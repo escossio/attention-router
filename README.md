@@ -1,83 +1,114 @@
 # Attention Router / Andy
 
-Attention Router is a policy-controlled conversation system; Andy is its contextual personal agent.
+[![Public CI](https://github.com/escossio/attention-router/actions/workflows/ci.yml/badge.svg?branch=public-release-candidate-20260908)](https://github.com/escossio/attention-router/actions/workflows/ci.yml?query=branch%3Apublic-release-candidate-20260908)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-Messages deserve different levels of attention, but an AI reply is not permission to act. The Router separates interpretation, policy, approval, execution and confirmed delivery, keeping the human owner in control.
+**Attention Router is a contextual agent runtime for controlled, policy-aware autonomous interactions.** Andy is its principal conversational agent: context-aware assistance with explicit limits on what an agent may do.
+
+## Why
+
+A useful agent needs more than a generated reply. It must identify the conversation, carry relevant context, respect human control, authorize effects, and distinguish a proposed response from one actually delivered.
+
+Attention Router makes those boundaries explicit and auditable. WhatsApp is an integration, not the product's entire architecture.
 
 ## Current capabilities
 
-- Structured inbound routing and actor/contact context.
-- An optional OpenAI Agent with bounded context and structured action proposals.
-- Policy evaluation, review, controlled autonomy and owner pause/resume boundaries.
-- Recent user/assistant history backed by delivered replies, limited to six previous interactions with a temporal cutoff.
-- Optional voice input through STT and voice output through an external TTS service, followed by Ogg/Opus normalization.
-- Idempotency, transactional outbox, audit provenance and optional tracing.
-- Persistent memory modules with separate eligibility/disclosure controls; disabled by default.
+- Structured inbound processing, tenant/contact scope and idempotent event handling.
+- An optional OpenAI Agents SDK adapter with bounded, structured context.
+- Policies, autonomy evaluation, human approval and durable Owner Control.
+- Recent bidirectional history: up to six prior interactions, with assistant entries backed by delivery evidence and a temporal cutoff for reprocessing.
+- Separate persistent memory with eligibility, provenance and disclosure controls.
+- Optional voice input/output, locale propagation, and Ogg/Opus normalization.
+- Transactional execution/outbox boundaries, delivery-state tracking and health endpoints.
 
-This is an early public-baseline candidate, not a production-ready hosted service. Fixtures are synthetic. No availability, calendar action or external delivery should be inferred from generated text alone.
+These are implemented components, not a promise that every configuration or provider is supported. The public baseline remains prerelease; PostgreSQL integration certification is an explicit release gate.
 
 ## Architecture
 
-```text
-Inbound -> effective text / optional STT -> allowed Agent context
-        -> structured proposal -> policy / review / autonomy
-        -> execution intent -> text or external TTS -> Ogg/Opus
-        -> outbox -> transport -> delivery evidence
+```mermaid
+flowchart LR
+    I[Inbound] --> E[Effective text / optional STT]
+    E --> A[Agent context and proposal]
+    A --> P[Policy / autonomy / approval]
+    P --> X[Execution intent and outbox]
+    X --> T[Optional TTS]
+    T --> N[Ogg/Opus normalization]
+    N --> W[Transport]
+    X --> W
+    W --> D[Delivery evidence]
 ```
 
-See [architecture](docs/architecture/overview.md), [voice boundary](docs/guides/voice.md) and [security](SECURITY.md).
+See [architecture and trust boundaries](docs/architecture/overview.md).
 
-## Safety and controlled autonomy
+## Safety and human control
 
-External delivery, autonomous execution and live providers are disabled in the local example. Owner Control remains an execution authority, not a prompt instruction. Model output is a proposal; the Router decides what is authorized. An ambiguous delivery must not be treated as a confirmed reply or blindly replayed.
+The model does not grant itself permission to act. Owner pause, policies and approval gates remain outside model authority. Proposed text, synthesized audio and confirmed delivery are different states. Ambiguous delivery is not proof of a conversation turn and must not be blindly replayed.
 
-## Preliminary local quick start
+Local defaults disable provider-backed Agent, STT/TTS and external autonomous delivery. Loopback binding and example credentials are for local development, not a production security configuration. See [SECURITY.md](SECURITY.md).
 
-Requires Docker with Compose. The intended startup runs a local database and Router services, not WhatsApp or an AI provider. Full Compose startup has not yet been certified; this remains a prototype configuration.
+## Voice and conversation context
 
-```sh
+The optional path is voice inbound -> transcript -> Agent -> authorized response -> external TTS -> Ogg/Opus -> transport. TTS is a separately versioned service; this repository contains the adapter, contract and mocked tests, not that service's deployment.
+
+A resolved locale travels with a response even when its text is neutral, such as a number. This is not universal language detection or a guarantee of any provider's pronunciation. Recent history and long-term memory have different purposes and lifecycles.
+
+## Quick Start: local core, no providers
+
+Prerequisites: Git, Docker Engine and Docker Compose v2 with `--wait` support. Docker must be able to download base images and packages. No phone, browser profile, OpenAI key or TTS account is required.
+
+```bash
+git clone --branch public-release-candidate-20260908 --single-branch \
+  git@github.com:escossio/attention-router.git
+cd attention-router
 cp .env.example .env
-docker compose up --build
+docker compose -p attention-router-demo up --build --wait db api
+curl --fail http://127.0.0.1:8080/health/ready
 ```
 
-The admin service binds to `127.0.0.1:18100`. The example includes deliberately public local-only credentials; replace them before sharing any deployment. Do not expose this configuration to the internet. Database migrations and synthetic policy seeding run during API startup. Use `docker compose down` to stop it; database data remains in a named volume.
+During private staging, cloning requires repository access. The API starts only after database migrations and policy seeding succeed. PostgreSQL has no host port exposed; the API binds to loopback. Set `PUBLIC_HTTP_PORT` in `.env` if port 8080 is occupied.
 
-For a provider-free local check using existing deterministic adapters:
+This starts a core API and database, **not a live messaging agent**. To stop the demo while retaining its local database:
 
-```sh
-docker compose run --rm --no-deps api python -m pytest -q \
-  tests/test_tts_adapter.py tests/test_agent_conversation_history.py \
-  tests/test_conversation_language.py
+```bash
+docker compose -p attention-router-demo down
 ```
 
-This fixture demonstrates context and the TTS client contract with a mock, not actual speech or live model reasoning. Optional channel ingress requires the `channels` Compose profile and explicit security configuration. Voice setup is documented separately; no private TTS source is required to run offline tests.
+`docker compose up --build` also starts the worker. The `channels` profile is opt-in and does not configure a real WhatsApp session for you. Full messaging, Agent and voice capabilities require separately configured credentials, authenticated services and authorization controls. Do not enable them just to run this demo.
 
-## Development and tests
+More details: [local setup](docs/guides/quick-start.md).
 
-The public suite covers the Router and WhatsApp transport. Live synthetic-peer and pairing tools are private engineering utilities, not release dependencies. Optional scenario-readiness contracts remain fail-closed without an external test harness.
+## Provider-free demonstration and tests
 
-Python 3.11+ (Docker uses 3.12), Node.js 20.19.2+ for transport, and ffmpeg for codec tests.
+An existing example exercises context and TTS adapter fixtures without contacting providers:
 
-```sh
-python -m venv .venv
+```bash
+python3 -m venv .venv
 . .venv/bin/activate
-pip install -e '.[dev]'
-# pytest supplies isolated synthetic settings in tests/conftest.py.
-# Do not source a production .env; shell and dotenv syntax are not equivalent.
-ruff check .
+python -m pip install -e '.[dev]'
+python examples/offline_context.py
+python -m pytest -q
+python -m ruff check .
 python -m compileall -q attention_router tests
-pytest -q
+```
+
+Use Python 3.12, Node.js 22 and local `ffmpeg` for parity with CI. The main Python profile excludes tests marked `postgres`; it must not be presented as PostgreSQL certification.
+
+```bash
 cd whatsapp-transport-local
 PUPPETEER_SKIP_DOWNLOAD=true npm ci --ignore-scripts
 npm test
+cd ..
+bash scripts/postgres_test_harness.sh
 ```
 
-Default pytest excludes tests marked `postgres`. PostgreSQL integration and full Compose startup require separate isolated validation; never point tests at a production database. See [contributing](CONTRIBUTING.md).
+The PostgreSQL harness creates and removes a disposable container/database. Never point integration tests at a database containing valuable data. [Contributing](CONTRIBUTING.md) describes the CI jobs and remaining gates.
 
-## Roadmap and future vision
+## Project status and future evolution
 
-Next: reproducible onboarding, CI/security automation, dependency remediation and clearer deployment guides. Temporary Conversation Session State is future evolution, not an implemented fix for every context error. [Andy Enterprise](docs/andy-enterprise-evolution.md) is a design vision; its session, ledger, goal and management modules are not current capabilities.
+**Current:** prerelease private staging of a sanitized product baseline. The CI badge is authoritative for the branch's current job results; a prepared or skipped security workflow is not a passed scan. Quick Start proves only core health, not production readiness.
+
+**Future, not implemented capabilities:** Conversation Session State for temporary activities; the modular workflow and enterprise concepts in [Andy Enterprise](docs/andy-enterprise-evolution.md); broader public demos and deployment guides. Game state must not automatically become long-term memory.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE). Third-party dependencies retain their own licenses.
+[Apache License 2.0](LICENSE). Contribution and vulnerability-reporting guidance: [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).

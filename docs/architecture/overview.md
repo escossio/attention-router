@@ -29,3 +29,19 @@ Decision, authorization, intent, derivation, outbox and delivery evidence descri
 ## Isolation
 
 Tenant/contact boundaries apply to history and decisions; active context and memory disclosure add scope. Internal ingress authentication, data minimization and explicit external-service configuration are necessary even when local examples bind to loopback.
+
+## Trust and control boundaries
+
+```mermaid
+flowchart TB
+    H[Human / Owner Control] --> G[Execution authorization gates]
+    P[Policies and approvals] --> G
+    C[Scoped history and approved memory] --> A[Agent proposal]
+    A --> G
+    G --> E[Authorized external effect]
+    E --> D[Observed delivery state]
+    G --> U[Audit and provenance]
+    D --> U
+```
+
+The local core demo intentionally exercises a smaller boundary: database readiness and API startup. Provider-free contract tests demonstrate Agent context and TTS request semantics without treating mocks as evidence of real external delivery.

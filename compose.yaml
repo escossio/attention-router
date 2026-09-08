@@ -26,7 +26,7 @@ services:
         python -c 'from attention_router.infrastructure.db import SessionLocal; from attention_router.infrastructure.repository import seed_policies; s=SessionLocal(); seed_policies(s); s.commit(); s.close()' &&
         uvicorn attention_router.web.app:app --host 0.0.0.0 --port 18100
     ports:
-      - "127.0.0.1:18100:18100"
+      - "127.0.0.1:${PUBLIC_HTTP_PORT:-8080}:18100"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18100/health/ready"]
       interval: 10s
