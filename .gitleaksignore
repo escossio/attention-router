@@ -1,0 +1,4 @@
+# Exact findings only: generated authorization/message IDs, not credentials.
+# These two unchanged test statements were manually reviewed in the baseline.
+1d08444f83bc4529cde2b5c5a141737246faed93:tests/integration/test_postgres_10_5c_contract.py:generic-api-key:82
+1d08444f83bc4529cde2b5c5a141737246faed93:tests/integration/test_postgres_10_5c_contract.py:generic-api-key:125

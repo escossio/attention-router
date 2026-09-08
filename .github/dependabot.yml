@@ -1,0 +1,21 @@
+version: 2
+# Staging-only proposal. Enable version-update PRs after the main migration.
+updates:
+  - package-ecosystem: pip
+    directory: /
+    target-branch: public-release-candidate-20260908
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+  - package-ecosystem: npm
+    directory: /whatsapp-transport-local
+    target-branch: public-release-candidate-20260908
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: public-release-candidate-20260908
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0

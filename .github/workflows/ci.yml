@@ -1,0 +1,98 @@
+name: Public CI
+on:
+  push:
+    branches: [main, public-release-candidate-20260908]
+  pull_request:
+    branches: [main, public-release-candidate-20260908]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: public-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m ruff check .
+      - run: python -m compileall -q attention_router tests
+      - run: python -m pytest -q
+  transport-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: whatsapp-transport-local
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: whatsapp-transport-local/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: node ../tests/fixtures/synthetic-identity-contract.cjs
+      - run: npm test
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ar_test
+          POSTGRES_PASSWORD: ci-only-disposable-password # gitleaks:allow
+          POSTGRES_DB: attention_router_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ar_test -d attention_router_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://ar_test:ci-only-disposable-password@127.0.0.1:5432/attention_router_test # gitleaks:allow
+      PUBLIC_POSTGRES_TEST_URL: postgresql+psycopg://ar_test:ci-only-disposable-password@127.0.0.1:5432/attention_router_test # gitleaks:allow
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m alembic upgrade head
+      - name: All PostgreSQL integration tests (no exclusions)
+        run: python -m pytest -m postgres -q
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: docker build --build-arg ATTENTION_ROUTER_BUILD_SHA=${{ github.sha }} -t attention-router:ci .
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan only the candidate history, not unrelated private refs
+        run: bash scripts/public_secret_scan.sh
