@@ -63,6 +63,7 @@ jobs:
           --health-cmd "pg_isready -U ar_test -d attention_router_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
+      ADMIN_AUTH_ENABLED: 'true'
       DATABASE_URL: postgresql+psycopg://ar_test:ci-only-disposable-password@127.0.0.1:5432/attention_router_test # gitleaks:allow
       PUBLIC_POSTGRES_TEST_URL: postgresql+psycopg://ar_test:ci-only-disposable-password@127.0.0.1:5432/attention_router_test # gitleaks:allow
     steps:
@@ -75,6 +76,21 @@ jobs:
           cache: pip
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: python -m pip install -e '.[dev]'
+      - name: Generate ephemeral PostgreSQL job auth values
+        shell: python
+        run: |
+          import os
+          import secrets
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for name in ("ADMIN_TOKEN", "INTERNAL_INGRESS_HMAC_SECRET"):
+                  value = secrets.token_urlsafe(32)
+                  print(f"::add-mask::{value}")
+                  env_file.write(f"{name}={value}\n")
+      - name: Verify safe configuration diagnostics
+        run: python scripts/ci_settings_check.py --self-test
+      - name: Load Settings with the CI auth contract
+        run: python scripts/ci_settings_check.py
       - run: python -m alembic upgrade head
       - name: All PostgreSQL integration tests (no exclusions)
         run: python -m pytest -m postgres -q
