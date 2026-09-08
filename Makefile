@@ -22,7 +22,7 @@ test:
 	pytest
 
 test-integration:
-	docker compose run --rm api pytest -q -m postgres
+	bash scripts/postgres_test_harness.sh
 
 test-postgres-contract:
 	POSTGRES_TEST_SELECTOR="$(if $(POSTGRES_TEST_SELECTOR),$(POSTGRES_TEST_SELECTOR),tests/integration/test_postgres_10_5c_contract.py -m postgres)" ./scripts/postgres_test_harness.sh

@@ -184,7 +184,8 @@ def test_scn_pe_029_owner_sleeping_full_path_l0_starts_at_scenario_run(Session, 
         monkeypatch.setattr("attention_router.config.settings.andy_agent_enabled", True)
         monkeypatch.setattr(
             "attention_router.application.decision_pipeline._agent_enabled_for",
-            lambda *args: True,
+            lambda binding, audience, policy_version, owner_authenticated=False,
+            *, event=None, blueprint_configured=False: True,
         )
         monkeypatch.setattr(
             "attention_router.application.decision_pipeline.run_andy",

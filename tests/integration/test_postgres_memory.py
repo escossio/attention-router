@@ -20,7 +20,10 @@ pytestmark = pytest.mark.postgres
 def test_postgres_incremental_memory_archive_job_claim_and_retry(Session, monkeypatch):
     monkeypatch.setattr(settings, "persistent_memory_enabled", True)
     monkeypatch.setattr(settings, "memory_ingestion_enabled", True)
-    payload = {"metadata": {"thread_key": "pg-memory-chat", "source_account": "pg-test"}}
+    payload = {
+        "lineage_classification": "ORGANIC",
+        "metadata": {"thread_key": "pg-memory-chat", "source_account": "pg-test"},
+    }
     with Session() as session:
         first = services.receive_inbound_event(
             session, "pgtest", "memory-1", "message", "memory-actor", "Contato Sintético",

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PG_IMAGE="${POSTGRES_TEST_IMAGE:-postgres:16-alpine}"
-RUNNER_IMAGE="${POSTGRES_TEST_RUNNER_IMAGE:-attention-router-test-runner:10-5bc}"
+RUNNER_IMAGE="${POSTGRES_TEST_RUNNER_IMAGE:-attention-router-test-runner:public-local}"
 PG="attention-router-pg-test-${RANDOM}-${RANDOM}"; RUNNER="attention-router-test-runner-${RANDOM}-${RANDOM}"; NETWORK="attention-router-test-net-${RANDOM}-${RANDOM}"
 USER_NAME="ar_test"; DB_NAME="attention_router_test"; PASSWORD="$(openssl rand -hex 24)"; TARGET="${POSTGRES_TEST_TARGET:-head}"
 cleanup() { docker rm -f "$RUNNER" "$PG" >/dev/null 2>&1 || true; docker network rm "$NETWORK" >/dev/null 2>&1 || true; }
@@ -15,7 +15,7 @@ for _ in $(seq 1 60); do [ "$(docker inspect -f '{{.State.Health.Status}}' "$PG"
 [ "$(docker inspect -f '{{.State.Health.Status}}' "$PG")" = healthy ] || exit 1
 case "$TARGET" in 0023|rehearsal|zero|legacy) REVISION=0023_human_execution_auth ;; 0025|head|newhea) REVISION=head ;; *) echo "Unsupported POSTGRES_TEST_TARGET: $TARGET" >&2; exit 2 ;; esac
 DATABASE_URL="postgresql+psycopg://${USER_NAME}:${PASSWORD}@postgres:5432/${DB_NAME}"
-run_runner() { docker run --rm --name "$RUNNER" --network "$NETWORK" -e DATABASE_URL="$DATABASE_URL" -e ADMIN_AUTH_ENABLED=false -e META_WEBHOOK_DISPATCH_ENABLED=false -e INTERNAL_INGRESS_HMAC_SECRET="test-only-harness-secret-012345678901234567890123" "$RUNNER_IMAGE" "$@"; }
+run_runner() { docker run --rm --name "$RUNNER" --network "$NETWORK" -e DATABASE_URL="$DATABASE_URL" -e PUBLIC_POSTGRES_TEST_URL="$DATABASE_URL" -e ADMIN_AUTH_ENABLED=false -e META_WEBHOOK_DISPATCH_ENABLED=false -e INTERNAL_INGRESS_HMAC_SECRET="test-only-harness-secret-012345678901234567890123" "$RUNNER_IMAGE" "$@"; }
 run_runner python -m alembic upgrade "$REVISION"
 if [ "$TARGET" = zero ]; then
   run_runner python -m alembic upgrade 0024_execution_intent

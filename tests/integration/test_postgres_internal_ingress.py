@@ -29,6 +29,8 @@ SECRET = "postgres-internal-ingress-secret-32-bytes"
 @pytest.fixture()
 def client(Session, monkeypatch):
     monkeypatch.setattr(settings, "internal_ingress_hmac_secret", SECRET)
+    # Ingress processing owns its transaction rather than using the HTTP dependency.
+    monkeypatch.setattr("attention_router.web.internal_ingress_app.SessionLocal", Session)
 
     def override():
         session = Session()

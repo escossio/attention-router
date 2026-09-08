@@ -17,9 +17,24 @@ from attention_router.web.app import app, get_session
 
 pytestmark = pytest.mark.postgres
 
+HTTP_SCENARIO_FIXTURE: dict[str, str] = {}
+
 
 @pytest.fixture()
-def client(Session):
+def client(Session, monkeypatch):
+    # The HTTP contract requires real synthetic lineage, not orphan foreign keys.
+    from attention_router.infrastructure.models import ScenarioDefinitionRow, ScenarioVersionRow
+    from tests.integration.test_postgres_10_5c_6i1a_r2_3b_legacy_synthetic import (
+        _synthetic_run,
+    )
+
+    with Session() as session:
+        run = _synthetic_run(session)
+        version = session.get(ScenarioVersionRow, run.scenario_version_id)
+        definition = session.get(ScenarioDefinitionRow, version.scenario_definition_id)
+        monkeypatch.setitem(HTTP_SCENARIO_FIXTURE, "run_id", run.id)
+        monkeypatch.setitem(HTTP_SCENARIO_FIXTURE, "scenario_id", definition.scenario_key)
+        session.commit()
     def override():
         session = Session()
         try:
@@ -48,8 +63,8 @@ def payload(event_id: str, text_value: str = "Fixture HTTP sintética."):
         "relationship_category": "family_core",
         "text": text_value,
         "metadata": {"case": "http"},
-        "scenario_id": "SCN-PE-001",
-        "scenario_run_id": f"run-{event_id}",
+        "scenario_id": HTTP_SCENARIO_FIXTURE["scenario_id"],
+        "scenario_run_id": HTTP_SCENARIO_FIXTURE["run_id"],
         "stimulus_id": f"stimulus-{event_id}",
     }
 

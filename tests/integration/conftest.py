@@ -36,6 +36,23 @@ def pg_url():
 @pytest.fixture()
 def Session(pg_url):
     engine = create_engine(pg_url, future=True)
+    # pg_url belongs to the random database created and dropped by this suite.
+    # A shared schema is cheap; committed state must never cross test boundaries.
+    database = engine.url.database or ""
+    prefix = "attention_router_test_"
+    suffix = database.removeprefix(prefix)
+    if not (database.startswith(prefix) and len(suffix) == 10
+            and all(char in "0123456789abcdef" for char in suffix)):
+        engine.dispose()
+        raise RuntimeError("Refusing to reset a database not created by the test fixture")
+    with engine.begin() as connection:
+        tables = connection.scalars(text(
+            "SELECT tablename FROM pg_tables WHERE schemaname='public' "
+            "AND tablename <> 'alembic_version' ORDER BY tablename"
+        )).all()
+        if tables:
+            quoted = ', '.join('"' + name.replace('"', '""') + '"' for name in tables)
+            connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     with SessionLocal() as session:
         seed_policies(session)

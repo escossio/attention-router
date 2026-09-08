@@ -227,7 +227,7 @@ def test_sa10_immutable_input_mutation_rejected(Session):
         parent = _parent(session)
         decision_id = _decision(session)
         session.commit()
-        with pytest.raises(DBAPIError, match="frozen execution authority is immutable"):
+        with pytest.raises(DBAPIError, match="versioned authority semantics are immutable"):
             session.execute(
                 text(
                     "UPDATE execution_intents SET scope = jsonb_set("
@@ -250,7 +250,7 @@ def test_sa11_expiry_widening_and_revival_rejected(Session):
         session.commit()
         with pytest.raises(ProductionAuthorityDenied, match="EXECUTION_INTENT_EXPIRED"):
             _materialize(session, parent, decision_id=decision_id, now=parent.expires_at)
-        with pytest.raises(DBAPIError, match="frozen execution authority is immutable"):
+        with pytest.raises(DBAPIError, match="versioned authority semantics are immutable"):
             session.execute(
                 text("UPDATE execution_intents SET expires_at=expires_at + interval '1 hour' WHERE id=:id"),
                 {"id": parent.id},
@@ -294,7 +294,17 @@ def test_sa13_technical_metadata_does_not_change_fingerprint(Session):
         approved = session.scalar(select(HumanExecutionAuthorizationRow).where(
             HumanExecutionAuthorizationRow.execution_intent_id == parent.id
         ))
+        original_provenance = deepcopy(parent.provenance)
+        parent_id = parent.id
+        parent_type = type(parent)
+        session.commit()
         parent.provenance = {"source": "other-technical-source", "trace": "sa13"}
+        with pytest.raises(DBAPIError, match="versioned authority semantics are immutable"):
+            session.flush()
+        session.rollback()
+        session.expire_all()
+        parent = session.get(parent_type, parent_id)
+        assert parent.provenance == original_provenance
         approved.request_wamid = "wamid.technical"
         approved.correlation_id = "sa13-technical-correlation"
         session.flush()

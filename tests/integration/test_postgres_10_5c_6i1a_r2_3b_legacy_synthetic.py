@@ -1,6 +1,7 @@
 """R2.3B behavioral compatibility proof for legacy and synthetic paths."""
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -66,6 +67,10 @@ def _response_review_intent(session) -> AgentExecutionIntentRow:
 
 def _autonomy_decision(session) -> AgentDecisionRow:
     suffix = uuid4().hex
+    identities = json.loads(
+        (Path(__file__).resolve().parents[1] / "fixtures/synthetic-identities.json").read_text()
+    )
+    peer = identities["ACTOR_A"]["jid"]
     now = datetime.now(UTC)
     blueprint = AgentBlueprintRow(
         id=f"r23b-blueprint-{suffix}",
@@ -114,7 +119,7 @@ def _autonomy_decision(session) -> AgentDecisionRow:
         id=f"r23b-interaction-{suffix}",
         tenant_id=DEFAULT_TENANT_ID,
         event_type="message",
-        contact_id=f"r23b-{suffix}@c.us",
+        contact_id=peer,
         contact_name="R2.3B Canary",
         relationship_category="canary",
         inbound_text="hello",
@@ -131,7 +136,16 @@ def _autonomy_decision(session) -> AgentDecisionRow:
         source="wwebjs",
         external_event_id=f"r23b-external-{suffix}",
         event_type="message",
-        payload={"external_actor_id": interaction.contact_id, "channel": "whatsapp"},
+        payload={
+            "external_actor_id": peer, "channel": "whatsapp", "event_type": "message",
+            "event_origin": "EXTERNAL_INBOUND", "owner_authenticated": False,
+            "metadata": {
+                "from_me": False, "conversation_state": "READY", "is_group": False,
+                "conversation_key": f"wwebjs:{peer}", "source_account": "test-account",
+                "peer_identifiers": [peer], "peer_id_kind": "c.us",
+            },
+        },
+        lineage_classification="ORGANIC",
         payload_hash=f"r23b-payload-{suffix}",
         received_at=now,
         interaction_id=interaction.id,
