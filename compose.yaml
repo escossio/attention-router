@@ -1,0 +1,75 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-attention_router}
+      POSTGRES_USER: ${POSTGRES_USER:-attention_router}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-attention_router} -d ${POSTGRES_DB:-attention_router}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  api:
+    build: .
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        python -c 'from attention_router.infrastructure.db import SessionLocal; from attention_router.infrastructure.repository import seed_policies; s=SessionLocal(); seed_policies(s); s.commit(); s.close()' &&
+        uvicorn attention_router.web.app:app --host 0.0.0.0 --port 18100
+    ports:
+      - "127.0.0.1:18100:18100"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18100/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  worker:
+    build: .
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["python", "-m", "attention_router.infrastructure.worker"]
+    volumes:
+      - media:/var/lib/attention-router/whatsapp-media
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from sqlalchemy import text; from attention_router.infrastructure.db import SessionLocal; s=SessionLocal(); s.execute(text('select 1')); s.close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  ingress:
+    profiles: [channels]
+    build: .
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["uvicorn", "attention_router.web.ingress_app:app", "--host", "0.0.0.0", "--port", "18101"]
+    ports:
+      - "127.0.0.1:18101:18101"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18101/health/live"]
+  internal-ingress:
+    profiles: [channels]
+    build: .
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["uvicorn", "attention_router.web.internal_ingress_app:app", "--host", "0.0.0.0", "--port", "18102"]
+    ports:
+      - "127.0.0.1:18102:18102"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18102/health/live"]
+volumes:
+  database:
+  media:

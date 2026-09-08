@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attention Router</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="shell">
+  <header class="topbar">
+    <div>
+      <h1>Attention Router</h1>
+      <p>Protótipo privado. Lia usa eventos e atuadores sintéticos.</p>
+    </div>
+    <a href="/docs">OpenAPI</a>
+  </header>
+  <section class="grid">
+    <form class="panel" method="post" action="/sim/interactions">
+      <h2>Nova interação</h2>
+      <label>Contato
+        <select name="contact_id" onchange="fillContact(this.value)">
+          <option value="contact_mae">Mãe</option>
+          <option value="contact_pai">Pai</option>
+          <option value="unknown_recruiter">Desconhecido recrutador</option>
+          <option value="unknown_contact">Desconhecido</option>
+        </select>
+      </label>
+      <input id="contact_name" name="contact_name" value="Mãe Sintética">
+      <input id="relationship_category" name="relationship_category" value="family_core">
+      <label>Contexto
+        <select name="active_context">
+          <option value="">Nenhum</option>
+          <option value="interview">Entrevista ativa</option>
+        </select>
+      </label>
+      <label>Tipo
+        <select name="event_type"><option value="message">Mensagem</option><option value="call">Ligação</option></select>
+      </label>
+      <textarea name="inbound_text">Fixture sintética: preciso falar com Alex.</textarea>
+      <button>Criar</button>
+    </form>
+    <section class="panel">
+      <h2>Políticas</h2>
+      {% for p in policies %}
+      <details>
+        <summary>{{ p.name }} · prioridade {{ p.priority }}</summary>
+        <p>Tom: {{ p.tone }}</p>
+        <p>Ações: {{ p.escalation_steps | join(", ") }}</p>
+        <form method="post" action="/sim/policies/{{ p.identifier }}" class="compact">
+          <input name="tone" value="{{ p.tone }}">
+          <input name="initial_wait_seconds" type="number" min="0" value="{{ p.initial_wait_seconds }}">
+          <input name="escalation_steps" value="{{ p.escalation_steps | join(',') }}">
+          <button>Salvar teste</button>
+        </form>
+      </details>
+      {% endfor %}
+    </section>
+  </section>
+  <section class="panel">
+    <h2>Interações recentes</h2>
+    <div class="cards">
+      {% for i in latest %}
+      <a class="card" href="/interactions/{{ i.id }}">
+        <strong>{{ i.contact.display_name }}</strong>
+        <span>{{ i.state }} · {{ i.policy_id }}</span>
+        <small>{{ i.lia_speech }}</small>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+</main>
+<script>
+const fixtures = {
+  contact_mae: ["Mãe Sintética", "family_core"],
+  contact_pai: ["Pai Sintético", "family_core"],
+  unknown_recruiter: ["Recrutador Sintético", "unknown"],
+  unknown_contact: ["Contato Sintético", "unknown"]
+};
+function fillContact(id) {
+  document.getElementById("contact_name").value = fixtures[id][0];
+  document.getElementById("relationship_category").value = fixtures[id][1];
+}
+</script>
+</body>
+</html>
+

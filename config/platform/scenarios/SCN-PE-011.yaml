@@ -1,0 +1,144 @@
+{
+  "scenario": {
+    "id": "SCN-PE-011",
+    "version": 1,
+    "title": "driver restart after stimulus",
+    "priority": "P1",
+    "level": "L1_SYNTHETIC_E2E",
+    "executor_kind": "SYNTHETIC_DRIVER",
+    "effect_class": "SYNTHETIC_EXTERNAL_EFFECT"
+  },
+  "traceability": {
+    "pe_ids": [
+      "PE-008",
+      "PE-009"
+    ],
+    "acceptance_ids": [
+      "ACC-PE008-007",
+      "ACC-PE009-006"
+    ],
+    "invariant_ids": [
+      "INV-PE-SCEN-004",
+      "INV-PE-RESTART-001"
+    ],
+    "risk_ids": [
+      "RPE-008"
+    ],
+    "historical_risk_ids": [],
+    "coverage_gap_ids": [
+      "COV-GAP-CORE-SCENARIO-001",
+      "COV-GAP-PE008-001"
+    ],
+    "work_packages": [
+      "WP-PE-05",
+      "WP-PE-06"
+    ],
+    "config_keys": [
+      "SYNTHETIC_TEST_DRIVER_ENABLED",
+      "MAX_RESPONSE_CHAIN_DEPTH",
+      "EXTERNAL_STIMULUS_CONFIRM_TIMEOUT",
+      "WHATSAPP_RESPONSE_WAIT_TIMEOUT"
+    ]
+  },
+  "preconditions": [
+    "IMPLEMENTATION_AVAILABLE",
+    "TEST_TENANT_ISOLATED"
+  ],
+  "readiness_requirements": [
+    "POSTGRES_READY",
+    "PROVENANCE_KNOWN"
+  ],
+  "execution": {
+    "setup": [
+      {
+        "action": "prepare_isolated_fixture",
+        "parameters": {
+          "source_candidate": "driver_restart_after_stimulus"
+        }
+      }
+    ],
+    "stimulus": [
+      {
+        "action": "driver_restart_after_stimulus",
+        "parameters": {
+          "external_effect": true
+        }
+      }
+    ],
+    "waits": [],
+    "assertions": [
+      {
+        "assertion_id": "ASSERT-SCN-PE-011-001",
+        "assertion_type": "DETERMINISTIC",
+        "expected_property": "driver_restart_after_stimulus satisfies its fail-closed acceptance contract",
+        "evaluator": "platform_acceptance_evaluator",
+        "blocking": true,
+        "evidence": [
+          "TEST_REPORT",
+          "INVARIANT_RESULT"
+        ]
+      }
+    ],
+    "invariants": [
+      "INV-PE-SCEN-004",
+      "INV-PE-RESTART-001"
+    ],
+    "cleanup": [
+      {
+        "action": "close_test_owned_state",
+        "parameters": {
+          "preserve_evidence": true
+        }
+      }
+    ]
+  },
+  "safety": {
+    "effect_budget": {
+      "effect_types": [
+        "WHATSAPP_STIMULUS",
+        "WHATSAPP_RESPONSE"
+      ],
+      "target_scope": {
+        "actor_ref": "SYNTHETIC_TEST_ACTOR"
+      },
+      "max_stimulus": 1,
+      "max_system_response": 1,
+      "ttl_seconds": 180
+    },
+    "execution_lease": {
+      "required": true,
+      "lease_type": "SCENARIO_STEP",
+      "scope_key": "SCN-PE-011:isolated-scope"
+    },
+    "timeout": {
+      "scenario_seconds": 180,
+      "step_seconds": 60
+    },
+    "retry": {
+      "transient_max_retries": 0,
+      "external_effect_blind_retries": 0,
+      "same_correlation_required": true
+    },
+    "allowed_target_scope": {
+      "actor_ref": "SYNTHETIC_TEST_ACTOR"
+    },
+    "abort_on_blocking_invariant": true
+  },
+  "evidence": {
+    "required": [
+      "SCENARIO_RUN",
+      "LEDGER",
+      "ASSERTION_RESULT",
+      "INVARIANT_RESULT"
+    ],
+    "provenance": [
+      "SOURCE_SHA",
+      "RUNTIME_SHA",
+      "SCHEMA_REVISION",
+      "SCENARIO_HASH",
+      "DRIVER_REVISION"
+    ]
+  },
+  "expected_finding_behavior": "NONE",
+  "safe_execution_stage": "AFTER_WP06_DRIVER_PAIRING"
+}

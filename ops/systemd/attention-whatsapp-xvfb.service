@@ -1,0 +1,19 @@
+[Unit]
+Description=Attention Router AGT Xvfb display
+After=local-fs.target
+Before=attention-whatsapp-browser.service
+
+[Service]
+Type=simple
+User=example
+Environment=HOME=/home/example
+Environment=XDG_RUNTIME_DIR=/tmp/example-runtime
+Environment=DISPLAY=:98
+ExecStart=/usr/bin/Xvfb :98 -screen 0 1280x960x24 -nolisten tcp
+Restart=on-failure
+RestartSec=3s
+KillMode=control-group
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

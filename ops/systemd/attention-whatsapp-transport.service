@@ -1,0 +1,20 @@
+[Unit]
+Description=Attention Router AGT local WhatsApp transport
+Requires=attention-whatsapp-browser.service
+After=attention-whatsapp-browser.service
+BindsTo=attention-whatsapp-browser.service
+
+[Service]
+Type=simple
+User=example
+WorkingDirectory=/var/lib/attention-router/whatsapp-transport
+EnvironmentFile=/etc/attention-router/agt-production.env
+ExecStart=/usr/bin/node /workspace/attention-router-stage38/whatsapp-transport-local/src/index.js
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+KillMode=process
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

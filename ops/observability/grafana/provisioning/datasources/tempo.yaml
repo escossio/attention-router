@@ -1,0 +1,22 @@
+apiVersion: 1
+
+prune: true
+
+datasources:
+  - name: Attention Router Tempo
+    type: tempo
+    uid: attention-router-tempo
+    url: http://tempo:3200
+    access: proxy
+    isDefault: true
+    editable: false
+    jsonData:
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      traceQuery:
+        timeShiftEnabled: false
+      streamingEnabled:
+        search: false
+        metrics: false

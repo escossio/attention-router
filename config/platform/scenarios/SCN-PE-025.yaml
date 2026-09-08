@@ -1,0 +1,126 @@
+{
+  "scenario": {
+    "id": "SCN-PE-025",
+    "version": 1,
+    "title": "remediation direct runtime attempt",
+    "priority": "P3",
+    "level": "L0_UNIT_DRY",
+    "executor_kind": "SECURITY_NEGATIVE_HARNESS",
+    "effect_class": "NO_EXTERNAL_EFFECT"
+  },
+  "traceability": {
+    "pe_ids": [
+      "PE-015",
+      "PE-017"
+    ],
+    "acceptance_ids": [
+      "ACC-PE015-003",
+      "ACC-PE015-004"
+    ],
+    "invariant_ids": [
+      "INV-PE-REMED-001"
+    ],
+    "risk_ids": [
+      "RPE-022",
+      "RPE-029"
+    ],
+    "historical_risk_ids": [],
+    "coverage_gap_ids": [
+      "COV-GAP-CORE-DIAG-001"
+    ],
+    "work_packages": [
+      "WP-PE-09",
+      "WP-PE-11"
+    ],
+    "config_keys": []
+  },
+  "preconditions": [
+    "IMPLEMENTATION_AVAILABLE",
+    "TEST_TENANT_ISOLATED"
+  ],
+  "readiness_requirements": [
+    "POSTGRES_READY",
+    "PROVENANCE_KNOWN"
+  ],
+  "execution": {
+    "setup": [
+      {
+        "action": "prepare_isolated_fixture",
+        "parameters": {
+          "source_candidate": "remediation_direct_runtime_attempt"
+        }
+      }
+    ],
+    "stimulus": [
+      {
+        "action": "remediation_direct_runtime_attempt",
+        "parameters": {
+          "external_effect": false
+        }
+      }
+    ],
+    "waits": [],
+    "assertions": [
+      {
+        "assertion_id": "ASSERT-SCN-PE-025-001",
+        "assertion_type": "DETERMINISTIC",
+        "expected_property": "remediation_direct_runtime_attempt satisfies its fail-closed acceptance contract",
+        "evaluator": "platform_acceptance_evaluator",
+        "blocking": true,
+        "evidence": [
+          "TEST_REPORT",
+          "INVARIANT_RESULT"
+        ]
+      }
+    ],
+    "invariants": [
+      "INV-PE-REMED-001"
+    ],
+    "cleanup": [
+      {
+        "action": "close_test_owned_state",
+        "parameters": {
+          "preserve_evidence": true
+        }
+      }
+    ]
+  },
+  "safety": {
+    "effect_budget": {
+      "effect_types": [],
+      "target_scope": {},
+      "max_stimulus": 0,
+      "max_system_response": 0,
+      "ttl_seconds": 180
+    },
+    "execution_lease": {
+      "required": false,
+      "lease_type": null,
+      "scope_key": null
+    },
+    "timeout": {
+      "scenario_seconds": 180,
+      "step_seconds": 60
+    },
+    "retry": {
+      "transient_max_retries": 1,
+      "external_effect_blind_retries": 0,
+      "same_correlation_required": true
+    },
+    "allowed_target_scope": {},
+    "abort_on_blocking_invariant": true
+  },
+  "evidence": {
+    "required": [
+      "TEST_REPORT",
+      "INVARIANT_RESULT"
+    ],
+    "provenance": [
+      "SOURCE_SHA",
+      "SCHEMA_REVISION",
+      "SCENARIO_HASH"
+    ]
+  },
+  "expected_finding_behavior": "EXPECTED_DENY_ONLY",
+  "safe_execution_stage": "AFTER_WP09_REMEDIATION"
+}

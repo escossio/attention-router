@@ -1,0 +1,21 @@
+[Unit]
+Description=Attention Router AGT official Google Chrome
+Requires=attention-whatsapp-xvfb.service
+After=attention-whatsapp-xvfb.service
+Before=attention-whatsapp-transport.service
+
+[Service]
+Type=simple
+User=example
+WorkingDirectory=/home/example
+Environment=HOME=/home/example
+Environment=XDG_RUNTIME_DIR=/tmp/example-runtime
+Environment=DISPLAY=:98
+ExecStart=/usr/bin/google-chrome --disable-restore-session-state --user-data-dir=/workspace/attention-router-runtime/whatsapp-browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 https://web.whatsapp.com/
+Restart=on-failure
+RestartSec=5s
+KillMode=control-group
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

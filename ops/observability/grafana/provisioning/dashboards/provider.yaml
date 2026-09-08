@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: Attention Router dashboards
+    orgId: 1
+    folder: Attention Router
+    folderUid: attention-router
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

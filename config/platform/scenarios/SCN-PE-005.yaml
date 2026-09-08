@@ -1,0 +1,128 @@
+{
+  "scenario": {
+    "id": "SCN-PE-005",
+    "version": 1,
+    "title": "synthetic memory contamination",
+    "priority": "P0",
+    "level": "L0_UNIT_DRY",
+    "executor_kind": "POSTGRES_HARNESS",
+    "effect_class": "NO_EXTERNAL_EFFECT"
+  },
+  "traceability": {
+    "pe_ids": [
+      "PE-007",
+      "PE-009",
+      "PE-010",
+      "PE-011"
+    ],
+    "acceptance_ids": [
+      "ACC-PE007-005",
+      "ACC-PE007-006"
+    ],
+    "invariant_ids": [
+      "INV-PE-MEM-001",
+      "INV-PE-MEM-002"
+    ],
+    "risk_ids": [
+      "RPE-010"
+    ],
+    "historical_risk_ids": [],
+    "coverage_gap_ids": [
+      "COV-GAP-CORE-LINEAGE-001"
+    ],
+    "work_packages": [
+      "WP-PE-04"
+    ],
+    "config_keys": []
+  },
+  "preconditions": [
+    "IMPLEMENTATION_AVAILABLE",
+    "TEST_TENANT_ISOLATED"
+  ],
+  "readiness_requirements": [
+    "POSTGRES_READY",
+    "PROVENANCE_KNOWN"
+  ],
+  "execution": {
+    "setup": [
+      {
+        "action": "prepare_isolated_fixture",
+        "parameters": {
+          "source_candidate": "synthetic_memory_contamination"
+        }
+      }
+    ],
+    "stimulus": [
+      {
+        "action": "synthetic_memory_contamination",
+        "parameters": {
+          "external_effect": false
+        }
+      }
+    ],
+    "waits": [],
+    "assertions": [
+      {
+        "assertion_id": "ASSERT-SCN-PE-005-001",
+        "assertion_type": "DETERMINISTIC",
+        "expected_property": "synthetic_memory_contamination satisfies its fail-closed acceptance contract",
+        "evaluator": "platform_acceptance_evaluator",
+        "blocking": true,
+        "evidence": [
+          "TEST_REPORT",
+          "INVARIANT_RESULT"
+        ]
+      }
+    ],
+    "invariants": [
+      "INV-PE-MEM-001",
+      "INV-PE-MEM-002"
+    ],
+    "cleanup": [
+      {
+        "action": "close_test_owned_state",
+        "parameters": {
+          "preserve_evidence": true
+        }
+      }
+    ]
+  },
+  "safety": {
+    "effect_budget": {
+      "effect_types": [],
+      "target_scope": {},
+      "max_stimulus": 0,
+      "max_system_response": 0,
+      "ttl_seconds": 180
+    },
+    "execution_lease": {
+      "required": false,
+      "lease_type": null,
+      "scope_key": null
+    },
+    "timeout": {
+      "scenario_seconds": 180,
+      "step_seconds": 60
+    },
+    "retry": {
+      "transient_max_retries": 1,
+      "external_effect_blind_retries": 0,
+      "same_correlation_required": true
+    },
+    "allowed_target_scope": {},
+    "abort_on_blocking_invariant": true
+  },
+  "evidence": {
+    "required": [
+      "TEST_REPORT",
+      "INVARIANT_RESULT"
+    ],
+    "provenance": [
+      "SOURCE_SHA",
+      "SCHEMA_REVISION",
+      "SCENARIO_HASH"
+    ]
+  },
+  "expected_finding_behavior": "NONE",
+  "safe_execution_stage": "AFTER_WP04_SECURITY"
+}

@@ -1,0 +1,134 @@
+{
+  "scenario": {
+    "id": "SCN-PE-022",
+    "version": 1,
+    "title": "retention capacity pressure",
+    "priority": "P2",
+    "level": "L0_UNIT_DRY",
+    "executor_kind": "POSTGRES_HARNESS",
+    "effect_class": "NO_EXTERNAL_EFFECT"
+  },
+  "traceability": {
+    "pe_ids": [
+      "PE-001",
+      "PE-004",
+      "PE-018"
+    ],
+    "acceptance_ids": [
+      "ACC-PE001-003",
+      "ACC-PE018-002"
+    ],
+    "invariant_ids": [
+      "INV-PE-PRIV-001"
+    ],
+    "risk_ids": [
+      "RPE-026"
+    ],
+    "historical_risk_ids": [
+      "R10"
+    ],
+    "coverage_gap_ids": [
+      "COV-GAP-CORE-OPS-001",
+      "COV-GAP-CORE-FIND-001"
+    ],
+    "work_packages": [
+      "WP-PE-01",
+      "WP-PE-02",
+      "WP-PE-13"
+    ],
+    "config_keys": [
+      "DISK_WARNING",
+      "DISK_CRITICAL",
+      "DISK_BLOCK_NEW_HEAVY_TESTS"
+    ]
+  },
+  "preconditions": [
+    "IMPLEMENTATION_AVAILABLE",
+    "TEST_TENANT_ISOLATED"
+  ],
+  "readiness_requirements": [
+    "POSTGRES_READY",
+    "PROVENANCE_KNOWN"
+  ],
+  "execution": {
+    "setup": [
+      {
+        "action": "prepare_isolated_fixture",
+        "parameters": {
+          "source_candidate": "retention_capacity_pressure"
+        }
+      }
+    ],
+    "stimulus": [
+      {
+        "action": "retention_capacity_pressure",
+        "parameters": {
+          "external_effect": false
+        }
+      }
+    ],
+    "waits": [],
+    "assertions": [
+      {
+        "assertion_id": "ASSERT-SCN-PE-022-001",
+        "assertion_type": "DETERMINISTIC",
+        "expected_property": "retention_capacity_pressure satisfies its fail-closed acceptance contract",
+        "evaluator": "platform_acceptance_evaluator",
+        "blocking": true,
+        "evidence": [
+          "TEST_REPORT",
+          "INVARIANT_RESULT"
+        ]
+      }
+    ],
+    "invariants": [
+      "INV-PE-PRIV-001"
+    ],
+    "cleanup": [
+      {
+        "action": "close_test_owned_state",
+        "parameters": {
+          "preserve_evidence": true
+        }
+      }
+    ]
+  },
+  "safety": {
+    "effect_budget": {
+      "effect_types": [],
+      "target_scope": {},
+      "max_stimulus": 0,
+      "max_system_response": 0,
+      "ttl_seconds": 180
+    },
+    "execution_lease": {
+      "required": false,
+      "lease_type": null,
+      "scope_key": null
+    },
+    "timeout": {
+      "scenario_seconds": 180,
+      "step_seconds": 60
+    },
+    "retry": {
+      "transient_max_retries": 1,
+      "external_effect_blind_retries": 0,
+      "same_correlation_required": true
+    },
+    "allowed_target_scope": {},
+    "abort_on_blocking_invariant": true
+  },
+  "evidence": {
+    "required": [
+      "TEST_REPORT",
+      "INVARIANT_RESULT"
+    ],
+    "provenance": [
+      "SOURCE_SHA",
+      "SCHEMA_REVISION",
+      "SCENARIO_HASH"
+    ]
+  },
+  "expected_finding_behavior": "CREATE",
+  "safe_execution_stage": "AFTER_WP13_MATRIX"
+}

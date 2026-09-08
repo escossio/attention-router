@@ -1,0 +1,65 @@
+scenario:
+  id: SCN-PE-029
+  version: 1
+  title: owner_sleeping_autoreply
+  priority: P1
+  level: L1_SYNTHETIC_E2E
+  executor_kind: SYNTHETIC_DRIVER
+  effect_class: SYNTHETIC_EXTERNAL_EFFECT
+traceability:
+  pe_ids: [PE-008, PE-009, PE-010, PE-011]
+  acceptance_ids: [ACC-PE008-007, ACC-PE009-006]
+  invariant_ids: [INV-PE-SCEN-004, INV-PE-RESTART-001]
+  risk_ids: [RPE-008]
+  historical_risk_ids: []
+  coverage_gap_ids: []
+  work_packages: [WP-PE-05, WP-PE-06]
+  config_keys: [SYNTHETIC_TEST_DRIVER_ENABLED, EXTERNAL_STIMULUS_CONFIRM_TIMEOUT]
+preconditions:
+  - SYNTHETIC_WHATSAPP_READY
+  - SYNTHETIC_ACTOR_READY
+  - SYNTHETIC_ACTOR_NOT_OWNER
+  - OWNER_TARGET_RESOLVED
+  - OWNER_PRESENCE_SLEEPING
+  - OWNER_PRESENCE_FRESH
+  - STANDING_DIRECTIVE_ACTIVE
+  - DISCLOSURE_AUTHORITY_ALLOWED
+  - RESPOND_PROVIDER_READY
+  - ANDY_CONTEXT_READY
+  - PRODUCTION_EXECUTION_LEASE_READY
+  - EXACTLY_ONCE_READY
+  - CORRELATION_READY
+execution:
+  setup: []
+  stimulus:
+    - action: synthetic_send_bounded
+      parameters: {target_actor_ref: OWNER, external_effect: true}
+  waits: []
+  assertions:
+    - assertion_id: ASSERT-SCN-PE-029-001
+      assertion_type: DETERMINISTIC
+      expected_property: OWNER_SLEEPING_OR_UNAVAILABLE
+      evaluator: semantic_response_evaluator
+      blocking: true
+      evidence: [SCENARIO_RUN, ASSERTION_RESULT]
+  invariants: [INV-PE-SCEN-004, INV-PE-RESTART-001]
+  cleanup:
+    - action: close_test_owned_state
+      parameters: {preserve_evidence: true}
+safety:
+  effect_budget:
+    effect_types: [WHATSAPP_STIMULUS, WHATSAPP_RESPONSE]
+    target_scope: {actor_ref: OWNER}
+    max_stimulus: 1
+    max_system_response: 1
+    ttl_seconds: 180
+  execution_lease: {required: true, lease_type: SCENARIO_STEP, scope_key: SCN-PE-029:isolated-scope}
+  timeout: {scenario_seconds: 180, step_seconds: 60}
+  retry: {transient_max_retries: 0, external_effect_blind_retries: 0, same_correlation_required: true}
+  allowed_target_scope: {actor_ref: OWNER}
+  abort_on_blocking_invariant: true
+evidence:
+  required: [SCENARIO_RUN, LEDGER, ASSERTION_RESULT, INVARIANT_RESULT]
+  provenance: [SOURCE_SHA, RUNTIME_SHA, SCHEMA_REVISION, SCENARIO_HASH, DRIVER_REVISION]
+expected_finding_behavior: NONE
+safe_execution_stage: AFTER_FOUNDATION_PREFLIGHT

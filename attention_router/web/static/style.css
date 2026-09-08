@@ -1,0 +1,39 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --ink: #17202a;
+  --muted: #5d6b78;
+  --line: #d8dee6;
+  --panel: #ffffff;
+  --accent: #146c94;
+  --warn: #a15c12;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif; background: var(--bg); color: var(--ink); }
+.shell { width: min(1180px, calc(100% - 28px)); margin: 24px auto; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+h1, h2 { margin: 0 0 8px; letter-spacing: 0; }
+p { color: var(--muted); }
+a { color: var(--accent); text-decoration: none; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+label, input, select, textarea, button { display: block; width: 100%; font: inherit; }
+input, select, textarea { border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 6px 0 12px; background: #fff; }
+textarea { min-height: 90px; }
+button { border: 0; border-radius: 6px; background: var(--accent); color: white; padding: 10px 12px; cursor: pointer; }
+details { border-top: 1px solid var(--line); padding: 10px 0; }
+summary { cursor: pointer; font-weight: 700; }
+.compact { display: grid; grid-template-columns: 1fr 90px 1fr 110px; gap: 8px; align-items: center; }
+.compact input, .compact button { margin: 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; color: var(--ink); background: #fbfcfd; }
+.card span, .card small { display: block; color: var(--muted); margin-top: 6px; }
+.speech { color: var(--ink); font-size: 1.05rem; }
+pre { white-space: pre-wrap; word-break: break-word; background: #f0f3f6; padding: 10px; border-radius: 6px; overflow: auto; }
+.action { display: grid; grid-template-columns: 1fr auto; gap: 8px; border-top: 1px solid var(--line); padding: 12px 0; }
+.action form { grid-column: span 1; }
+.event { border-top: 1px solid var(--line); padding: 10px 0; }
+@media (max-width: 760px) {
+  .grid, .compact { grid-template-columns: 1fr; }
+  .topbar { align-items: flex-start; flex-direction: column; }
+}

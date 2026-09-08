@@ -1,0 +1,40 @@
+[
+  {
+    "source": "wwebjs",
+    "external_actor_id": null,
+    "known_number_suffix": "0001",
+    "actor_key": "actor_sr_morgan_example",
+    "actor_category": "family_core",
+    "display_name": "Sr. Morgan Example",
+    "active_context": null,
+    "metadata": {
+      "actor_alias": "sr_morgan_example",
+      "display_name": "Sr. Morgan Example",
+      "relationship": "pai",
+      "role": "family",
+      "priority": "high",
+      "test_allowed": true,
+      "policy_id": "attention_default_v1"
+    },
+    "is_active": true
+  },
+  {
+    "source": "wwebjs",
+    "external_actor_id": null,
+    "known_number_suffix": "0002",
+    "actor_key": "actor_taylor",
+    "actor_category": "real_contact",
+    "display_name": "Taylor",
+    "active_context": null,
+    "metadata": {
+      "actor_alias": "taylor",
+      "display_name": "Taylor",
+      "relationship": "real_contact",
+      "role": "personal_contact",
+      "priority": "normal",
+      "test_allowed": false,
+      "policy_id": "attention_default_v1"
+    },
+    "is_active": true
+  }
+]

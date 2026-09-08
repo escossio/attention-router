@@ -1,0 +1,21 @@
+{
+  "schema_version": "1",
+  "providers": [
+    {"canonical_name": "object_storage", "interface_name": "ObjectStorageProvider", "description": "Artifact storage and retrieval contract.", "contract_version": 1},
+    {"canonical_name": "payment", "interface_name": "PaymentProvider", "description": "Payment instruction, charge and verification contract.", "contract_version": 1},
+    {"canonical_name": "location", "interface_name": "LocationProvider", "description": "Authorized location lookup contract.", "contract_version": 1},
+    {"canonical_name": "calendar", "interface_name": "CalendarProvider", "description": "Calendar availability and scheduling contract.", "contract_version": 1},
+    {"canonical_name": "vehicle", "interface_name": "VehicleProvider", "description": "Vehicle capability contract.", "contract_version": 1},
+    {"canonical_name": "crm", "interface_name": "CRMProvider", "description": "Contact relationship provider contract.", "contract_version": 1},
+    {"canonical_name": "notification", "interface_name": "NotificationProvider", "description": "External notification provider contract.", "contract_version": 1},
+    {"canonical_name": "identity", "interface_name": "IdentityProvider", "description": "Identity verification provider contract.", "contract_version": 1},
+    {"canonical_name": "device_gateway", "interface_name": "DeviceProvider", "description": "Outbound-authenticated device capability fabric contract; unprovisioned.", "contract_version": 1},
+    {"canonical_name": "internal_presence", "interface_name": "InternalPresenceProvider", "description": "Internal versioned presence state provider.", "contract_version": 1},
+    {"canonical_name": "internal_capability_registry", "interface_name": "InternalCapabilityRegistryProvider", "description": "Internal safe capability discovery provider.", "contract_version": 1},
+    {"canonical_name": "internal_commitments", "interface_name": "InternalCommitmentProvider", "description": "Internal commitment lifecycle provider.", "contract_version": 1},
+    {"canonical_name": "internal_scheduler", "interface_name": "InternalSchedulerProvider", "description": "Internal restart-safe reminder scheduler provider.", "contract_version": 1},
+    {"canonical_name": "internal_grants", "interface_name": "InternalGrantProvider", "description": "Internal owner-managed grant provider.", "contract_version": 1},
+    {"canonical_name": "internal_timeline", "interface_name": "InternalTimelineProvider", "description": "Internal recorded-timeline query provider.", "contract_version": 1},
+    {"canonical_name": "internal_reply", "interface_name": "InternalReplyProvider", "description": "Delegates validated conversational replies to the existing execution and outbox boundary; never sends directly.", "contract_version": 1}
+  ]
+}

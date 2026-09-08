@@ -1,0 +1,130 @@
+{
+  "scenario": {
+    "id": "SCN-PE-003",
+    "version": 1,
+    "title": "budget exhaustion concurrency",
+    "priority": "P0",
+    "level": "L0_UNIT_DRY",
+    "executor_kind": "CONCURRENCY_HARNESS",
+    "effect_class": "NO_EXTERNAL_EFFECT"
+  },
+  "traceability": {
+    "pe_ids": [
+      "PE-009",
+      "PE-018"
+    ],
+    "acceptance_ids": [
+      "ACC-CORE-BUDGET-002"
+    ],
+    "invariant_ids": [
+      "INV-PE-BUDGET-002",
+      "INV-PE-BUDGET-003",
+      "INV-PE-BUDGET-004"
+    ],
+    "risk_ids": [
+      "RPE-006"
+    ],
+    "historical_risk_ids": [],
+    "coverage_gap_ids": [
+      "COV-GAP-CORE-BUDGET-001"
+    ],
+    "work_packages": [
+      "WP-PE-03"
+    ],
+    "config_keys": [
+      "DEFAULT_EXTERNAL_EFFECT_BUDGET",
+      "DB_LOCK_WAIT_TIMEOUT"
+    ]
+  },
+  "preconditions": [
+    "IMPLEMENTATION_AVAILABLE",
+    "TEST_TENANT_ISOLATED"
+  ],
+  "readiness_requirements": [
+    "POSTGRES_READY",
+    "PROVENANCE_KNOWN"
+  ],
+  "execution": {
+    "setup": [
+      {
+        "action": "prepare_isolated_fixture",
+        "parameters": {
+          "source_candidate": "budget_exhaustion_concurrency"
+        }
+      }
+    ],
+    "stimulus": [
+      {
+        "action": "budget_exhaustion_concurrency",
+        "parameters": {
+          "external_effect": false
+        }
+      }
+    ],
+    "waits": [],
+    "assertions": [
+      {
+        "assertion_id": "ASSERT-SCN-PE-003-001",
+        "assertion_type": "DETERMINISTIC",
+        "expected_property": "budget_exhaustion_concurrency satisfies its fail-closed acceptance contract",
+        "evaluator": "platform_acceptance_evaluator",
+        "blocking": true,
+        "evidence": [
+          "TEST_REPORT",
+          "INVARIANT_RESULT"
+        ]
+      }
+    ],
+    "invariants": [
+      "INV-PE-BUDGET-002",
+      "INV-PE-BUDGET-003",
+      "INV-PE-BUDGET-004"
+    ],
+    "cleanup": [
+      {
+        "action": "close_test_owned_state",
+        "parameters": {
+          "preserve_evidence": true
+        }
+      }
+    ]
+  },
+  "safety": {
+    "effect_budget": {
+      "effect_types": [],
+      "target_scope": {},
+      "max_stimulus": 0,
+      "max_system_response": 0,
+      "ttl_seconds": 180
+    },
+    "execution_lease": {
+      "required": true,
+      "lease_type": "SCENARIO_STEP",
+      "scope_key": "SCN-PE-003:isolated-scope"
+    },
+    "timeout": {
+      "scenario_seconds": 180,
+      "step_seconds": 60
+    },
+    "retry": {
+      "transient_max_retries": 1,
+      "external_effect_blind_retries": 0,
+      "same_correlation_required": true
+    },
+    "allowed_target_scope": {},
+    "abort_on_blocking_invariant": true
+  },
+  "evidence": {
+    "required": [
+      "TEST_REPORT",
+      "INVARIANT_RESULT"
+    ],
+    "provenance": [
+      "SOURCE_SHA",
+      "SCHEMA_REVISION",
+      "SCENARIO_HASH"
+    ]
+  },
+  "expected_finding_behavior": "NONE",
+  "safe_execution_stage": "AFTER_WP03_INTERNAL"
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interação {{ item.id }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="shell">
+  <header class="topbar">
+    <div><h1>{{ item.contact.display_name }}</h1><p>{{ item.state }} · política {{ item.policy_id }}</p></div>
+    <a href="/">Voltar</a>
+  </header>
+  <section class="grid">
+    <section class="panel">
+      <h2>Decisão</h2>
+      <p class="speech">{{ item.lia_speech }}</p>
+      {% for d in item.decisions %}
+      <pre>{{ d | tojson(indent=2) }}</pre>
+      {% endfor %}
+      <form method="post" action="/api/v1/interactions/{{ item.id }}/human-reply" onsubmit="return postAndReload(this)">
+        <input name="text" value="Fixture: Alex respondeu manualmente.">
+        <button>Simular resposta humana</button>
+      </form>
+      <form method="post" action="/api/v1/test-clock/advance-next" onsubmit="return postAndReload(this)">
+        <button>Vencer próximo temporizador</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>Ações</h2>
+      {% for a in item.actions %}
+      <div class="action">
+        <strong>{{ a.action_key }}</strong><span>{{ a.state }}</span>
+        <form method="post" action="/api/v1/actions/{{ a.id }}/executed" onsubmit="return postAndReload(this)"><button>Executou</button></form>
+        <form method="post" action="/api/v1/actions/{{ a.id }}/failed" onsubmit="return postAndReload(this)"><button>Falhou</button></form>
+        <form method="post" action="/api/v1/actions/{{ a.id }}/acknowledge" onsubmit="return postAndReload(this)"><button>Reconheceu</button></form>
+      </div>
+      {% endfor %}
+    </section>
+  </section>
+  <section class="panel">
+    <h2>Linha do tempo e auditoria</h2>
+    {% for e in item.audit_events %}
+    <div class="event"><strong>{{ e.event_type }}</strong><pre>{{ e.payload | tojson(indent=2) }}</pre></div>
+    {% endfor %}
+  </section>
+</main>
+<script>
+async function postAndReload(form) {
+  const body = {};
+  new FormData(form).forEach((v, k) => body[k] = v);
+  await fetch(form.action, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)});
+  location.reload();
+  return false;
+}
+</script>
+</body>
+</html>
+

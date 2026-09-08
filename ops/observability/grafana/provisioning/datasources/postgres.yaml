@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: Attention Router Functional DB
+    type: postgres
+    uid: attention-router-postgres
+    url: ${ATTENTION_ROUTER_DB_HOST}:5432
+    user: ${ATTENTION_ROUTER_DB_USER}
+    readOnly: true
+    editable: false
+    jsonData:
+      database: ${ATTENTION_ROUTER_DB_NAME}
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: ${ATTENTION_ROUTER_DB_PASSWORD}

@@ -1,0 +1,130 @@
+{
+  "scenario": {
+    "id": "SCN-PE-006",
+    "version": 1,
+    "title": "cross tenant lease denial",
+    "priority": "P0",
+    "level": "L0_UNIT_DRY",
+    "executor_kind": "SECURITY_NEGATIVE_HARNESS",
+    "effect_class": "NO_EXTERNAL_EFFECT"
+  },
+  "traceability": {
+    "pe_ids": [
+      "PE-003",
+      "PE-007",
+      "PE-009"
+    ],
+    "acceptance_ids": [
+      "ACC-CORE-TENANT-001"
+    ],
+    "invariant_ids": [
+      "INV-PE-TENANT-001",
+      "INV-PE-TENANT-002"
+    ],
+    "risk_ids": [
+      "RPE-003",
+      "RPE-020"
+    ],
+    "historical_risk_ids": [],
+    "coverage_gap_ids": [
+      "COV-GAP-CORE-LEASE-001",
+      "COV-GAP-CORE-LINEAGE-001"
+    ],
+    "work_packages": [
+      "WP-PE-01",
+      "WP-PE-03",
+      "WP-PE-04"
+    ],
+    "config_keys": []
+  },
+  "preconditions": [
+    "IMPLEMENTATION_AVAILABLE",
+    "TEST_TENANT_ISOLATED"
+  ],
+  "readiness_requirements": [
+    "POSTGRES_READY",
+    "PROVENANCE_KNOWN"
+  ],
+  "execution": {
+    "setup": [
+      {
+        "action": "prepare_isolated_fixture",
+        "parameters": {
+          "source_candidate": "cross_tenant_lease_denial"
+        }
+      }
+    ],
+    "stimulus": [
+      {
+        "action": "cross_tenant_lease_denial",
+        "parameters": {
+          "external_effect": false
+        }
+      }
+    ],
+    "waits": [],
+    "assertions": [
+      {
+        "assertion_id": "ASSERT-SCN-PE-006-001",
+        "assertion_type": "DETERMINISTIC",
+        "expected_property": "cross_tenant_lease_denial satisfies its fail-closed acceptance contract",
+        "evaluator": "platform_acceptance_evaluator",
+        "blocking": true,
+        "evidence": [
+          "TEST_REPORT",
+          "INVARIANT_RESULT"
+        ]
+      }
+    ],
+    "invariants": [
+      "INV-PE-TENANT-001",
+      "INV-PE-TENANT-002"
+    ],
+    "cleanup": [
+      {
+        "action": "close_test_owned_state",
+        "parameters": {
+          "preserve_evidence": true
+        }
+      }
+    ]
+  },
+  "safety": {
+    "effect_budget": {
+      "effect_types": [],
+      "target_scope": {},
+      "max_stimulus": 0,
+      "max_system_response": 0,
+      "ttl_seconds": 180
+    },
+    "execution_lease": {
+      "required": true,
+      "lease_type": "SCENARIO_STEP",
+      "scope_key": "SCN-PE-006:isolated-scope"
+    },
+    "timeout": {
+      "scenario_seconds": 180,
+      "step_seconds": 60
+    },
+    "retry": {
+      "transient_max_retries": 1,
+      "external_effect_blind_retries": 0,
+      "same_correlation_required": true
+    },
+    "allowed_target_scope": {},
+    "abort_on_blocking_invariant": true
+  },
+  "evidence": {
+    "required": [
+      "TEST_REPORT",
+      "INVARIANT_RESULT"
+    ],
+    "provenance": [
+      "SOURCE_SHA",
+      "SCHEMA_REVISION",
+      "SCENARIO_HASH"
+    ]
+  },
+  "expected_finding_behavior": "EXPECTED_DENY_ONLY",
+  "safe_execution_stage": "AFTER_WP04_SECURITY"
+}

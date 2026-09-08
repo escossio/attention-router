@@ -1,0 +1,110 @@
+services:
+  tempo:
+    image: grafana/tempo:3.0.2
+    command: ["-config.file=/etc/tempo/tempo.yaml", "-target=all"]
+    volumes:
+      - attention_router_tempo_data:/var/tempo
+      - ./ops/observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "192.0.2.6:3200:3200"
+    networks:
+      - attention_router_observability
+      - attention_router_observability_host
+    healthcheck:
+      # Tempo is distroless; endpoint readiness is checked from the host runbook.
+      test: ["CMD", "/tempo", "--version"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.153.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      tempo:
+        condition: service_healthy
+    volumes:
+      - ./ops/observability/collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "192.0.2.6:4317:4317"
+      - "192.0.2.6:4318:4318"
+      - "192.0.2.6:13133:13133"
+      - "192.0.2.6:8888:8888"
+    networks:
+      - attention_router_observability
+      - attention_router_observability_host
+    healthcheck:
+      # The image has no shell/curl; endpoint readiness is checked externally.
+      test: ["CMD", "/otelcol-contrib", "--version"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    depends_on:
+      tempo:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set at runtime}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://192.0.2.6:3000/
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      ATTENTION_ROUTER_DB_HOST: db
+      ATTENTION_ROUTER_DB_NAME: ${POSTGRES_DB:-attention_router}
+      ATTENTION_ROUTER_DB_USER: ${GRAFANA_DB_USER:-grafana_readonly}
+      ATTENTION_ROUTER_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?GRAFANA_DB_PASSWORD must be set at runtime}
+    ports:
+      - "192.0.2.6:3000:3000"
+    volumes:
+      - attention_router_grafana_data:/var/lib/grafana
+      - ./ops/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - attention_router_observability
+      - attention_router_observability_host
+      - attention_router_functional
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  trace-demo:
+    profiles: [candidate]
+    build: .
+    environment:
+      APP_ENV: test
+      ADMIN_AUTH_ENABLED: "false"
+      INTERNAL_INGRESS_HMAC_SECRET: stage2-synthetic-not-a-credential-000000
+      OTEL_TRACING_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: attention-router-trace-demo
+      OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    networks:
+      - attention_router_observability
+    command: ["python", "scripts/trace_demo.py", "--otlp", "--path", "${TRACE_DEMO_PATH:-happy}", "--endpoint", "http://otel-collector:4318/v1/traces"]
+
+volumes:
+  attention_router_tempo_data:
+  attention_router_grafana_data:
+
+networks:
+  attention_router_observability:
+    internal: true
+  # Only loopback-published endpoints use this second network.
+  attention_router_observability_host: {}
+  attention_router_functional:
+    external: true
+    name: attention-router_default

@@ -1,0 +1,40 @@
+{
+  "classification": "SYNTHETIC_TEST_ONLY_NOT_ROUTABLE",
+  "contract": "Brazilian parser-compatible forms with deliberately invalid DDD 01. Never dial these fixtures. PN/JID and national forms represent one actor; LID is a distinct namespace paired only by authoritative fixture evidence. LID sorts before PN in these scenarios.",
+  "ACTOR_A": {
+    "displayName": "Actor A Example",
+    "email": "actor-a@example.com",
+    "national": "01900000001",
+    "nationalJid": "01900000001@c.us",
+    "e164": "+5501900000001",
+    "pn": "5501900000001",
+    "jid": "5501900000001@c.us",
+    "serverJid": "5501900000001@s.whatsapp.net",
+    "legacyJid": "550100000001@c.us",
+    "lid": "2000000001@lid"
+  },
+  "ACTOR_B": {
+    "displayName": "Actor B Example",
+    "email": "actor-b@example.com",
+    "national": "01900000002",
+    "nationalJid": "01900000002@c.us",
+    "e164": "+5501900000002",
+    "pn": "5501900000002",
+    "jid": "5501900000002@c.us",
+    "serverJid": "5501900000002@s.whatsapp.net",
+    "legacyJid": "550100000002@c.us",
+    "lid": "2000000002@lid"
+  },
+  "ACTOR_C": {
+    "displayName": "Actor C Example",
+    "email": "actor-c@example.com",
+    "national": "01900000003",
+    "nationalJid": "01900000003@c.us",
+    "e164": "+5501900000003",
+    "pn": "5501900000003",
+    "jid": "5501900000003@c.us",
+    "serverJid": "5501900000003@s.whatsapp.net",
+    "legacyJid": "550100000003@c.us",
+    "lid": "2000000003@lid"
+  }
+}

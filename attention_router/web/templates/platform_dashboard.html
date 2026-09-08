@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attention Router / Platform Operations</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='platform.css') }}">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <header class="masthead">
+    <a class="brand" href="/ops/platform">
+      <span class="brand-mark">AR</span>
+      <span>Attention Router</span>
+    </a>
+    <div class="edition">Platform Operations / Read-only V1</div>
+    <a class="refresh" href="/ops/platform">Refresh snapshot</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Current platform posture</p>
+        <h1>{{ snapshot.overall_state | default('UNKNOWN') }}</h1>
+        <p class="lede">{{ snapshot.summary | default('No current snapshot is available.') }}</p>
+      </div>
+      <dl class="provenance-stamp">
+        <div><dt>Source</dt><dd>{{ snapshot.provenance.source_revision | default('unknown') }}</dd></div>
+        <div><dt>Runtime</dt><dd>{{ snapshot.provenance.runtime_revision | default('unknown') }}</dd></div>
+        <div><dt>Schema</dt><dd>{{ snapshot.provenance.schema_revision | default('unknown') }}</dd></div>
+        <div><dt>Observed</dt><dd>{{ snapshot.generated_at | default('unknown') }}</dd></div>
+      </dl>
+    </section>
+
+    <section class="readiness" aria-labelledby="readiness-title">
+      <div class="section-heading">
+        <p class="eyebrow">Three independent dimensions</p>
+        <h2 id="readiness-title">Readiness is not one green light</h2>
+      </div>
+      <div class="readiness-grid">
+        {% for item in snapshot.readiness | default([]) %}
+        <article class="readiness-card state-{{ item.state | lower }}">
+          <span class="signal" aria-hidden="true"></span>
+          <p>{{ item.dimension | replace('_', ' ') }}</p>
+          <h3>{{ item.state }}</h3>
+          <small>{{ item.reason_codes | join(' / ') }}</small>
+          {% if item.stale %}<strong class="stale-label">STALE EVIDENCE</strong>{% endif %}
+        </article>
+        {% else %}
+        <article class="readiness-card state-unknown">
+          <span class="signal" aria-hidden="true"></span>
+          <p>Readiness</p><h3>UNKNOWN</h3><small>No persisted evaluation</small>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="split-grid">
+      <article class="panel gates-panel">
+        <div class="panel-title"><span>01</span><h2>Safety gates</h2></div>
+        <div class="gate-list">
+          {% for gate in snapshot.gates | default([]) %}
+          <div class="gate-row">
+            <span>{{ gate.name }}</span>
+            <strong class="gate-{{ gate.state | lower }}">
+              {{ gate.state }}
+            </strong>
+          </div>
+          {% else %}
+          <div class="gate-row"><span>Gate evidence</span><strong class="gate-closed">UNKNOWN</strong></div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="panel blockers-panel">
+        <div class="panel-title"><span>02</span><h2>Next blocker</h2></div>
+        {% if snapshot.next_blocker %}
+        <p class="blocker-code">{{ snapshot.next_blocker.code }}</p>
+        <p>{{ snapshot.next_blocker.summary }}</p>
+        {% else %}
+        <p class="muted">No blocker summary is currently available.</p>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="panel wide-panel">
+      <div class="panel-title"><span>03</span><h2>Components and dependencies</h2></div>
+      <div class="component-grid">
+        {% for component in snapshot.components | default([]) %}
+        <article>
+          <div class="component-line"><h3>{{ component.name }}</h3><span>{{ component.state }}</span></div>
+          <p>{{ component.reason_code | default('NO_REASON_CODE') }}</p>
+          <small>{{ component.freshness | default('freshness unknown') }}</small>
+        </article>
+        {% else %}
+        <p class="muted">No normalized component state has been recorded.</p>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="split-grid lower-grid">
+      <article class="panel">
+        <div class="panel-title"><span>04</span><h2>Findings</h2></div>
+        <div class="record-list">
+          {% for finding in snapshot.findings | default([]) %}
+          <div class="record">
+            <div><strong>{{ finding.severity }}</strong><span>{{ finding.status }}</span></div>
+            <h3>{{ finding.title }}</h3>
+            <p>{{ finding.summary }}</p>
+            <small>{{ finding.occurrence_count }} occurrence(s)</small>
+          </div>
+          {% else %}
+          <p class="muted">No current findings in this snapshot.</p>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-title"><span>05</span><h2>Scenario runs</h2></div>
+        <div class="record-list">
+          {% for run in snapshot.scenario_runs | default([]) %}
+          <div class="record compact">
+            <div><strong>{{ run.id }}</strong><span>{{ run.status }}</span></div>
+            <p>Version {{ run.scenario_version_id }}</p>
+            <small>{{ run.started_at | default('not started') }}</small>
+          </div>
+          {% else %}
+          <p class="muted">No ScenarioRun evidence is available.</p>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer>
+    <p>Observation plane only. This surface cannot send, pair, mutate policy, change gates, deploy, or promote.</p>
+    <p>{{ snapshot.tenant_id | default('tenant unavailable') }} / sanitized operational metadata</p>
+  </footer>
+</body>
+</html>
