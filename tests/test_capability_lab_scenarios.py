@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from attention_router.core.capability_lab import CapabilityLabScenario
+from attention_router.core.capability_lab import (
+    CapabilityLabObservation,
+    CapabilityLabScenario,
+    ComparisonStatus,
+    compare_scenario,
+)
 
 
 FIXTURE = Path("tests/fixtures/capability_lab_scenarios.json")
@@ -74,3 +79,62 @@ def test_denied_or_pending_scenario_cannot_expect_grant():
             simulated_human_decision="NONE",
             expected_grant_mode="PERSISTENT",
         )
+
+
+def test_expected_and_observed_match_passes_without_mutation():
+    scenario = _scenarios()[0]
+    observation = CapabilityLabObservation(
+        scenario_id=scenario.scenario_id,
+        observed_resolution=scenario.expected_resolution,
+        observed_grant_mode=scenario.expected_grant_mode,
+        matched_rule_id="synthetic-rule-1",
+        evidence_refs=["synthetic:evidence:1"],
+    )
+
+    comparison = compare_scenario(scenario, observation)
+
+    assert comparison.status == ComparisonStatus.PASS
+    assert comparison.mismatches == []
+    assert comparison.evidence_refs == ["synthetic:evidence:1"]
+
+
+def test_missing_observation_is_incomplete_not_success():
+    scenario = _scenarios()[0]
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(scenario_id=scenario.scenario_id),
+    )
+
+    assert comparison.status == ComparisonStatus.INCOMPLETE
+    assert comparison.mismatches == []
+
+
+def test_resolution_or_grant_mismatch_fails_with_reason_codes():
+    scenario = _scenarios()[0]
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="DENY",
+            observed_grant_mode="NONE",
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.FAIL
+    assert any(item.startswith("RESOLUTION_MISMATCH:") for item in comparison.mismatches)
+    assert any(item.startswith("GRANT_MODE_MISMATCH:") for item in comparison.mismatches)
+
+
+def test_any_production_effect_observed_fails_the_lab_comparison():
+    scenario = _scenarios()[1]
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution=scenario.expected_resolution,
+            production_effect_observed=True,
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.FAIL
+    assert "PRODUCTION_EFFECT_OBSERVED" in comparison.mismatches
