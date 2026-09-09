@@ -9,10 +9,12 @@
     capabilities: [],
     approvals: [],
     intents: [],
+    scenarios: [],
   };
 
   const titles = {
     overview: "Visão geral",
+    scenarios: "Cenários",
     approvals: "Autorizações",
     capabilities: "Capacidades",
     rules: "Regras de autorização",
@@ -46,12 +48,12 @@
     return state.token ? { Authorization: `Bearer ${state.token}` } : {};
   }
 
-  async function fetchJson(path) {
+  async function fetchJson(path, { authenticated = true } = {}) {
+    const headers = { Accept: "application/json" };
+    if (authenticated) Object.assign(headers, authHeaders());
+
     const response = await fetch(path, {
-      headers: {
-        Accept: "application/json",
-        ...authHeaders(),
-      },
+      headers,
       credentials: "same-origin",
     });
 
@@ -69,7 +71,16 @@
     return response.json();
   }
 
-  async function loadControlPlane() {
+  async function loadScenarios() {
+    const payload = await fetchJson("/static/capability-lab-scenarios.json", {
+      authenticated: false,
+    });
+    state.scenarios = Array.isArray(payload) ? payload : [];
+    renderScenarios();
+    renderMetrics();
+  }
+
+  async function loadRuntime() {
     const calls = [
       fetchJson("/api/v1/admin/platform/operations/snapshot"),
       fetchJson("/api/v1/admin/policies"),
@@ -95,6 +106,7 @@
     renderConnection();
     renderMetrics();
     renderRuntime();
+    renderScenarios();
     renderApprovals();
     renderCapabilities();
   }
@@ -113,21 +125,27 @@
   }
 
   function renderMetrics() {
-    $("#metric-approvals").textContent = String(state.approvals.length);
-    $("#metric-policies").textContent = String(
-      state.policies.filter((item) => firstDefined(item.is_active, true) !== false).length,
-    );
-    $("#metric-capabilities").textContent = String(state.capabilities.length);
-    $("#metric-intents").textContent = String(state.intents.length);
-    $("#nav-approval-count").textContent = String(state.approvals.length);
+    $("#metric-scenarios").textContent = String(state.scenarios.length);
+    $("#metric-approvals").textContent = state.connected ? String(state.approvals.length) : "—";
+    $("#metric-policies").textContent = state.connected
+      ? String(state.policies.filter((item) => firstDefined(item.is_active, true) !== false).length)
+      : "—";
+    $("#metric-capabilities").textContent = state.connected
+      ? String(state.capabilities.length)
+      : "—";
+    $("#metric-intents").textContent = state.connected ? String(state.intents.length) : "—";
+    $("#nav-scenario-count").textContent = String(state.scenarios.length);
+    $("#nav-approval-count").textContent = state.connected ? String(state.approvals.length) : "—";
   }
 
   function renderRuntime() {
     const pill = $("#runtime-state");
     const provenance = $("#runtime-provenance");
-    const readiness = Array.isArray(state.snapshot?.readiness) ? state.snapshot.readiness : [];
+    if (!state.connected) return;
 
+    const readiness = Array.isArray(state.snapshot?.readiness) ? state.snapshot.readiness : [];
     let value = "UNKNOWN";
+
     if (state.snapshot?.stale) {
       value = "BLOCKED";
     } else if (readiness.length && readiness.every((item) => item.state === "READY")) {
@@ -148,6 +166,38 @@
       state.snapshot?.runtime_provenance?.source_revision ||
       "unknown";
     provenance.textContent = `runtime ${runtimeRevision}`;
+  }
+
+  function renderScenarios() {
+    const container = $("#scenario-list");
+    if (!container) return;
+
+    if (!state.scenarios.length) {
+      container.innerHTML =
+        '<div class="empty-state">Nenhum cenário sintético carregado.</div>';
+      return;
+    }
+
+    container.innerHTML = state.scenarios
+      .map((item) => {
+        const decision = firstDefined(item.simulated_human_decision, "NONE");
+        const grant = firstDefined(item.expected_grant_mode, "NONE");
+        return `
+          <article class="record">
+            <div class="record-main">
+              <span class="record-kicker">synthetic / ${escapeHtml(item.scenario_id)}</span>
+              <h3>${escapeHtml(item.title)}</h3>
+              <p>${escapeHtml(item.request_text)}</p>
+              <small>
+                capability: ${escapeHtml(item.capability_key)} · decisão simulada:
+                ${escapeHtml(decision)} · grant esperado: ${escapeHtml(grant)}
+              </small>
+            </div>
+            <div class="record-state">${escapeHtml(item.expected_resolution)}</div>
+          </article>
+        `;
+      })
+      .join("");
   }
 
   function approvalTitle(item) {
@@ -188,7 +238,7 @@
               <span class="record-kicker">review / ${escapeHtml(id)}</span>
               <h3>${escapeHtml(approvalTitle(item))}</h3>
               <p>correlação: ${escapeHtml(decisionId)}</p>
-              <small>Esta fila ainda representa Response Review, não o futuro AuthorizationRequest.</small>
+              <small>Esta fila ainda representa Response Review, não AuthorizationRequest.</small>
             </div>
             <div class="record-state">${escapeHtml(status)}</div>
           </article>
@@ -217,7 +267,7 @@
     }
     if (!state.capabilities.length) {
       container.innerHTML =
-        '<div class="empty-state">Nenhuma capability de plataforma foi anunciada para este tenant.</div>';
+        '<div class="empty-state">Nenhuma capability de plataforma foi anunciada.</div>';
       return;
     }
 
@@ -272,8 +322,8 @@
     $("#connect-button").textContent = "Carregando…";
 
     try {
-      await loadControlPlane();
-      toast("Control Plane conectado ao runtime.");
+      await loadRuntime();
+      toast("Capability Lab conectado ao runtime.");
     } catch (error) {
       state.connected = false;
       renderConnection();
@@ -288,4 +338,8 @@
   });
 
   renderConnection();
+  renderMetrics();
+  loadScenarios().catch((error) => {
+    toast(error.message || "Falha ao carregar cenários sintéticos.", "error");
+  });
 })();
