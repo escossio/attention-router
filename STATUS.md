@@ -2,6 +2,16 @@
 
 Updated: 2026-09-09
 
+## Architecture governance
+
+- Phase 4E merged in `e643f634247f5e918d1b519607e6333f5ca13480`.
+- Public ADR index and supplementary decisions cover authority, approval,
+  outbox, delivery evidence, memory, providers and browser-origin trust.
+- Public threat model, trust-boundary diagram and directional roadmap are
+  available; implemented, planned and conceptual scope remains separated.
+- No core product logic, database schema, migrations, runtime or immutable
+  `v0.1.0` tag was changed.
+
 ## Public prerelease baseline
 
 - Main: current protected branch; Phase 4B merge SHA is recorded in the final scorecard.
