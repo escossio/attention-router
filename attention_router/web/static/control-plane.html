@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Andy Control Plane</title>
+  <link rel="stylesheet" href="/static/control-plane.css">
+  <script defer src="/static/control-plane.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/static/control-plane.html" aria-label="Andy Control Plane">
+        <span class="brand-mark">A</span>
+        <span>
+          <strong>Andy</strong>
+          <small>Control Plane</small>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Navegação principal">
+        <button class="nav-item active" data-view="overview" type="button">
+          <span class="nav-index">01</span><span>Visão geral</span>
+        </button>
+        <button class="nav-item" data-view="approvals" type="button">
+          <span class="nav-index">02</span><span>Autorizações</span>
+          <span class="nav-badge" id="nav-approval-count">—</span>
+        </button>
+        <button class="nav-item" data-view="capabilities" type="button">
+          <span class="nav-index">03</span><span>Capacidades</span>
+        </button>
+        <button class="nav-item" data-view="rules" type="button">
+          <span class="nav-index">04</span><span>Regras</span>
+        </button>
+        <button class="nav-item" data-view="grants" type="button">
+          <span class="nav-index">05</span><span>Permissões</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div>
+          <strong>Public prerelease</strong>
+          <small>Control Plane V0</small>
+        </div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Governança da agente</p>
+          <h1 id="page-title">Visão geral</h1>
+        </div>
+
+        <div class="connection">
+          <label for="admin-token">Credencial administrativa</label>
+          <div class="connection-row">
+            <input id="admin-token" type="password" autocomplete="off"
+                   placeholder="Bearer token (não é armazenado)">
+            <button id="connect-button" class="button primary" type="button">Conectar</button>
+          </div>
+          <p id="connection-state" class="connection-state">Somente memória da página; nada vai para localStorage.</p>
+        </div>
+      </header>
+
+      <main>
+        <section class="view active" data-view-panel="overview">
+          <div class="hero">
+            <div>
+              <p class="eyebrow">Control Plane</p>
+              <h2>Autoridade configurável sem transformar cada regra em código.</h2>
+              <p class="hero-copy">
+                Esta superfície nasce separada do runtime: o painel configura e observa;
+                o Attention Router continua sendo a autoridade de execução.
+              </p>
+            </div>
+            <div class="hero-state">
+              <span id="runtime-state" class="state-pill neutral">DESCONECTADO</span>
+              <small id="runtime-provenance">runtime não consultado</small>
+            </div>
+          </div>
+
+          <div class="metric-grid" aria-label="Resumo">
+            <article class="metric">
+              <p>Revisões pendentes</p>
+              <strong id="metric-approvals">—</strong>
+              <small>fluxo humano atual</small>
+            </article>
+            <article class="metric">
+              <p>Policies ativas</p>
+              <strong id="metric-policies">—</strong>
+              <small>configuração do runtime</small>
+            </article>
+            <article class="metric">
+              <p>Capacidades de plataforma</p>
+              <strong id="metric-capabilities">—</strong>
+              <small>matrix atual</small>
+            </article>
+            <article class="metric">
+              <p>Execution intents pendentes</p>
+              <strong id="metric-intents">—</strong>
+              <small>efeitos ainda não liberados</small>
+            </article>
+          </div>
+
+          <div class="two-column">
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Próxima fronteira</p>
+                  <h3>Governed Capabilities</h3>
+                </div>
+                <span class="tag planned">CONTRATO V0</span>
+              </div>
+              <p>
+                Informações e ações passam a ser identificadas por capability keys, como
+                <code>personal.identity.cpf</code>. A regra decide se Andy pode negar,
+                permitir ou pedir autorização.
+              </p>
+              <div class="flow">
+                <span>Solicitação</span><i>→</i><span>Capability</span><i>→</i>
+                <span>Regra</span><i>→</i><span>Autorização</span><i>→</i><span>Grant</span>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Segurança</p>
+                  <h3>Separação de autoridade</h3>
+                </div>
+                <span class="tag safe">FAIL-CLOSED</span>
+              </div>
+              <p>
+                O painel não concede autoridade ao modelo. Uma futura decisão de aprovação
+                continua precisando de uma identidade humana autenticada e de evidência durável.
+              </p>
+              <ul class="compact-list">
+                <li>nenhuma credencial embutida no frontend;</li>
+                <li>nenhum dado pessoal real no repositório público;</li>
+                <li>nenhuma execução externa nasce desta tela V0.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="approvals">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Fila humana</p>
+              <h2>Autorizações</h2>
+            </div>
+            <span class="tag current">BASELINE ATUAL</span>
+          </div>
+          <p class="section-copy">
+            Por enquanto esta visão lê as revisões humanas já existentes. O contrato de
+            AuthorizationRequest será ligado aqui numa etapa posterior, sem fingir que os
+            dois fluxos já são equivalentes.
+          </p>
+          <div id="approval-list" class="record-list">
+            <div class="empty-state">Conecte-se para carregar as revisões pendentes.</div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="capabilities">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Catálogo</p>
+              <h2>Capacidades</h2>
+            </div>
+            <span class="tag planned">EVOLUÇÃO</span>
+          </div>
+          <p class="section-copy">
+            A matrix abaixo é a capacidade de plataforma que já existe. O catálogo de
+            capacidades governadas — disclosure, action, delegation e automation — será
+            persistido separadamente.
+          </p>
+          <div id="capability-list" class="record-list">
+            <div class="empty-state">Conecte-se para carregar a matrix atual.</div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="rules">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Policy as data</p>
+              <h2>Regras de autorização</h2>
+            </div>
+            <span class="tag planned">SCHEMA-FIRST</span>
+          </div>
+          <div class="three-column">
+            <article class="concept-card">
+              <span>01</span>
+              <h3>Quem está pedindo?</h3>
+              <p>Contato, categoria de relacionamento, organização ou outro seletor.</p>
+            </article>
+            <article class="concept-card">
+              <span>02</span>
+              <h3>O que está sendo pedido?</h3>
+              <p>Uma capability key estável, sem amarrar a decisão ao texto da conversa.</p>
+            </article>
+            <article class="concept-card">
+              <span>03</span>
+              <h3>Qual resolução?</h3>
+              <p>ALLOW, DENY ou REQUIRE_APPROVAL, com grant opcional após aprovação.</p>
+            </article>
+          </div>
+          <article class="panel schema-panel">
+            <div class="panel-heading">
+              <h3>Contrato preparado</h3>
+              <span class="tag safe">SEM PERSISTÊNCIA AINDA</span>
+            </div>
+            <p>
+              O V0 introduz um contrato transport-neutral. A API, o painel web e um futuro
+              cliente Android poderão consumir o mesmo schema sem copiar regra de negócio.
+            </p>
+          </article>
+        </section>
+
+        <section class="view" data-view-panel="grants">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Permissões derivadas</p>
+              <h2>Grants</h2>
+            </div>
+            <span class="tag planned">PRÓXIMA FASE</span>
+          </div>
+          <p class="section-copy">
+            Uma aprovação poderá gerar uma permissão de uso único, temporária ou persistente.
+            O grant terá sujeito, beneficiário, capability, origem da autorização, validade,
+            revogação e trilha de proveniência.
+          </p>
+          <div class="grant-example">
+            <div><small>Capability</small><strong>personal.identity.cpf</strong></div>
+            <div><small>Beneficiário</small><strong>actor/contact-…</strong></div>
+            <div><small>Modo</small><strong>TIME_BOUND</strong></div>
+            <div><small>Origem</small><strong>authorization/…</strong></div>
+          </div>
+          <div class="empty-state">
+            Nenhum grant é criado por esta versão do painel. Isso é deliberado.
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
