@@ -1,6 +1,6 @@
 # Contributing
 
-This is a prerelease staging branch. Keep changes focused and explain which contract they preserve or change. Do not import private deployment material or use real identities in fixtures.
+This is a public prerelease baseline. Keep changes focused and explain which contract they preserve or change. Do not import private deployment material or use real identities in fixtures.
 
 ## Development and checks
 
@@ -36,6 +36,8 @@ The existing integration suite is under certification. Failures involving old ex
 
 Include targeted tests and relevant regression results. Keep test data synthetic and preserve identity/ordering relationships. Architectural changes should state authority, privacy, failure and rollback implications. Do not introduce provider calls into tests.
 
-CI separates Python/static checks, transport, PostgreSQL, Docker build and secret scanning. CodeQL requires public-repository availability or private Code Security entitlement and explicit enablement. Dependabot configuration is staged with version-update PR creation disabled until the repository migration is approved.
+CI separates Python/static checks, transport, PostgreSQL, Docker build and secret scanning; CodeQL runs for Python and JavaScript/TypeScript. Dependabot is active for pip, npm and GitHub Actions with weekly grouped minor/patch updates targeting `main`.
+
+The current public verification baseline is 986 Python tests, 228 transport tests and 325 PostgreSQL integration tests. These counts are evidence for this prerelease baseline, not a production-readiness claim.
 
 Report vulnerabilities privately according to [SECURITY.md](SECURITY.md), not in a normal issue.
