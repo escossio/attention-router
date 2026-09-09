@@ -14,6 +14,13 @@ A useful agent needs more than a generated reply. It must identify the conversat
 
 Attention Router makes those boundaries explicit and auditable. WhatsApp is an integration, not the product's entire architecture.
 
+## Demo
+
+Watch the [60–90 second public architecture demo](docs/assets/demo/attention-router-demo.mp4)
+or view its [poster](docs/assets/demo/attention-router-demo-poster.png). It is
+synthetic and offline; the [demo guide](docs/demo.md) explains the flow and
+reproduction command.
+
 ## Current capabilities
 
 - Structured inbound processing, tenant/contact scope and idempotent event handling.
