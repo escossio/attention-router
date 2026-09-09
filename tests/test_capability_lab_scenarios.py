@@ -12,7 +12,7 @@ from attention_router.core.capability_lab import (
 )
 
 
-FIXTURE = Path("tests/fixtures/capability_lab_scenarios.json")
+FIXTURE = Path("attention_router/web/static/capability-lab-scenarios.json")
 
 
 def _scenarios() -> list[CapabilityLabScenario]:
