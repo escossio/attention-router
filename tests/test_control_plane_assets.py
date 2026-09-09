@@ -4,14 +4,16 @@ from pathlib import Path
 STATIC = Path("attention_router/web/static")
 
 
-def test_control_plane_assets_are_self_contained():
+def test_capability_lab_assets_are_self_contained():
     html = (STATIC / "control-plane.html").read_text(encoding="utf-8")
     css = (STATIC / "control-plane.css").read_text(encoding="utf-8")
     javascript = (STATIC / "control-plane.js").read_text(encoding="utf-8")
 
     assert '/static/control-plane.css' in html
     assert '/static/control-plane.js' in html
-    assert "Andy Control Plane" in html
+    assert "Andy Capability Lab" in html
+    assert "Desenvolvimento e validação" in html
+    assert "não define a UX comercial da Andy" in html
     assert css.strip()
     assert javascript.strip()
 
@@ -28,7 +30,7 @@ def test_control_plane_does_not_persist_admin_credential_in_browser_storage():
     assert "Authorization" in javascript
 
 
-def test_control_plane_reads_existing_protected_runtime_surfaces_only():
+def test_capability_lab_reads_existing_protected_runtime_surfaces_only():
     javascript = (STATIC / "control-plane.js").read_text(encoding="utf-8")
 
     expected_paths = {
@@ -44,3 +46,11 @@ def test_control_plane_reads_existing_protected_runtime_surfaces_only():
     assert 'method: "POST"' not in javascript
     assert 'method: "PATCH"' not in javascript
     assert 'method: "DELETE"' not in javascript
+
+
+def test_capability_lab_is_not_presented_as_customer_settings_ui():
+    html = (STATIC / "control-plane.html").read_text(encoding="utf-8")
+
+    assert "bancada para provar features" in html
+    assert "Laboratório não é autoridade" in html
+    assert "detalhes de engenharia" in html
