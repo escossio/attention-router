@@ -1,9 +1,11 @@
 # Attention Router / Andy
 
-[![Public CI](https://github.com/escossio/attention-router/actions/workflows/ci.yml/badge.svg?branch=public-release-candidate-20260908)](https://github.com/escossio/attention-router/actions/workflows/ci.yml?query=branch%3Apublic-release-candidate-20260908)
+[![Public CI](https://github.com/escossio/attention-router/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/escossio/attention-router/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 **Attention Router is a contextual agent runtime for controlled, policy-aware autonomous interactions.** Andy is its principal conversational agent: context-aware assistance with explicit limits on what an agent may do.
+
+**Status: public prerelease.**
 
 ## Why
 
@@ -56,16 +58,17 @@ A resolved locale travels with a response even when its text is neutral, such as
 
 Prerequisites: Git, Docker Engine and Docker Compose v2 with `--wait` support. Docker must be able to download base images and packages. No phone, browser profile, OpenAI key or TTS account is required.
 
+If port 8080 is occupied, run `export PUBLIC_HTTP_PORT=18080` in your shell before the commands below (or choose another free port). The API and health check use the same port.
+
 ```bash
-git clone --branch public-release-candidate-20260908 --single-branch \
-  git@github.com:escossio/attention-router.git
+git clone https://github.com/escossio/attention-router.git
 cd attention-router
 cp .env.example .env
 docker compose -p attention-router-demo up --build --wait db api
-curl --fail http://127.0.0.1:8080/health/ready
+curl --fail "http://127.0.0.1:${PUBLIC_HTTP_PORT:-8080}/health/ready"
 ```
 
-During private staging, cloning requires repository access. The API starts only after database migrations and policy seeding succeed. PostgreSQL has no host port exposed; the API binds to loopback. Set `PUBLIC_HTTP_PORT` in `.env` if port 8080 is occupied.
+The API starts only after database migrations and policy seeding succeed. PostgreSQL has no host port exposed; the API binds to loopback.
 
 This starts a core API and database, **not a live messaging agent**. To stop the demo while retaining its local database:
 
@@ -105,7 +108,7 @@ The PostgreSQL harness creates and removes a disposable container/database. Neve
 
 ## Project status and future evolution
 
-**Current:** prerelease private staging of a sanitized product baseline. The CI badge is authoritative for the branch's current job results; a prepared or skipped security workflow is not a passed scan. Quick Start proves only core health, not production readiness.
+**Current:** public prerelease of a sanitized product baseline. The CI badge is authoritative for the branch's current job results; a prepared or skipped security workflow is not a passed scan. Quick Start proves only core health, not production readiness.
 
 **Future, not implemented capabilities:** Conversation Session State for temporary activities; the modular workflow and enterprise concepts in [Andy Enterprise](docs/andy-enterprise-evolution.md); broader public demos and deployment guides. Game state must not automatically become long-term memory.
 
