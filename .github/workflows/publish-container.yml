@@ -1,0 +1,95 @@
+name: Publish container
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish
+        required: true
+        default: v0.1.0
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/escossio/attention-router
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      EXPECTED_SHA: 7e6faa89b21e1c0f21d80c34fb3e1cf02f26c805
+    steps:
+      - name: Checkout immutable release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.release_tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RELEASE_TAG" = "v0.1.0"
+          actual_sha=$(git rev-parse HEAD)
+          test "$actual_sha" = "$EXPECTED_SHA"
+          echo "ATTENTION_ROUTER_BUILD_SHA=$actual_sha" >> "$GITHUB_ENV"
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract OCI metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=v0.1.0
+            type=raw,value=sha-7e6faa89b21e
+      - name: Build and push amd64 image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.source=https://github.com/escossio/attention-router
+            org.opencontainers.image.revision=${{ env.ATTENTION_ROUTER_BUILD_SHA }}
+            org.opencontainers.image.version=v0.1.0
+            org.opencontainers.image.title=Attention Router
+            org.opencontainers.image.description=Policy-controlled conversational routing for contextual personal agents
+            org.opencontainers.image.licenses=Apache-2.0
+          build-args: |
+            ATTENTION_ROUTER_BUILD_SHA=${{ env.ATTENTION_ROUTER_BUILD_SHA }}
+            ATTENTION_ROUTER_IMAGE_VERSION=v0.1.0
+      - name: Generate SBOM and attach it
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: attention-router-v0.1.0.spdx.json
+          artifact-name: attention-router-v0.1.0.spdx.json
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Attest SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: attention-router-v0.1.0.spdx.json

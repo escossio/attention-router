@@ -109,6 +109,14 @@ The PostgreSQL harness creates and removes a disposable container/database. Neve
 
 ## Project status and future evolution
 
+## Distribution / Supply chain
+
+The public prerelease is available from the [v0.1.0 release](https://github.com/escossio/attention-router/releases/tag/v0.1.0)
+and [GHCR](https://ghcr.io/escossio/attention-router). See the
+[public supply-chain guide](docs/supply-chain.md) for digest, SBOM, and
+artifact/build provenance verification. The [offline architecture demo](docs/demo.md)
+is provider-free and synthetic-only.
+
 **Current:** public prerelease of a sanitized product baseline. The CI badge is authoritative for the branch's current job results; a prepared or skipped security workflow is not a passed scan. Quick Start proves only core health, not production readiness.
 
 **Future, not implemented capabilities:** Conversation Session State for temporary activities; the modular workflow and enterprise concepts in [Andy Enterprise](docs/andy-enterprise-evolution.md); broader public demos and deployment guides. Game state must not automatically become long-term memory.
