@@ -8,14 +8,19 @@ def test_capability_lab_assets_are_self_contained():
     html = (STATIC / "control-plane.html").read_text(encoding="utf-8")
     css = (STATIC / "control-plane.css").read_text(encoding="utf-8")
     javascript = (STATIC / "control-plane.js").read_text(encoding="utf-8")
+    scenarios = (STATIC / "capability-lab-scenarios.json").read_text(encoding="utf-8")
 
     assert '/static/control-plane.css' in html
     assert '/static/control-plane.js' in html
+    assert "/static/capability-lab-scenarios.json" in javascript
     assert "Andy Capability Lab" in html
     assert "Desenvolvimento e validação" in html
     assert "não define a UX comercial da Andy" in html
+    assert 'data-view="scenarios"' in html
+    assert 'id="scenario-list"' in html
     assert css.strip()
     assert javascript.strip()
+    assert scenarios.strip()
 
 
 def test_control_plane_does_not_persist_admin_credential_in_browser_storage():
@@ -54,3 +59,5 @@ def test_capability_lab_is_not_presented_as_customer_settings_ui():
     assert "bancada para provar features" in html
     assert "Laboratório não é autoridade" in html
     assert "detalhes de engenharia" in html
+    assert "Feature acceptance" in html
+    assert "SEM EFEITO DE PRODUÇÃO" in html
