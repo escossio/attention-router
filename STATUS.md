@@ -24,3 +24,12 @@ assets are available in the repository.
 
 No live runtime, real provider credential, real WhatsApp account, real
 conversation, or real database was used or mutated.
+
+## Portfolio demo
+
+The public portfolio demo is available as a reproducible, silent 72-second
+H.264 video at `docs/assets/demo/attention-router-demo.mp4`, with a 1920x1080
+poster beside it. It is synthetic-only and offline: no real names, phone
+numbers, messages, hostnames, private paths, secrets, or provider calls are
+used. The renderer is `scripts/render_public_demo.py` and the README links to
+the assets and `docs/demo.md`.
