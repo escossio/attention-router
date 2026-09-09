@@ -23,18 +23,22 @@
         <button class="nav-item active" data-view="overview" type="button">
           <span class="nav-index">01</span><span>Visão geral</span>
         </button>
+        <button class="nav-item" data-view="scenarios" type="button">
+          <span class="nav-index">02</span><span>Cenários</span>
+          <span class="nav-badge" id="nav-scenario-count">—</span>
+        </button>
         <button class="nav-item" data-view="approvals" type="button">
-          <span class="nav-index">02</span><span>Autorizações</span>
+          <span class="nav-index">03</span><span>Autorizações</span>
           <span class="nav-badge" id="nav-approval-count">—</span>
         </button>
         <button class="nav-item" data-view="capabilities" type="button">
-          <span class="nav-index">03</span><span>Capacidades</span>
+          <span class="nav-index">04</span><span>Capacidades</span>
         </button>
         <button class="nav-item" data-view="rules" type="button">
-          <span class="nav-index">04</span><span>Regras</span>
+          <span class="nav-index">05</span><span>Regras</span>
         </button>
         <button class="nav-item" data-view="grants" type="button">
-          <span class="nav-index">05</span><span>Permissões</span>
+          <span class="nav-index">06</span><span>Permissões</span>
         </button>
       </nav>
 
@@ -86,6 +90,11 @@
 
           <div class="metric-grid" aria-label="Resumo do laboratório">
             <article class="metric">
+              <p>Cenários sintéticos</p>
+              <strong id="metric-scenarios">0</strong>
+              <small>fixtures de aceitação</small>
+            </article>
+            <article class="metric">
               <p>Revisões pendentes</p>
               <strong id="metric-approvals">—</strong>
               <small>baseline humano existente</small>
@@ -118,7 +127,7 @@
               </div>
               <p>
                 Informações e ações são identificadas por capability keys estáveis, como
-                <code>personal.identity.cpf</code>. O laboratório deve mostrar como uma solicitação
+                <code>personal.identity.cpf</code>. O laboratório mostra como uma solicitação
                 atravessa regra, autorização e eventual grant sem amarrar isso à interface final.
               </p>
               <div class="flow">
@@ -147,6 +156,24 @@
                 <li>a UX final poderá ser muito mais simples que este cockpit.</li>
               </ul>
             </article>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="scenarios">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Feature acceptance</p>
+              <h2>Cenários sintéticos</h2>
+            </div>
+            <span class="tag safe">SEM EFEITO DE PRODUÇÃO</span>
+          </div>
+          <p class="section-copy">
+            Estes cenários descrevem comportamento esperado. Eles podem usar complexidade técnica
+            porque são ferramentas de engenharia; nenhum deles contém dado pessoal real ou concede
+            autoridade para executar efeitos externos.
+          </p>
+          <div id="scenario-list" class="record-list">
+            <div class="empty-state">Carregando cenários sintéticos…</div>
           </div>
         </section>
 
