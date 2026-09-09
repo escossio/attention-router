@@ -50,6 +50,9 @@ flowchart LR
 
 See [architecture and trust boundaries](docs/architecture/overview.md).
 
+Architecture governance: [decision records](docs/adr/README.md), [threat
+model](docs/security/threat-model.md), and [technical roadmap](ROADMAP.md).
+
 ## Safety and human control
 
 The model does not grant itself permission to act. Owner pause, policies and approval gates remain outside model authority. Proposed text, synthesized audio and confirmed delivery are different states. Ambiguous delivery is not proof of a conversation turn and must not be blindly replayed.
@@ -115,6 +118,8 @@ bash scripts/postgres_test_harness.sh
 The PostgreSQL harness creates and removes a disposable container/database. Never point integration tests at a database containing valuable data. [Contributing](CONTRIBUTING.md) describes the CI jobs and remaining gates.
 
 ## Project status and future evolution
+
+Project website: [GitHub Pages](https://escossio.github.io/attention-router/).
 
 ## Distribution / Supply chain
 
