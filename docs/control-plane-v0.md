@@ -72,13 +72,25 @@ A DENY or ALLOW scenario cannot pretend a human approval occurred. A pending or 
 
 ## Implemented V0 scenarios
 
-`tests/fixtures/capability_lab_scenarios.json` currently contains synthetic acceptance cases for:
+`attention_router/web/static/capability-lab-scenarios.json` is the canonical synthetic scenario fixture and is loaded directly by the lab. It currently contains acceptance cases for:
 
 1. restricted identity disclosure requiring approval and a one-time grant;
 2. relationship-status disclosure resolved directly to DENY;
 3. current-location disclosure requiring approval and a time-bounded grant.
 
 These fixtures describe expected feature behavior only. They do not mutate runtime policy and they are not evidence that the full feature path is implemented.
+
+## Expected versus observed comparison
+
+`CapabilityLabObservation` and `compare_scenario()` provide an inert comparison layer for lab evidence.
+
+A comparison can resolve to:
+
+- `PASS` — observed resolution and grant match the scenario expectation;
+- `FAIL` — a mismatch, observation error or production effect was observed;
+- `INCOMPLETE` — the scenario does not yet have enough observed evidence to be evaluated.
+
+Any `production_effect_observed = true` forces the comparison to FAIL. The comparator never mutates runtime state and never grants authority.
 
 ## Current web lab
 
@@ -88,7 +100,7 @@ The engineering surface currently lives at:
 
 The legacy path name is acceptable for V0 because it consumes Control Plane concepts; the user-facing identity is **Andy Capability Lab**.
 
-It currently reads only protected, existing runtime surfaces:
+The lab loads its synthetic acceptance scenarios without requiring a runtime connection. Runtime observation is optional and currently uses only protected, existing surfaces:
 
 - `/api/v1/admin/platform/operations/snapshot`
 - `/api/v1/admin/policies`
@@ -112,7 +124,7 @@ The lab should progressively answer:
 - Did tenant and represented-subject isolation remain intact?
 - Can the feature be validated without a real WhatsApp conversation or production data?
 
-Future lab tooling may include replay, state-machine visualization, rule explanation, synthetic actor selection, time travel for expiry tests, audit correlation and expected-versus-observed comparison.
+Future lab tooling may include replay, state-machine visualization, rule explanation, synthetic actor selection, time travel for expiry tests and audit correlation.
 
 ## Existing human-authorization boundary
 
@@ -148,6 +160,6 @@ V0 does not:
 
 ## Next implementation boundary
 
-The next safe step is **not persistence**. First, connect the synthetic scenario model to explainability: represent expected versus observed capability resolution without granting production authority or producing an external effect.
+The next safe step is **read-only evidence binding**: connect a synthetic scenario to observable runtime evidence and feed that evidence into `compare_scenario()` without creating a new authorization path, mutating policy or producing an external effect.
 
 After that, reconcile `AuthorizationRequest` with the existing human-authorization model. Only then should we decide what new persistence, if any, is actually required.
