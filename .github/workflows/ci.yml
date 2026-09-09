@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list && sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: python -m pip install -e '.[dev]'
       - run: python -m ruff check .
       - run: python -m compileall -q attention_router tests
@@ -74,7 +74,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list && sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: python -m pip install -e '.[dev]'
       - name: Generate ephemeral PostgreSQL job auth values
         shell: python
