@@ -14,6 +14,16 @@ const {
 const { compareOwnerIdentity, resolveWhatsAppIdentity } = require('./identity');
 const { identityFromAliases, resolveConversationIdentity } = require('./conversation');
 
+const TRUSTED_WHATSAPP_ORIGIN = 'https://web.whatsapp.com';
+
+function isTrustedWhatsAppPageUrl(value) {
+  try {
+    return new URL(value).origin === TRUSTED_WHATSAPP_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
 function safeState(value) {
   if (value === undefined || value === null) {
     return 'UNKNOWN';
@@ -494,7 +504,7 @@ async function inspectWhatsAppPageState(page) {
 }
 
 async function selectCanonicalConnectedWhatsAppPage(pages) {
-  const whatsappPages = pages.filter((page) => page.url().includes('web.whatsapp.com'));
+  const whatsappPages = pages.filter((page) => isTrustedWhatsAppPageUrl(page.url()));
   const inspections = await Promise.all(whatsappPages.map(inspectWhatsAppPageState));
   const connectedPageCount = inspections.filter((s) => s.state === 'CONNECTED' && !s.error).length;
   const counts = { whatsappPageCount: whatsappPages.length, connectedPageCount };
@@ -605,7 +615,7 @@ async function recoverConnectedPage(client, status, logger = console) {
     if (browser?.pages) {
       const pages = await browser.pages().catch(() => []);
       for (const page of pages) {
-        if (!page.url().includes('web.whatsapp.com')) continue;
+        if (!isTrustedWhatsAppPageUrl(page.url())) continue;
         const connected = await page.evaluate(() => ({
           connected: window.AuthStore?.AppState?.state === 'CONNECTED',
           handler: typeof window.onAppStateHasSyncedEvent === 'function',
@@ -1217,6 +1227,7 @@ module.exports = {
   OWNER_AUTHORITY_REVERIFY_INTERVAL_MS,
   detachTransport,
   prepareAuthenticatedPage,
+  isTrustedWhatsAppPageUrl,
   inspectWhatsAppPageState,
   selectCanonicalConnectedWhatsAppPage,
   armExistingPageAttach,

@@ -2,7 +2,7 @@
 
 ## Supported code
 
-There is no stable public release or security-support SLA yet. During private staging, security review targets `public-release-candidate-20260908`. Historical branches are not supported deployment releases. The supported release/branch policy must be reviewed before public launch.
+There is no stable public release or security-support SLA yet. The supported public branch is `main`; historical and staging branches are not supported deployment releases. This repository is a prerelease and security findings should be reported privately before any public disclosure.
 
 ## Private reporting and coordinated disclosure
 
@@ -14,7 +14,7 @@ Include affected revision, impact and a minimal synthetic reproduction. Coordina
 
 Never include API keys, tokens, session cookies, phone numbers, private conversations, media, database dumps or unredacted logs in issues, commits or CI output. Revoke/rotate exposed credentials first; deleting text from a branch does not invalidate a credential or erase cached copies.
 
-Secret scanning is a release gate, not proof that every sensitive datum has been found. Narrowly documented generated-test-ID exceptions must not become broad secret allowlists. CodeQL that cannot run under the current private-repository entitlement is reported as blocked, not passed.
+Secret scanning is a release gate, not proof that every sensitive datum has been found. Narrowly documented generated-test-ID exceptions must not become broad secret allowlists. CodeQL is an active required security check; a skipped or unavailable analysis is blocked, not passed.
 
 ## Security boundaries
 

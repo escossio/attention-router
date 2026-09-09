@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible problem in the public baseline.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not publish tokens, credentials, phone numbers, personal messages, customer data, or PII.
+        Report suspected vulnerabilities privately through [SECURITY.md](../../SECURITY.md), not a public issue.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide a minimal synthetic reproduction and relevant revision.
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Checks
+      description: List the tests or commands run and their results.
+    validations:
+      required: true

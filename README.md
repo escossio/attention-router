@@ -1,6 +1,7 @@
 # Attention Router / Andy
 
 [![Public CI](https://github.com/escossio/attention-router/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/escossio/attention-router/actions/workflows/ci.yml?query=branch%3Amain)
+[![CodeQL](https://github.com/escossio/attention-router/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/escossio/attention-router/security/code-scanning)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 **Attention Router is a contextual agent runtime for controlled, policy-aware autonomous interactions.** Andy is its principal conversational agent: context-aware assistance with explicit limits on what an agent may do.
