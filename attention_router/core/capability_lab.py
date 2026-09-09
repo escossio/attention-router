@@ -17,6 +17,12 @@ class SimulatedHumanDecision(StrEnum):
     DENY = "DENY"
 
 
+class ComparisonStatus(StrEnum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    INCOMPLETE = "INCOMPLETE"
+
+
 class CapabilityLabScenario(BaseModel):
     """Synthetic acceptance scenario for feature validation in the Capability Lab.
 
@@ -55,3 +61,79 @@ class CapabilityLabScenario(BaseModel):
             if self.expected_grant_mode != GrantMode.NONE:
                 raise ValueError("only simulated approval can expect a permission grant")
         return self
+
+
+class CapabilityLabObservation(BaseModel):
+    """Observed result supplied to the lab comparator; never an execution command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["capability-lab.v0"] = CAPABILITY_LAB_SCHEMA_VERSION
+    scenario_id: str = Field(pattern=r"^[a-z][a-z0-9_.-]{2,119}$")
+    observed_resolution: DecisionMode | None = None
+    observed_grant_mode: GrantMode = GrantMode.NONE
+    matched_rule_id: str | None = Field(default=None, max_length=64)
+    evidence_refs: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    production_effect_observed: bool = False
+
+    @model_validator(mode="after")
+    def validate_observation(self) -> "CapabilityLabObservation":
+        if self.observed_resolution is None and self.observed_grant_mode != GrantMode.NONE:
+            raise ValueError("a grant observation requires an observed resolution")
+        return self
+
+
+class CapabilityLabComparison(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_id: str
+    status: ComparisonStatus
+    mismatches: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+def compare_scenario(
+    scenario: CapabilityLabScenario,
+    observation: CapabilityLabObservation,
+) -> CapabilityLabComparison:
+    """Compare expected and observed behavior without mutating runtime state."""
+
+    mismatches: list[str] = []
+
+    if scenario.scenario_id != observation.scenario_id:
+        mismatches.append("SCENARIO_ID_MISMATCH")
+
+    if observation.production_effect_observed:
+        mismatches.append("PRODUCTION_EFFECT_OBSERVED")
+
+    if observation.errors:
+        mismatches.extend(f"OBSERVATION_ERROR:{error}" for error in observation.errors)
+
+    if observation.observed_resolution is None:
+        status = ComparisonStatus.FAIL if mismatches else ComparisonStatus.INCOMPLETE
+        return CapabilityLabComparison(
+            scenario_id=scenario.scenario_id,
+            status=status,
+            mismatches=mismatches,
+            evidence_refs=observation.evidence_refs,
+        )
+
+    if observation.observed_resolution != scenario.expected_resolution:
+        mismatches.append(
+            "RESOLUTION_MISMATCH:"
+            f"expected={scenario.expected_resolution};observed={observation.observed_resolution}"
+        )
+
+    if observation.observed_grant_mode != scenario.expected_grant_mode:
+        mismatches.append(
+            "GRANT_MODE_MISMATCH:"
+            f"expected={scenario.expected_grant_mode};observed={observation.observed_grant_mode}"
+        )
+
+    return CapabilityLabComparison(
+        scenario_id=scenario.scenario_id,
+        status=ComparisonStatus.FAIL if mismatches else ComparisonStatus.PASS,
+        mismatches=mismatches,
+        evidence_refs=observation.evidence_refs,
+    )
