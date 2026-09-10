@@ -11,6 +11,7 @@
     approvals: [],
     intents: [],
     scenarios: [],
+    probeReports: {},
   };
 
   const titles = {
@@ -81,7 +82,27 @@
     renderMetrics();
   }
 
+  async function loadProbeReports() {
+    const entries = await Promise.all(
+      state.scenarios.map(async (scenario) => {
+        const base = "/api/v1/admin/platform/operations/capability-lab/probe/";
+        const path = `${base}${encodeURIComponent(scenario.scenario_id)}`;
+        try {
+          return [scenario.scenario_id, await fetchJson(path)];
+        } catch (error) {
+          return [
+            scenario.scenario_id,
+            { error: error.message || "T0 probe unavailable" },
+          ];
+        }
+      }),
+    );
+    state.probeReports = Object.fromEntries(entries);
+  }
+
   async function loadRuntime() {
+    if (!state.scenarios.length) await loadScenarios();
+
     const calls = [
       fetchJson("/api/v1/admin/platform/operations/snapshot"),
       fetchJson("/api/v1/admin/platform/operations/capability-lab/scenario-engine"),
@@ -106,6 +127,7 @@
     state.capabilities = Array.isArray(capabilities) ? capabilities : [];
     state.approvals = Array.isArray(approvalResponse?.items) ? approvalResponse.items : [];
     state.intents = Array.isArray(intentResponse?.items) ? intentResponse.items : [];
+    await loadProbeReports();
     state.connected = true;
 
     renderAll();
@@ -223,6 +245,31 @@
     return scenarios.find((item) => item.scenario_key === scenarioKey) || null;
   }
 
+  function probeView(scenarioId) {
+    if (!state.connected) {
+      return {
+        label: "NOT PROBED",
+        detail: "conecte o runtime para executar o probe T0 read-only",
+      };
+    }
+
+    const report = state.probeReports[scenarioId];
+    if (!report) return { label: "NOT PROBED", detail: "probe sem resultado" };
+    if (report.error) return { label: "PROBE ERROR", detail: report.error };
+
+    const probe = report.probe || {};
+    const comparison = report.comparison || {};
+    const status = firstDefined(comparison.status, "INCOMPLETE");
+    const observed = firstDefined(probe.authority_result, "UNKNOWN");
+    const reason = firstDefined(probe.reason_code, "reason unavailable");
+    const resolution = firstDefined(probe.resolution_status, "UNKNOWN");
+    const durable = probe.durable_evidence === true ? "YES" : "NO";
+    return {
+      label: `T0 ${status}`,
+      detail: `observado: ${observed} / ${reason} · runtime: ${resolution} · evidência durável: ${durable} · ${report.certification || "EPHEMERAL_ONLY"}`,
+    };
+  }
+
   function renderScenarios() {
     const container = $("#scenario-list");
     if (!container) return;
@@ -238,6 +285,7 @@
         const decision = firstDefined(item.simulated_human_decision, "NONE");
         const grant = firstDefined(item.expected_grant_mode, "NONE");
         const registry = registryState(item.capability_key);
+        const probe = probeView(item.scenario_id);
         const binding = item.engine_scenario_key || null;
         const engine = binding ? engineScenario(binding) : null;
         let bindingState = "UNBOUND";
@@ -261,10 +309,14 @@
                 ${escapeHtml(registry.label)} · ${escapeHtml(registry.detail)}
               </small>
               <small>
-                engine binding: ${escapeHtml(binding || "none")} · sem binding/evidência, o resultado é INCOMPLETE
+                probe T0: ${escapeHtml(probe.detail)}
+              </small>
+              <small>
+                engine binding: ${escapeHtml(binding || "none")} · ${escapeHtml(bindingState)} ·
+                sem binding/evidência durável, o resultado não é certificação
               </small>
             </div>
-            <div class="record-state">${escapeHtml(bindingState)}</div>
+            <div class="record-state">${escapeHtml(probe.label)}</div>
           </article>
         `;
       })
@@ -441,7 +493,9 @@
     } catch (error) {
       state.connected = false;
       state.scenarioEngine = null;
+      state.probeReports = {};
       renderConnection();
+      renderScenarios();
       renderScenarioEngine();
       $("#runtime-state").textContent = "ERRO";
       $("#runtime-state").className = "state-pill blocked";
