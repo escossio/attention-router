@@ -58,7 +58,6 @@
       headers,
       credentials: "same-origin",
     });
-
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`;
       try {
@@ -69,7 +68,6 @@
       }
       throw new Error(`${path}: ${detail}`);
     }
-
     return response.json();
   }
 
@@ -103,15 +101,6 @@
   async function loadRuntime() {
     if (!state.scenarios.length) await loadScenarios();
 
-    const calls = [
-      fetchJson("/api/v1/admin/platform/operations/snapshot"),
-      fetchJson("/api/v1/admin/platform/operations/capability-lab/scenario-engine"),
-      fetchJson("/api/v1/admin/policies"),
-      fetchJson("/api/v1/admin/platform/matrix"),
-      fetchJson("/api/v1/private/response-reviews?review_status=PENDING"),
-      fetchJson("/api/v1/private/execution-intents?intent_status=PENDING"),
-    ];
-
     const [
       snapshot,
       scenarioEngine,
@@ -119,7 +108,14 @@
       capabilities,
       approvalResponse,
       intentResponse,
-    ] = await Promise.all(calls);
+    ] = await Promise.all([
+      fetchJson("/api/v1/admin/platform/operations/snapshot"),
+      fetchJson("/api/v1/admin/platform/operations/capability-lab/scenario-engine"),
+      fetchJson("/api/v1/admin/policies"),
+      fetchJson("/api/v1/admin/platform/matrix"),
+      fetchJson("/api/v1/private/response-reviews?review_status=PENDING"),
+      fetchJson("/api/v1/private/execution-intents?intent_status=PENDING"),
+    ]);
 
     state.snapshot = snapshot;
     state.scenarioEngine = scenarioEngine;
@@ -129,7 +125,6 @@
     state.intents = Array.isArray(intentResponse?.items) ? intentResponse.items : [];
     await loadProbeReports();
     state.connected = true;
-
     renderAll();
   }
 
@@ -149,11 +144,11 @@
       element.textContent = "Conectado. A credencial existe somente na memória desta página.";
       element.classList.add("connected");
       $("#connect-button").textContent = "Atualizar";
-    } else {
-      element.textContent = "Somente memória da página; nada vai para localStorage.";
-      element.classList.remove("connected");
-      $("#connect-button").textContent = "Conectar";
+      return;
     }
+    element.textContent = "Somente memória da página; nada vai para localStorage.";
+    element.classList.remove("connected");
+    $("#connect-button").textContent = "Conectar";
   }
 
   function renderMetrics() {
@@ -177,7 +172,6 @@
 
     const readiness = Array.isArray(state.snapshot?.readiness) ? state.snapshot.readiness : [];
     let value = "UNKNOWN";
-
     if (state.snapshot?.stale) {
       value = "BLOCKED";
     } else if (readiness.length && readiness.every((item) => item.state === "READY")) {
@@ -192,7 +186,6 @@
 
     pill.textContent = value;
     pill.className = `state-pill ${value.toLowerCase()}`;
-
     const runtimeRevision =
       state.snapshot?.runtime_provenance?.runtime_revision ||
       state.snapshot?.runtime_provenance?.source_revision ||
@@ -220,22 +213,17 @@
     if (!state.connected) {
       return { label: "NOT OBSERVED", detail: "conecte o runtime para consultar o registry" };
     }
-
     const capability = canonicalCapability(capabilityKey);
     if (!capability) {
       return { label: "UNREGISTERED", detail: "não existe no registry canônico observado" };
     }
-
     const status = firstDefined(capability.state, capability.status, "REGISTERED");
     const provider = firstDefined(
       capability.bound_provider,
       capability.required_provider,
       "internal / none",
     );
-    return {
-      label: status,
-      detail: `provider: ${provider}`,
-    };
+    return { label: status, detail: `provider: ${provider}` };
   }
 
   function engineScenario(scenarioKey) {
@@ -252,7 +240,6 @@
         detail: "conecte o runtime para executar o probe T0 read-only",
       };
     }
-
     const report = state.probeReports[scenarioId];
     if (!report) return { label: "NOT PROBED", detail: "probe sem resultado" };
     if (report.error) return { label: "PROBE ERROR", detail: report.error };
@@ -273,10 +260,8 @@
   function renderScenarios() {
     const container = $("#scenario-list");
     if (!container) return;
-
     if (!state.scenarios.length) {
-      container.innerHTML =
-        '<div class="empty-state">Nenhum cenário sintético carregado.</div>';
+      container.innerHTML = '<div class="empty-state">Nenhum cenário sintético carregado.</div>';
       return;
     }
 
@@ -308,9 +293,7 @@
                 capability: ${escapeHtml(item.capability_key)} · registry:
                 ${escapeHtml(registry.label)} · ${escapeHtml(registry.detail)}
               </small>
-              <small>
-                probe T0: ${escapeHtml(probe.detail)}
-              </small>
+              <small>probe T0: ${escapeHtml(probe.detail)}</small>
               <small>
                 engine binding: ${escapeHtml(binding || "none")} · ${escapeHtml(bindingState)} ·
                 sem binding/evidência durável, o resultado não é certificação
@@ -318,6 +301,44 @@
             </div>
             <div class="record-state">${escapeHtml(probe.label)}</div>
           </article>
+        `;
+      })
+      .join("");
+  }
+
+  function evidenceLabel(reference) {
+    const type = firstDefined(reference.evidence_type, "EVIDENCE");
+    const id = firstDefined(reference.id, "unknown");
+    const source = firstDefined(reference.source_sha, "unknown");
+    return `${type}:${id} @ ${source}`;
+  }
+
+  function semanticAssertionHtml(run) {
+    const assertions = Array.isArray(run.semantic_assertions) ? run.semantic_assertions : [];
+    if (!assertions.length) {
+      return '<small>assertions semânticos: nenhum observado</small>';
+    }
+
+    return assertions
+      .map((assertion) => {
+        const refs = Array.isArray(assertion.evidence_refs) ? assertion.evidence_refs : [];
+        const evidence = refs.length
+          ? refs.map((reference) => evidenceLabel(reference)).join(" · ")
+          : "nenhuma evidência resolvida";
+        const unresolved = firstDefined(assertion.unresolved_evidence_ref_count, 0);
+        return `
+          <div class="semantic-proof">
+            <small>
+              assertion: ${escapeHtml(assertion.assertion_id)} · resultado: ${escapeHtml(assertion.result)} ·
+              blocking: ${assertion.blocking === true ? "YES" : "NO"}
+            </small>
+            <small>expected: ${escapeHtml(assertion.expected_property || "—")}</small>
+            <small>observed: ${escapeHtml(assertion.observed_summary || "—")}</small>
+            <small>evaluator: ${escapeHtml(assertion.evaluator || "—")}</small>
+            <small>
+              evidence: ${escapeHtml(evidence)} · unresolved: ${escapeHtml(unresolved)}
+            </small>
+          </div>
         `;
       })
       .join("");
@@ -360,6 +381,11 @@
       .map((run) => {
         const evidenceCount = Array.isArray(run.evidence_refs) ? run.evidence_refs.length : 0;
         const stepTotal = firstDefined(run.step_summary?.total, 0);
+        const assertionTotal = firstDefined(run.assertion_summary?.total, 0);
+        const resultSummary = run.assertion_summary?.results || {};
+        const assertionResults = Object.entries(resultSummary)
+          .map(([result, count]) => `${result}:${count}`)
+          .join(" · ") || "none";
         return `
           <article class="record">
             <div class="record-main">
@@ -367,8 +393,10 @@
               <h3>${escapeHtml(run.scenario_key || "scenario não resolvido")}</h3>
               <small>
                 versão: ${escapeHtml(run.scenario_version)} · steps: ${escapeHtml(stepTotal)} ·
+                assertions: ${escapeHtml(assertionTotal)} (${escapeHtml(assertionResults)}) ·
                 evidence refs: ${escapeHtml(evidenceCount)} · cleanup: ${escapeHtml(run.cleanup_state)}
               </small>
+              ${semanticAssertionHtml(run)}
             </div>
             <div class="record-state">${escapeHtml(run.status)}</div>
           </article>
@@ -390,13 +418,11 @@
   function renderApprovals() {
     const container = $("#approval-list");
     if (!state.connected) {
-      container.innerHTML =
-        '<div class="empty-state">Conecte-se para carregar as revisões pendentes.</div>';
+      container.innerHTML = '<div class="empty-state">Conecte-se para carregar as revisões pendentes.</div>';
       return;
     }
     if (!state.approvals.length) {
-      container.innerHTML =
-        '<div class="empty-state">Nenhuma revisão humana pendente no fluxo atual.</div>';
+      container.innerHTML = '<div class="empty-state">Nenhuma revisão humana pendente no fluxo atual.</div>';
       return;
     }
 
@@ -427,13 +453,11 @@
   function renderCapabilities() {
     const container = $("#capability-list");
     if (!state.connected) {
-      container.innerHTML =
-        '<div class="empty-state">Conecte-se para carregar o registry de capabilities.</div>';
+      container.innerHTML = '<div class="empty-state">Conecte-se para carregar o registry de capabilities.</div>';
       return;
     }
     if (!state.capabilities.length) {
-      container.innerHTML =
-        '<div class="empty-state">Nenhuma capability canônica foi observada.</div>';
+      container.innerHTML = '<div class="empty-state">Nenhuma capability canônica foi observada.</div>';
       return;
     }
 
@@ -464,7 +488,6 @@
 
   function activateView(name) {
     if (!titles[name]) return;
-
     $$(".nav-item").forEach((button) => {
       button.classList.toggle("active", button.dataset.view === name);
     });
@@ -483,7 +506,6 @@
     const input = $("#admin-token");
     state.token = input.value.trim();
     input.value = "";
-
     $("#connect-button").disabled = true;
     $("#connect-button").textContent = "Carregando…";
 
