@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -12,10 +14,20 @@ from attention_router.core.capabilities import (
     CapabilityResolutionStatus,
 )
 from attention_router.core.capability_lab import (
+    CapabilityLabComparison,
     CapabilityLabObservation,
     CapabilityLabScenario,
+    compare_scenario,
 )
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
+
+
+SCENARIO_FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "web"
+    / "static"
+    / "capability-lab-scenarios.json"
+)
 
 
 class CapabilityLabProbeResult(BaseModel):
@@ -33,6 +45,39 @@ class CapabilityLabProbeResult(BaseModel):
     execution_allowed: bool
     durable_evidence: Literal[False] = False
     observation: CapabilityLabObservation
+
+
+class CapabilityLabProbeReport(BaseModel):
+    """One read-only feature probe plus fail-closed acceptance comparison."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    certification: Literal["EPHEMERAL_ONLY"] = "EPHEMERAL_ONLY"
+    probe: CapabilityLabProbeResult
+    comparison: CapabilityLabComparison
+
+
+def load_capability_lab_scenarios() -> dict[str, CapabilityLabScenario]:
+    """Load the repository-owned synthetic hypotheses used by the Lab.
+
+    The caller can select only a scenario id from this fixed fixture. Capability,
+    requester identity and expected authority cannot be supplied by an HTTP client.
+    """
+
+    payload = json.loads(SCENARIO_FIXTURE.read_text(encoding="utf-8"))
+    scenarios = [CapabilityLabScenario.model_validate(item) for item in payload]
+    by_id = {scenario.scenario_id: scenario for scenario in scenarios}
+    if len(by_id) != len(scenarios):
+        raise ValueError("CAPABILITY_LAB_SCENARIO_IDS_MUST_BE_UNIQUE")
+    return by_id
+
+
+def capability_lab_scenario(scenario_id: str) -> CapabilityLabScenario:
+    scenarios = load_capability_lab_scenarios()
+    scenario = scenarios.get(scenario_id)
+    if scenario is None:
+        raise KeyError("CAPABILITY_LAB_SCENARIO_UNKNOWN")
+    return scenario
 
 
 def probe_capability_t0(
@@ -80,4 +125,25 @@ def probe_capability_t0(
         approval_required=resolution.approval_required,
         execution_allowed=resolution.execution_allowed,
         observation=observation,
+    )
+
+
+def probe_named_scenario_t0(
+    session: Session,
+    scenario_id: str,
+    *,
+    tenant_id: str = DEFAULT_TENANT_ID,
+) -> CapabilityLabProbeReport:
+    """Probe only a repository-owned synthetic scenario, never client-defined authority."""
+
+    scenario = capability_lab_scenario(scenario_id)
+    probe = probe_capability_t0(
+        session,
+        scenario,
+        tenant_id=tenant_id,
+        policy_allows=True,
+    )
+    return CapabilityLabProbeReport(
+        probe=probe,
+        comparison=compare_scenario(scenario, probe.observation),
     )
