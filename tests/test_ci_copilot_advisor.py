@@ -188,19 +188,20 @@ def test_existing_advisor_comment_is_patched_not_duplicated(monkeypatch):
 
 def test_workflow_scopes_copilot_permission_to_failure_advisor_job():
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    advisor_job = workflow.split("\n  copilot-advisor:\n", 1)[1].split("\n  copilot-patch-trial:\n", 1)[0]
 
-    assert "copilot-advisor:" in workflow
-    assert "needs: triage" in workflow
-    assert "github.event.workflow_run.conclusion == 'failure'" in workflow
-    assert "copilot-requests: write" in workflow
-    assert "contents: read" in workflow
-    assert "pull-requests: write" in workflow
-    assert "contents: write" not in workflow
-    assert "node-version: '22'" in workflow
-    assert "npm install -g @github/copilot@1.0.83" in workflow
-    assert "python -m scripts.ci_copilot_advisor_entrypoint" in workflow
-    assert "python -m scripts.ci_copilot_advisor\n" not in workflow
-    assert "python scripts/ci_copilot_advisor.py" not in workflow
+    assert "needs: triage" in advisor_job
+    assert "github.event.workflow_run.conclusion == 'failure'" in advisor_job
+    assert "copilot-requests: write" in advisor_job
+    assert "contents: read" in advisor_job
+    assert "pull-requests: write" in advisor_job
+    assert "contents: write" not in advisor_job
+    assert "node-version: '22'" in advisor_job
+    assert "npm install -g @github/copilot@1.0.83" in advisor_job
+    assert "python -m scripts.ci_copilot_advisor_entrypoint" in advisor_job
+    assert "python -m scripts.ci_copilot_advisor\n" not in advisor_job
+    assert "python scripts/ci_copilot_advisor.py" not in advisor_job
     assert "--yolo" not in workflow
     assert "allow-all" not in workflow
+    assert workflow.count("contents: write") == 1
     assert "secrets." not in workflow
