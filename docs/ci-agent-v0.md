@@ -4,7 +4,7 @@
 
 CI Agent V0 turns GitHub Actions completion into an event-driven, fail-closed triage loop for pull requests. It removes the need for a human to repeatedly tell an external assistant that a workflow finished or failed.
 
-The V0 is intentionally observation-only. It proves event delivery, exact-head correlation, deterministic classification and a single sticky PR status surface before any code mutation authority is introduced.
+The V0 is intentionally observation-only with respect to repository contents. It proves event delivery, exact-head correlation, deterministic classification and a single sticky PR status surface before any code mutation authority is introduced.
 
 ## Event path
 
@@ -18,12 +18,19 @@ The workflow has only:
 
 - `actions: read`
 - `contents: read`
-- `issues: write`
-- `pull-requests: read`
+- `pull-requests: write`
 
-It does not have `contents: write` or merge authority. The checkout always reads the trusted default branch rather than the pull-request head. No repository or provider secret is consumed; the only credential is the ephemeral GitHub Actions token.
+`pull-requests: write` exists only because the GitHub REST issue-comment endpoint used for pull-request conversation comments accepts Pull requests write as an authorization path. V0 still has no repository-content write permission, no workflow mutation permission and no merge authority.
 
-Fork-origin workflow runs are rejected. Events whose completed run head is no longer the current PR head are rejected as stale before job triage or comment mutation.
+The checkout always reads the trusted default branch rather than the pull-request head. No repository or provider secret is consumed; the only credential is the ephemeral GitHub Actions token.
+
+Fork-origin workflow runs are rejected. Events whose completed run head is no longer the current PR head are rejected as stale before job triage or comment mutation. Dependabot-origin runs are observation-only at the upstream CI layer and are skipped by this V0 comment writer because GitHub can restrict write-token behavior for bot-originated pull requests.
+
+## Real-event finding
+
+The first live proof after V0 activation showed that `workflow_run` delivery and exact-head triage worked, but `issues: write` + `pull-requests: read` received `403 Resource not accessible by integration` when creating the sticky comment on a normal repository PR. The V0.5 correction changes the comment authorization path to `pull-requests: write` while retaining `contents: read`.
+
+This is an integration-permission correction, not an expansion into code mutation. The agent still cannot commit, push or merge.
 
 ## State model
 

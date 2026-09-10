@@ -213,19 +213,19 @@ def test_current_head_can_update_the_single_agent_comment(monkeypatch):
     assert "GREEN" in observed["body"]
 
 
-def test_workflow_run_boundary_is_same_repo_read_only_and_default_branch_trusted():
+def test_workflow_run_boundary_allows_only_pr_comment_write_and_trusted_code():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert 'workflows: ["Public CI", "CodeQL"]' in workflow
     assert "types: [completed]" in workflow
     assert "github.event.workflow_run.head_repository.full_name == github.repository" in workflow
+    assert "github.event.workflow_run.actor.login != 'dependabot[bot]'" in workflow
     assert "ref: ${{ github.event.repository.default_branch }}" in workflow
     assert "persist-credentials: false" in workflow
     assert "actions: read" in workflow
     assert "contents: read" in workflow
-    assert "issues: write" in workflow
-    assert "pull-requests: read" in workflow
+    assert "pull-requests: write" in workflow
+    assert "issues: write" not in workflow
     assert "contents: write" not in workflow
-    assert "pull-requests: write" not in workflow
     assert "secrets." not in workflow
     assert "github.event.workflow_run.head_sha" in workflow

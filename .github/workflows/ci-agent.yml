@@ -5,13 +5,12 @@ on:
     workflows: ["Public CI", "CodeQL"]
     types: [completed]
 
-# workflow_run executes from the default branch. Keep this workflow incapable of
-# mutating repository contents until the observation-only V0 is proven.
+# workflow_run executes from the default branch. V0 may update only its sticky
+# PR conversation comment; repository contents remain strictly read-only.
 permissions:
   actions: read
   contents: read
-  issues: write
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: ci-agent-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
@@ -22,7 +21,8 @@ jobs:
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.pull_requests[0].number != null
+      github.event.workflow_run.pull_requests[0].number != null &&
+      github.event.workflow_run.actor.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
