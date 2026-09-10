@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -20,6 +21,12 @@ from attention_router.core.capability_lab import (
     compare_scenario,
 )
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
+from attention_router.platform.evidence import (
+    EvidenceReferenceInput,
+    EvidenceType,
+    create_evidence_reference,
+)
+from attention_router.platform.operations import ObservationInput, record_observation
 
 
 SCENARIO_FIXTURE = (
@@ -54,6 +61,19 @@ class CapabilityLabProbeReport(BaseModel):
 
     certification: Literal["EPHEMERAL_ONLY"] = "EPHEMERAL_ONLY"
     probe: CapabilityLabProbeResult
+    comparison: CapabilityLabComparison
+
+
+class CapabilityLabT0EvidenceReport(BaseModel):
+    """Durable T0 evidence over the same canonical resolver; never execution authority."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    certification: Literal["DURABLE_T0_ONLY"] = "DURABLE_T0_ONLY"
+    probe: CapabilityLabProbeResult
+    operational_observation_id: str
+    evidence_reference_id: str
+    observation: CapabilityLabObservation
     comparison: CapabilityLabComparison
 
 
@@ -146,4 +166,102 @@ def probe_named_scenario_t0(
     return CapabilityLabProbeReport(
         probe=probe,
         comparison=compare_scenario(scenario, probe.observation),
+    )
+
+
+def record_capability_t0_evidence(
+    session: Session,
+    scenario: CapabilityLabScenario,
+    *,
+    tenant_id: str = DEFAULT_TENANT_ID,
+    source_sha: str,
+    runtime_sha: str,
+    schema_revision: str,
+    now: datetime | None = None,
+    freshness_seconds: int = 300,
+) -> CapabilityLabT0EvidenceReport:
+    """Persist minimal synthetic T0 evidence without granting or executing anything.
+
+    The canonical resolver remains the source of the semantic result. This function
+    records only a sanitized operational observation plus an EvidenceReference that
+    points to it. It never creates a grant, human authorization, ScenarioRun, outbox
+    item, transport call or external effect. Transaction commit remains caller-owned.
+    """
+
+    if not source_sha or not runtime_sha or not schema_revision:
+        raise ValueError("CAPABILITY_LAB_T0_PROVENANCE_REQUIRED")
+    if freshness_seconds < 1 or freshness_seconds > 3600:
+        raise ValueError("CAPABILITY_LAB_T0_FRESHNESS_INVALID")
+
+    timestamp = now or datetime.now(UTC)
+    probe = probe_capability_t0(
+        session,
+        scenario,
+        tenant_id=tenant_id,
+        policy_allows=True,
+    )
+
+    operational = record_observation(
+        session,
+        ObservationInput(
+            tenant_id=tenant_id,
+            source="capability_lab_t0_semantic_evaluator",
+            source_type="CAPABILITY_RESOLUTION",
+            status=probe.resolution_status.value,
+            reason_code=probe.reason_code,
+            observed_at=timestamp,
+            received_at=timestamp,
+            freshness_expires_at=timestamp + timedelta(seconds=freshness_seconds),
+            component_key="capability_lab.t0",
+            lineage_classification="SYNTHETIC",
+            source_revision=source_sha,
+            runtime_revision=runtime_sha,
+            schema_revision=schema_revision,
+            metadata={
+                "stage": "T0",
+                "scenario_id": scenario.scenario_id,
+                "capability": scenario.capability_key,
+                "resolution_status": probe.resolution_status.value,
+                "authority_result": probe.authority_result.value,
+                "approval_required": probe.approval_required,
+                "execution_allowed": probe.execution_allowed,
+                "synthetic": True,
+                "production_effects": False,
+            },
+        ),
+        now=timestamp,
+    )
+
+    evidence = create_evidence_reference(
+        session,
+        EvidenceReferenceInput(
+            tenant_id=tenant_id,
+            evidence_type=EvidenceType.API_RESULT,
+            internal_entity_type="operational_observation",
+            internal_entity_id=operational.id,
+            source_sha=source_sha,
+            metadata={
+                "stage": "T0",
+                "scenario_id": scenario.scenario_id,
+                "capability": scenario.capability_key,
+                "resolution_status": probe.resolution_status.value,
+                "authority_result": probe.authority_result.value,
+                "lineage": "SYNTHETIC",
+            },
+        ),
+        now=timestamp,
+    )
+
+    observation = CapabilityLabObservation(
+        scenario_id=scenario.scenario_id,
+        observed_resolution=probe.authority_result,
+        observed_reason_code=probe.reason_code,
+        resolution_evidence_refs=[evidence.id],
+    )
+    return CapabilityLabT0EvidenceReport(
+        probe=probe,
+        operational_observation_id=operational.id,
+        evidence_reference_id=evidence.id,
+        observation=observation,
+        comparison=compare_scenario(scenario, observation),
     )
