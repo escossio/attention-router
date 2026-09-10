@@ -7,6 +7,16 @@ import urllib.request
 from scripts import ci_copilot_advisor as advisor
 
 
+_SENSITIVE_REDIRECT_HEADERS = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "x-github-api-version",
+    }
+)
+
+
 class CredentialStrippingRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Follow HTTPS redirects without forwarding GitHub credentials cross-origin."""
 
@@ -29,13 +39,10 @@ class CredentialStrippingRedirectHandler(urllib.request.HTTPRedirectHandler):
         source_origin = (source.scheme.lower(), source.hostname, source.port)
         target_origin = (target.scheme.lower(), target.hostname, target.port)
         if source_origin != target_origin:
-            for header in (
-                "Authorization",
-                "Proxy-Authorization",
-                "Cookie",
-                "X-GitHub-Api-Version",
-            ):
-                redirected.remove_header(header)
+            for mapping in (redirected.headers, redirected.unredirected_hdrs):
+                for header in list(mapping):
+                    if header.lower() in _SENSITIVE_REDIRECT_HEADERS:
+                        del mapping[header]
         return redirected
 
 
