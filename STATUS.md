@@ -2,6 +2,16 @@
 
 Updated: 2026-09-09
 
+## Freeze checkpoint — Phase 4F deferred
+
+The project is intentionally frozen at the Phase 4E public implementation baseline while development proceeds in other layers. Phase 4F (public API contract / developer experience) has partial local work but is **not complete**, has no remote PR/branch, and must not be resumed automatically.
+
+The exact freeze boundary, completed local Phase 4F work, remaining gates, and resume rules are recorded in [`docs/checkpoints/PHASE4F_FREEZE_20260909.md`](docs/checkpoints/PHASE4F_FREEZE_20260909.md).
+
+Canonical implementation baseline at freeze: `4283a9db879510038f60f12e025f87fcd277e731`.
+
+No core product logic, database schema, migrations, live runtime, database, or immutable `v0.1.0` tag was changed by this checkpoint.
+
 ## Architecture governance
 
 - Phase 4E merged in `e643f634247f5e918d1b519607e6333f5ca13480`.
