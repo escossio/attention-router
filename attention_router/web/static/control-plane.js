@@ -178,6 +178,44 @@
     provenance.textContent = `runtime ${runtimeRevision}`;
   }
 
+  function capabilityTitle(item) {
+    return firstDefined(
+      item.capability,
+      item.capability_key,
+      item.canonical_key,
+      item.identity,
+      item.name,
+      item.key,
+      "capability",
+    );
+  }
+
+  function canonicalCapability(capabilityKey) {
+    return state.capabilities.find((item) => capabilityTitle(item) === capabilityKey) || null;
+  }
+
+  function registryState(capabilityKey) {
+    if (!state.connected) {
+      return { label: "NOT OBSERVED", detail: "conecte o runtime para consultar o registry" };
+    }
+
+    const capability = canonicalCapability(capabilityKey);
+    if (!capability) {
+      return { label: "UNREGISTERED", detail: "não existe no registry canônico observado" };
+    }
+
+    const status = firstDefined(capability.state, capability.status, "REGISTERED");
+    const provider = firstDefined(
+      capability.bound_provider,
+      capability.required_provider,
+      "internal / none",
+    );
+    return {
+      label: status,
+      detail: `provider: ${provider}`,
+    };
+  }
+
   function engineScenario(scenarioKey) {
     const scenarios = Array.isArray(state.scenarioEngine?.scenarios)
       ? state.scenarioEngine.scenarios
@@ -199,6 +237,7 @@
       .map((item) => {
         const decision = firstDefined(item.simulated_human_decision, "NONE");
         const grant = firstDefined(item.expected_grant_mode, "NONE");
+        const registry = registryState(item.capability_key);
         const binding = item.engine_scenario_key || null;
         const engine = binding ? engineScenario(binding) : null;
         let bindingState = "UNBOUND";
@@ -214,9 +253,12 @@
               <h3>${escapeHtml(item.title)}</h3>
               <p>${escapeHtml(item.request_text)}</p>
               <small>
-                capability: ${escapeHtml(item.capability_key)} · esperado:
-                ${escapeHtml(item.expected_resolution)} · decisão simulada:
-                ${escapeHtml(decision)} · grant esperado: ${escapeHtml(grant)}
+                T0 esperado: ${escapeHtml(item.expected_resolution)} ·
+                T1 simulado: ${escapeHtml(decision)} · T2 esperado: ${escapeHtml(grant)}
+              </small>
+              <small>
+                capability: ${escapeHtml(item.capability_key)} · registry:
+                ${escapeHtml(registry.label)} · ${escapeHtml(registry.detail)}
               </small>
               <small>
                 engine binding: ${escapeHtml(binding || "none")} · sem binding/evidência, o resultado é INCOMPLETE
@@ -328,18 +370,6 @@
         `;
       })
       .join("");
-  }
-
-  function capabilityTitle(item) {
-    return firstDefined(
-      item.capability,
-      item.capability_key,
-      item.canonical_key,
-      item.identity,
-      item.name,
-      item.key,
-      "capability",
-    );
   }
 
   function renderCapabilities() {
