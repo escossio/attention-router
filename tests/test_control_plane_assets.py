@@ -87,3 +87,10 @@ def test_capability_lab_presents_existing_runtime_as_canonical():
     assert "O laboratório exercita esse motor; não cria outro." in normalized_html
     assert "canonical runtime capability" in javascript
     assert "este é o registry existente que o Lab deve exercitar, não duplicar" in javascript
+
+
+def test_capability_lab_frontend_does_not_expect_minimized_scenario_fields():
+    javascript = (STATIC / "control-plane.js").read_text(encoding="utf-8")
+
+    assert "run.correlation_id" not in javascript
+    assert "run.terminal_reason" not in javascript
