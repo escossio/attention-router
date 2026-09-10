@@ -115,6 +115,37 @@ def test_comment_is_sticky_minimized_and_explicitly_non_mutating():
     assert "nunca faz merge" in body
 
 
+def test_existing_bot_marker_is_patched_instead_of_posting_second_comment(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, *, token, payload=None):
+        calls.append((method, url, payload))
+        if method == "GET":
+            return [
+                {
+                    "id": 456,
+                    "body": f"{ci_agent.AGENT_MARKER}\nold state",
+                    "user": {"type": "Bot"},
+                }
+            ]
+        if method == "PATCH":
+            return {"id": 456, "body": payload["body"]}
+        raise AssertionError(f"unexpected request: {method} {url}")
+
+    monkeypatch.setattr(ci_agent, "_request_json", fake_request)
+
+    comment_id = ci_agent._upsert_comment(
+        "escossio/attention-router",
+        19,
+        f"{ci_agent.AGENT_MARKER}\nnew state",
+        token="synthetic-token",
+    )
+
+    assert comment_id == 456
+    assert [method for method, _, _ in calls] == ["GET", "PATCH"]
+    assert "/issues/comments/456" in calls[-1][1]
+
+
 def test_stale_workflow_event_exits_before_triage_or_comment(monkeypatch, capsys):
     monkeypatch.setenv("GITHUB_TOKEN", "synthetic-token")
     monkeypatch.setattr(ci_agent, "_fetch_current_pr_head", lambda *args, **kwargs: "b" * 40)
