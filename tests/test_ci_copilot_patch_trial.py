@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,43 @@ def test_validation_environment_strips_github_and_oidc_credentials(monkeypatch):
     assert env["CI_COPILOT_PATCH_TRIAL"] == "1"
 
 
+def test_failed_validation_reports_cleanup_after_finally(monkeypatch, tmp_path):
+    proposal = trial.PatchProposal(
+        decision="PATCH",
+        confidence="HIGH",
+        summary="Synthetic patch.",
+        target_files=("tests/test_example.py",),
+        patch=_valid_patch(),
+    )
+    responses = iter(
+        [
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "tests/test_example.py\n", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 1, "lint failed", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+        ]
+    )
+
+    def fake_run(*args, **kwargs):
+        return next(responses)
+
+    monkeypatch.setattr(trial, "_run", fake_run)
+
+    result = trial.apply_and_validate_ephemerally(
+        proposal,
+        candidate_dir=tmp_path,
+        log_excerpt="FAILED tests/test_example.py::test_example",
+    )
+
+    assert result.status == "VALIDATION_FAILED"
+    assert result.cleanup_clean is True
+    assert "lint failed" in result.detail
+
+
 def test_workflow_keeps_patch_trial_opt_in_read_only_and_disposable():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
@@ -154,7 +192,7 @@ def test_workflow_keeps_patch_trial_opt_in_read_only_and_disposable():
     assert workflow.count("persist-credentials: false") >= 4
     assert "python-version: '3.12'" in workflow
     assert "npm install -g @github/copilot@1.0.83" in workflow
-    assert "python -m scripts.ci_copilot_patch_trial" in workflow
+    assert "python -m scripts.ci_copilot_patch_trial_entrypoint" in workflow
     assert "--candidate-dir candidate" in workflow
     assert "secrets." not in workflow
 
