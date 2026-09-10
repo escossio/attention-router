@@ -1,0 +1,18 @@
+{
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "workflows": [
+    {
+      "name": "Public CI",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_job": "python-tests",
+      "failed_step": "Run python -m pytest -q",
+      "expected_category": "TEST_FAILURE"
+    },
+    {
+      "name": "CodeQL",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ]
+}
