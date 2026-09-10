@@ -1,0 +1,67 @@
+scenario:
+  id: SCN-PE-030
+  version: 1
+  title: capability_lab_t0_callback_no_grant_semantics
+  priority: P2
+  level: L0_UNIT_DRY
+  executor_kind: SCENARIO_ENGINE
+  effect_class: NO_EXTERNAL_EFFECT
+traceability:
+  pe_ids: []
+  acceptance_ids: []
+  invariant_ids: []
+  risk_ids: []
+  historical_risk_ids: []
+  coverage_gap_ids: [COV-GAP-CAPABILITY-LAB-T0-001]
+  work_packages: [CAPABILITY-LAB-V0]
+  config_keys: []
+preconditions:
+  - POSTGRES_READY
+  - CAPABILITY_REGISTRY_SYNCHRONIZED
+  - SYNTHETIC_ACTOR_READY
+readiness_requirements: []
+execution:
+  setup: []
+  stimulus:
+    - action: capability_lab_t0_resolve
+      parameters:
+        lab_scenario_id: callback.request.current-behavior-control
+        capability: callback.request
+        requester_actor_key: "synthetic:contact.control"
+        expected_resolution: DENY
+        expected_reason_code: CAPABILITY_GRANT_MISSING
+  waits: []
+  assertions:
+    - assertion_id: ASSERT-SCN-PE-030-001
+      assertion_type: DETERMINISTIC
+      expected_property: callback.request resolves DENY / CAPABILITY_GRANT_MISSING without a grant
+      evaluator: capability_lab_t0_semantic_evaluator
+      blocking: true
+      evidence: [SCENARIO_RUN, API_RESULT, ASSERTION_RESULT]
+  invariants: []
+  cleanup: []
+safety:
+  effect_budget:
+    effect_types: []
+    target_scope: {}
+    max_stimulus: 0
+    max_system_response: 0
+    ttl_seconds: 60
+  execution_lease:
+    required: false
+    lease_type: null
+    scope_key: null
+  timeout:
+    scenario_seconds: 60
+    step_seconds: 30
+  retry:
+    transient_max_retries: 0
+    external_effect_blind_retries: 0
+    same_correlation_required: true
+  allowed_target_scope: {}
+  abort_on_blocking_invariant: true
+evidence:
+  required: [SCENARIO_RUN, API_RESULT, ASSERTION_RESULT]
+  provenance: [SOURCE_SHA, RUNTIME_SHA, SCHEMA_REVISION, SCENARIO_HASH]
+expected_finding_behavior: NONE
+safe_execution_stage: PRE_PROMOTION
