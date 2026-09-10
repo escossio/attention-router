@@ -117,6 +117,28 @@ def test_later_stage_observation_requires_t0_resolution():
         )
 
 
+def test_stage_evidence_cannot_exist_without_its_observation():
+    with pytest.raises(ValidationError):
+        CapabilityLabObservation(
+            scenario_id=_cpf_scenario().scenario_id,
+            resolution_evidence_refs=["evidence:t0"],
+        )
+
+    with pytest.raises(ValidationError):
+        CapabilityLabObservation(
+            scenario_id=_cpf_scenario().scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            human_decision_evidence_refs=["evidence:t1"],
+        )
+
+    with pytest.raises(ValidationError):
+        CapabilityLabObservation(
+            scenario_id=_cpf_scenario().scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            grant_evidence_refs=["evidence:t2"],
+        )
+
+
 def test_current_no_grant_authority_gap_is_explicit_not_hidden():
     cpf = _cpf_scenario()
 
@@ -133,7 +155,25 @@ def test_current_no_grant_authority_gap_is_explicit_not_hidden():
     assert current.reason_code == "CAPABILITY_GRANT_MISSING"
 
 
-def test_t0_matching_resolution_is_incomplete_until_human_decision_is_observed():
+def test_matching_t0_without_evidence_is_incomplete():
+    scenario = _cpf_scenario()
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.INCOMPLETE
+    assert comparison.incomplete_reasons == [
+        "T0_RESOLUTION_EVIDENCE_MISSING",
+        "T1_HUMAN_DECISION_NOT_OBSERVED",
+    ]
+    assert comparison.evidence_refs == []
+
+
+def test_t0_matching_resolution_with_evidence_waits_for_human_decision():
     scenario = _cpf_scenario()
     comparison = compare_scenario(
         scenario,
@@ -141,16 +181,17 @@ def test_t0_matching_resolution_is_incomplete_until_human_decision_is_observed()
             scenario_id=scenario.scenario_id,
             observed_resolution="REQUIRES_APPROVAL",
             observed_reason_code="APPROVAL_REQUIRED",
-            evidence_refs=["synthetic:evidence:t0"],
+            resolution_evidence_refs=["synthetic:evidence:t0"],
         ),
     )
 
     assert comparison.status == ComparisonStatus.INCOMPLETE
     assert comparison.mismatches == []
     assert comparison.incomplete_reasons == ["T1_HUMAN_DECISION_NOT_OBSERVED"]
+    assert comparison.evidence_refs == ["synthetic:evidence:t0"]
 
 
-def test_t1_matching_approval_is_incomplete_until_expected_grant_is_observed():
+def test_t1_matching_approval_without_evidence_remains_incomplete():
     scenario = _cpf_scenario()
     comparison = compare_scenario(
         scenario,
@@ -158,16 +199,59 @@ def test_t1_matching_approval_is_incomplete_until_expected_grant_is_observed():
             scenario_id=scenario.scenario_id,
             observed_resolution="REQUIRES_APPROVAL",
             observed_human_decision="APPROVE",
-            evidence_refs=["synthetic:evidence:t0", "synthetic:evidence:t1"],
+            resolution_evidence_refs=["synthetic:evidence:t0"],
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.INCOMPLETE
+    assert comparison.mismatches == []
+    assert comparison.incomplete_reasons == [
+        "T1_HUMAN_DECISION_EVIDENCE_MISSING",
+        "T2_GRANT_NOT_OBSERVED",
+    ]
+
+
+def test_t1_matching_approval_with_evidence_waits_for_expected_grant():
+    scenario = _cpf_scenario()
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            observed_human_decision="APPROVE",
+            resolution_evidence_refs=["synthetic:evidence:t0"],
+            human_decision_evidence_refs=["synthetic:evidence:t1"],
         ),
     )
 
     assert comparison.status == ComparisonStatus.INCOMPLETE
     assert comparison.mismatches == []
     assert comparison.incomplete_reasons == ["T2_GRANT_NOT_OBSERVED"]
+    assert comparison.evidence_refs == [
+        "synthetic:evidence:t0",
+        "synthetic:evidence:t1",
+    ]
 
 
-def test_t2_matching_grant_completes_the_expected_flow():
+def test_t2_matching_grant_without_evidence_is_not_certified():
+    scenario = _cpf_scenario()
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            observed_human_decision="APPROVE",
+            observed_grant_mode="ONE_TIME",
+            resolution_evidence_refs=["synthetic:evidence:t0"],
+            human_decision_evidence_refs=["synthetic:evidence:t1"],
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.INCOMPLETE
+    assert comparison.incomplete_reasons == ["T2_GRANT_EVIDENCE_MISSING"]
+
+
+def test_t2_matching_grant_with_all_stage_evidence_completes_flow():
     scenario = _cpf_scenario()
     comparison = compare_scenario(
         scenario,
@@ -177,18 +261,20 @@ def test_t2_matching_grant_completes_the_expected_flow():
             observed_human_decision="APPROVE",
             observed_grant_mode="ONE_TIME",
             matched_rule_id="synthetic-rule-1",
-            evidence_refs=[
-                "synthetic:evidence:t0",
-                "synthetic:evidence:t1",
-                "synthetic:evidence:t2",
-            ],
+            resolution_evidence_refs=["synthetic:evidence:t0"],
+            human_decision_evidence_refs=["synthetic:evidence:t1"],
+            grant_evidence_refs=["synthetic:evidence:t2"],
         ),
     )
 
     assert comparison.status == ComparisonStatus.PASS
     assert comparison.mismatches == []
     assert comparison.incomplete_reasons == []
-    assert comparison.evidence_refs[-1] == "synthetic:evidence:t2"
+    assert comparison.evidence_refs == [
+        "synthetic:evidence:t0",
+        "synthetic:evidence:t1",
+        "synthetic:evidence:t2",
+    ]
 
 
 def test_missing_t0_observation_is_incomplete_not_success():
@@ -211,6 +297,7 @@ def test_t0_resolution_mismatch_fails_without_guessing_downstream_state():
             scenario_id=scenario.scenario_id,
             observed_resolution="DENY",
             observed_reason_code="CAPABILITY_GRANT_MISSING",
+            resolution_evidence_refs=["synthetic:evidence:t0"],
         ),
     )
 
@@ -228,6 +315,8 @@ def test_t1_human_decision_mismatch_fails_before_grant_stage():
             scenario_id=scenario.scenario_id,
             observed_resolution="REQUIRES_APPROVAL",
             observed_human_decision="DENY",
+            resolution_evidence_refs=["synthetic:evidence:t0"],
+            human_decision_evidence_refs=["synthetic:evidence:t1"],
         ),
     )
 
@@ -245,6 +334,9 @@ def test_t2_wrong_grant_mode_fails_with_reason_code():
             observed_resolution="REQUIRES_APPROVAL",
             observed_human_decision="APPROVE",
             observed_grant_mode="PERSISTENT",
+            resolution_evidence_refs=["synthetic:evidence:t0"],
+            human_decision_evidence_refs=["synthetic:evidence:t1"],
+            grant_evidence_refs=["synthetic:evidence:t2"],
         ),
     )
 
@@ -252,22 +344,33 @@ def test_t2_wrong_grant_mode_fails_with_reason_code():
     assert any(item.startswith("GRANT_MODE_MISMATCH:") for item in comparison.mismatches)
 
 
-def test_direct_deny_can_complete_at_t0_without_human_or_grant_stages():
+def test_direct_deny_needs_t0_evidence_to_complete():
     scenario = {
         item.scenario_id: item for item in _scenarios()
     }["personal.relationship.status.denied"]
-    comparison = compare_scenario(
+
+    without_evidence = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="DENY",
+        ),
+    )
+    assert without_evidence.status == ComparisonStatus.INCOMPLETE
+    assert without_evidence.incomplete_reasons == ["T0_RESOLUTION_EVIDENCE_MISSING"]
+
+    with_evidence = compare_scenario(
         scenario,
         CapabilityLabObservation(
             scenario_id=scenario.scenario_id,
             observed_resolution="DENY",
             observed_reason_code="POLICY_DENIED",
+            resolution_evidence_refs=["synthetic:evidence:t0"],
         ),
     )
-
-    assert comparison.status == ComparisonStatus.PASS
-    assert comparison.mismatches == []
-    assert comparison.incomplete_reasons == []
+    assert with_evidence.status == ComparisonStatus.PASS
+    assert with_evidence.mismatches == []
+    assert with_evidence.incomplete_reasons == []
 
 
 def test_any_production_effect_observed_fails_the_lab_comparison():
@@ -279,6 +382,7 @@ def test_any_production_effect_observed_fails_the_lab_comparison():
         CapabilityLabObservation(
             scenario_id=scenario.scenario_id,
             observed_resolution=scenario.expected_resolution,
+            resolution_evidence_refs=["synthetic:evidence:t0"],
             production_effect_observed=True,
         ),
     )
