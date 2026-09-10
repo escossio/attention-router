@@ -198,7 +198,8 @@ def test_workflow_scopes_copilot_permission_to_failure_advisor_job():
     assert "contents: write" not in workflow
     assert "node-version: '22'" in workflow
     assert "npm install -g @github/copilot@1.0.83" in workflow
-    assert "scripts/ci_copilot_advisor.py" in workflow
+    assert "python -m scripts.ci_copilot_advisor" in workflow
+    assert "python scripts/ci_copilot_advisor.py" not in workflow
     assert "--yolo" not in workflow
     assert "allow-all" not in workflow
     assert "secrets." not in workflow
