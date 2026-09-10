@@ -22,6 +22,12 @@ def _scenarios() -> list[CapabilityLabScenario]:
     return [CapabilityLabScenario.model_validate(item) for item in payload]
 
 
+def _cpf_scenario() -> CapabilityLabScenario:
+    return {
+        scenario.scenario_id: scenario for scenario in _scenarios()
+    }["personal.identity.cpf.requires-approval-once"]
+
+
 def test_capability_lab_fixture_is_valid_and_synthetic_only():
     scenarios = _scenarios()
 
@@ -82,7 +88,7 @@ def test_non_approval_scenario_cannot_simulate_human_decision():
         )
 
 
-def test_denied_or_pending_scenario_cannot_expect_grant():
+def test_pending_approval_scenario_cannot_expect_grant():
     with pytest.raises(ValidationError):
         CapabilityLabScenario(
             scenario_id="invalid.pending-with-grant",
@@ -97,10 +103,22 @@ def test_denied_or_pending_scenario_cannot_expect_grant():
         )
 
 
+def test_later_stage_observation_requires_t0_resolution():
+    with pytest.raises(ValidationError):
+        CapabilityLabObservation(
+            scenario_id=_cpf_scenario().scenario_id,
+            observed_human_decision="APPROVE",
+        )
+
+    with pytest.raises(ValidationError):
+        CapabilityLabObservation(
+            scenario_id=_cpf_scenario().scenario_id,
+            observed_grant_mode="ONE_TIME",
+        )
+
+
 def test_current_no_grant_authority_gap_is_explicit_not_hidden():
-    cpf = {
-        scenario.scenario_id: scenario for scenario in _scenarios()
-    }["personal.identity.cpf.requires-approval-once"]
+    cpf = _cpf_scenario()
 
     current = evaluate_effective_authority(
         availability=CapabilityAvailability.OPERATIONAL,
@@ -115,25 +133,66 @@ def test_current_no_grant_authority_gap_is_explicit_not_hidden():
     assert current.reason_code == "CAPABILITY_GRANT_MISSING"
 
 
-def test_expected_and_observed_match_passes_without_mutation():
-    scenario = _scenarios()[0]
-    observation = CapabilityLabObservation(
-        scenario_id=scenario.scenario_id,
-        observed_resolution=scenario.expected_resolution,
-        observed_grant_mode=scenario.expected_grant_mode,
-        matched_rule_id="synthetic-rule-1",
-        evidence_refs=["synthetic:evidence:1"],
+def test_t0_matching_resolution_is_incomplete_until_human_decision_is_observed():
+    scenario = _cpf_scenario()
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            observed_reason_code="APPROVAL_REQUIRED",
+            evidence_refs=["synthetic:evidence:t0"],
+        ),
     )
 
-    comparison = compare_scenario(scenario, observation)
+    assert comparison.status == ComparisonStatus.INCOMPLETE
+    assert comparison.mismatches == []
+    assert comparison.incomplete_reasons == ["T1_HUMAN_DECISION_NOT_OBSERVED"]
+
+
+def test_t1_matching_approval_is_incomplete_until_expected_grant_is_observed():
+    scenario = _cpf_scenario()
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            observed_human_decision="APPROVE",
+            evidence_refs=["synthetic:evidence:t0", "synthetic:evidence:t1"],
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.INCOMPLETE
+    assert comparison.mismatches == []
+    assert comparison.incomplete_reasons == ["T2_GRANT_NOT_OBSERVED"]
+
+
+def test_t2_matching_grant_completes_the_expected_flow():
+    scenario = _cpf_scenario()
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            observed_human_decision="APPROVE",
+            observed_grant_mode="ONE_TIME",
+            matched_rule_id="synthetic-rule-1",
+            evidence_refs=[
+                "synthetic:evidence:t0",
+                "synthetic:evidence:t1",
+                "synthetic:evidence:t2",
+            ],
+        ),
+    )
 
     assert comparison.status == ComparisonStatus.PASS
     assert comparison.mismatches == []
-    assert comparison.evidence_refs == ["synthetic:evidence:1"]
+    assert comparison.incomplete_reasons == []
+    assert comparison.evidence_refs[-1] == "synthetic:evidence:t2"
 
 
-def test_missing_observation_is_incomplete_not_success():
-    scenario = _scenarios()[0]
+def test_missing_t0_observation_is_incomplete_not_success():
+    scenario = _cpf_scenario()
     comparison = compare_scenario(
         scenario,
         CapabilityLabObservation(scenario_id=scenario.scenario_id),
@@ -141,26 +200,80 @@ def test_missing_observation_is_incomplete_not_success():
 
     assert comparison.status == ComparisonStatus.INCOMPLETE
     assert comparison.mismatches == []
+    assert comparison.incomplete_reasons == ["T0_RESOLUTION_NOT_OBSERVED"]
 
 
-def test_resolution_or_grant_mismatch_fails_with_reason_codes():
-    scenario = _scenarios()[0]
+def test_t0_resolution_mismatch_fails_without_guessing_downstream_state():
+    scenario = _cpf_scenario()
     comparison = compare_scenario(
         scenario,
         CapabilityLabObservation(
             scenario_id=scenario.scenario_id,
             observed_resolution="DENY",
-            observed_grant_mode="NONE",
+            observed_reason_code="CAPABILITY_GRANT_MISSING",
         ),
     )
 
     assert comparison.status == ComparisonStatus.FAIL
-    assert any(item.startswith("RESOLUTION_MISMATCH:") for item in comparison.mismatches)
+    assert len(comparison.mismatches) == 1
+    assert comparison.mismatches[0].startswith("RESOLUTION_MISMATCH:")
+    assert comparison.incomplete_reasons == []
+
+
+def test_t1_human_decision_mismatch_fails_before_grant_stage():
+    scenario = _cpf_scenario()
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            observed_human_decision="DENY",
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.FAIL
+    assert any(item.startswith("HUMAN_DECISION_MISMATCH:") for item in comparison.mismatches)
+    assert comparison.incomplete_reasons == []
+
+
+def test_t2_wrong_grant_mode_fails_with_reason_code():
+    scenario = _cpf_scenario()
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="REQUIRES_APPROVAL",
+            observed_human_decision="APPROVE",
+            observed_grant_mode="PERSISTENT",
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.FAIL
     assert any(item.startswith("GRANT_MODE_MISMATCH:") for item in comparison.mismatches)
 
 
+def test_direct_deny_can_complete_at_t0_without_human_or_grant_stages():
+    scenario = {
+        item.scenario_id: item for item in _scenarios()
+    }["personal.relationship.status.denied"]
+    comparison = compare_scenario(
+        scenario,
+        CapabilityLabObservation(
+            scenario_id=scenario.scenario_id,
+            observed_resolution="DENY",
+            observed_reason_code="POLICY_DENIED",
+        ),
+    )
+
+    assert comparison.status == ComparisonStatus.PASS
+    assert comparison.mismatches == []
+    assert comparison.incomplete_reasons == []
+
+
 def test_any_production_effect_observed_fails_the_lab_comparison():
-    scenario = _scenarios()[1]
+    scenario = {
+        item.scenario_id: item for item in _scenarios()
+    }["personal.relationship.status.denied"]
     comparison = compare_scenario(
         scenario,
         CapabilityLabObservation(
