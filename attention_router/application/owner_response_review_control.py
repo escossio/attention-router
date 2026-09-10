@@ -19,6 +19,7 @@ from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     AgentDecisionRow,
+    AgentExecutionIntentRow,
     AgentResponseReviewRow,
     InteractionRow,
     OutboxMessageRow,
@@ -43,6 +44,8 @@ class OwnerResponseReviewMutation:
     execution_intent_id: str | None
     changed: bool
     duplicate: bool
+    release_status: str | None = None
+    release_reason: str | None = None
 
 
 def review_reference(review_id: str) -> str:
@@ -79,6 +82,12 @@ def _review_for_reference(
     return matches[0]
 
 
+def _intent_state(intent: AgentExecutionIntentRow | None) -> tuple[str | None, str | None, str | None]:
+    if intent is None:
+        return None, None, None
+    return intent.status, intent.release_status, intent.blocked_reason
+
+
 def apply_owner_response_review(
     session: Session,
     *,
@@ -87,16 +96,24 @@ def apply_owner_response_review(
     approve: bool,
     authority: OperatorAuthority,
 ) -> OwnerResponseReviewMutation:
+    roles = {role.upper() for role in authority.roles}
     if (
         not authority.authenticated
         or authority.tenant_id != tenant_id
-        or "OWNER" not in authority.roles
+        or "OWNER" not in roles
     ):
         raise OwnerResponseReviewError("OWNER_AUTHORITY_UNAVAILABLE")
 
     row = _review_for_reference(session, tenant_id=tenant_id, reference=reference)
     previous_status = row.status
+    previous_intent = session.scalar(
+        select(AgentExecutionIntentRow).where(AgentExecutionIntentRow.response_review_id == row.id)
+    )
+    previous_intent_state = _intent_state(previous_intent)
     reviewer_reference = f"owner:{stable_hash(authority.operator_actor_id)[:16]}"
+    release_status: str | None = None
+    release_reason: str | None = None
+
     try:
         if approve:
             row, intent = approve_review(
@@ -106,6 +123,24 @@ def apply_owner_response_review(
             )
             execution_intent_id = intent.id
             expected_terminal = "APPROVED"
+
+            if intent.status in {"READY", "SENT"} and intent.release_status == "RELEASED":
+                release_status = "RELEASED"
+            else:
+                from attention_router.application import execution
+
+                try:
+                    intent = execution.release_intent(
+                        session,
+                        intent.id,
+                        operator_reference=reviewer_reference,
+                        transport_ready=execution.probe_transport_ready(),
+                    )
+                except execution.ExecutionBlocked as exc:
+                    release_status = "BLOCKED"
+                    release_reason = str(exc)
+                else:
+                    release_status = intent.release_status
         else:
             row = reject_review(
                 session,
@@ -113,18 +148,23 @@ def apply_owner_response_review(
                 reason=OWNER_REVIEW_REJECTION_REASON,
                 reviewer_reference=reviewer_reference,
             )
+            intent = None
             execution_intent_id = None
             expected_terminal = "REJECTED"
     except (ReviewNotFound, ReviewConflict) as exc:
         raise OwnerResponseReviewError(str(exc)) from exc
 
-    duplicate = previous_status == expected_terminal
+    current_intent_state = _intent_state(intent if approve else previous_intent)
+    changed = previous_status != row.status or previous_intent_state != current_intent_state
+    duplicate = previous_status == expected_terminal and not changed
     return OwnerResponseReviewMutation(
         review_id=row.id,
         review_status=row.status,
         execution_intent_id=execution_intent_id,
-        changed=not duplicate,
+        changed=changed,
         duplicate=duplicate,
+        release_status=release_status,
+        release_reason=release_reason,
     )
 
 

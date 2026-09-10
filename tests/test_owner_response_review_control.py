@@ -7,7 +7,7 @@ from attention_router.adapters.wwebjs_owner_control import (
     OwnerControlParseStatus,
     parse_owner_grace_control,
 )
-from attention_router.application import response_review, services
+from attention_router.application import execution, response_review, services
 from attention_router.application.owner_control import OwnerControlAction
 from attention_router.application.owner_response_review_control import (
     OWNER_REVIEW_REQUEST_ACTION,
@@ -15,6 +15,7 @@ from attention_router.application.owner_response_review_control import (
     apply_owner_response_review,
     review_reference,
 )
+from attention_router.config import settings
 from attention_router.core.events import OperatorAuthority
 from attention_router.infrastructure.models import (
     ActorBindingRow,
@@ -52,6 +53,7 @@ def _decision(session, *, suffix="base") -> AgentDecisionRow:
     event_id = f"event-owner-review-{suffix}"
     interaction_id = f"interaction-owner-review-{suffix}"
     decision_id = f"decision-owner-review-{suffix}"
+    recipient = f"synthetic-contact-{suffix}@c.us"
     session.add(
         InteractionRow(
             id=interaction_id,
@@ -73,10 +75,15 @@ def _decision(session, *, suffix="base") -> AgentDecisionRow:
     session.add(
         InboundEventRow(
             id=event_id,
-            source="test",
+            source="wwebjs",
             external_event_id=f"external-{suffix}",
             event_type="message",
-            payload={"safe": True},
+            payload={
+                "channel": "whatsapp",
+                "external_actor_id": recipient,
+                "actor_id": recipient,
+                "metadata": {"is_group": False},
+            },
             payload_hash=f"hash-{suffix}",
             received_at=now,
             interaction_id=interaction_id,
@@ -121,6 +128,12 @@ def _authority(authenticated=True) -> OperatorAuthority:
     )
 
 
+def review_to_tenant(session, review: AgentResponseReviewRow) -> str:
+    decision = session.get(AgentDecisionRow, review.agent_decision_id)
+    interaction = session.get(InteractionRow, decision.interaction_id)
+    return interaction.tenant_id
+
+
 def test_parser_recognizes_explicit_approve_and_deny_commands():
     reference = "12345678-ab1"
 
@@ -162,10 +175,14 @@ def test_review_creation_enqueues_one_idempotent_owner_request(session):
     assert f"negar resposta {review_reference(review.id)}" in requests[0].payload["text"]
 
 
-def test_direct_review_control_requires_authenticated_owner_and_keeps_delivery_blocked(session):
-    decision = _decision(session, suffix="approve")
+def test_approval_is_recorded_but_release_stays_blocked_when_global_gate_is_closed(
+    session,
+    monkeypatch,
+):
+    decision = _decision(session, suffix="blocked")
     review = response_review.create_review_for_decision(session, decision.id)
     reference = review_reference(review.id)
+    monkeypatch.setattr(execution, "probe_transport_ready", lambda: True)
 
     with pytest.raises(OwnerResponseReviewError, match="OWNER_AUTHORITY_UNAVAILABLE"):
         apply_owner_response_review(
@@ -194,25 +211,65 @@ def test_direct_review_control_requires_authenticated_owner_and_keeps_delivery_b
 
     assert mutation.review_status == "APPROVED"
     assert mutation.changed is True
+    assert mutation.release_status == "BLOCKED"
+    assert mutation.release_reason == "EXTERNAL_DELIVERY_DISABLED"
     assert duplicate.duplicate is True
     assert duplicate.execution_intent_id == mutation.execution_intent_id
     assert intent.status == "BLOCKED"
-    assert intent.execution_allowed is False
-    assert intent.external_delivery_allowed is False
+    assert intent.release_status == "HELD"
     assert intent.blocked_reason == "EXTERNAL_DELIVERY_DISABLED"
 
 
-def review_to_tenant(session, review: AgentResponseReviewRow) -> str:
-    decision = session.get(AgentDecisionRow, review.agent_decision_id)
-    interaction = session.get(InteractionRow, decision.interaction_id)
-    return interaction.tenant_id
+def test_owner_approval_releases_through_existing_gate_and_becomes_enqueueable(
+    session,
+    monkeypatch,
+):
+    decision = _decision(session, suffix="released")
+    review = response_review.create_review_for_decision(session, decision.id)
+    monkeypatch.setattr(settings, "external_delivery_enabled", True)
+    monkeypatch.setattr(settings, "agent_execution_enabled", True)
+    monkeypatch.setattr(execution, "probe_transport_ready", lambda: True)
+
+    mutation = apply_owner_response_review(
+        session,
+        tenant_id=review_to_tenant(session, review),
+        reference=review_reference(review.id),
+        approve=True,
+        authority=_authority(),
+    )
+    intent = session.get(AgentExecutionIntentRow, mutation.execution_intent_id)
+
+    assert mutation.review_status == "APPROVED"
+    assert mutation.release_status == "RELEASED"
+    assert mutation.release_reason is None
+    assert intent.status == "READY"
+    assert intent.release_status == "RELEASED"
+    assert intent.blocked_reason is None
+
+    assert execution.enqueue_ready_intents(
+        session,
+        transport_ready=True,
+        execution_intent_id=intent.id,
+    ) == 1
+    outbox = session.scalar(
+        select(OutboxMessageRow).where(OutboxMessageRow.execution_intent_id == intent.id)
+    )
+    assert outbox is not None
+    assert outbox.action_type == "agent_execution_text"
+    assert outbox.destination == "local_transport"
 
 
-def test_authenticated_wwebjs_self_chat_approves_pending_review_end_to_end(session):
+def test_authenticated_wwebjs_self_chat_approves_and_releases_end_to_end(
+    session,
+    monkeypatch,
+):
     binding = _owner_binding(session)
     decision = _decision(session, suffix="e2e")
     review = response_review.create_review_for_decision(session, decision.id)
     reference = review_reference(review.id)
+    monkeypatch.setattr(settings, "external_delivery_enabled", True)
+    monkeypatch.setattr(settings, "agent_execution_enabled", True)
+    monkeypatch.setattr(execution, "probe_transport_ready", lambda: True)
 
     result = services.receive_inbound_event(
         session,
@@ -253,9 +310,10 @@ def test_authenticated_wwebjs_self_chat_approves_pending_review_end_to_end(sessi
     assert result["event_type"] == "OWNER_CONTROL_COMMAND"
     assert updated.status == "APPROVED"
     assert intent is not None
-    assert intent.external_delivery_allowed is False
+    assert intent.status == "READY"
+    assert intent.release_status == "RELEASED"
     assert len(confirmations) == 1
-    assert "Resposta aprovada" in confirmations[0].payload["text"]
+    assert "liberada para envio" in confirmations[0].payload["text"]
 
 
 def test_deny_is_terminal_and_creates_no_execution_intent(session):

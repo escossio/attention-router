@@ -13,7 +13,9 @@ The response state machine remains `AgentResponseReviewRow`:
 - `PENDING` → `APPROVED`
 - `PENDING` → `REJECTED`
 
-Approval continues to create the existing `AgentExecutionIntentRow` with `authorization_source=HUMAN_REVIEW`. It remains `BLOCKED`, with `execution_allowed=false` and `external_delivery_allowed=false`, until the normal execution safety gates release it.
+Approval creates or reuses the existing `AgentExecutionIntentRow` with `authorization_source=HUMAN_REVIEW`. The same authenticated owner command then asks the existing execution layer to release that intent. No release bypass exists: `release_intent()` still checks the normal execution gate, recipient resolution, global external-delivery gate and transport readiness.
+
+If those gates pass, the human-reviewed intent becomes `READY` / `RELEASED` and the normal worker may enqueue the response for the local transport. If any gate blocks, the review remains `APPROVED` but the intent is not made ready; the owner confirmation states that delivery was not released.
 
 ## Owner request
 
@@ -36,9 +38,10 @@ Questions are not commands. Malformed approval-like text is consumed and rejecte
 
 ## Replay and terminal state
 
-Repeating the same decision is idempotent:
+Repeating the same decision is idempotent at the review layer:
 
 - approve after approve reuses the existing execution intent;
+- if a previous release was blocked, a repeated authenticated approval may re-evaluate the normal release gates;
 - reject after reject remains rejected.
 
 Trying the opposite terminal decision remains a conflict and does not rewrite history.

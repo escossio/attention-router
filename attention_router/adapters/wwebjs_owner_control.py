@@ -213,9 +213,17 @@ def render_owner_control_confirmation(
 ) -> str:
     if action == OwnerControlAction.APPROVE_RESPONSE_REVIEW:
         assert isinstance(result.mutation, OwnerResponseReviewMutation)
+        if result.mutation.release_status == "RELEASED":
+            return (
+                "Essa resposta já estava aprovada e liberada para envio."
+                if result.mutation.duplicate
+                else "Resposta aprovada e liberada para envio."
+            )
+        if result.mutation.release_status == "BLOCKED":
+            return "Resposta aprovada, mas o envio não foi liberado pelos gates de execução."
         if result.mutation.duplicate:
             return "Essa resposta já estava aprovada."
-        return "Resposta aprovada. A autorização foi registrada; o envio segue pelos gates normais."
+        return "Resposta aprovada."
     if action == OwnerControlAction.REJECT_RESPONSE_REVIEW:
         assert isinstance(result.mutation, OwnerResponseReviewMutation)
         if result.mutation.duplicate:
