@@ -18,8 +18,8 @@
     scenarios: "Cenários",
     approvals: "Autorizações",
     capabilities: "Capacidades",
-    rules: "Regras de autorização",
-    grants: "Permissões",
+    rules: "Authority",
+    grants: "Grants",
   };
 
   const $ = (selector) => document.querySelector(selector);
@@ -271,7 +271,6 @@
             <div class="record-main">
               <span class="record-kicker">scenario engine / ${escapeHtml(run.run_id)}</span>
               <h3>${escapeHtml(run.scenario_key || "scenario não resolvido")}</h3>
-              <p>correlação: ${escapeHtml(run.correlation_id)}</p>
               <small>
                 versão: ${escapeHtml(run.scenario_version)} · steps: ${escapeHtml(stepTotal)} ·
                 evidence refs: ${escapeHtml(evidenceCount)} · cleanup: ${escapeHtml(run.cleanup_state)}
