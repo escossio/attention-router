@@ -10,13 +10,13 @@ from attention_router.platform.scenarios import (
 CATALOG = Path(__file__).parents[1] / "config" / "platform" / "scenarios"
 
 
-def test_catalog_loads_exactly_twenty_eight_unique_immutable_v1_manifests():
+def test_catalog_loads_exactly_thirty_unique_immutable_v1_manifests():
     paths = sorted(CATALOG.glob("SCN-PE-*.yaml"))
     manifests = [load_manifest_file(path) for path in paths]
-    assert len(manifests) == 29
-    assert len({manifest.scenario.id for manifest in manifests}) == 29
+    assert len(manifests) == 30
+    assert len({manifest.scenario.id for manifest in manifests}) == 30
     assert {manifest.scenario.id for manifest in manifests} == {
-        f"SCN-PE-{number:03d}" for number in range(1, 30)
+        f"SCN-PE-{number:03d}" for number in range(1, 31)
     }
     assert all(manifest.scenario.version == 1 for manifest in manifests)
     assert all(len(manifest.content_hash()) == 64 for manifest in manifests)
@@ -40,7 +40,7 @@ def test_only_driver_restart_is_l1_and_it_is_bounded_one_plus_one():
 def test_all_l0_scenarios_have_zero_external_effect_budget():
     manifests = [load_manifest_file(path) for path in CATALOG.glob("SCN-PE-*.yaml")]
     l0 = [manifest for manifest in manifests if manifest.scenario.level is ScenarioTestLevel.L0_UNIT_DRY]
-    assert len(l0) == 27
+    assert len(l0) == 28
     assert all(manifest.safety.effect_budget.max_stimulus == 0 for manifest in l0)
     assert all(manifest.safety.effect_budget.max_system_response == 0 for manifest in l0)
     assert all(not manifest.safety.allowed_target_scope for manifest in l0)
