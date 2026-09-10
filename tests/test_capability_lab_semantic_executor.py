@@ -18,6 +18,7 @@ from attention_router.infrastructure.models import (
     ScenarioStepRunRow,
     ScenarioVersionRow,
 )
+from attention_router.platform.capability_lab_read_model import read_scenario_engine_snapshot
 from attention_router.platform.capability_lab_semantic_executor import (
     execute_capability_lab_t0_manifest,
 )
@@ -136,6 +137,49 @@ def test_scn_pe_030_binds_scenario_engine_to_real_t0_semantics(session):
     assert operational.lineage_classification == "SYNTHETIC"
     assert operational.sanitized_metadata["authority_result"] == "DENY"
     assert operational.sanitized_metadata["production_effects"] is False
+
+    before_read = {
+        model: _count(session, model)
+        for model in (
+            ScenarioRunRow,
+            ScenarioStepRunRow,
+            AssertionResultRow,
+            EvidenceReferenceRow,
+            OperationalObservationRow,
+        )
+    }
+    snapshot = read_scenario_engine_snapshot(session)
+    after_read = {model: _count(session, model) for model in before_read}
+    assert after_read == before_read
+
+    projected = next(
+        item for item in snapshot["recent_runs"] if item["run_id"] == result.run_id
+    )
+    assert projected["scenario_key"] == "SCN-PE-030"
+    assert projected["status"] == "PASSED"
+    assert projected["assertion_summary"] == {"total": 1, "results": {"PASS": 1}}
+    assert len(projected["semantic_assertions"]) == 1
+    semantic = projected["semantic_assertions"][0]
+    assert semantic["assertion_id"] == "ASSERT-SCN-PE-030-001"
+    assert semantic["result"] == "PASS"
+    assert semantic["evaluator"] == "capability_lab_t0_semantic_evaluator"
+    assert semantic["observed_summary"] == (
+        "comparison=PASS; authority=DENY; reason=CAPABILITY_GRANT_MISSING"
+    )
+    assert semantic["unresolved_evidence_ref_count"] == 0
+    assert {item["id"] for item in semantic["evidence_refs"]} == {
+        result.scenario_evidence_ref,
+        result.t0_evidence_ref,
+    }
+    assert {item["evidence_type"] for item in semantic["evidence_refs"]} == {
+        "SCENARIO_RUN",
+        "API_RESULT",
+    }
+    serialized = str(projected)
+    assert "sanitized_metadata" not in serialized
+    assert "provenance" not in serialized
+    assert "synthetic:contact.control" not in serialized
+    assert "Synthetic Capability Lab T0 control request" not in serialized
 
 
 def test_semantic_scenario_fails_when_reason_code_does_not_match_runtime(session):
