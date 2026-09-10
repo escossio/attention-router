@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from attention_router.core.authority import AuthorityResult, evaluate_effective_authority
+from attention_router.core.capabilities import CapabilityAvailability
 from attention_router.core.capability_lab import (
     CapabilityLabObservation,
     CapabilityLabScenario,
@@ -53,6 +55,19 @@ def test_capability_lab_fixture_covers_allowance_boundaries_without_real_values(
     assert "longitude" not in serialized.lower()
 
 
+def test_lab_reuses_canonical_capability_name_validation():
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))[0]
+    payload["capability_key"] = " Personal.Identity.CPF "
+
+    scenario = CapabilityLabScenario.model_validate(payload)
+
+    assert scenario.capability_key == "personal.identity.cpf"
+
+    payload["capability_key"] = "cpf"
+    with pytest.raises(ValidationError):
+        CapabilityLabScenario.model_validate(payload)
+
+
 def test_non_approval_scenario_cannot_simulate_human_decision():
     with pytest.raises(ValidationError):
         CapabilityLabScenario(
@@ -80,6 +95,24 @@ def test_denied_or_pending_scenario_cannot_expect_grant():
             simulated_human_decision="NONE",
             expected_grant_mode="PERSISTENT",
         )
+
+
+def test_current_no_grant_authority_gap_is_explicit_not_hidden():
+    cpf = {
+        scenario.scenario_id: scenario for scenario in _scenarios()
+    }["personal.identity.cpf.requires-approval-once"]
+
+    current = evaluate_effective_authority(
+        availability=CapabilityAvailability.OPERATIONAL,
+        policy_allows=True,
+        grant_active=False,
+        side_effect=False,
+        default_approval_policy="REQUIRES_APPROVAL",
+    )
+
+    assert cpf.expected_resolution == AuthorityResult.REQUIRES_APPROVAL
+    assert current.result == AuthorityResult.DENY
+    assert current.reason_code == "CAPABILITY_GRANT_MISSING"
 
 
 def test_expected_and_observed_match_passes_without_mutation():
