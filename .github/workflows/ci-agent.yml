@@ -187,7 +187,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout trusted default-branch V2 proposal code
+      - name: Checkout trusted default-branch V2.1 proposal code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
@@ -219,7 +219,7 @@ jobs:
       - name: Install pinned Copilot CLI
         run: npm install -g @github/copilot@1.0.83
 
-      - name: Generate and validate read-only V2 proposal
+      - name: Generate structured edit and validate deterministic V2.1 patch
         id: propose
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -229,7 +229,7 @@ jobs:
           CI_AGENT_TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name }}
           CI_AGENT_TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
         run: >-
-          python -m scripts.ci_copilot_autofix_proposal
+          python -m scripts.ci_copilot_autofix_proposal_v21
           --repo "$CI_AGENT_REPO"
           --pr-number "$CI_AGENT_PR_NUMBER"
           --head-sha "$CI_AGENT_HEAD_SHA"
