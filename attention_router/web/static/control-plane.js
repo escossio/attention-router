@@ -5,6 +5,7 @@
     token: "",
     connected: false,
     snapshot: null,
+    scenarioEngine: null,
     policies: [],
     capabilities: [],
     approvals: [],
@@ -83,16 +84,24 @@
   async function loadRuntime() {
     const calls = [
       fetchJson("/api/v1/admin/platform/operations/snapshot"),
+      fetchJson("/api/v1/admin/platform/operations/capability-lab/scenario-engine"),
       fetchJson("/api/v1/admin/policies"),
       fetchJson("/api/v1/admin/platform/matrix"),
       fetchJson("/api/v1/private/response-reviews?review_status=PENDING"),
       fetchJson("/api/v1/private/execution-intents?intent_status=PENDING"),
     ];
 
-    const [snapshot, policies, capabilities, approvalResponse, intentResponse] =
-      await Promise.all(calls);
+    const [
+      snapshot,
+      scenarioEngine,
+      policies,
+      capabilities,
+      approvalResponse,
+      intentResponse,
+    ] = await Promise.all(calls);
 
     state.snapshot = snapshot;
+    state.scenarioEngine = scenarioEngine;
     state.policies = Array.isArray(policies) ? policies : [];
     state.capabilities = Array.isArray(capabilities) ? capabilities : [];
     state.approvals = Array.isArray(approvalResponse?.items) ? approvalResponse.items : [];
@@ -107,6 +116,7 @@
     renderMetrics();
     renderRuntime();
     renderScenarios();
+    renderScenarioEngine();
     renderApprovals();
     renderCapabilities();
   }
@@ -168,6 +178,13 @@
     provenance.textContent = `runtime ${runtimeRevision}`;
   }
 
+  function engineScenario(scenarioKey) {
+    const scenarios = Array.isArray(state.scenarioEngine?.scenarios)
+      ? state.scenarioEngine.scenarios
+      : [];
+    return scenarios.find((item) => item.scenario_key === scenarioKey) || null;
+  }
+
   function renderScenarios() {
     const container = $("#scenario-list");
     if (!container) return;
@@ -182,18 +199,85 @@
       .map((item) => {
         const decision = firstDefined(item.simulated_human_decision, "NONE");
         const grant = firstDefined(item.expected_grant_mode, "NONE");
+        const binding = item.engine_scenario_key || null;
+        const engine = binding ? engineScenario(binding) : null;
+        let bindingState = "UNBOUND";
+        if (binding && !state.connected) bindingState = "BOUND / NOT OBSERVED";
+        if (binding && state.connected && !engine) bindingState = "BOUND / MISSING";
+        if (binding && engine && !engine.latest_run) bindingState = "BOUND / INCOMPLETE";
+        if (binding && engine?.latest_run) bindingState = `BOUND / ${engine.latest_run.status}`;
+
         return `
           <article class="record">
             <div class="record-main">
-              <span class="record-kicker">synthetic / ${escapeHtml(item.scenario_id)}</span>
+              <span class="record-kicker">feature hypothesis / ${escapeHtml(item.scenario_id)}</span>
               <h3>${escapeHtml(item.title)}</h3>
               <p>${escapeHtml(item.request_text)}</p>
               <small>
-                capability: ${escapeHtml(item.capability_key)} · decisão simulada:
+                capability: ${escapeHtml(item.capability_key)} · esperado:
+                ${escapeHtml(item.expected_resolution)} · decisão simulada:
                 ${escapeHtml(decision)} · grant esperado: ${escapeHtml(grant)}
               </small>
+              <small>
+                engine binding: ${escapeHtml(binding || "none")} · sem binding/evidência, o resultado é INCOMPLETE
+              </small>
             </div>
-            <div class="record-state">${escapeHtml(item.expected_resolution)}</div>
+            <div class="record-state">${escapeHtml(bindingState)}</div>
+          </article>
+        `;
+      })
+      .join("");
+  }
+
+  function renderScenarioEngine() {
+    const metrics = $("#scenario-engine-metrics");
+    const container = $("#scenario-engine-list");
+    if (!metrics || !container) return;
+
+    if (!state.connected || !state.scenarioEngine) {
+      metrics.innerHTML = `
+        <div><small>Autoridade</small><strong>OBSERVATION ONLY</strong></div>
+        <div><small>Cenários registrados</small><strong>—</strong></div>
+        <div><small>Runs recentes</small><strong>—</strong></div>
+        <div><small>Mutação</small><strong>NONE</strong></div>
+      `;
+      container.innerHTML =
+        '<div class="empty-state">Conecte-se para observar o Scenario Engine persistido.</div>';
+      return;
+    }
+
+    metrics.innerHTML = `
+      <div><small>Autoridade</small><strong>${escapeHtml(state.scenarioEngine.authority)}</strong></div>
+      <div><small>Cenários registrados</small><strong>${escapeHtml(state.scenarioEngine.registered_scenario_count)}</strong></div>
+      <div><small>Runs recentes</small><strong>${escapeHtml(state.scenarioEngine.recent_run_count)}</strong></div>
+      <div><small>Read-only</small><strong>${state.scenarioEngine.read_only === true ? "YES" : "NO"}</strong></div>
+    `;
+
+    const runs = Array.isArray(state.scenarioEngine.recent_runs)
+      ? state.scenarioEngine.recent_runs
+      : [];
+    if (!runs.length) {
+      container.innerHTML =
+        '<div class="empty-state">Nenhum ScenarioRun persistido foi observado neste tenant.</div>';
+      return;
+    }
+
+    container.innerHTML = runs
+      .map((run) => {
+        const evidenceCount = Array.isArray(run.evidence_refs) ? run.evidence_refs.length : 0;
+        const stepTotal = firstDefined(run.step_summary?.total, 0);
+        return `
+          <article class="record">
+            <div class="record-main">
+              <span class="record-kicker">scenario engine / ${escapeHtml(run.run_id)}</span>
+              <h3>${escapeHtml(run.scenario_key || "scenario não resolvido")}</h3>
+              <p>correlação: ${escapeHtml(run.correlation_id)}</p>
+              <small>
+                versão: ${escapeHtml(run.scenario_version)} · steps: ${escapeHtml(stepTotal)} ·
+                evidence refs: ${escapeHtml(evidenceCount)} · cleanup: ${escapeHtml(run.cleanup_state)}
+              </small>
+            </div>
+            <div class="record-state">${escapeHtml(run.status)}</div>
           </article>
         `;
       })
@@ -238,7 +322,7 @@
               <span class="record-kicker">review / ${escapeHtml(id)}</span>
               <h3>${escapeHtml(approvalTitle(item))}</h3>
               <p>correlação: ${escapeHtml(decisionId)}</p>
-              <small>Esta fila ainda representa Response Review, não AuthorizationRequest.</small>
+              <small>Response Review ainda não é HumanExecutionAuthorization.</small>
             </div>
             <div class="record-state">${escapeHtml(status)}</div>
           </article>
@@ -249,6 +333,7 @@
 
   function capabilityTitle(item) {
     return firstDefined(
+      item.capability,
       item.capability_key,
       item.canonical_key,
       item.identity,
@@ -262,32 +347,32 @@
     const container = $("#capability-list");
     if (!state.connected) {
       container.innerHTML =
-        '<div class="empty-state">Conecte-se para carregar a matrix atual.</div>';
+        '<div class="empty-state">Conecte-se para carregar o registry de capabilities.</div>';
       return;
     }
     if (!state.capabilities.length) {
       container.innerHTML =
-        '<div class="empty-state">Nenhuma capability de plataforma foi anunciada.</div>';
+        '<div class="empty-state">Nenhuma capability canônica foi observada.</div>';
       return;
     }
 
     container.innerHTML = state.capabilities
       .map((item) => {
         const title = capabilityTitle(item);
-        const status = firstDefined(
-          item.authorization_status,
-          item.status,
-          item.state,
-          item.authorized === true ? "AUTHORIZED" : "OBSERVED",
-        );
-        const source = firstDefined(item.device_id, item.source, item.provider, "platform");
+        const status = firstDefined(item.state, item.status, "OBSERVED");
+        const provider = firstDefined(item.bound_provider, item.required_provider, "internal / none");
+        const sensitivity = firstDefined(item.sensitivity, "unknown");
+        const effect = item.side_effect === true ? "side effect" : "no side effect";
         return `
           <article class="record">
             <div class="record-main">
-              <span class="record-kicker">platform capability</span>
+              <span class="record-kicker">canonical runtime capability</span>
               <h3>${escapeHtml(title)}</h3>
-              <p>origem: ${escapeHtml(source)}</p>
-              <small>Não confundir com GovernedCapability do Control Plane.</small>
+              <p>provider: ${escapeHtml(provider)}</p>
+              <small>
+                sensitivity: ${escapeHtml(sensitivity)} · ${escapeHtml(effect)} ·
+                este é o registry existente que o Lab deve exercitar, não duplicar
+              </small>
             </div>
             <div class="record-state">${escapeHtml(status)}</div>
           </article>
@@ -326,7 +411,9 @@
       toast("Capability Lab conectado ao runtime.");
     } catch (error) {
       state.connected = false;
+      state.scenarioEngine = null;
       renderConnection();
+      renderScenarioEngine();
       $("#runtime-state").textContent = "ERRO";
       $("#runtime-state").className = "state-pill blocked";
       $("#runtime-provenance").textContent = "falha ao consultar runtime";
@@ -339,6 +426,7 @@
 
   renderConnection();
   renderMetrics();
+  renderScenarioEngine();
   loadScenarios().catch((error) => {
     toast(error.message || "Falha ao carregar cenários sintéticos.", "error");
   });
