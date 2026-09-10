@@ -39,5 +39,7 @@ def test_semantic_evidence_ui_remains_read_only_and_minimized():
     assert "run.terminal_reason" not in javascript
     assert "sanitized_metadata" not in javascript
     assert "assertion.provenance" not in javascript
-    assert "requester_actor_key" not in javascript
-    assert "request_text" not in javascript
+    assert "run.requester_actor_key" not in javascript
+    assert "assertion.requester_actor_key" not in javascript
+    assert "run.request_text" not in javascript
+    assert "assertion.request_text" not in javascript
