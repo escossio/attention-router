@@ -10,6 +10,7 @@ from attention_router.infrastructure.models import (
     ScenarioRunRow,
     ScenarioStepRunRow,
     ScenarioVersionRow,
+    TenantRow,
 )
 from attention_router.platform.api import build_operations_router
 from attention_router.platform.capability_lab_read_model import read_scenario_engine_snapshot
@@ -42,6 +43,17 @@ def test_empty_scenario_engine_snapshot_is_explicitly_observation_only(session):
 def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(session):
     ensure_default_tenant(session)
     now = datetime.now(UTC)
+    other_tenant = TenantRow(
+        id="tenant-other",
+        slug="other",
+        name="Other synthetic tenant",
+        status="ACTIVE",
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(other_tenant)
+    session.flush()
+
     definition = ScenarioDefinitionRow(
         id="scenario-definition-lab",
         tenant_id=DEFAULT_TENANT_ID,
@@ -77,7 +89,7 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
         synthetic_actor_binding_id=None,
         agent_execution_intent_id=None,
         status="PASSED",
-        root_correlation_id="correlation-synthetic",
+        root_correlation_id="must-not-be-projected-correlation",
         source_sha="source-synthetic",
         runtime_sha="runtime-synthetic",
         schema_revision="schema-synthetic",
@@ -91,7 +103,7 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
         verifying_at=now,
         completed_at=now,
         expires_at=now + timedelta(minutes=5),
-        terminal_reason="SYNTHETIC_PASS",
+        terminal_reason="must-not-be-projected-terminal",
         cleanup_state="COMPLETE",
         updated_at=now,
     )
@@ -106,7 +118,7 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
         attempt=1,
         max_attempts=1,
         idempotency_key="scenario-run-lab:0:synthetic",
-        correlation_id="correlation-synthetic",
+        correlation_id="must-not-be-projected-step-correlation",
         execution_lease_id=None,
         created_at=now,
         started_at=now,
@@ -130,7 +142,22 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
         sanitized_metadata={"private_detail": "must-not-be-projected"},
         created_at=now,
     )
-    session.add_all([definition, version, run, step, evidence])
+    foreign_evidence = EvidenceReferenceRow(
+        id="evidence-other-tenant",
+        tenant_id=other_tenant.id,
+        evidence_type="SCENARIO_RUN",
+        finding_id=None,
+        finding_occurrence_id=None,
+        internal_entity_type="scenario_run",
+        internal_entity_id=run.id,
+        external_reference=None,
+        artifact_reference=None,
+        trace_id=None,
+        source_sha="foreign-source",
+        sanitized_metadata={"foreign_detail": "must-not-cross-tenant"},
+        created_at=now,
+    )
+    session.add_all([definition, version, run, step, evidence, foreign_evidence])
     session.commit()
 
     before = {
@@ -169,8 +196,13 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
             "created_at": now,
         }
     ]
-    assert "sanitized_metadata" not in str(snapshot)
-    assert "must-not-be-projected" not in str(snapshot)
+    serialized = str(snapshot)
+    assert "sanitized_metadata" not in serialized
+    assert "must-not-be-projected" not in serialized
+    assert "must-not-cross-tenant" not in serialized
+    assert "evidence-other-tenant" not in serialized
+    assert "terminal_reason" not in projected_run
+    assert "correlation_id" not in projected_run
 
 
 def test_capability_lab_scenario_engine_surface_is_get_only():
@@ -180,10 +212,6 @@ def test_capability_lab_scenario_engine_surface_is_get_only():
     )
 
     path = "/api/v1/admin/platform/operations/capability-lab/scenario-engine"
-    routes = [
-        route
-        for route in router.routes
-        if getattr(route, "path", None) == path
-    ]
+    routes = [route for route in router.routes if getattr(route, "path", None) == path]
     assert len(routes) == 1
     assert routes[0].methods == {"GET"}
