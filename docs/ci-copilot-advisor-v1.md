@@ -87,6 +87,10 @@ and grants only the advisor job:
 
 There is no `contents: write`, no Git credential persistence, no merge permission, no `--yolo`, no allow-all tool mode and no repository/provider secret.
 
+## Proven boundary
+
+V1 has been proven on a controlled failed-CI event. The agent classified a synthetic pytest failure, collected and sanitized the failing-job log through the hardened redirect reader, invoked Copilot, validated the model response and published a `PROPOSE_FIX` diagnosis with no repository write authority.
+
 ## Next boundary
 
-Only after this advice-only V1 is proven on real failed CI events may a later boundary let Copilot produce an **ephemeral patch inside the runner**. Even then, the patch must remain non-persistent until a deterministic guardian validates file/change budgets and forbidden paths. Repository writes and automated merge remain out of scope for this V1.
+V1.5 may let Copilot produce an **ephemeral patch inside a disposable runner workspace** only after deterministic policy checks. The patch must remain non-persistent: no commit, push or merge. The guardian must enforce explicit opt-in, exact-head matching, file/path allowlists, patch budgets, deterministic test commands and explicit cleanup after validation.
