@@ -1,6 +1,3 @@
-import json
-from pathlib import Path
-
 from sqlalchemy import func, select
 
 from attention_router.application.platform.registry import sync_platform_registry
@@ -17,16 +14,17 @@ from attention_router.infrastructure.models import (
     ProviderDefinitionRow,
     ProviderInstanceRow,
 )
-from attention_router.platform.capability_lab_probe import probe_capability_t0
-
-
-FIXTURE = Path("attention_router/web/static/capability-lab-scenarios.json")
+from attention_router.platform.api import build_operations_router
+from attention_router.platform.capability_lab_probe import (
+    capability_lab_scenario,
+    load_capability_lab_scenarios,
+    probe_capability_t0,
+    probe_named_scenario_t0,
+)
 
 
 def _scenarios() -> dict[str, CapabilityLabScenario]:
-    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    scenarios = [CapabilityLabScenario.model_validate(item) for item in payload]
-    return {item.scenario_id: item for item in scenarios}
+    return load_capability_lab_scenarios()
 
 
 def _count(session, model) -> int:
@@ -53,6 +51,28 @@ def _sync_registry(session) -> None:
     assert not session.deleted
 
 
+def test_probe_scenario_loader_is_fixed_to_repository_synthetic_hypotheses():
+    scenarios = load_capability_lab_scenarios()
+
+    assert set(scenarios) == {
+        "personal.identity.cpf.requires-approval-once",
+        "personal.relationship.status.denied",
+        "location.current.temporary-grant",
+    }
+    assert all(item.synthetic_only for item in scenarios.values())
+    assert all(not item.uses_real_personal_data for item in scenarios.values())
+    assert all(not item.production_effects_allowed for item in scenarios.values())
+
+
+def test_unknown_probe_scenario_fails_closed():
+    try:
+        capability_lab_scenario("synthetic.but.not.registered")
+    except KeyError as exc:
+        assert exc.args == ("CAPABILITY_LAB_SCENARIO_UNKNOWN",)
+    else:  # pragma: no cover - contract guard
+        raise AssertionError("unknown scenario must fail closed")
+
+
 def test_unknown_cpf_probe_reports_canonical_unknown_without_mutation(session):
     _sync_registry(session)
     scenario = _scenarios()["personal.identity.cpf.requires-approval-once"]
@@ -76,6 +96,26 @@ def test_unknown_cpf_probe_reports_canonical_unknown_without_mutation(session):
     assert comparison.mismatches == [
         "RESOLUTION_MISMATCH:expected=REQUIRES_APPROVAL;observed=UNAVAILABLE"
     ]
+
+
+def test_named_cpf_probe_returns_ephemeral_report_without_mutation(session):
+    _sync_registry(session)
+    before = _registry_counts(session)
+
+    report = probe_named_scenario_t0(
+        session,
+        "personal.identity.cpf.requires-approval-once",
+    )
+
+    assert _registry_counts(session) == before
+    assert not session.new
+    assert not session.dirty
+    assert not session.deleted
+    assert report.certification == "EPHEMERAL_ONLY"
+    assert report.probe.durable_evidence is False
+    assert report.probe.authority_result == "UNAVAILABLE"
+    assert report.probe.reason_code == "UNKNOWN_CAPABILITY"
+    assert report.comparison.status == ComparisonStatus.FAIL
 
 
 def test_registered_location_probe_reports_provider_unavailable_without_mutation(session):
@@ -147,3 +187,18 @@ def test_matching_ephemeral_probe_stays_incomplete_without_durable_t0_evidence(s
     assert comparison.mismatches == []
     assert comparison.incomplete_reasons == ["T0_RESOLUTION_EVIDENCE_MISSING"]
     assert comparison.evidence_refs == []
+
+
+def test_http_probe_accepts_only_repository_scenario_id():
+    router = build_operations_router(
+        get_session=lambda: None,
+        require_admin=lambda: None,
+    )
+    path = "/api/v1/admin/platform/operations/capability-lab/probe/{scenario_id}"
+    routes = [route for route in router.routes if getattr(route, "path", None) == path]
+
+    assert len(routes) == 1
+    route = routes[0]
+    assert route.methods == {"GET"}
+    assert [item.name for item in route.dependant.path_params] == ["scenario_id"]
+    assert [item.name for item in route.dependant.query_params] == []
