@@ -55,9 +55,10 @@ def test_capability_lab_reads_existing_protected_runtime_surfaces_only():
 
 def test_capability_lab_is_not_presented_as_customer_settings_ui():
     html = (STATIC / "control-plane.html").read_text(encoding="utf-8")
+    normalized_html = " ".join(html.split())
 
-    assert "bancada para provar features" in html
-    assert "Laboratório não é autoridade" in html
-    assert "detalhes de engenharia" in html
-    assert "Feature acceptance" in html
-    assert "SEM EFEITO DE PRODUÇÃO" in html
+    assert "bancada para provar features" in normalized_html
+    assert "Laboratório não é autoridade" in normalized_html
+    assert "detalhes de engenharia" in normalized_html
+    assert "Feature acceptance" in normalized_html
+    assert "SEM EFEITO DE PRODUÇÃO" in normalized_html
