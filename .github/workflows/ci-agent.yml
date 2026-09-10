@@ -86,7 +86,7 @@ jobs:
           CI_AGENT_TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name }}
           CI_AGENT_TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
         run: >-
-          python scripts/ci_copilot_advisor.py
+          python -m scripts.ci_copilot_advisor
           --repo "$CI_AGENT_REPO"
           --pr-number "$CI_AGENT_PR_NUMBER"
           --head-sha "$CI_AGENT_HEAD_SHA"
