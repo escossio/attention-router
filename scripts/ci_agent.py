@@ -190,10 +190,7 @@ def render_comment(
     for state in states:
         status = state.status
         conclusion = state.conclusion or "—"
-        if state.html_url:
-            workflow_label = f"[{state.name}]({state.html_url})"
-        else:
-            workflow_label = state.name
+        workflow_label = f"[{state.name}]({state.html_url})" if state.html_url else state.name
         lines.append(f"| {workflow_label} | `{status}` | `{conclusion}` |")
 
     failures = tuple(step for state in states for step in state.failed_steps)
@@ -221,6 +218,15 @@ def render_comment(
     else:
         lines.append("\nPróxima ação: revisão humana necessária antes de qualquer mutação.")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _fetch_current_pr_head(repo: str, pr_number: int, *, token: str) -> str:
+    payload = _request_json(
+        "GET",
+        _api_url(repo, f"pulls/{pr_number}"),
+        token=token,
+    )
+    return str((payload.get("head") or {}).get("sha") or "")
 
 
 def _fetch_runs_for_head(repo: str, head_sha: str, *, token: str) -> list[dict[str, Any]]:
@@ -320,6 +326,14 @@ def main(argv: list[str] | None = None) -> int:
     if not token:
         print("GITHUB_TOKEN is required", file=sys.stderr)
         return 2
+
+    current_head = _fetch_current_pr_head(args.repo, args.pr_number, token=token)
+    if current_head != args.head_sha:
+        print("CI_AGENT_STALE_HEAD=YES")
+        print(f"CI_AGENT_EVENT_HEAD={args.head_sha}")
+        print(f"CI_AGENT_CURRENT_HEAD={current_head}")
+        return 0
+
     states = build_workflow_states(args.repo, args.head_sha, token=token)
     body = render_comment(
         pr_number=args.pr_number,
