@@ -180,20 +180,21 @@ def test_failed_validation_reports_cleanup_after_finally(monkeypatch, tmp_path):
 
 def test_workflow_keeps_patch_trial_opt_in_read_only_and_disposable():
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    patch_job = workflow.split("\n  copilot-patch-trial:\n", 1)[1].split("\n  autofix-proposal:\n", 1)[0]
 
-    assert "copilot-patch-trial:" in workflow
-    assert "startsWith(github.event.workflow_run.head_branch, 'ci-agent-patch-trial/')" in workflow
-    assert "needs: [triage, copilot-advisor]" in workflow
-    assert "contents: read" in workflow
-    assert "contents: write" not in workflow
-    assert "copilot-requests: write" in workflow
-    assert "ref: ${{ github.event.workflow_run.head_sha }}" in workflow
-    assert "path: candidate" in workflow
-    assert workflow.count("persist-credentials: false") >= 4
-    assert "python-version: '3.12'" in workflow
-    assert "npm install -g @github/copilot@1.0.83" in workflow
-    assert "python -m scripts.ci_copilot_patch_trial_entrypoint" in workflow
-    assert "--candidate-dir candidate" in workflow
+    assert "startsWith(github.event.workflow_run.head_branch, 'ci-agent-patch-trial/')" in patch_job
+    assert "needs: [triage, copilot-advisor]" in patch_job
+    assert "contents: read" in patch_job
+    assert "contents: write" not in patch_job
+    assert "copilot-requests: write" in patch_job
+    assert "ref: ${{ github.event.workflow_run.head_sha }}" in patch_job
+    assert "path: candidate" in patch_job
+    assert patch_job.count("persist-credentials: false") >= 2
+    assert "python-version: '3.12'" in patch_job
+    assert "npm install -g @github/copilot@1.0.83" in patch_job
+    assert "python -m scripts.ci_copilot_patch_trial_entrypoint" in patch_job
+    assert "--candidate-dir candidate" in patch_job
+    assert workflow.count("contents: write") == 1
     assert "secrets." not in workflow
 
 
