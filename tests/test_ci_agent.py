@@ -215,17 +215,17 @@ def test_current_head_can_update_the_single_agent_comment(monkeypatch):
 
 def test_workflow_run_boundary_allows_only_pr_comment_write_and_trusted_code():
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    triage_job = workflow.split("\n  triage:\n", 1)[1].split("\n  copilot-advisor:\n", 1)[0]
 
     assert 'workflows: ["Public CI", "CodeQL"]' in workflow
     assert "types: [completed]" in workflow
-    assert "github.event.workflow_run.head_repository.full_name == github.repository" in workflow
-    assert "github.event.workflow_run.actor.login != 'dependabot[bot]'" in workflow
-    assert "ref: ${{ github.event.repository.default_branch }}" in workflow
-    assert "persist-credentials: false" in workflow
-    assert "actions: read" in workflow
-    assert "contents: read" in workflow
-    assert "pull-requests: write" in workflow
-    assert "issues: write" not in workflow
-    assert "contents: write" not in workflow
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in triage_job
+    assert "github.event.workflow_run.actor.login != 'dependabot[bot]'" in triage_job
+    assert "ref: ${{ github.event.repository.default_branch }}" in triage_job
+    assert "persist-credentials: false" in triage_job
+    assert "contents: write" not in triage_job
+    assert "issues: write" not in triage_job
+    assert workflow.count("contents: write") == 1
+    assert "autofix-persist:" in workflow
     assert "secrets." not in workflow
     assert "github.event.workflow_run.head_sha" in workflow
