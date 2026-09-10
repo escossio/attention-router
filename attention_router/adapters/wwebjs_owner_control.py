@@ -12,7 +12,9 @@ from attention_router.application.owner_control import (
     OwnerControlAction,
     OwnerControlDispatchResult,
     OwnerControlParameters,
+    ReviewReferenceParameters,
 )
+from attention_router.application.owner_response_review_control import OwnerResponseReviewMutation
 
 
 class OwnerControlParseStatus(StrEnum):
@@ -63,6 +65,26 @@ _DISABLE_PATTERNS = tuple(
         rf"desative {_AUTO_RESPONSE_TARGET}",
     )
 )
+_REVIEW_REFERENCE = r"(?P<reference>[0-9a-f-]{8,36})"
+_APPROVE_REVIEW_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        rf"aprovar resposta {_REVIEW_REFERENCE}",
+        rf"aprove resposta {_REVIEW_REFERENCE}",
+    )
+)
+_REJECT_REVIEW_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        rf"negar resposta {_REVIEW_REFERENCE}",
+        rf"negue resposta {_REVIEW_REFERENCE}",
+        rf"rejeitar resposta {_REVIEW_REFERENCE}",
+        rf"rejeite resposta {_REVIEW_REFERENCE}",
+    )
+)
+_REVIEW_ADMINISTRATIVE_PREFIX = re.compile(
+    r"(?:aprovar|aprove|negar|negue|rejeitar|rejeite) resposta\b"
+)
 _ADMINISTRATIVE_WRITTEN_SECONDS = (
     r"(?:zero|dez|vinte|trinta|quarenta|cinquenta|sessenta|setenta|"
     r"oitenta|noventa|cem|duzentos|trezentos)"
@@ -98,6 +120,27 @@ def parse_owner_grace_control(text: str) -> OwnerControlParseResult:
     normalized = _normalize(text)
     if not normalized:
         return OwnerControlParseResult(OwnerControlParseStatus.NOT_CONTROL_COMMAND)
+    for pattern in _APPROVE_REVIEW_PATTERNS:
+        match = pattern.fullmatch(normalized)
+        if match:
+            return OwnerControlParseResult(
+                OwnerControlParseStatus.MATCHED,
+                OwnerControlAction.APPROVE_RESPONSE_REVIEW,
+                ReviewReferenceParameters(reference=match.group("reference")),
+            )
+    for pattern in _REJECT_REVIEW_PATTERNS:
+        match = pattern.fullmatch(normalized)
+        if match:
+            return OwnerControlParseResult(
+                OwnerControlParseStatus.MATCHED,
+                OwnerControlAction.REJECT_RESPONSE_REVIEW,
+                ReviewReferenceParameters(reference=match.group("reference")),
+            )
+    if _REVIEW_ADMINISTRATIVE_PREFIX.match(normalized):
+        return OwnerControlParseResult(
+            OwnerControlParseStatus.REJECTED,
+            reason_code="OWNER_REVIEW_REFERENCE_INVALID",
+        )
     for pattern in _SECONDS_PATTERNS:
         match = pattern.fullmatch(normalized)
         if match:
@@ -154,6 +197,12 @@ def canonical_command_text(result: OwnerControlParseResult) -> str:
         assert isinstance(result.parameters, GraceEnabledParameters)
         value = "true" if result.parameters.enabled else "false"
         return f"SET_OWNER_REPLY_GRACE_ENABLED enabled={value}"
+    if result.action in {
+        OwnerControlAction.APPROVE_RESPONSE_REVIEW,
+        OwnerControlAction.REJECT_RESPONSE_REVIEW,
+    }:
+        assert isinstance(result.parameters, ReviewReferenceParameters)
+        return f"{result.action.value} reference={result.parameters.reference}"
     return f"OWNER_CONTROL_REJECTED reason={result.reason_code or 'UNKNOWN'}"
 
 
@@ -162,6 +211,17 @@ def render_owner_control_confirmation(
     *,
     action: OwnerControlAction,
 ) -> str:
+    if action == OwnerControlAction.APPROVE_RESPONSE_REVIEW:
+        assert isinstance(result.mutation, OwnerResponseReviewMutation)
+        if result.mutation.duplicate:
+            return "Essa resposta já estava aprovada."
+        return "Resposta aprovada. A autorização foi registrada; o envio segue pelos gates normais."
+    if action == OwnerControlAction.REJECT_RESPONSE_REVIEW:
+        assert isinstance(result.mutation, OwnerResponseReviewMutation)
+        if result.mutation.duplicate:
+            return "Essa resposta já estava negada."
+        return "Resposta negada. Ela não será liberada por esta revisão."
+
     control = result.mutation.control
     if action == OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED:
         if control.automatic_responses_enabled:
@@ -196,7 +256,15 @@ def render_owner_control_error(reason_code: str) -> str:
         return "Não consegui alterar a espera: configuração indisponível."
     if reason_code == "OWNER_CONTROL_GRACE_POLICY_AMBIGUOUS":
         return "Não consegui alterar a espera: há mais de uma configuração aplicável."
-    return "Não consegui alterar a espera."
+    if reason_code == "OWNER_REVIEW_REFERENCE_INVALID":
+        return "Não consegui identificar a resposta: referência inválida."
+    if reason_code == "OWNER_REVIEW_NOT_FOUND":
+        return "Não encontrei essa resposta para revisão."
+    if reason_code == "OWNER_REVIEW_REFERENCE_AMBIGUOUS":
+        return "A referência corresponde a mais de uma revisão; não apliquei nenhuma ação."
+    if reason_code.startswith("review cannot be"):
+        return "Essa revisão já foi decidida de outra forma; não alterei o estado."
+    return "Não consegui aplicar o comando."
 
 
 __all__ = [
