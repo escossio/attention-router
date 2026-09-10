@@ -288,7 +288,12 @@ def apply_and_validate_ephemerally(
         if check.returncode != 0:
             raise PatchTrialError("git apply --check rejected the proposed patch")
 
-        applied = _run(["git", "apply", "--whitespace=error-all", "-"], cwd=candidate_dir, input_text=proposal.patch, timeout=20)
+        applied = _run(
+            ["git", "apply", "--whitespace=error-all", "-"],
+            cwd=candidate_dir,
+            input_text=proposal.patch,
+            timeout=20,
+        )
         if applied.returncode != 0:
             raise PatchTrialError("git apply failed")
 
@@ -310,22 +315,14 @@ def apply_and_validate_ephemerally(
         )
         for command in validation_commands:
             commands.append(" ".join(command))
-            result = _run(command, cwd=candidate_dir, env=env, timeout=120)
-            if result.returncode != 0:
-                tail = (result.stdout + "\n" + result.stderr)[-1500:].strip()
+            command_result = _run(command, cwd=candidate_dir, env=env, timeout=120)
+            if command_result.returncode != 0:
+                tail = (command_result.stdout + "\n" + command_result.stderr)[-1500:].strip()
                 detail = f"validation command failed: {' '.join(command)}; {tail}"
-                return ValidationResult(
-                    status="VALIDATION_FAILED",
-                    target_files=proposal.target_files,
-                    changed_lines=changed_lines,
-                    patch_sha256=patch_hash,
-                    commands=tuple(commands),
-                    cleanup_clean=False,
-                    detail=detail,
-                )
-
-        status = "VALIDATED_PASS"
-        detail = "ephemeral patch passed deterministic targeted validation"
+                break
+        else:
+            status = "VALIDATED_PASS"
+            detail = "ephemeral patch passed deterministic targeted validation"
     except (PatchTrialError, subprocess.TimeoutExpired) as exc:
         detail = str(exc)
     finally:
@@ -530,7 +527,7 @@ def main(argv: list[str] | None = None) -> int:
     comment_id = _upsert_comment(args.repo, args.pr_number, body, token=token)
     print(f"CI_COPILOT_PATCH_TRIAL_COMMENT_ID={comment_id}")
     print(f"CI_COPILOT_PATCH_TRIAL_MODEL_CALLED={'YES' if blocked_reason is None else 'NO'}")
-    print(f"CI_COPILOT_PATCH_TRIAL_PERSISTENT_MUTATION=NO")
+    print("CI_COPILOT_PATCH_TRIAL_PERSISTENT_MUTATION=NO")
     if result is not None:
         print(f"CI_COPILOT_PATCH_TRIAL_RESULT={result.status}")
         print(f"CI_COPILOT_PATCH_TRIAL_CLEANUP={'CLEAN' if result.cleanup_clean else 'DIRTY'}")
