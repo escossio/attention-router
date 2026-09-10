@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from attention_router.core.control_plane import DecisionMode, GrantMode
+from attention_router.core.authority import AuthorityResult
 
 
 CAPABILITY_LAB_SCHEMA_VERSION = "capability-lab.v0"
@@ -17,6 +17,15 @@ class SimulatedHumanDecision(StrEnum):
     DENY = "DENY"
 
 
+class ExpectedGrantMode(StrEnum):
+    """Lab expectation only; it does not define the runtime grant storage contract."""
+
+    NONE = "NONE"
+    ONE_TIME = "ONE_TIME"
+    TIME_BOUND = "TIME_BOUND"
+    PERSISTENT = "PERSISTENT"
+
+
 class ComparisonStatus(StrEnum):
     PASS = "PASS"
     FAIL = "FAIL"
@@ -26,8 +35,9 @@ class ComparisonStatus(StrEnum):
 class CapabilityLabScenario(BaseModel):
     """Synthetic acceptance scenario for feature validation in the Capability Lab.
 
-    This contract describes an expected behavior. It is deliberately incapable of
-    representing permission to produce a production external effect.
+    This contract describes expected behavior around the existing capability and
+    authority runtime. It cannot grant execution authority or produce a production
+    external effect.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -40,9 +50,10 @@ class CapabilityLabScenario(BaseModel):
     requester_actor_key: str = Field(pattern=r"^synthetic[.:/][a-zA-Z0-9_.:/-]{1,119}$")
     request_text: str = Field(min_length=1, max_length=1000)
     request_context: dict[str, Any] = Field(default_factory=dict)
-    expected_resolution: DecisionMode
+    expected_resolution: AuthorityResult
     simulated_human_decision: SimulatedHumanDecision = SimulatedHumanDecision.NONE
-    expected_grant_mode: GrantMode = GrantMode.NONE
+    expected_grant_mode: ExpectedGrantMode = ExpectedGrantMode.NONE
+    engine_scenario_key: str | None = Field(default=None, pattern=r"^SCN-PE-[0-9]{3}$")
     tags: list[str] = Field(default_factory=list)
     synthetic_only: Literal[True] = True
     uses_real_personal_data: Literal[False] = False
@@ -50,15 +61,15 @@ class CapabilityLabScenario(BaseModel):
 
     @model_validator(mode="after")
     def validate_expected_flow(self) -> "CapabilityLabScenario":
-        if self.expected_resolution != DecisionMode.REQUIRE_APPROVAL:
+        if self.expected_resolution != AuthorityResult.REQUIRES_APPROVAL:
             if self.simulated_human_decision != SimulatedHumanDecision.NONE:
-                raise ValueError("human decision is only valid for REQUIRE_APPROVAL scenarios")
-            if self.expected_grant_mode != GrantMode.NONE:
+                raise ValueError("human decision is only valid for REQUIRES_APPROVAL scenarios")
+            if self.expected_grant_mode != ExpectedGrantMode.NONE:
                 raise ValueError("non-approval scenarios cannot expect a permission grant")
             return self
 
         if self.simulated_human_decision != SimulatedHumanDecision.APPROVE:
-            if self.expected_grant_mode != GrantMode.NONE:
+            if self.expected_grant_mode != ExpectedGrantMode.NONE:
                 raise ValueError("only simulated approval can expect a permission grant")
         return self
 
@@ -70,8 +81,8 @@ class CapabilityLabObservation(BaseModel):
 
     schema_version: Literal["capability-lab.v0"] = CAPABILITY_LAB_SCHEMA_VERSION
     scenario_id: str = Field(pattern=r"^[a-z][a-z0-9_.-]{2,119}$")
-    observed_resolution: DecisionMode | None = None
-    observed_grant_mode: GrantMode = GrantMode.NONE
+    observed_resolution: AuthorityResult | None = None
+    observed_grant_mode: ExpectedGrantMode = ExpectedGrantMode.NONE
     matched_rule_id: str | None = Field(default=None, max_length=64)
     evidence_refs: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
@@ -79,7 +90,7 @@ class CapabilityLabObservation(BaseModel):
 
     @model_validator(mode="after")
     def validate_observation(self) -> "CapabilityLabObservation":
-        if self.observed_resolution is None and self.observed_grant_mode != GrantMode.NONE:
+        if self.observed_resolution is None and self.observed_grant_mode != ExpectedGrantMode.NONE:
             raise ValueError("a grant observation requires an observed resolution")
         return self
 
