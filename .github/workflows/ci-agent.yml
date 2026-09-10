@@ -5,9 +5,9 @@ on:
     workflows: ["Public CI", "CodeQL"]
     types: [completed]
 
-# workflow_run executes from the default branch. The deterministic V0 triage may
-# update only PR comments. Repository contents remain read-only. V1.5 may mutate
-# only a disposable runner checkout and never persists that patch to GitHub.
+# workflow_run executes trusted agent code from the default branch. V0/V1/V1.5
+# remain repository read-only. V2 separates model proposal from persistence: the
+# Copilot job has contents: read; only the deterministic persist job gets write.
 permissions:
   actions: read
   contents: read
@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: ci-agent-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   triage:
@@ -160,4 +160,134 @@ jobs:
           --head-sha "$CI_AGENT_HEAD_SHA"
           --trigger-workflow "$CI_AGENT_TRIGGER_WORKFLOW"
           --trigger-run-id "$CI_AGENT_TRIGGER_RUN_ID"
+          --candidate-dir candidate
+
+  autofix-proposal:
+    needs: [triage, copilot-advisor]
+    if: >-
+      needs.triage.result == 'success' &&
+      needs.copilot-advisor.result == 'success' &&
+      github.event.workflow_run.name == 'Public CI' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.pull_requests[0].number != null &&
+      github.event.workflow_run.actor.login != 'dependabot[bot]' &&
+      startsWith(github.event.workflow_run.head_branch, 'ci-agent-autofix/')
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+      copilot-requests: write
+    outputs:
+      ready: ${{ steps.propose.outputs.ready }}
+      proposal_b64: ${{ steps.propose.outputs.proposal_b64 }}
+      source_head: ${{ steps.propose.outputs.source_head }}
+      branch: ${{ steps.propose.outputs.branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted default-branch V2 proposal code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout exact PR head into read-only candidate workspace
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: candidate
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python 3.12 for proposal validation
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install trusted proposal validation dependencies
+        run: python -m pip install -e '.[dev]'
+
+      - name: Set up Node.js 22 for Copilot CLI
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+
+      - name: Install pinned Copilot CLI
+        run: npm install -g @github/copilot@1.0.83
+
+      - name: Generate and validate read-only V2 proposal
+        id: propose
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CI_AGENT_REPO: ${{ github.repository }}
+          CI_AGENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          CI_AGENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_AGENT_TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name }}
+          CI_AGENT_TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: >-
+          python -m scripts.ci_copilot_autofix_proposal
+          --repo "$CI_AGENT_REPO"
+          --pr-number "$CI_AGENT_PR_NUMBER"
+          --head-sha "$CI_AGENT_HEAD_SHA"
+          --trigger-workflow "$CI_AGENT_TRIGGER_WORKFLOW"
+          --trigger-run-id "$CI_AGENT_TRIGGER_RUN_ID"
+          --candidate-dir candidate
+
+  autofix-persist:
+    needs: [triage, copilot-advisor, autofix-proposal]
+    if: >-
+      needs.triage.result == 'success' &&
+      needs.copilot-advisor.result == 'success' &&
+      needs.autofix-proposal.result == 'success' &&
+      needs.autofix-proposal.outputs.ready == 'true'
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted default-branch V2 persistence code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout exact source head into credential-free candidate workspace
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.autofix-proposal.outputs.source_head }}
+          path: candidate
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python 3.12 for deterministic persistence revalidation
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install trusted persistence validation dependencies
+        run: python -m pip install -e '.[dev]'
+
+      - name: Revalidate and persist one bounded autofix commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CI_AGENT_REPO: ${{ github.repository }}
+          CI_AGENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          CI_AGENT_SOURCE_HEAD: ${{ needs.autofix-proposal.outputs.source_head }}
+          CI_AGENT_BRANCH: ${{ needs.autofix-proposal.outputs.branch }}
+          CI_AGENT_PROPOSAL_B64: ${{ needs.autofix-proposal.outputs.proposal_b64 }}
+        run: >-
+          python -m scripts.ci_copilot_autofix_persist
+          --repo "$CI_AGENT_REPO"
+          --pr-number "$CI_AGENT_PR_NUMBER"
+          --source-head "$CI_AGENT_SOURCE_HEAD"
+          --branch "$CI_AGENT_BRANCH"
+          --proposal-b64 "$CI_AGENT_PROPOSAL_B64"
           --candidate-dir candidate
