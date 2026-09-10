@@ -89,6 +89,17 @@ def test_capability_lab_presents_existing_runtime_as_canonical():
     assert "este é o registry existente que o Lab deve exercitar, não duplicar" in javascript
 
 
+def test_capability_lab_hypotheses_show_registry_and_staged_expectations():
+    javascript = (STATIC / "control-plane.js").read_text(encoding="utf-8")
+
+    assert 'label: "UNREGISTERED"' in javascript
+    assert "não existe no registry canônico observado" in javascript
+    assert "T0 esperado:" in javascript
+    assert "T1 simulado:" in javascript
+    assert "T2 esperado:" in javascript
+    assert "registry:" in javascript
+
+
 def test_capability_lab_frontend_does_not_expect_minimized_scenario_fields():
     javascript = (STATIC / "control-plane.js").read_text(encoding="utf-8")
 
