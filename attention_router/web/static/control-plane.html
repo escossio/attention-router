@@ -35,10 +35,10 @@
           <span class="nav-index">04</span><span>Capacidades</span>
         </button>
         <button class="nav-item" data-view="rules" type="button">
-          <span class="nav-index">05</span><span>Regras</span>
+          <span class="nav-index">05</span><span>Authority</span>
         </button>
         <button class="nav-item" data-view="grants" type="button">
-          <span class="nav-index">06</span><span>Permissões</span>
+          <span class="nav-index">06</span><span>Grants</span>
         </button>
       </nav>
 
@@ -79,7 +79,7 @@
               <h2>Uma bancada para provar features antes de desenhar a experiência do usuário.</h2>
               <p class="hero-copy">
                 Esta tela é uma superfície de engenharia: observa contratos, estados e fronteiras,
-                exercita cenários e ajuda a validar capacidades. Ela não define a UX comercial da Andy.
+                exercita hipóteses e ajuda a validar capacidades. Ela não define a UX comercial da Andy.
               </p>
             </div>
             <div class="hero-state">
@@ -90,9 +90,9 @@
 
           <div class="metric-grid" aria-label="Resumo do laboratório">
             <article class="metric">
-              <p>Cenários sintéticos</p>
+              <p>Hipóteses de feature</p>
               <strong id="metric-scenarios">0</strong>
-              <small>fixtures de aceitação</small>
+              <small>fixtures sintéticos</small>
             </article>
             <article class="metric">
               <p>Revisões pendentes</p>
@@ -105,9 +105,9 @@
               <small>configuração observada</small>
             </article>
             <article class="metric">
-              <p>Capacidades de plataforma</p>
+              <p>Capabilities canônicas</p>
               <strong id="metric-capabilities">—</strong>
-              <small>matrix atual</small>
+              <small>registry do runtime</small>
             </article>
             <article class="metric">
               <p>Execution intents pendentes</p>
@@ -121,18 +121,17 @@
               <div class="panel-heading">
                 <div>
                   <p class="eyebrow">Objeto de teste</p>
-                  <h3>Governed Capabilities</h3>
+                  <h3>Capability Runtime</h3>
                 </div>
-                <span class="tag planned">CONTRATO V0</span>
+                <span class="tag current">RUNTIME EXISTENTE</span>
               </div>
               <p>
-                Informações e ações são identificadas por capability keys estáveis, como
-                <code>personal.identity.cpf</code>. O laboratório mostra como uma solicitação
-                atravessa regra, autorização e eventual grant sem amarrar isso à interface final.
+                O Attention Router já possui manifest versionado, registry, provider resolution,
+                grants e avaliação de authority. O laboratório exercita esse motor; não cria outro.
               </p>
               <div class="flow">
-                <span>Cenário</span><i>→</i><span>Capability</span><i>→</i>
-                <span>Regra</span><i>→</i><span>Autorização</span><i>→</i><span>Grant</span>
+                <span>Hipótese</span><i>→</i><span>CapabilityRequest</span><i>→</i>
+                <span>Authority</span><i>→</i><span>Evidência</span><i>→</i><span>Comparação</span>
               </div>
             </article>
 
@@ -145,9 +144,8 @@
                 <span class="tag safe">FAIL-CLOSED</span>
               </div>
               <p>
-                O Capability Lab pode observar e, em fases futuras, disparar cenários controlados.
-                Ele não transforma clique de desenvolvedor, resposta do modelo ou estado de tela
-                em autorização de produção.
+                O Capability Lab observa e valida. Ele não transforma clique de desenvolvedor,
+                resposta do modelo ou estado de tela em autorização de produção.
               </p>
               <ul class="compact-list">
                 <li>nenhuma credencial embutida no frontend;</li>
@@ -163,18 +161,40 @@
           <div class="section-heading">
             <div>
               <p class="eyebrow">Feature acceptance</p>
-              <h2>Cenários sintéticos</h2>
+              <h2>Hipóteses sintéticas</h2>
             </div>
             <span class="tag safe">SEM EFEITO DE PRODUÇÃO</span>
           </div>
           <p class="section-copy">
-            Estes cenários descrevem comportamento esperado. Eles podem usar complexidade técnica
-            porque são ferramentas de engenharia; nenhum deles contém dado pessoal real ou concede
-            autoridade para executar efeitos externos.
+            Estes cards descrevem comportamento esperado. Sem vínculo explícito com um cenário do
+            engine e sem evidência suficiente, o resultado correto é INCOMPLETE — nunca PASS por aproximação.
           </p>
           <div id="scenario-list" class="record-list">
-            <div class="empty-state">Carregando cenários sintéticos…</div>
+            <div class="empty-state">Carregando hipóteses sintéticas…</div>
           </div>
+
+          <article class="panel schema-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Runtime evidence</p>
+                <h3>Scenario Engine</h3>
+              </div>
+              <span class="tag safe">OBSERVATION ONLY</span>
+            </div>
+            <p>
+              Esta projeção lê ScenarioDefinition, ScenarioVersion, ScenarioRun, steps e referências
+              mínimas de evidência já persistidas. Ela não cria run, não executa step e não concede authority.
+            </p>
+            <div id="scenario-engine-metrics" class="grant-example">
+              <div><small>Autoridade</small><strong>OBSERVATION ONLY</strong></div>
+              <div><small>Cenários registrados</small><strong>—</strong></div>
+              <div><small>Runs recentes</small><strong>—</strong></div>
+              <div><small>Mutação</small><strong>NONE</strong></div>
+            </div>
+            <div id="scenario-engine-list" class="record-list">
+              <div class="empty-state">Conecte-se para observar o Scenario Engine persistido.</div>
+            </div>
+          </article>
         </section>
 
         <section class="view" data-view-panel="approvals">
@@ -183,12 +203,11 @@
               <p class="eyebrow">Validação de fronteira humana</p>
               <h2>Autorizações</h2>
             </div>
-            <span class="tag current">BASELINE ATUAL</span>
+            <span class="tag current">RUNTIME EXISTENTE</span>
           </div>
           <p class="section-copy">
-            Esta visão usa o fluxo humano já existente como evidência para desenvolver a futura
-            capability de autorização. Response Review e AuthorizationRequest continuam sendo
-            conceitos diferentes até que essa relação seja formalmente definida.
+            O runtime já possui HumanExecutionAuthorization e evidência durável de aprovação.
+            Response Review continua sendo um conceito diferente; o Lab não funde os dois por conveniência.
           </p>
           <div id="approval-list" class="record-list">
             <div class="empty-state">Conecte-se para carregar as revisões pendentes.</div>
@@ -198,18 +217,18 @@
         <section class="view" data-view-panel="capabilities">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Inventário para experimentação</p>
-              <h2>Capacidades</h2>
+              <p class="eyebrow">Runtime registry</p>
+              <h2>Capabilities</h2>
             </div>
-            <span class="tag planned">EVOLUÇÃO</span>
+            <span class="tag current">CANÔNICO</span>
           </div>
           <p class="section-copy">
-            A matrix abaixo mostra capacidades de plataforma já existentes. O catálogo de
-            capacidades governadas será uma abstração separada e poderá ser exercitado aqui
-            com fixtures e cenários sintéticos antes de integrar canais reais.
+            Esta visão mostra o registry versionado que já pertence ao Attention Router: estado,
+            provider, sensitivity e side-effect. Novas features devem evoluir esse contrato quando
+            necessário, não criar um segundo catálogo exclusivo do painel.
           </p>
           <div id="capability-list" class="record-list">
-            <div class="empty-state">Conecte-se para carregar a matrix atual.</div>
+            <div class="empty-state">Conecte-se para carregar o registry atual.</div>
           </div>
         </section>
 
@@ -217,35 +236,36 @@
           <div class="section-heading">
             <div>
               <p class="eyebrow">Inspeção técnica</p>
-              <h2>Regras de autorização</h2>
+              <h2>Authority</h2>
             </div>
-            <span class="tag planned">SCHEMA-FIRST</span>
+            <span class="tag current">RUNTIME EXISTENTE</span>
           </div>
           <div class="three-column">
             <article class="concept-card">
               <span>01</span>
-              <h3>Quem está pedindo?</h3>
-              <p>Contato, categoria, organização ou seletor sintético usado no cenário.</p>
+              <h3>Capability conhecida?</h3>
+              <p>Manifest, versão, availability e provider são resolvidos pelo registry existente.</p>
             </article>
             <article class="concept-card">
               <span>02</span>
-              <h3>O que está sendo pedido?</h3>
-              <p>Uma capability key estável, independente da frase usada na conversa.</p>
+              <h3>Existe authority?</h3>
+              <p>Policy, grant e propriedades da capability entram na avaliação determinística.</p>
             </article>
             <article class="concept-card">
               <span>03</span>
-              <h3>Por que resolveu assim?</h3>
-              <p>ALLOW, DENY ou REQUIRE_APPROVAL, com explicação e evidência observável.</p>
+              <h3>Qual resultado?</h3>
+              <p>ALLOW, DENY, REQUIRES_APPROVAL ou UNAVAILABLE, com reason code observável.</p>
             </article>
           </div>
           <article class="panel schema-panel">
             <div class="panel-heading">
-              <h3>Contrato sob teste</h3>
-              <span class="tag safe">SEM PERSISTÊNCIA AINDA</span>
+              <h3>Primeiro gap de feature já visível</h3>
+              <span class="tag planned">EXPECTED × OBSERVED</span>
             </div>
             <p>
-              Prioridade, seletores, escopos e TTL podem aparecer aqui porque são detalhes de
-              engenharia. A experiência final do usuário não precisa expor nenhum desses campos.
+              Hoje, a ausência de grant pode resultar em DENY antes do ramo REQUIRES_APPROVAL.
+              A hipótese “pedido sem grant → autorização humana → grant derivado” deve ser provada
+              no Lab antes de qualquer mudança deliberada no runtime.
             </p>
           </article>
         </section>
@@ -256,20 +276,21 @@
               <p class="eyebrow">Validação de permissão derivada</p>
               <h2>Grants</h2>
             </div>
-            <span class="tag planned">PRÓXIMA FASE</span>
+            <span class="tag current">RUNTIME EXISTENTE</span>
           </div>
           <p class="section-copy">
-            O laboratório poderá demonstrar se uma aprovação gera corretamente permissão de uso
-            único, temporária ou persistente, incluindo expiração, revogação e proveniência.
+            O runtime já possui CapabilityGrantRow com grantor, grantee, capability, scope,
+            validade, constraints, provenance e revogação. O Lab não cria um segundo grant store;
+            ONE_TIME, TIME_BOUND e PERSISTENT são expectativas de comportamento a serem provadas.
           </p>
           <div class="grant-example">
             <div><small>Capability</small><strong>personal.identity.cpf</strong></div>
-            <div><small>Beneficiário</small><strong>actor/synthetic-contact</strong></div>
-            <div><small>Modo</small><strong>TIME_BOUND</strong></div>
-            <div><small>Origem</small><strong>authorization/synthetic</strong></div>
+            <div><small>Beneficiário</small><strong>synthetic/contact</strong></div>
+            <div><small>Expectativa</small><strong>TIME_BOUND</strong></div>
+            <div><small>Authority</small><strong>HUMAN BOUNDARY</strong></div>
           </div>
           <div class="empty-state">
-            Nenhum grant é criado por esta versão do laboratório. Isso é deliberado.
+            O Capability Lab V0 não cria, revoga ou consome grants de produção.
           </div>
         </section>
       </main>
