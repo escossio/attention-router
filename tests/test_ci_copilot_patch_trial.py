@@ -204,5 +204,5 @@ def test_patch_trial_has_no_persistent_git_mutation_commands():
     assert '["git", "push"' not in source
     assert "contents: write" not in source
     assert "git apply" in source
-    assert "git reset" in source
-    assert "git clean" in source
+    assert '["git", "reset", "--hard", "HEAD"]' in source
+    assert '["git", "clean", "-fdx"]' in source
