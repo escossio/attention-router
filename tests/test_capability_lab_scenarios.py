@@ -29,6 +29,7 @@ def test_capability_lab_fixture_is_valid_and_synthetic_only():
     assert all(not scenario.uses_real_personal_data for scenario in scenarios)
     assert all(not scenario.production_effects_allowed for scenario in scenarios)
     assert all(scenario.requester_actor_key.startswith("synthetic:") for scenario in scenarios)
+    assert all(scenario.engine_scenario_key is None for scenario in scenarios)
 
 
 def test_capability_lab_fixture_covers_allowance_boundaries_without_real_values():
@@ -39,11 +40,11 @@ def test_capability_lab_fixture_covers_allowance_boundaries_without_real_values(
     relationship = by_id["personal.relationship.status.denied"]
     location = by_id["location.current.temporary-grant"]
 
-    assert cpf.expected_resolution == "REQUIRE_APPROVAL"
+    assert cpf.expected_resolution == "REQUIRES_APPROVAL"
     assert cpf.expected_grant_mode == "ONE_TIME"
     assert relationship.expected_resolution == "DENY"
     assert relationship.expected_grant_mode == "NONE"
-    assert location.expected_resolution == "REQUIRE_APPROVAL"
+    assert location.expected_resolution == "REQUIRES_APPROVAL"
     assert location.expected_grant_mode == "TIME_BOUND"
 
     serialized = FIXTURE.read_text(encoding="utf-8")
@@ -75,7 +76,7 @@ def test_denied_or_pending_scenario_cannot_expect_grant():
             capability_key="personal.identity.cpf",
             requester_actor_key="synthetic:contact.invalid",
             request_text="Synthetic request",
-            expected_resolution="REQUIRE_APPROVAL",
+            expected_resolution="REQUIRES_APPROVAL",
             simulated_human_decision="NONE",
             expected_grant_mode="PERSISTENT",
         )
