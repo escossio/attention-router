@@ -120,7 +120,7 @@ def _write_output(name: str, value: str) -> None:
 
 def _emit_not_ready(reason: str) -> None:
     _write_output("ready", "false")
-    print(f"CI_COPILOT_AUTOFIX_V2_READY=NO")
+    print("CI_COPILOT_AUTOFIX_V2_READY=NO")
     print(f"CI_COPILOT_AUTOFIX_V2_BLOCK={reason}")
 
 
