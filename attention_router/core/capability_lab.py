@@ -95,7 +95,9 @@ class CapabilityLabObservation(BaseModel):
     observed_human_decision: SimulatedHumanDecision | None = None
     observed_grant_mode: ExpectedGrantMode | None = None
     matched_rule_id: str | None = Field(default=None, max_length=64)
-    evidence_refs: list[str] = Field(default_factory=list)
+    resolution_evidence_refs: list[str] = Field(default_factory=list)
+    human_decision_evidence_refs: list[str] = Field(default_factory=list)
+    grant_evidence_refs: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     production_effect_observed: bool = False
 
@@ -104,7 +106,24 @@ class CapabilityLabObservation(BaseModel):
         if self.observed_resolution is None:
             if self.observed_human_decision is not None or self.observed_grant_mode is not None:
                 raise ValueError("later-stage observations require an observed resolution")
+            if self.resolution_evidence_refs:
+                raise ValueError("resolution evidence requires an observed resolution")
+        if self.observed_human_decision is None and self.human_decision_evidence_refs:
+            raise ValueError("human decision evidence requires an observed human decision")
+        if self.observed_grant_mode is None and self.grant_evidence_refs:
+            raise ValueError("grant evidence requires an observed grant mode")
         return self
+
+    def all_evidence_refs(self) -> list[str]:
+        return list(
+            dict.fromkeys(
+                [
+                    *self.resolution_evidence_refs,
+                    *self.human_decision_evidence_refs,
+                    *self.grant_evidence_refs,
+                ]
+            )
+        )
 
 
 class CapabilityLabComparison(BaseModel):
@@ -142,6 +161,7 @@ def compare_scenario(
     if observation.errors:
         mismatches.extend(f"OBSERVATION_ERROR:{error}" for error in observation.errors)
 
+    resolution_matches = False
     if observation.observed_resolution is None:
         incomplete.append("T0_RESOLUTION_NOT_OBSERVED")
     elif observation.observed_resolution != scenario.expected_resolution:
@@ -149,7 +169,12 @@ def compare_scenario(
             "RESOLUTION_MISMATCH:"
             f"expected={scenario.expected_resolution};observed={observation.observed_resolution}"
         )
-    elif scenario.expected_resolution == AuthorityResult.REQUIRES_APPROVAL:
+    else:
+        resolution_matches = True
+        if not observation.resolution_evidence_refs:
+            incomplete.append("T0_RESOLUTION_EVIDENCE_MISSING")
+
+    if resolution_matches and scenario.expected_resolution == AuthorityResult.REQUIRES_APPROVAL:
         expected_decision = scenario.simulated_human_decision
         observed_decision = observation.observed_human_decision
 
@@ -170,29 +195,34 @@ def compare_scenario(
                 "HUMAN_DECISION_MISMATCH:"
                 f"expected={expected_decision};observed={observed_decision}"
             )
-        elif expected_decision == SimulatedHumanDecision.APPROVE:
-            if scenario.expected_grant_mode == ExpectedGrantMode.NONE:
-                if observation.observed_grant_mode not in {None, ExpectedGrantMode.NONE}:
+        else:
+            if not observation.human_decision_evidence_refs:
+                incomplete.append("T1_HUMAN_DECISION_EVIDENCE_MISSING")
+            if expected_decision == SimulatedHumanDecision.APPROVE:
+                if scenario.expected_grant_mode == ExpectedGrantMode.NONE:
+                    if observation.observed_grant_mode not in {None, ExpectedGrantMode.NONE}:
+                        mismatches.append(
+                            _grant_mismatch(
+                                ExpectedGrantMode.NONE,
+                                observation.observed_grant_mode,
+                            )
+                        )
+                elif observation.observed_grant_mode is None:
+                    incomplete.append("T2_GRANT_NOT_OBSERVED")
+                elif observation.observed_grant_mode != scenario.expected_grant_mode:
                     mismatches.append(
                         _grant_mismatch(
-                            ExpectedGrantMode.NONE,
+                            scenario.expected_grant_mode,
                             observation.observed_grant_mode,
                         )
                     )
-            elif observation.observed_grant_mode is None:
-                incomplete.append("T2_GRANT_NOT_OBSERVED")
-            elif observation.observed_grant_mode != scenario.expected_grant_mode:
+                elif not observation.grant_evidence_refs:
+                    incomplete.append("T2_GRANT_EVIDENCE_MISSING")
+            elif observation.observed_grant_mode not in {None, ExpectedGrantMode.NONE}:
                 mismatches.append(
-                    _grant_mismatch(
-                        scenario.expected_grant_mode,
-                        observation.observed_grant_mode,
-                    )
+                    _grant_mismatch(ExpectedGrantMode.NONE, observation.observed_grant_mode)
                 )
-        elif observation.observed_grant_mode not in {None, ExpectedGrantMode.NONE}:
-            mismatches.append(
-                _grant_mismatch(ExpectedGrantMode.NONE, observation.observed_grant_mode)
-            )
-    else:
+    elif resolution_matches:
         if observation.observed_human_decision not in {None, SimulatedHumanDecision.NONE}:
             mismatches.append(
                 "UNEXPECTED_HUMAN_DECISION:"
@@ -215,5 +245,5 @@ def compare_scenario(
         status=status,
         mismatches=mismatches,
         incomplete_reasons=incomplete,
-        evidence_refs=observation.evidence_refs,
+        evidence_refs=observation.all_evidence_refs(),
     )
