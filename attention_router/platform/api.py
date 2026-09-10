@@ -5,12 +5,16 @@ from collections.abc import Callable, Generator, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from attention_router.config import settings
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
+from attention_router.platform.capability_lab_probe import (
+    CapabilityLabProbeReport,
+    probe_named_scenario_t0,
+)
 from attention_router.platform.capability_lab_read_model import read_scenario_engine_snapshot
 from attention_router.platform.findings import FindingStatus, list_findings
 from attention_router.platform.operations import (
@@ -146,5 +150,24 @@ def build_operations_router(
             tenant_id=tenant_id,
             run_limit=run_limit,
         )
+
+    @router.get("/capability-lab/probe/{scenario_id}")
+    def capability_lab_t0_probe(
+        scenario_id: str,
+        session: Session = Depends(get_session),
+    ) -> CapabilityLabProbeReport:
+        """Probe T0 only for repository-owned synthetic hypotheses.
+
+        The HTTP client cannot choose capability, actor, policy, tenant, grant or
+        owner authorization. Unknown scenario ids fail closed.
+        """
+
+        try:
+            return probe_named_scenario_t0(session, scenario_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="CAPABILITY_LAB_SCENARIO_UNKNOWN",
+            ) from exc
 
     return router
