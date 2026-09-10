@@ -8,12 +8,14 @@ from sqlalchemy.orm import Session
 
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.infrastructure.models import (
+    AssertionResultRow,
     EvidenceReferenceRow,
     ScenarioDefinitionRow,
     ScenarioRunRow,
     ScenarioStepRunRow,
     ScenarioVersionRow,
 )
+from attention_router.platform.privacy import sanitized_summary
 
 
 CAPABILITY_LAB_AUTHORITY = "OBSERVATION_ONLY"
@@ -39,6 +41,46 @@ def _evidence_summary(rows: list[EvidenceReferenceRow]) -> list[dict[str, Any]]:
     ]
 
 
+def _assertion_summary(
+    rows: list[AssertionResultRow],
+    *,
+    evidence_by_id: dict[str, EvidenceReferenceRow],
+) -> list[dict[str, Any]]:
+    projected: list[dict[str, Any]] = []
+    for row in rows:
+        reference_ids = tuple(str(item) for item in (row.evidence_reference_ids or []))
+        resolved = [evidence_by_id[item] for item in reference_ids if item in evidence_by_id]
+        projected.append(
+            {
+                "result_id": row.id,
+                "assertion_id": row.assertion_id,
+                "result": row.result,
+                "expected_property": sanitized_summary(
+                    row.expected_property,
+                    maximum_length=500,
+                ),
+                "observed_summary": sanitized_summary(
+                    row.observed_summary,
+                    maximum_length=1000,
+                ),
+                "evaluator": row.evaluator,
+                "blocking": row.blocking,
+                "evaluated_at": row.evaluated_at,
+                "evidence_refs": _evidence_summary(resolved),
+                "unresolved_evidence_ref_count": len(reference_ids) - len(resolved),
+            }
+        )
+    return projected
+
+
+def _assertion_result_summary(rows: list[AssertionResultRow]) -> dict[str, Any]:
+    statuses = Counter(row.result for row in rows)
+    return {
+        "total": len(rows),
+        "results": dict(sorted(statuses.items())),
+    }
+
+
 def read_scenario_engine_snapshot(
     session: Session,
     *,
@@ -49,6 +91,8 @@ def read_scenario_engine_snapshot(
 
     This function is intentionally read-only. It does not register manifests,
     create runs, execute steps, create evidence, or infer production authority.
+    Assertion projection is deliberately minimized: no provenance payload, finding,
+    correlation, requester identity, or evidence metadata crosses this boundary.
     """
 
     if run_limit < 1 or run_limit > 200:
@@ -85,7 +129,9 @@ def read_scenario_engine_snapshot(
 
     run_ids = [row.id for row in recent_runs]
     steps_by_run: dict[str, list[ScenarioStepRunRow]] = defaultdict(list)
+    assertions_by_run: dict[str, list[AssertionResultRow]] = defaultdict(list)
     evidence_by_run: dict[str, list[EvidenceReferenceRow]] = defaultdict(list)
+    evidence_by_id: dict[str, EvidenceReferenceRow] = {}
 
     if run_ids:
         for step in session.scalars(
@@ -98,6 +144,24 @@ def read_scenario_engine_snapshot(
         ).all():
             steps_by_run[step.scenario_run_id].append(step)
 
+        assertion_evidence_ids: set[str] = set()
+        for assertion in session.scalars(
+            select(AssertionResultRow)
+            .where(
+                AssertionResultRow.tenant_id == tenant_id,
+                AssertionResultRow.scenario_run_id.in_(run_ids),
+            )
+            .order_by(
+                AssertionResultRow.scenario_run_id,
+                AssertionResultRow.evaluated_at,
+                AssertionResultRow.id,
+            )
+        ).all():
+            assertions_by_run[assertion.scenario_run_id].append(assertion)
+            assertion_evidence_ids.update(
+                str(item) for item in (assertion.evidence_reference_ids or [])
+            )
+
         for evidence in session.scalars(
             select(EvidenceReferenceRow)
             .where(
@@ -107,14 +171,27 @@ def read_scenario_engine_snapshot(
             )
             .order_by(EvidenceReferenceRow.created_at, EvidenceReferenceRow.id)
         ).all():
+            evidence_by_id[evidence.id] = evidence
             if evidence.internal_entity_id is not None:
                 evidence_by_run[evidence.internal_entity_id].append(evidence)
+
+        if assertion_evidence_ids:
+            for evidence in session.scalars(
+                select(EvidenceReferenceRow)
+                .where(
+                    EvidenceReferenceRow.tenant_id == tenant_id,
+                    EvidenceReferenceRow.id.in_(sorted(assertion_evidence_ids)),
+                )
+                .order_by(EvidenceReferenceRow.created_at, EvidenceReferenceRow.id)
+            ).all():
+                evidence_by_id[evidence.id] = evidence
 
     projected_runs: list[dict[str, Any]] = []
     latest_run_by_definition: dict[str, dict[str, Any]] = {}
     for run in recent_runs:
         version = version_by_id.get(run.scenario_version_id)
         definition = definition_by_id.get(version.scenario_definition_id) if version else None
+        run_assertions = assertions_by_run.get(run.id, [])
         projected = {
             "run_id": run.id,
             "scenario_key": definition.scenario_key if definition else None,
@@ -127,6 +204,11 @@ def read_scenario_engine_snapshot(
             "created_at": run.created_at,
             "completed_at": run.completed_at,
             "step_summary": _step_summary(steps_by_run.get(run.id, [])),
+            "assertion_summary": _assertion_result_summary(run_assertions),
+            "semantic_assertions": _assertion_summary(
+                run_assertions,
+                evidence_by_id=evidence_by_id,
+            ),
             "evidence_refs": _evidence_summary(evidence_by_run.get(run.id, [])),
         }
         projected_runs.append(projected)
