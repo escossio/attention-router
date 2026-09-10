@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
+from attention_router.application.platform.registry import ensure_default_tenant
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.infrastructure.models import (
     EvidenceReferenceRow,
@@ -10,8 +11,7 @@ from attention_router.infrastructure.models import (
     ScenarioStepRunRow,
     ScenarioVersionRow,
 )
-from attention_router.application.platform.registry import ensure_default_tenant
-from attention_router.platform.capability_lab_api import build_capability_lab_router
+from attention_router.platform.api import build_operations_router
 from attention_router.platform.capability_lab_read_model import read_scenario_engine_snapshot
 
 
@@ -173,13 +173,17 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
     assert "must-not-be-projected" not in str(snapshot)
 
 
-def test_capability_lab_router_exposes_get_only_observation_surface():
-    router = build_capability_lab_router(
+def test_capability_lab_scenario_engine_surface_is_get_only():
+    router = build_operations_router(
         get_session=lambda: None,
         require_admin=lambda: None,
     )
 
-    routes = [route for route in router.routes if hasattr(route, "methods")]
+    path = "/api/v1/admin/platform/operations/capability-lab/scenario-engine"
+    routes = [
+        route
+        for route in router.routes
+        if getattr(route, "path", None) == path
+    ]
     assert len(routes) == 1
-    assert routes[0].path == "/api/v1/admin/platform/capability-lab/scenario-engine"
     assert routes[0].methods == {"GET"}
