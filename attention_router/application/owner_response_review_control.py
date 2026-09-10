@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from attention_router.application.owner_operational_control import OperationalControlError
 from attention_router.application.platform.context import resolve_represented_subject
 from attention_router.application.response_review import (
     ReviewConflict,
@@ -31,7 +32,7 @@ OWNER_REVIEW_REQUEST_ACTION = "owner_response_review_request_text"
 OWNER_REVIEW_REJECTION_REASON = "OWNER_REJECTED_VIA_SELF_CHAT"
 
 
-class OwnerResponseReviewError(ValueError):
+class OwnerResponseReviewError(OperationalControlError):
     pass
 
 
