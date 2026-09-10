@@ -18,6 +18,10 @@ from attention_router.application.owner_operational_control import (
     execute_owner_reply_grace_control_command,
     owner_reply_grace_policy_authority,
 )
+from attention_router.application.owner_response_review_control import (
+    OwnerResponseReviewMutation,
+    apply_owner_response_review,
+)
 from attention_router.application.platform.context import resolve_represented_subject
 from attention_router.core.events import OperatorAuthority
 from attention_router.infrastructure.models import (
@@ -44,6 +48,8 @@ class OwnerControlAction(StrEnum):
     SET_AUTOMATIC_RESPONSES_ENABLED = "SET_AUTOMATIC_RESPONSES_ENABLED"
     SET_OWNER_REPLY_GRACE_SECONDS = "SET_OWNER_REPLY_GRACE_SECONDS"
     SET_OWNER_REPLY_GRACE_ENABLED = "SET_OWNER_REPLY_GRACE_ENABLED"
+    APPROVE_RESPONSE_REVIEW = "APPROVE_RESPONSE_REVIEW"
+    REJECT_RESPONSE_REVIEW = "REJECT_RESPONSE_REVIEW"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +79,23 @@ class AutomaticResponsesEnabledParameters:
             raise OwnerControlError("CONTROL_COMMAND_INVALID_VALUE")
 
 
+@dataclass(frozen=True, slots=True)
+class ReviewReferenceParameters:
+    reference: str
+
+    def __post_init__(self) -> None:
+        value = self.reference.strip().casefold()
+        allowed = set("0123456789abcdef-")
+        if not 8 <= len(value) <= 36 or any(char not in allowed for char in value):
+            raise OwnerControlError("OWNER_REVIEW_REFERENCE_INVALID")
+        object.__setattr__(self, "reference", value)
+
+
 OwnerControlParameters = (
-    GraceSecondsParameters | GraceEnabledParameters | AutomaticResponsesEnabledParameters
+    GraceSecondsParameters
+    | GraceEnabledParameters
+    | AutomaticResponsesEnabledParameters
+    | ReviewReferenceParameters
 )
 
 
@@ -123,6 +144,8 @@ class OwnerControlSignal:
             OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED: AutomaticResponsesEnabledParameters,
             OwnerControlAction.SET_OWNER_REPLY_GRACE_SECONDS: GraceSecondsParameters,
             OwnerControlAction.SET_OWNER_REPLY_GRACE_ENABLED: GraceEnabledParameters,
+            OwnerControlAction.APPROVE_RESPONSE_REVIEW: ReviewReferenceParameters,
+            OwnerControlAction.REJECT_RESPONSE_REVIEW: ReviewReferenceParameters,
         }[self.action]
         if not isinstance(self.parameters, expected):
             raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
@@ -133,7 +156,11 @@ class OwnerControlSignal:
 @dataclass(frozen=True, slots=True)
 class OwnerControlDispatchResult:
     policy_id: str | None
-    mutation: OwnerReplyGraceControlMutation | OwnerAutomationControlMutation
+    mutation: (
+        OwnerReplyGraceControlMutation
+        | OwnerAutomationControlMutation
+        | OwnerResponseReviewMutation
+    )
 
 
 def _utc(value: datetime) -> datetime:
@@ -274,6 +301,20 @@ def dispatch_owner_control_signal(
             },
         )
         return OwnerControlDispatchResult(policy_id=None, mutation=mutation)
+    if signal.action in {
+        OwnerControlAction.APPROVE_RESPONSE_REVIEW,
+        OwnerControlAction.REJECT_RESPONSE_REVIEW,
+    }:
+        if not isinstance(signal.parameters, ReviewReferenceParameters):
+            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
+        mutation = apply_owner_response_review(
+            session,
+            tenant_id=signal.tenant_id,
+            reference=signal.parameters.reference,
+            approve=signal.action == OwnerControlAction.APPROVE_RESPONSE_REVIEW,
+            authority=authority,
+        )
+        return OwnerControlDispatchResult(policy_id=None, mutation=mutation)
     # Owner Reply Grace is a single owner-scoped contract, not a policy selector.
     policy_id = None
     if signal.action == OwnerControlAction.SET_OWNER_REPLY_GRACE_SECONDS:
@@ -307,6 +348,7 @@ __all__ = [
     "AutomaticResponsesEnabledParameters",
     "GraceEnabledParameters",
     "GraceSecondsParameters",
+    "ReviewReferenceParameters",
     "OwnerControlAction",
     "OwnerControlAuthorityEvidence",
     "OwnerControlDispatchResult",
