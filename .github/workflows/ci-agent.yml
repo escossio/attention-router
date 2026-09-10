@@ -11,6 +11,7 @@ permissions:
   actions: read
   contents: read
   issues: write
+  pull-requests: read
 
 concurrency:
   group: ci-agent-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
