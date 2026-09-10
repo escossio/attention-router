@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from attention_router.application.platform.registry import ensure_default_tenant
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.infrastructure.models import (
+    AssertionResultRow,
     EvidenceReferenceRow,
     ScenarioDefinitionRow,
     ScenarioRunRow,
@@ -157,7 +158,27 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
         sanitized_metadata={"foreign_detail": "must-not-cross-tenant"},
         created_at=now,
     )
-    session.add_all([definition, version, run, step, evidence, foreign_evidence])
+    assertion = AssertionResultRow(
+        id="assertion-result-lab",
+        tenant_id=DEFAULT_TENANT_ID,
+        scenario_run_id=run.id,
+        scenario_step_run_id=step.id,
+        assertion_id="ASSERT-SYNTHETIC-001",
+        assertion_version=1,
+        attempt=1,
+        result="PASS",
+        expected_property="Synthetic semantic property",
+        observed_summary="Synthetic semantic result",
+        evaluator="capability_lab_t0_semantic_evaluator",
+        blocking=True,
+        evidence_reference_ids=["evidence-lab", "evidence-other-tenant"],
+        finding_id=None,
+        evaluated_at=now,
+        provenance={"private_provenance": "must-not-be-projected"},
+    )
+    session.add_all(
+        [definition, version, run, step, evidence, foreign_evidence, assertion]
+    )
     session.commit()
 
     before = {
@@ -167,6 +188,7 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
             ScenarioVersionRow,
             ScenarioRunRow,
             ScenarioStepRunRow,
+            AssertionResultRow,
             EvidenceReferenceRow,
         )
     }
@@ -188,6 +210,7 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
 
     projected_run = snapshot["recent_runs"][0]
     assert projected_run["step_summary"] == {"total": 1, "statuses": {"PASSED": 1}}
+    assert projected_run["assertion_summary"] == {"total": 1, "results": {"PASS": 1}}
     assert projected_run["evidence_refs"] == [
         {
             "id": "evidence-lab",
@@ -196,11 +219,28 @@ def test_scenario_engine_snapshot_projects_existing_evidence_without_payloads(se
             "created_at": now,
         }
     ]
+    semantic = projected_run["semantic_assertions"][0]
+    assert semantic["assertion_id"] == "ASSERT-SYNTHETIC-001"
+    assert semantic["result"] == "PASS"
+    assert semantic["expected_property"] == "Synthetic semantic property"
+    assert semantic["observed_summary"] == "Synthetic semantic result"
+    assert semantic["evaluator"] == "capability_lab_t0_semantic_evaluator"
+    assert semantic["evidence_refs"] == [
+        {
+            "id": "evidence-lab",
+            "evidence_type": "SCENARIO_RUN",
+            "source_sha": "source-synthetic",
+            "created_at": now,
+        }
+    ]
+    assert semantic["unresolved_evidence_ref_count"] == 1
+
     serialized = str(snapshot)
     assert "sanitized_metadata" not in serialized
     assert "must-not-be-projected" not in serialized
     assert "must-not-cross-tenant" not in serialized
     assert "evidence-other-tenant" not in serialized
+    assert "private_provenance" not in serialized
     assert "terminal_reason" not in projected_run
     assert "correlation_id" not in projected_run
 
