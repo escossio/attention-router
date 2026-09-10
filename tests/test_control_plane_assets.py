@@ -43,6 +43,7 @@ def test_capability_lab_reads_existing_protected_runtime_surfaces_only():
     expected_paths = {
         "/api/v1/admin/platform/operations/snapshot",
         "/api/v1/admin/platform/operations/capability-lab/scenario-engine",
+        "/api/v1/admin/platform/operations/capability-lab/probe/",
         "/api/v1/admin/policies",
         "/api/v1/admin/platform/matrix",
         "/api/v1/private/response-reviews?review_status=PENDING",
@@ -75,7 +76,7 @@ def test_capability_lab_does_not_claim_unbound_feature_success():
     assert "INCOMPLETE" in html
     assert 'bindingState = "UNBOUND"' in javascript
     assert '"engine_scenario_key": null' in scenarios
-    assert "sem binding/evidência, o resultado é INCOMPLETE" in javascript
+    assert "sem binding/evidência durável, o resultado não é certificação" in javascript
 
 
 def test_capability_lab_presents_existing_runtime_as_canonical():
@@ -89,7 +90,7 @@ def test_capability_lab_presents_existing_runtime_as_canonical():
     assert "este é o registry existente que o Lab deve exercitar, não duplicar" in javascript
 
 
-def test_capability_lab_hypotheses_show_registry_and_staged_expectations():
+def test_capability_lab_hypotheses_show_registry_stages_and_t0_probe():
     javascript = (STATIC / "control-plane.js").read_text(encoding="utf-8")
 
     assert 'label: "UNREGISTERED"' in javascript
@@ -98,6 +99,19 @@ def test_capability_lab_hypotheses_show_registry_and_staged_expectations():
     assert "T1 simulado:" in javascript
     assert "T2 esperado:" in javascript
     assert "registry:" in javascript
+    assert "probe T0:" in javascript
+    assert "evidência durável:" in javascript
+    assert "EPHEMERAL_ONLY" in javascript
+
+
+def test_browser_probe_can_send_only_repository_scenario_id():
+    javascript = (STATIC / "control-plane.js").read_text(encoding="utf-8")
+
+    assert "encodeURIComponent(scenario.scenario_id)" in javascript
+    assert "capability_key=" not in javascript
+    assert "requester_actor_key=" not in javascript
+    assert "owner_authorized" not in javascript
+    assert "policy_allows" not in javascript
 
 
 def test_capability_lab_frontend_does_not_expect_minimized_scenario_fields():
