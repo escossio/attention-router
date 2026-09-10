@@ -3,9 +3,10 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from attention_router.core.authority import AuthorityResult
+from attention_router.core.capabilities import CAPABILITY_NAME_RE
 
 
 CAPABILITY_LAB_SCHEMA_VERSION = "capability-lab.v0"
@@ -46,7 +47,7 @@ class CapabilityLabScenario(BaseModel):
     scenario_id: str = Field(pattern=r"^[a-z][a-z0-9_.-]{2,119}$")
     title: str = Field(min_length=1, max_length=160)
     description: str = Field(min_length=1, max_length=800)
-    capability_key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{2,119}$")
+    capability_key: str
     requester_actor_key: str = Field(pattern=r"^synthetic[.:/][a-zA-Z0-9_.:/-]{1,119}$")
     request_text: str = Field(min_length=1, max_length=1000)
     request_context: dict[str, Any] = Field(default_factory=dict)
@@ -58,6 +59,14 @@ class CapabilityLabScenario(BaseModel):
     synthetic_only: Literal[True] = True
     uses_real_personal_data: Literal[False] = False
     production_effects_allowed: Literal[False] = False
+
+    @field_validator("capability_key")
+    @classmethod
+    def canonical_capability_key(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not CAPABILITY_NAME_RE.fullmatch(normalized):
+            raise ValueError("capability_key must use the canonical dotted capability name")
+        return normalized
 
     @model_validator(mode="after")
     def validate_expected_flow(self) -> "CapabilityLabScenario":
