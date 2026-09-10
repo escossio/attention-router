@@ -184,3 +184,7 @@ def test_persistence_uses_no_git_push_or_shell_commit():
     assert "git commit" not in source
     assert "CI-Agent-Merge: disabled" in source
     assert "contents: write" not in proposal_source
+
+
+def test_controlled_v2_persistent_autofix_proof():
+    assert False, "CONTROLLED_V2_PERSISTENT_AUTOFIX_PROOF"
