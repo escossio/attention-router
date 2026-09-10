@@ -28,7 +28,7 @@ from attention_router.infrastructure.repository import audit
 
 OWNER_REVIEW_REFERENCE_LENGTH = 12
 OWNER_REVIEW_BINDING_SOURCE = "wwebjs"
-OWNER_REVIEW_REQUEST_ACTION = "owner_response_review_request_text"
+OWNER_REVIEW_REQUEST_ACTION = "owner_control_text"
 OWNER_REVIEW_REJECTION_REASON = "OWNER_REJECTED_VIA_SELF_CHAT"
 
 
