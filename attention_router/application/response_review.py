@@ -37,6 +37,17 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _enqueue_owner_request(session: Session, row: AgentResponseReviewRow) -> None:
+    # Local import keeps the response-review state machine independent from the
+    # authenticated owner-control adapter while allowing the current creation
+    # boundary to emit one idempotent owner approval request.
+    from attention_router.application.owner_response_review_control import (
+        enqueue_owner_response_review_request,
+    )
+
+    enqueue_owner_response_review_request(session, row)
+
+
 def create_review_for_decision(session: Session, decision_id: str, reviewer_type: str = "operator") -> AgentResponseReviewRow:
     decision = session.get(AgentDecisionRow, decision_id)
     if decision is None:
@@ -45,6 +56,7 @@ def create_review_for_decision(session: Session, decision_id: str, reviewer_type
         raise ReviewError("agent decision has no proposed response")
     existing = session.scalar(select(AgentResponseReviewRow).where(AgentResponseReviewRow.agent_decision_id == decision_id))
     if existing:
+        _enqueue_owner_request(session, existing)
         return existing
     now = _now()
     row = AgentResponseReviewRow(
@@ -57,8 +69,13 @@ def create_review_for_decision(session: Session, decision_id: str, reviewer_type
         session.flush()
     except IntegrityError:
         session.rollback()
-        return session.scalar(select(AgentResponseReviewRow).where(AgentResponseReviewRow.agent_decision_id == decision_id))
+        existing = session.scalar(select(AgentResponseReviewRow).where(AgentResponseReviewRow.agent_decision_id == decision_id))
+        if existing is None:
+            raise
+        _enqueue_owner_request(session, existing)
+        return existing
     audit(session, decision.interaction_id, "response_review.created", {"review_id": row.id, "decision_id": decision_id})
+    _enqueue_owner_request(session, row)
     return row
 
 
