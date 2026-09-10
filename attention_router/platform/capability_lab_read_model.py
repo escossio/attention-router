@@ -126,8 +126,6 @@ def read_scenario_engine_snapshot(
             "schema_revision": run.schema_revision,
             "created_at": run.created_at,
             "completed_at": run.completed_at,
-            "terminal_reason": run.terminal_reason,
-            "correlation_id": run.root_correlation_id,
             "step_summary": _step_summary(steps_by_run.get(run.id, [])),
             "evidence_refs": _evidence_summary(evidence_by_run.get(run.id, [])),
         }
