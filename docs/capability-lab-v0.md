@@ -180,6 +180,41 @@ Current expected probe results after registry synchronization are:
 
 Tests prove the probe leaves registry/provider/grant row counts unchanged and leaves the SQLAlchemy session with no new, dirty or deleted rows.
 
+## Durable T0 semantic evidence
+
+`record_capability_t0_evidence()` adds the first evidence-producing certification boundary without changing authority semantics.
+
+The sequence is deliberately narrow:
+
+`canonical resolve_capability_request() -> synthetic OperationalObservationRow -> EvidenceReferenceRow -> CapabilityLabObservation -> compare_scenario()`
+
+The durable observation stores only minimized technical fields:
+
+- T0 stage;
+- Lab scenario id;
+- canonical capability name;
+- capability resolution status;
+- authority result;
+- approval-required and execution-allowed booleans;
+- synthetic lineage and explicit no-production-effect marker;
+- source, runtime and schema revisions.
+
+It does **not** store request text, request context, requester identity, message payloads, provider credentials or personal values.
+
+The `EvidenceReferenceRow` uses the existing `API_RESULT` evidence type and points to the persisted `OperationalObservationRow`; the reference does not duplicate the evidence payload.
+
+The report is marked:
+
+`certification = DURABLE_T0_ONLY`
+
+This means T0 can now become a real `PASS` when expected and observed authority match and the evidence reference is present. It says nothing about T1 or T2.
+
+The first control is deliberately not one of the new personal capabilities. It uses existing `callback.request`, which is operational and has no external effect. With an expectation matching current behavior (`DENY`), the control can certify T0 PASS with durable evidence. With an expectation of `REQUIRES_APPROVAL`, the same evidence remains FAIL because the canonical runtime currently returns `DENY / CAPABILITY_GRANT_MISSING`.
+
+The evidence-producing function is **not exposed through the GET probe route or browser V0**. Transaction commit remains caller-owned. It creates no `CapabilityGrantRow`, no `HumanExecutionAuthorizationRow`, no `ScenarioRunRow`, no outbox item and no external call.
+
+Both SQLite contract tests and a dedicated PostgreSQL integration test verify this boundary, including persistence after commit and unchanged authority-side-effect row counts.
+
 ## Read-only Scenario Engine bridge
 
 `attention_router.platform.capability_lab_read_model.read_scenario_engine_snapshot()` projects existing Scenario Engine state without mutation.
@@ -252,18 +287,19 @@ The browser credential remains in page memory only and is not written to localSt
 10. A semantically correct stage without stage evidence remains `INCOMPLETE`.
 11. A generic L0 dry-run PASS is not automatically business-semantic evidence.
 12. An ephemeral T0 match is not certification evidence.
-13. Ambiguous external effects remain fail-closed.
-14. Engineering complexity visible in the Lab must not dictate customer UX.
+13. Durable T0 evidence may certify only T0; it grants no execution authority.
+14. GET observation routes remain read-only and never create evidence as a hidden side effect.
+15. Ambiguous external effects remain fail-closed.
+16. Engineering complexity visible in the Lab must not dictate customer UX.
 
 ## Next safe boundary
 
-1. Validate the GET-only T0 endpoint, browser integration and full PostgreSQL suite on the PR branch.
-2. Design a **durable T0 semantic evidence evaluator** that calls the canonical resolver and records a minimal `EvidenceReference` without granting authority or producing an external effect.
-3. Prove that evaluator first with an already registered, operational, no-external-effect control capability such as `callback.request`.
-4. Only then create an explicit Scenario Engine binding for a feature hypothesis.
-5. Register new personal-disclosure capabilities only through the canonical capability manifest/registry when their contracts are mature.
-6. T1 must use canonical `HumanExecutionAuthorization` evidence.
-7. T2 must use canonical `CapabilityGrant` evidence.
-8. Only after T0/T1/T2 expose the exact semantic gap should runtime authority behavior change.
+1. Validate the durable T0 evaluator in the full Public CI and complete PostgreSQL suite.
+2. After a green checkpoint, design the explicit Scenario Engine semantic binding that invokes this T0 evaluator rather than the generic L0 `observed=True` path.
+3. Keep the three current personal-feature hypotheses UNBOUND until a real semantic manifest/evaluator proves their exact contract.
+4. Register new personal-disclosure capabilities only through the canonical capability manifest/registry when their contracts are mature.
+5. T1 must use canonical `HumanExecutionAuthorization` evidence.
+6. T2 must use canonical `CapabilityGrant` evidence.
+7. Only after T0/T1/T2 expose the exact semantic gap should runtime authority behavior change.
 
 Production approval actions, external effects and customer UX are outside this V0 boundary.
