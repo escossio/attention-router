@@ -5,8 +5,8 @@ on:
     workflows: ["Public CI", "CodeQL"]
     types: [completed]
 
-# workflow_run executes from the default branch. V0 may update only its sticky
-# PR conversation comment; repository contents remain strictly read-only.
+# workflow_run executes from the default branch. The deterministic V0 triage may
+# update only PR comments. Repository contents remain read-only.
 permissions:
   actions: read
   contents: read
@@ -44,3 +44,51 @@ jobs:
           --repo "$CI_AGENT_REPO"
           --pr-number "$CI_AGENT_PR_NUMBER"
           --head-sha "$CI_AGENT_HEAD_SHA"
+
+  copilot-advisor:
+    needs: triage
+    if: >-
+      needs.triage.result == 'success' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.pull_requests[0].number != null &&
+      github.event.workflow_run.actor.login != 'dependabot[bot]'
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+      copilot-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted default-branch advisor code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22 for Copilot CLI
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+
+      - name: Install pinned Copilot CLI
+        run: npm install -g @github/copilot@1.0.83
+
+      - name: Run read-only Copilot diagnosis advisor
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CI_AGENT_REPO: ${{ github.repository }}
+          CI_AGENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          CI_AGENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_AGENT_TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name }}
+          CI_AGENT_TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: >-
+          python scripts/ci_copilot_advisor.py
+          --repo "$CI_AGENT_REPO"
+          --pr-number "$CI_AGENT_PR_NUMBER"
+          --head-sha "$CI_AGENT_HEAD_SHA"
+          --trigger-workflow "$CI_AGENT_TRIGGER_WORKFLOW"
+          --trigger-run-id "$CI_AGENT_TRIGGER_RUN_ID"
