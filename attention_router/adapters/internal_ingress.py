@@ -11,6 +11,7 @@ class InternalInboundPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1"] = "1"
+    tenant_id: str = Field(min_length=1, max_length=64)
     source: Literal["wwebjs"]
     external_event_id: str = Field(min_length=1, max_length=180)
     event_type: Literal["message", "call"]
@@ -79,6 +80,7 @@ class InternalIngressAdapter(InboundAdapter):
             kwargs["received_at"] = payload.received_at
         return NormalizedInboundEvent(
             schema_version="1",
+            tenant_id=payload.tenant_id,
             source=payload.source,
             external_event_id=payload.external_event_id,
             event_type=payload.event_type,
