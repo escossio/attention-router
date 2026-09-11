@@ -23,6 +23,11 @@ This seam is temporary and lets tenant hardening proceed boundary-by-boundary ra
 
 V0 trusts the authenticated internal-ingress principal to assert a tenant after the database confirms that tenant is active. A later hardening step can bind distinct credentials/principals to one or more allowed tenant IDs so possession of a generic internal HMAC secret is not sufficient to choose arbitrary tenants.
 
+[ADR 0020](adr/0020-neutral-ingress-and-authenticated-tenant-binding.md) now
+proposes one credential-to-tenant/integration binding for a distinct neutral
+ingress surface. That proposal does not change this implemented HMAC trust model
+or migrate the WhatsApp transport; those remain separate implementation work.
+
 Public provider ingress is deliberately outside this boundary. In particular, a future multi-tenant Meta ingress should resolve provider account/phone-resource identity to a tenant through a trusted server-side binding rather than trusting a `tenant_id` supplied by the public webhook body.
 
 ## Non-goals

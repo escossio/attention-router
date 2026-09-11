@@ -28,3 +28,4 @@ futuros não são evidência de funcionalidade implementada.
 - [0010 — Administrative auth boundary](0010-admin-auth-boundary.md)
 - [00011 — Meta WhatsApp inbound adapter](0011-meta-whatsapp-inbound-adapter.md)
 - [0012–0019 — Authority, evidence, memory, providers and browser trust](0012-policy-outside-model-authority.md)
+- [0020 — Neutral ingress and authenticated tenant binding (proposed)](0020-neutral-ingress-and-authenticated-tenant-binding.md)
