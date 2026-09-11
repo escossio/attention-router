@@ -1,0 +1,16 @@
+{
+  "name": "andy-integration-contract-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Independent JavaScript validation of the shared integration wire contract",
+  "scripts": {
+    "test": "node --test contract.test.cjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  }
+}

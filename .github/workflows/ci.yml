@@ -48,10 +48,18 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: whatsapp-transport-local/package-lock.json
+          cache-dependency-path: |
+            whatsapp-transport-local/package-lock.json
+            contracts/integration/conformance/package-lock.json
       - run: npm ci --ignore-scripts
       - run: node ../tests/fixtures/synthetic-identity-contract.cjs
       - run: npm test
+      - name: Install integration contract conformance validators
+        working-directory: contracts/integration/conformance
+        run: npm ci --ignore-scripts
+      - name: Validate shared integration wire fixtures in JavaScript
+        working-directory: contracts/integration/conformance
+        run: npm test
   postgres-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25

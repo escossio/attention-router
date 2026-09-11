@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
+import json
+from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator, FormatChecker
 
 from attention_router.application.platform.integrations import (
     artifact_contract_to_input,
@@ -188,3 +191,22 @@ def test_current_wwebjs_normalized_shape_is_accepted_without_engine_branching():
         "from_me": False,
         "body_present": True,
     }
+
+
+def test_reference_adapter_outputs_satisfy_the_portable_wire_schema():
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "contracts/integration/v1/integration-contract.schema.json"
+    )
+    validator = Draft202012Validator(
+        json.loads(schema_path.read_text()), format_checker=FormatChecker()
+    )
+    for adapter, payload in (
+        (WhatsAppNormalizedAdapter(), _whatsapp_payload()),
+        (EmailNormalizedAdapter(), _email_payload()),
+    ):
+        output = adapter.normalize(
+            payload, tenant_id=TENANT, instance_id="synthetic-instance", received_at=NOW
+        )
+        for message in (output.event, *output.artifact_receipts):
+            validator.validate(message.model_dump(mode="json"))
