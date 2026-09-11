@@ -85,7 +85,7 @@ def test_scenario_and_budget_tightening_constraints_are_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0036_artifact_registry_v0"]
+    assert scripts.get_heads() == ["0037_integration_admission_v0"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
@@ -103,3 +103,5 @@ def test_platform_evolution_migration_waves_form_one_chain():
     assert revisions["0024_execution_intent"].down_revision == "0023_human_execution_auth"
     assert revisions["0025_human_auth_execution_intent"].down_revision == "0024_execution_intent"
     assert revisions["0036_artifact_registry_v0"].down_revision == "0035_whatsapp_voice_media"
+
+    assert revisions["0037_integration_admission_v0"].down_revision == "0036_artifact_registry_v0"

@@ -102,6 +102,8 @@ python -m ruff check attention_router/integrations/tenant_binding.py tests/test_
 
 The existing required `python-tests` CI job discovers these tests automatically.
 The current HMAC ingress, runtime, schema and SDK packages retain their existing
-behavior. The next implementation boundary is authoritative registry storage
-and bounded, transactional admission, with PostgreSQL race/crash tests before an
-HTTP client. This proof alone is insufficient to activate production intake.
+behavior. This offline proof alone is insufficient to activate production intake.
+
+The subsequent implementation is tracked in [persistent admission proof](integration-admission-proof-v0.md):
+internal PostgreSQL registry, atomic pending inbox and revocation/deduplication
+concurrency tests. HTTP and dispatch remain unimplemented.

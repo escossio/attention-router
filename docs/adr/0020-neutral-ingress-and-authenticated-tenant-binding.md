@@ -4,8 +4,10 @@
 
 Proposed HTTP design, 2026-09-11. An
 [isolated offline binding proof](../integration-tenant-binding-proof-v0.md) now
-implements the credential/tenant decision. No endpoint, production credential
-registry, migration or HTTP client is implemented by this increment.
+implements the credential/tenant decision. The
+[persistent admission proof](../integration-admission-proof-v0.md) adds an internal
+PostgreSQL registry, migration and transactional inbox. No endpoint, production
+enrollment, dispatcher or HTTP client is activated.
 
 ## Context
 
