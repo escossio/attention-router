@@ -34,7 +34,7 @@ The core does not need `if whatsapp` or `if gmail` to interpret channel ingress.
 
 ## SDK consequence
 
-The proof deliberately comes before SDK extraction. Once two different channel adapters survive the same contract boundary, the reusable mechanics can be extracted into SDKs without making a Python package the source of truth. The JSON Schema remains the language-neutral contract; future Python/TypeScript SDKs should implement validation, authentication helpers, idempotency, retries, artifact staging and observability around that contract.
+The proof deliberately comes before SDK extraction. The JSON Schema remains the language-neutral source of truth. [Integration SDK extraction V0](integration-sdks-v0.md) now packages types, validation and JSON round-trips independently for Python and TypeScript. Authentication helpers, network retries, artifact staging and transport observability remain dependent on a separately defined transport boundary.
 
 ## Non-goals
 
