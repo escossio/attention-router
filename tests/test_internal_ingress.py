@@ -6,8 +6,17 @@ import uuid
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
+
 from attention_router.config import settings
-from attention_router.web.internal_ingress_app import app, get_session, health_engine, internal_ingress_executor
+from attention_router.core.tenancy import DEFAULT_TENANT_ID
+from attention_router.domain.models import now_utc
+from attention_router.infrastructure.models import TenantRow
+from attention_router.web.internal_ingress_app import (
+    app,
+    get_session,
+    health_engine,
+    internal_ingress_executor,
+)
 
 
 SECRET = "unit-test-internal-ingress-secret-32-bytes"
@@ -20,6 +29,7 @@ def teardown_function():
 def payload(event_id: str | None = None, text: str = "Mensagem interna sintética.") -> dict:
     return {
         "schema_version": "1",
+        "tenant_id": DEFAULT_TENANT_ID,
         "source": "wwebjs",
         "external_event_id": event_id or f"int-{uuid.uuid4()}",
         "event_type": "message",
@@ -82,6 +92,40 @@ def test_internal_ingress_valid_hmac_accepts_payload(session, monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
     assert response.json()["interaction_id"]
+
+
+def test_internal_ingress_requires_explicit_tenant(session, monkeypatch):
+    c = client(session, monkeypatch)
+    data = payload()
+    data.pop("tenant_id")
+    assert post(c, data).status_code == 422
+
+
+def test_internal_ingress_rejects_unknown_tenant(session, monkeypatch):
+    c = client(session, monkeypatch)
+    data = payload()
+    data["tenant_id"] = f"missing-{uuid.uuid4()}"
+    response = post(c, data)
+    assert response.status_code == 403
+    assert response.json()["detail"] == "tenant unavailable"
+
+
+def test_internal_ingress_rejects_inactive_tenant(session, monkeypatch):
+    tenant_id = f"inactive-{uuid.uuid4()}"
+    stamp = now_utc()
+    session.add(TenantRow(
+        id=tenant_id,
+        slug=tenant_id,
+        name="Inactive synthetic tenant",
+        status="SUSPENDED",
+        created_at=stamp,
+        updated_at=stamp,
+    ))
+    session.commit()
+    c = client(session, monkeypatch)
+    data = payload()
+    data["tenant_id"] = tenant_id
+    assert post(c, data).status_code == 403
 
 
 def test_internal_ingress_invalid_hmac_rejected(session, monkeypatch):
