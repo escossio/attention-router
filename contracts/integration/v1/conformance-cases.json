@@ -1,0 +1,1532 @@
+{
+  "schema_id": "urn:attention-router:integration-contract:v1",
+  "cases": [
+    {
+      "id": "inbound_valid",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "artifact_receipt_valid",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": 8,
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-09-11T18:00:01Z"
+      }
+    },
+    {
+      "id": "channel_delivery_valid",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "channel_delivery",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "target_binding_id": "synthetic-binding",
+        "payload_type": "TEXT_REFERENCE",
+        "idempotency_key": "synthetic-delivery",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "capability_invocation_valid",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "capability_invocation",
+        "integration": {
+          "kind": "CAPABILITY",
+          "name": "provider.calendar",
+          "instance_id": "synthetic-calendar"
+        },
+        "capability": "calendar.schedule",
+        "idempotency_key": "synthetic-invocation"
+      }
+    },
+    {
+      "id": "result_succeeded",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "SUCCEEDED",
+        "reason_code": "OK"
+      }
+    },
+    {
+      "id": "result_accepted",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "ACCEPTED",
+        "reason_code": "OK"
+      }
+    },
+    {
+      "id": "result_succeeded_explicit_nulls",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "SUCCEEDED",
+        "reason_code": "OK",
+        "error_class": null,
+        "retry_after_seconds": null
+      }
+    },
+    {
+      "id": "result_retryable_zero_delay",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "RETRYABLE_FAILURE",
+        "reason_code": "PROVIDER_RATE_LIMIT",
+        "error_class": "RATE_LIMIT",
+        "retry_after_seconds": 0
+      }
+    },
+    {
+      "id": "result_retryable_max_delay",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "RETRYABLE_FAILURE",
+        "reason_code": "PROVIDER_RATE_LIMIT",
+        "error_class": "RATE_LIMIT",
+        "retry_after_seconds": 86400
+      }
+    },
+    {
+      "id": "result_retryable_without_delay",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "RETRYABLE_FAILURE",
+        "reason_code": "PROVIDER_TIMEOUT",
+        "error_class": "TIMEOUT"
+      }
+    },
+    {
+      "id": "result_permanent_null_delay",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "PERMANENT_FAILURE",
+        "reason_code": "INVALID_TARGET",
+        "error_class": "INVALID_REQUEST",
+        "retry_after_seconds": null
+      }
+    },
+    {
+      "id": "timestamp_offset_normalizes_to_utc",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T15:00:00-03:00",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      },
+      "normalized_fields": {
+        "occurred_at": "2026-09-11T18:00:00Z"
+      }
+    },
+    {
+      "id": "source_optional_account_is_null",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": null
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "artifact_empty_file",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": 0,
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-09-11T18:00:01Z"
+      }
+    },
+    {
+      "id": "artifact_ids_internal_space_is_preserved",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact a",
+          "artifact b"
+        ]
+      }
+    },
+    {
+      "id": "delivery_rejects_capability_role",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "channel_delivery",
+        "integration": {
+          "kind": "CAPABILITY",
+          "name": "provider.calendar",
+          "instance_id": "synthetic-calendar"
+        },
+        "target_binding_id": "synthetic-binding",
+        "payload_type": "TEXT_REFERENCE",
+        "idempotency_key": "synthetic-delivery",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "invocation_rejects_channel_role",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "capability_invocation",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "capability": "calendar.schedule",
+        "idempotency_key": "synthetic-invocation"
+      }
+    },
+    {
+      "id": "failure_requires_error_class",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "PERMANENT_FAILURE",
+        "reason_code": "INVALID_TARGET"
+      }
+    },
+    {
+      "id": "failure_rejects_null_error_class",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "RETRYABLE_FAILURE",
+        "reason_code": "PROVIDER_TIMEOUT",
+        "error_class": null
+      }
+    },
+    {
+      "id": "success_rejects_error_class",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "SUCCEEDED",
+        "reason_code": "OK",
+        "error_class": "UNKNOWN"
+      }
+    },
+    {
+      "id": "accepted_rejects_error_class",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "ACCEPTED",
+        "reason_code": "OK",
+        "error_class": "UNKNOWN"
+      }
+    },
+    {
+      "id": "success_rejects_retry_delay",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "SUCCEEDED",
+        "reason_code": "OK",
+        "retry_after_seconds": 0
+      }
+    },
+    {
+      "id": "accepted_rejects_retry_delay",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "ACCEPTED",
+        "reason_code": "OK",
+        "retry_after_seconds": 1
+      }
+    },
+    {
+      "id": "permanent_failure_rejects_retry_delay",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "PERMANENT_FAILURE",
+        "reason_code": "OK",
+        "error_class": "INVALID_REQUEST",
+        "retry_after_seconds": 1
+      }
+    },
+    {
+      "id": "retry_delay_negative",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "RETRYABLE_FAILURE",
+        "reason_code": "OK",
+        "error_class": "TIMEOUT",
+        "retry_after_seconds": -1
+      }
+    },
+    {
+      "id": "retry_delay_over_limit",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "RETRYABLE_FAILURE",
+        "reason_code": "OK",
+        "error_class": "TIMEOUT",
+        "retry_after_seconds": 86401
+      }
+    },
+    {
+      "id": "inbound_duplicate_artifact_ids",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a",
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "delivery_duplicate_artifact_ids",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "channel_delivery",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "target_binding_id": "synthetic-binding",
+        "payload_type": "TEXT_REFERENCE",
+        "idempotency_key": "synthetic-delivery",
+        "artifact_ids": [
+          "artifact-a",
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "artifact_id_empty",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          ""
+        ]
+      }
+    },
+    {
+      "id": "artifact_id_whitespace",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "channel_delivery",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "target_binding_id": "synthetic-binding",
+        "payload_type": "TEXT_REFERENCE",
+        "idempotency_key": "synthetic-delivery",
+        "artifact_ids": [
+          "  "
+        ]
+      }
+    },
+    {
+      "id": "artifact_ids_collide_after_trimming",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a",
+          " artifact-a "
+        ]
+      }
+    },
+    {
+      "id": "sha256_non_hex",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": 8,
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-09-11T18:00:01Z"
+      }
+    },
+    {
+      "id": "sha256_wrong_length",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": 8,
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-09-11T18:00:01Z"
+      }
+    },
+    {
+      "id": "integration_name_not_canonical",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "invalid name",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "capability_name_not_canonical",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "capability_invocation",
+        "integration": {
+          "kind": "CAPABILITY",
+          "name": "provider.calendar",
+          "instance_id": "synthetic-calendar"
+        },
+        "capability": "invalid capability",
+        "idempotency_key": "synthetic-invocation"
+      }
+    },
+    {
+      "id": "reason_code_invalid",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "SUCCEEDED",
+        "reason_code": "INVALID REASON"
+      }
+    },
+    {
+      "id": "instance_id_blank",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "  ",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "account_id_blank",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "  "
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "timestamp_without_timezone",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "timestamp_invalid_calendar_date",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": 8,
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-02-30T18:00:00Z"
+      }
+    },
+    {
+      "id": "tenant_missing",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "tenant_empty",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "capability_invocation",
+        "integration": {
+          "kind": "CAPABILITY",
+          "name": "provider.calendar",
+          "instance_id": "synthetic-calendar"
+        },
+        "capability": "calendar.schedule",
+        "idempotency_key": "synthetic-invocation"
+      }
+    },
+    {
+      "id": "message_extra_field",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "SUCCEEDED",
+        "reason_code": "OK",
+        "unexpected": true
+      }
+    },
+    {
+      "id": "source_extra_field",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account",
+          "unexpected": true
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "contract_type_missing",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "contract_type_unknown",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "unknown",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "schema_version_unknown",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "2",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": 8,
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-09-11T18:00:01Z"
+      }
+    },
+    {
+      "id": "native_schema_version_default",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      },
+      "normalized_fields": {
+        "schema_version": "1"
+      }
+    },
+    {
+      "id": "native_sha256_case_normalization",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": 8,
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-09-11T18:00:01Z"
+      },
+      "normalized_fields": {
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "id": "native_reason_case_normalization",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "integration_result",
+        "integration": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "request_id": "synthetic-request",
+        "status": "SUCCEEDED",
+        "reason_code": "ok"
+      },
+      "normalized_fields": {
+        "reason_code": "OK"
+      }
+    },
+    {
+      "id": "native_integration_case_normalization",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "CHANNEL.EMAIL",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      },
+      "normalized_fields": {
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        }
+      }
+    },
+    {
+      "id": "native_capability_case_normalization",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "capability_invocation",
+        "integration": {
+          "kind": "CAPABILITY",
+          "name": "provider.calendar",
+          "instance_id": "synthetic-calendar"
+        },
+        "capability": "CALENDAR.SCHEDULE",
+        "idempotency_key": "synthetic-invocation"
+      },
+      "normalized_fields": {
+        "capability": "calendar.schedule"
+      }
+    },
+    {
+      "id": "native_name_trailing_newline",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email\n",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      },
+      "normalized_fields": {
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        }
+      }
+    },
+    {
+      "id": "native_artifact_id_trimming",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          " artifact-a "
+        ]
+      },
+      "normalized_fields": {
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "native_numeric_string",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": "8",
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-09-11T18:00:01Z"
+      },
+      "normalized_fields": {
+        "size_bytes": 8
+      }
+    },
+    {
+      "id": "native_boolean_is_not_wire_integer",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "contract_type": "artifact_receipt",
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_receipt_id": "synthetic-receipt",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_kind": "DOCUMENT",
+        "mime_type": "application/pdf",
+        "size_bytes": true,
+        "storage_provider": "synthetic",
+        "storage_reference": "opaque/synthetic-ref",
+        "received_at": "2026-09-11T18:00:01Z"
+      },
+      "normalized_fields": {
+        "size_bytes": 1
+      }
+    },
+    {
+      "id": "native_epoch_is_not_wire_datetime",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": 1789149600,
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      },
+      "normalized_fields": {
+        "occurred_at": "2026-09-11T18:00:00Z"
+      }
+    },
+    {
+      "id": "leap_second",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T23:59:60Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "year_zero",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "0000-01-01T00:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "unicode_blank_instance",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "\u0085",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    },
+    {
+      "id": "unicode_blank_artifact",
+      "wire_valid": false,
+      "python_model_valid": false,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "\u0085"
+        ]
+      }
+    },
+    {
+      "id": "unicode_nonblank_bom",
+      "wire_valid": true,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "\ufeff"
+        ]
+      }
+    },
+    {
+      "id": "native_artifact_id_unicode_trim",
+      "wire_valid": false,
+      "python_model_valid": true,
+      "message": {
+        "schema_version": "1",
+        "tenant_id": "00000000-0000-4000-8000-000000000001",
+        "correlation_id": "synthetic-correlation",
+        "contract_type": "inbound_event",
+        "source": {
+          "kind": "CHANNEL",
+          "name": "channel.email",
+          "instance_id": "synthetic-mail",
+          "account_id": "synthetic-account"
+        },
+        "external_event_id": "synthetic-event",
+        "event_type": "message",
+        "payload_type": "TEXT_REFERENCE",
+        "occurred_at": "2026-09-11T18:00:00Z",
+        "received_at": "2026-09-11T18:00:01Z",
+        "idempotency_key": "synthetic-inbound",
+        "artifact_ids": [
+          "\u0085artifact-a\u0085"
+        ]
+      },
+      "normalized_fields": {
+        "artifact_ids": [
+          "artifact-a"
+        ]
+      }
+    }
+  ]
+}

@@ -19,6 +19,20 @@ CANONICAL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 REASON_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,119}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
+# JS \s and Python \s disagree on U+0085, U+FEFF and control separators. Spell out
+# str.strip() whitespace so independent JSON Schema engines use the same boundary.
+WIRE_NONSPACE_PATTERN = (
+    r"[^\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680"
+    r"\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
+)
+# RFC 3339 format implementations disagree on year zero and leap seconds; neither
+# can be represented by these Python models. Calendar/offset validity is still
+# enforced by the required date-time format checker.
+WIRE_DATETIME_PATTERN = (
+    r"^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9]"
+    r"(?:\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})(?![\s\S])"
+)
+
 
 class IntegrationKind(StrEnum):
     CHANNEL = "CHANNEL"
@@ -293,11 +307,97 @@ IntegrationContractMessage = Annotated[
 ]
 
 
+def _wire_pattern(pattern: re.Pattern[str]) -> str:
+    # Unlike fullmatch(), JS/Python regex '$' can also match before a final newline.
+    return pattern.pattern.removesuffix("$") + r"(?![\s\S])"
+
+
+def _add_wire_constraints(definitions: dict[str, Any]) -> None:
+    """Express model-validator semantics in the portable, normalized JSON contract.
+
+    Native constructors still normalize provider inputs. Wire validators must not
+    coerce values or supply defaults before validating the published schema.
+    """
+    source = definitions["IntegrationSource"]["properties"]
+    source["name"]["pattern"] = _wire_pattern(CANONICAL_NAME_RE)
+    source["instance_id"]["pattern"] = WIRE_NONSPACE_PATTERN
+    for variant in source["account_id"]["anyOf"]:
+        if variant.get("type") == "string":
+            variant["pattern"] = WIRE_NONSPACE_PATTERN
+
+    definitions["ArtifactReceiptContract"]["properties"]["content_sha256"]["pattern"] = (
+        _wire_pattern(SHA256_RE)
+    )
+    definitions["CapabilityInvocationContract"]["properties"]["capability"]["pattern"] = (
+        _wire_pattern(CANONICAL_NAME_RE)
+    )
+    definitions["IntegrationResultContract"]["properties"]["reason_code"]["pattern"] = (
+        _wire_pattern(REASON_CODE_RE)
+    )
+
+    for name in ("InboundIntegrationEvent", "ChannelDeliveryContract"):
+        artifact_ids = definitions[name]["properties"]["artifact_ids"]
+        artifact_ids["uniqueItems"] = True
+        artifact_ids["items"].update(
+            minLength=1,
+            # IDs must already be stripped: otherwise 'a' and ' a' evade uniqueItems.
+            pattern=rf"^{WIRE_NONSPACE_PATTERN}(?:[\s\S]*{WIRE_NONSPACE_PATTERN})?(?![\s\S])",
+        )
+
+    for name, fields in (
+        ("ArtifactReceiptContract", ("received_at",)),
+        ("InboundIntegrationEvent", ("occurred_at", "received_at")),
+    ):
+        for field in fields:
+            definitions[name]["properties"][field]["pattern"] = WIRE_DATETIME_PATTERN
+
+    for name, kind in (
+        ("ChannelDeliveryContract", IntegrationKind.CHANNEL),
+        ("CapabilityInvocationContract", IntegrationKind.CAPABILITY),
+    ):
+        definitions[name]["properties"]["integration"].update(
+            type="object",
+            properties={"kind": {"const": kind.value}},
+        )
+
+    definitions["IntegrationResultContract"]["allOf"] = [
+        {
+            "if": {
+                "properties": {
+                    "status": {"enum": ["RETRYABLE_FAILURE", "PERMANENT_FAILURE"]}
+                },
+                "required": ["status"],
+            },
+            "then": {
+                "required": ["error_class"],
+                "properties": {"error_class": {"type": "string"}},
+            },
+            "else": {"properties": {"error_class": {"type": "null"}}},
+        },
+        {
+            "if": {
+                "properties": {"status": {"const": "RETRYABLE_FAILURE"}},
+                "required": ["status"],
+            },
+            "else": {"properties": {"retry_after_seconds": {"type": "null"}}},
+        },
+    ]
+
+    # Python constructors retain their defaults; serialized messages identify their
+    # family/version explicitly, including when a non-Python validator reads them.
+    for definition in definitions.values():
+        if "contract_type" in definition.get("properties", {}):
+            definition["required"] = sorted(
+                set(definition["required"]) | {"contract_type", "schema_version"}
+            )
+
+
 def integration_contract_json_schema() -> dict[str, Any]:
-    """Return the versioned language-neutral schema used by SDK implementations."""
+    """Return the portable wire schema, including semantics omitted by Pydantic export."""
     schema = TypeAdapter(IntegrationContractMessage).json_schema(
         ref_template="#/$defs/{model}"
     )
+    _add_wire_constraints(schema["$defs"])
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "urn:attention-router:integration-contract:v1",

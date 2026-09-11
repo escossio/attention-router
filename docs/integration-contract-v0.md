@@ -16,6 +16,53 @@ V0 publishes five message families through one discriminated JSON Schema:
 
 The language-neutral schema is committed at `contracts/integration/v1/integration-contract.schema.json`. Python models are in `attention_router/contracts/integration.py`, and CI asserts that the checked-in schema exactly matches the generated model schema. A TypeScript or other SDK must implement the JSON Schema contract rather than importing Python internals.
 
+## Portable validation and native normalization
+
+The public wire schema is produced by `integration_contract_json_schema()`. It adds
+semantic rules that Pydantic's automatic export does not encode: channel versus
+capability roles, coherent result/error/retry fields, canonical names and SHA-256,
+nonblank integration identifiers, and unique, already-trimmed artifact IDs. Wire
+messages explicitly include `contract_type` and `schema_version`.
+
+Python constructors remain normalizers for trusted adapter inputs. For example,
+they can lowercase a SHA-256, uppercase a reason code, supply a version default or
+convert a timestamp to UTC. Their permissive input surface is **not** the public
+wire contract. Future SDKs must validate incoming JSON against the published
+schema before constructing native models. Validators must enforce `date-time`
+formats and must not coerce types, inject defaults or remove unknown fields.
+Knowing that JSON is valid still grants no authority and establishes no tenant
+binding.
+
+The shared corpus at `contracts/integration/v1/conformance-cases.json` records exact
+synthetic JSON messages, expected wire acceptance and expected native Python
+acceptance. It distinguishes constructor normalization from portable validation
+and covers all five message families, including the semantic gaps above, Unicode
+whitespace and timestamp edge cases. Explicit character classes avoid JS/Python
+whitespace differences; timestamps exclude year zero and leap seconds, which the
+native models cannot represent. Python
+`jsonschema` and JavaScript Ajv validate the same corpus independently; successful
+native construction must serialize back into valid wire data. This establishes a
+tested interoperability boundary, not a proof over every possible JSON value.
+
+Run the focused checks with the development dependencies installed:
+
+```bash
+python -m pytest -q tests/test_integration_contract.py tests/test_integration_contract_conformance.py tests/test_integration_adapter_proof.py
+npm --prefix contracts/integration/conformance ci --ignore-scripts
+npm --prefix contracts/integration/conformance test
+```
+
+The JavaScript check runs inside the existing required `transport-tests` CI job;
+Python conformance cases run inside `python-tests`. The JavaScript package is a
+private test harness, not a published SDK. The JSON Schema discriminator annotation
+is informational; standard `oneOf` and `const` constraints enforce message family
+selection.
+
+This is a correction to the public prerelease V1 schema. Consumers of the earlier,
+permissive export must adopt the corrected validation rules. Existing normalized
+reference-adapter outputs remain covered by regression tests; native constructor
+normalization and runtime transport behavior are unchanged.
+
 ## Tenant and identity boundary
 
 Every operational contract carries an explicit `tenant_id`; there is no default tenant in this boundary. The tenant must be established by a trusted server-side binding/authentication layer. A public webhook body must never be allowed to choose an arbitrary tenant merely by supplying a `tenant_id` field.
