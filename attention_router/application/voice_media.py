@@ -7,6 +7,7 @@ from sqlalchemy import or_, select
 
 from attention_router.application.voice_transcription import is_voice_input_event
 from attention_router.config import settings
+from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.media_store import ALLOWED_MIME_TYPES, MediaStore, MediaStoreError
 from attention_router.infrastructure.models import (
@@ -25,7 +26,9 @@ class MediaNotificationRetryable(RuntimeError):
 class MediaReadyNotification(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tenant_id: str = Field(min_length=1, max_length=64)
+    # Compatibility default for direct/internal callers. The authenticated media
+    # HTTP endpoint rejects notifications that omit tenant_id before validation.
+    tenant_id: str = Field(default=DEFAULT_TENANT_ID, min_length=1, max_length=64)
     source: str = Field(min_length=1, max_length=32)
     external_event_id: str = Field(min_length=1, max_length=180)
     media_ref: str | None = Field(default=None, max_length=80)
