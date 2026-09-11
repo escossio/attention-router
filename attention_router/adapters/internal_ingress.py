@@ -5,13 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from attention_router.adapters.inbound import InboundAdapter, NormalizedInboundEvent
 from attention_router.config import settings
+from attention_router.core.tenancy import DEFAULT_TENANT_ID
 
 
 class InternalInboundPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1"] = "1"
-    tenant_id: str = Field(min_length=1, max_length=64)
+    # Compatibility default for direct/internal adapter callers only. The authenticated
+    # HTTP ingress boundary rejects payloads that omit tenant_id before normalization.
+    tenant_id: str = Field(default=DEFAULT_TENANT_ID, min_length=1, max_length=64)
     source: Literal["wwebjs"]
     external_event_id: str = Field(min_length=1, max_length=180)
     event_type: Literal["message", "call"]
