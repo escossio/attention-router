@@ -53,8 +53,10 @@ test("rejects native non-JSON values, cycles, holes, accessors and omitted prope
   const accessor = { get field() { getterCalled = true; return "value"; } };
   const nonEnumerable = Object.defineProperty({}, "hidden", { value: 1 });
   const extraArray = [1]; extraArray.extra = 2;
+  class RewrittenArray extends Array { toJSON() { return ["changed"]; } }
   for (const value of [undefined, NaN, Infinity, 1n, new Date(), () => {}, new Map(),
-    cycle, Array(2), accessor, nonEnumerable, extraArray, { [Symbol("key")]: 1 }]) {
+    cycle, Array(2), accessor, nonEnumerable, extraArray, new RewrittenArray("original"),
+    { [Symbol("key")]: 1 }]) {
     const message = { ...structuredClone(cases[0].message), payload_ref: { value } };
     assert.throws(() => sdk.validateIntegrationContract(message), sdk.ContractValidationError);
     assert(!sdk.isIntegrationContract(message));

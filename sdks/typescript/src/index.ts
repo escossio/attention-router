@@ -42,7 +42,7 @@ function checkJson(value: unknown, path: string, ancestors: Set<object>): void {
   if (typeof value !== "object" || ancestors.has(value)) jsonError(path);
   const array = Array.isArray(value);
   const prototype = Object.getPrototypeOf(value);
-  if (!array && prototype !== Object.prototype && prototype !== null) jsonError(path);
+  if (prototype !== null && prototype !== (array ? Array.prototype : Object.prototype)) jsonError(path);
   ancestors.add(value);
   try {
     // Reject accessors, symbols, sparse arrays and values JSON.stringify would silently drop.
