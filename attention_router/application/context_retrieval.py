@@ -33,6 +33,22 @@ _STOP_WORDS = {
     "esse", "isto", "aquele", "aquela", "voce", "voces",
 }
 
+# Canonical predicates are intentionally provider/language neutral and currently
+# use English tokens. V0 keeps retrieval deterministic while allowing a very
+# small, explicit PT-BR bridge for canonical vocabulary. This is not semantic
+# inference: aliases are reviewed data and matched terms always remain the
+# original query terms for explainability.
+_TOKEN_ALIASES: dict[str, set[str]] = {
+    "primary": {"principal"},
+    "principal": {"primary"},
+    "payment": {"pagamento"},
+    "pagamento": {"payment"},
+    "work": {"trabalho"},
+    "trabalho": {"work"},
+    "branch": {"filial"},
+    "filial": {"branch"},
+}
+
 
 @dataclass(frozen=True)
 class RetrievedPersonalContextItem:
@@ -78,6 +94,13 @@ def _tokens(value: str | None) -> set[str]:
     }
 
 
+def _expand_candidate_tokens(tokens: set[str]) -> set[str]:
+    expanded = set(tokens)
+    for token in tokens:
+        expanded.update(_TOKEN_ALIASES.get(token, ()))
+    return expanded
+
+
 def _json_text(value: Any) -> str:
     if value is None:
         return ""
@@ -99,8 +122,10 @@ def _candidate_score(
     searchable_value: str,
     confidence: float,
 ) -> tuple[float, tuple[str, ...]]:
-    predicate_tokens = _tokens(predicate.replace(".", " ").replace("_", " "))
-    value_tokens = _tokens(searchable_value)
+    predicate_tokens = _expand_candidate_tokens(
+        _tokens(predicate.replace(".", " ").replace("_", " "))
+    )
+    value_tokens = _expand_candidate_tokens(_tokens(searchable_value))
     candidate_tokens = predicate_tokens | value_tokens
     matched = query_tokens & candidate_tokens
     if not matched:
