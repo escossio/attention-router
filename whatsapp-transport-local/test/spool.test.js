@@ -7,9 +7,12 @@ const path = require('node:path');
 const { createInboundBridge } = require('../src/bridge');
 const { deliverPendingFile, enqueuePending, ensureSpool, listPending } = require('../src/spool');
 
+const TENANT_ID = '00000000-0000-4000-8000-000000000001';
+
 function tempConfig(overrides = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'attention-router-stage37-spool-'));
   const config = {
+    tenantId: TENANT_ID,
     inboundSpoolDir: path.join(root, 'spool'),
     inboundPendingDir: path.join(root, 'spool', 'pending'),
     inboundSendingDir: path.join(root, 'spool', 'sending'),
@@ -50,6 +53,29 @@ test('inbound bridge fails closed when forward is disabled', async () => {
   assert.equal(counters.length > 0, true);
 });
 
+test('inbound bridge fails closed when forwarding has no explicit tenant', async () => {
+  const { config } = tempConfig({
+    tenantId: null,
+    inboundForwardEnabled: true,
+  });
+  const bridge = createInboundBridge(config, { info() {}, error() {}, warn() {} }, {
+    fetchImpl: async () => {
+      throw new Error('fetch should not be called');
+    },
+  });
+
+  const result = await bridge.handleMessage({
+    id: { _serialized: 'wamid.synthetic.missing-tenant' },
+    from: '5500000000029@c.us',
+    type: 'chat',
+    body: 'Fixture inbound.',
+    timestamp: 1723520000,
+  });
+
+  assert.equal(result.status, 'blocked_missing_tenant');
+  assert.equal(result.forwarded, false);
+});
+
 test('inbound bridge rejects non-local targets even when enabled in test mode', async () => {
   const { config } = tempConfig({
     inboundForwardEnabled: true,
@@ -80,6 +106,7 @@ test('inbound spool survives restart and delivers exactly once', async () => {
   ensureSpool(config);
   const normalized = {
     schema_version: '1',
+    tenant_id: TENANT_ID,
     source: 'wwebjs',
     external_event_id: 'wamid.synthetic.recovery',
     event_type: 'message',
@@ -126,6 +153,7 @@ test('inbound spool quarantines bad payload and keeps retryable failures pending
   });
   const normalized = {
     schema_version: '1',
+    tenant_id: TENANT_ID,
     source: 'wwebjs',
     external_event_id: 'wamid.synthetic.retry',
     event_type: 'message',

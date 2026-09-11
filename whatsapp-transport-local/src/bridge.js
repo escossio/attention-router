@@ -31,7 +31,12 @@ function createInboundBridge(config, logger = console, deps = {}) {
     if (!fromMe && ownerSelfChat) {
       return { status: 'ignored_self_chat_signal', normalized: null, forwarded: false };
     }
+    if (config.inboundForwardEnabled && !config.tenantId) {
+      onCounters({ last_inbound_error_at: new Date().toISOString() });
+      return { status: 'blocked_missing_tenant', normalized: null, forwarded: false };
+    }
     const normalized = normalizeInboundMessage(message, {
+      tenantId: config.tenantId,
       source: config.inboundSource,
       channel: config.inboundChannel,
       sourceAccount: config.sourceAccount,

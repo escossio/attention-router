@@ -100,6 +100,7 @@ function createConfig(env = process.env) {
     serviceName: env.LOCAL_TRANSPORT_SERVICE_NAME || 'attention-router-local-whatsapp-transport',
     sourceRevision: env.ATTENTION_TRANSPORT_SOURCE_SHA || 'unknown',
     ownerIdentityRef: env.OWNER_WHATSAPP_IDENTITY_REF || null,
+    tenantId: (env.LOCAL_TENANT_ID || '').trim() || null,
     inboundSpoolDir,
     inboundPendingDir: env.LOCAL_INBOUND_PENDING_DIR || '',
     inboundSendingDir: env.LOCAL_INBOUND_SENDING_DIR || '',

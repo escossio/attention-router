@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
 from attention_router.config import settings
+from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.infrastructure.models import (
     AuditEventRow,
     DecisionRow,
@@ -53,6 +54,7 @@ def client(Session, monkeypatch):
 def payload(event_id: str, text_value: str = "Mensagem interna PostgreSQL.") -> dict:
     return {
         "schema_version": "1",
+        "tenant_id": DEFAULT_TENANT_ID,
         "source": "wwebjs",
         "external_event_id": event_id,
         "event_type": "message",
@@ -85,7 +87,7 @@ def test_internal_ingress_postgres_pipeline_and_replay(Session, client):
     assert second.json()["status"] == "duplicate"
     interaction_id = first.json()["interaction_id"]
     with Session() as session:
-        assert session.scalar(select(text("count(*)")).select_from(InboundEventRow).where(InboundEventRow.external_event_id == event_id, InboundEventRow.source == "wwebjs")) == 1
+        assert session.scalar(select(text("count(*)")).select_from(InboundEventRow).where(InboundEventRow.tenant_id == DEFAULT_TENANT_ID, InboundEventRow.external_event_id == event_id, InboundEventRow.source == "wwebjs")) == 1
         assert session.scalar(select(text("count(*)")).select_from(InteractionRow).where(InteractionRow.id == interaction_id)) == 1
         assert session.scalar(select(text("count(*)")).select_from(DecisionRow).where(DecisionRow.interaction_id == interaction_id)) == 1
         assert session.scalar(select(text("count(*)")).select_from(TimerRow).where(TimerRow.interaction_id == interaction_id)) == 1
@@ -98,7 +100,7 @@ def test_internal_ingress_postgres_conflict(Session, client):
     assert post(client, payload(event_id)).status_code == 200
     assert post(client, payload(event_id, "Texto modificado.")).status_code == 409
     with Session() as session:
-        assert session.scalar(select(text("count(*)")).select_from(InboundEventRow).where(InboundEventRow.external_event_id == event_id, InboundEventRow.source == "wwebjs")) == 1
+        assert session.scalar(select(text("count(*)")).select_from(InboundEventRow).where(InboundEventRow.tenant_id == DEFAULT_TENANT_ID, InboundEventRow.external_event_id == event_id, InboundEventRow.source == "wwebjs")) == 1
 
 
 def test_internal_ingress_postgres_concurrent_deduplicates(Session, client):
@@ -118,5 +120,5 @@ def test_internal_ingress_postgres_concurrent_deduplicates(Session, client):
     interaction_ids = {response.json()["interaction_id"] for response in responses}
     assert len(interaction_ids) == 1
     with Session() as session:
-        assert session.scalar(select(text("count(*)")).select_from(InboundEventRow).where(InboundEventRow.external_event_id == event_id, InboundEventRow.source == "wwebjs")) == 1
+        assert session.scalar(select(text("count(*)")).select_from(InboundEventRow).where(InboundEventRow.tenant_id == DEFAULT_TENANT_ID, InboundEventRow.external_event_id == event_id, InboundEventRow.source == "wwebjs")) == 1
         assert session.scalar(select(text("count(*)")).select_from(InteractionRow).where(InteractionRow.id.in_(interaction_ids))) == 1
