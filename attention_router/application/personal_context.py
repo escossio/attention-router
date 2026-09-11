@@ -1,7 +1,7 @@
 """Tenant-scoped owner Personal Context read model.
 
-Personal Context is knowledge, not authority.  Nothing in this module grants
-permission to disclose a value or execute an action.  It intentionally remains
+Personal Context is knowledge, not authority. Nothing in this module grants
+permission to disclose a value or execute an action. It intentionally remains
 read-only and independent from outbound execution.
 """
 
@@ -91,10 +91,17 @@ def _owner_bindings(session: Session, tenant_id: str) -> tuple[str, list[ActorBi
     return next(iter(actor_keys)), bindings
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _active_at(valid_from: datetime | None, valid_until: datetime | None, now: datetime) -> bool:
-    if valid_from is not None and valid_from > now:
+    reference = _as_utc(now)
+    if valid_from is not None and _as_utc(valid_from) > reference:
         return False
-    if valid_until is not None and valid_until <= now:
+    if valid_until is not None and _as_utc(valid_until) <= reference:
         return False
     return True
 
@@ -115,7 +122,7 @@ def build_personal_context(
     """
     if limit < 1 or limit > 500:
         raise ValueError("PERSONAL_CONTEXT_LIMIT_OUT_OF_RANGE")
-    stamp = now or datetime.now(timezone.utc)
+    stamp = _as_utc(now or datetime.now(timezone.utc))
     actor_key, bindings = _owner_bindings(session, tenant_id)
     aliases = {actor_key, *(binding.external_actor_id for binding in bindings)}
 
