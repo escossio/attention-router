@@ -31,6 +31,7 @@ reproduction command.
 - Optional voice input/output, locale propagation, and Ogg/Opus normalization.
 - Transactional execution/outbox boundaries, delivery-state tracking and health endpoints.
 - Standalone Python and TypeScript [integration contract SDKs](docs/integration-sdks-v0.md), with generated types and offline wire validation.
+- Internal [transactional integration admission proof](docs/integration-admission-proof-v0.md), with authenticated bindings and a PostgreSQL pending inbox; no public endpoint or dispatcher.
 
 These are implemented components, not a promise that every configuration or provider is supported. The public baseline remains prerelease; PostgreSQL integration certification is an explicit release gate.
 

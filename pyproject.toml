@@ -7,6 +7,7 @@ dependencies = [
   "alembic==1.13.2",
   "fastapi==0.112.2",
   "jinja2==3.1.4",
+  "jsonschema[format-nongpl]==4.26.0",
   "openai==2.11.0",
   "openai-agents==0.7.0",
   "opentelemetry-api==1.27.0",
@@ -23,7 +24,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "httpx==0.27.2",
-  "jsonschema[format-nongpl]==4.26.0",
   "pytest==8.3.2",
   "ruff==0.6.3",
 ]

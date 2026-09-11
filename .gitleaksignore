@@ -2,3 +2,6 @@
 # These two unchanged test statements were manually reviewed in the baseline.
 1d08444f83bc4529cde2b5c5a141737246faed93:tests/integration/test_postgres_10_5c_contract.py:generic-api-key:82
 1d08444f83bc4529cde2b5c5a141737246faed93:tests/integration/test_postgres_10_5c_contract.py:generic-api-key:125
+# Reviewed synthetic idempotency identifier in the neutral ingress JSON example.
+# It selects a replay identity; it is not a credential or an authentication token.
+fec9cc427001933abcea7eeedeadcf4e81785068:docs/integration-transport-v0.md:generic-api-key:91

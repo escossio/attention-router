@@ -7,6 +7,8 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
+    LargeBinary,
     Index,
     Integer,
     String,
@@ -2768,4 +2770,68 @@ class PromotionDecisionRow(Base):
             "patch_candidate_id",
             "created_at",
         ),
+    )
+
+
+class IntegrationBindingRow(Base):
+    __tablename__ = "integration_bindings"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    audience: Mapped[str] = mapped_column(String(120), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(64), ForeignKey("tenants.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    instance_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    account_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    scopes: Mapped[list] = mapped_column(JsonType, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_integration_binding_tenant"),
+        UniqueConstraint("audience", "tenant_id", "kind", "name", "instance_id", "account_key",
+                         name="uq_integration_binding_namespace"),
+        CheckConstraint("kind in ('CHANNEL','CAPABILITY')", name="ck_integration_binding_kind"),
+    )
+
+
+class IntegrationCredentialRow(Base):
+    __tablename__ = "integration_credentials"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    binding_id: Mapped[str] = mapped_column(String(64), ForeignKey("integration_bindings.id"), nullable=False)
+    not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    scopes: Mapped[list] = mapped_column(JsonType, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("id", "binding_id", name="uq_integration_credential_binding"),
+        CheckConstraint("expires_at > not_before", name="ck_integration_credential_lifetime"),
+    )
+
+
+class IntegrationInboxRow(Base):
+    """One committed row is both the receipt and recoverable pending work."""
+    __tablename__ = "integration_inbox"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    binding_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    credential_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    contract_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    external_event_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(240), nullable=False)
+    body_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_body: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    admitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "binding_id"],
+                             ["integration_bindings.tenant_id", "integration_bindings.id"]),
+        ForeignKeyConstraint(["credential_id", "binding_id"],
+                             ["integration_credentials.id", "integration_credentials.binding_id"]),
+        UniqueConstraint("tenant_id", "binding_id", "contract_type", "external_event_id",
+                         name="uq_integration_inbox_event"),
+        UniqueConstraint("tenant_id", "binding_id", "contract_type", "idempotency_key",
+                         name="uq_integration_inbox_key"),
+        CheckConstraint("contract_type = 'inbound_event'", name="ck_integration_inbox_type"),
+        CheckConstraint("state = 'PENDING'", name="ck_integration_inbox_state"),
+        CheckConstraint("length(raw_body) <= 65536", name="ck_integration_inbox_size"),
     )
