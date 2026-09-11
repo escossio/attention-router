@@ -12,6 +12,9 @@ function isoFromUnixSeconds(value) {
 function normalizeInboundMessage(message, options = {}) {
   const source = options.source || 'wwebjs';
   const channel = options.channel || 'whatsapp';
+  const tenantId = typeof options.tenantId === 'string' && options.tenantId.trim()
+    ? options.tenantId.trim()
+    : null;
   const finalFromMeClassification = message?.__finalFromMeClassification || null;
   const authenticatedSelfChatTarget = Boolean(
     options.authenticatedSelfAuthorityCurrent === true
@@ -40,6 +43,7 @@ function normalizeInboundMessage(message, options = {}) {
   const isOwnerObservation = Boolean(message?.fromMe) && !ownerSelfChat && Boolean(fromMeClassification);
   return {
     schema_version: '1',
+    tenant_id: tenantId,
     source,
     external_event_id: externalEventId,
     event_type: 'message',
