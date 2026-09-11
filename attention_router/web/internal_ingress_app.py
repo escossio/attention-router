@@ -45,6 +45,15 @@ def get_session():
         session.close()
 
 
+def _require_explicit_tenant_payload(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="explicit tenant required")
+    tenant_id = payload.get("tenant_id")
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        raise HTTPException(status_code=422, detail="explicit tenant required")
+    return tenant_id.strip()
+
+
 def _require_active_tenant(session, tenant_id: str) -> TenantRow:
     tenant = session.get(TenantRow, tenant_id)
     if tenant is None or tenant.status != "ACTIVE":
@@ -78,10 +87,16 @@ def process_internal_event(
             audit(session, None, "internal_ingress_rejected", {"reason": "invalid_json"}, origin="ingress")
             raise HTTPException(status_code=400, detail="invalid json") from exc
         try:
+            explicit_tenant_id = _require_explicit_tenant_payload(payload)
             event = internal_adapter.normalize(payload)
+        except HTTPException:
+            audit(session, None, "internal_ingress_rejected", {"reason": "tenant_required"}, origin="ingress")
+            raise
         except (ValidationError, ValueError, TypeError) as exc:
             audit(session, None, "internal_ingress_rejected", {"reason": "invalid_payload"}, origin="ingress")
             raise HTTPException(status_code=422, detail="invalid internal event") from exc
+        if event.tenant_id != explicit_tenant_id:
+            raise HTTPException(status_code=422, detail="tenant normalization mismatch")
         _require_active_tenant(session, event.tenant_id)
         audit(
             session,
@@ -154,9 +169,15 @@ def process_media_notification(
     if not ok:
         raise HTTPException(status_code=401, detail="invalid internal signature")
     try:
-        payload = MediaReadyNotification.model_validate_json(body)
-    except ValidationError as exc:
+        raw_payload = json.loads(body)
+        explicit_tenant_id = _require_explicit_tenant_payload(raw_payload)
+        payload = MediaReadyNotification.model_validate(raw_payload)
+    except HTTPException:
+        raise
+    except (json.JSONDecodeError, ValidationError) as exc:
         raise HTTPException(status_code=422, detail="invalid media notification") from exc
+    if payload.tenant_id != explicit_tenant_id:
+        raise HTTPException(status_code=422, detail="tenant normalization mismatch")
     session = SessionLocal()
     try:
         _require_active_tenant(session, payload.tenant_id)
