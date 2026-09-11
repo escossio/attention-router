@@ -4,6 +4,9 @@ on:
   workflow_run:
     workflows: ["Public CI", "CodeQL"]
     types: [completed]
+    branches-ignore:
+      - main
+      - "dependabot/**"
 
 # workflow_run executes trusted agent code from the default branch. V0/V1/V1.5
 # remain repository read-only. V2 separates model proposal from persistence: the
