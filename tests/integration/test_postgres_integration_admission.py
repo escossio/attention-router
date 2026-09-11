@@ -317,3 +317,13 @@ def test_populated_downgrade_refuses_to_drop_receipts(Session, world, pg_url):
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
             "0037_integration_admission_v0"
         )
+
+
+@pytest.mark.parametrize("model,identity", [(BindingRow, "binding-a"),
+                                            (CredentialRow, "credential-a")])
+@pytest.mark.parametrize("scopes", [{INBOUND_SCOPE: True}, INBOUND_SCOPE])
+def test_malformed_stored_scopes_fail_closed(Session, world, model, identity, scopes):
+    with Session.begin() as session:
+        session.get(model, identity).scopes = scopes
+    assert send(Session, world).code == "INGRESS_UNAVAILABLE"
+    assert count(Session) == 0

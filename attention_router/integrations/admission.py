@@ -50,15 +50,21 @@ def _lock(session, model, identity):
                           .execution_options(populate_existing=True))
 
 
+def _stored_scopes(value):
+    if type(value) is not list or any(type(scope) is not str for scope in value):
+        raise RegistryUnavailable("Invalid stored scopes")
+    return frozenset(value)
+
+
 def _binding_record(row):
     return IntegrationBinding(row.id, row.audience, row.tenant_id, row.kind, row.name,
                               row.instance_id, row.account_key or None, row.active,
-                              frozenset(row.scopes))
+                              _stored_scopes(row.scopes))
 
 
 def _credential_record(row):
     return CredentialRecord(row.id, row.digest, row.binding_id, row.not_before,
-                            row.expires_at, row.revoked, frozenset(row.scopes))
+                            row.expires_at, row.revoked, _stored_scopes(row.scopes))
 
 
 class _Snapshot:

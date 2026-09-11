@@ -1,8 +1,9 @@
 # Neutral Integration Transport and Tenant Binding V0
 
-**Status: proposed HTTP design; isolated offline binding proof implemented.**
-The [binding proof](integration-tenant-binding-proof-v0.md) covers a subset of the
-acceptance matrix, without implementing a receiver, database registry or client.
+**Status: proposed HTTP design; binding and internal admission proofs implemented.**
+The [offline binding proof](integration-tenant-binding-proof-v0.md) and
+[PostgreSQL admission proof](integration-admission-proof-v0.md) cover parts of the
+acceptance matrix. No HTTP receiver, dispatcher or network client is activated.
 This specifies the next boundary
 after the [contract SDK extraction](integration-sdks-v0.md), under
 [ADR 0020](adr/0020-neutral-ingress-and-authenticated-tenant-binding.md).
