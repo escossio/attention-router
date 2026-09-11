@@ -17,7 +17,7 @@ from attention_router.application.voice_media import (
 )
 from attention_router.config import settings
 from attention_router.infrastructure.db import SessionLocal
-from attention_router.infrastructure.models import InboundEventRow
+from attention_router.infrastructure.models import InboundEventRow, TenantRow
 from attention_router.infrastructure.repository import audit, mask_identifier
 from attention_router.web.internal_security import verify_internal_signature
 
@@ -43,6 +43,13 @@ def get_session():
         raise
     finally:
         session.close()
+
+
+def _require_active_tenant(session, tenant_id: str) -> TenantRow:
+    tenant = session.get(TenantRow, tenant_id)
+    if tenant is None or tenant.status != "ACTIVE":
+        raise HTTPException(status_code=403, detail="tenant unavailable")
+    return tenant
 
 
 def process_internal_event(
@@ -75,6 +82,7 @@ def process_internal_event(
         except (ValidationError, ValueError, TypeError) as exc:
             audit(session, None, "internal_ingress_rejected", {"reason": "invalid_payload"}, origin="ingress")
             raise HTTPException(status_code=422, detail="invalid internal event") from exc
+        _require_active_tenant(session, event.tenant_id)
         audit(
             session,
             None,
@@ -89,9 +97,12 @@ def process_internal_event(
             event.correlation_id,
             None,
             origin="ingress",
+            tenant_id=event.tenant_id,
         )
         existing = session.query(InboundEventRow).filter_by(
-            source=event.source, external_event_id=event.external_event_id
+            tenant_id=event.tenant_id,
+            source=event.source,
+            external_event_id=event.external_event_id,
         ).first()
         try:
             result = services.receive_normalized_inbound_event(session, event)
@@ -104,6 +115,7 @@ def process_internal_event(
                 event.correlation_id,
                 None,
                 origin="ingress",
+                tenant_id=event.tenant_id,
             )
             raise HTTPException(status_code=409, detail="event id conflict") from exc
         status_value = "duplicate" if existing else "accepted"
@@ -116,6 +128,7 @@ def process_internal_event(
             result.get("correlation_id", event.correlation_id),
             None,
             origin="ingress",
+            tenant_id=event.tenant_id,
         )
         session.commit()
         return {
@@ -146,6 +159,7 @@ def process_media_notification(
         raise HTTPException(status_code=422, detail="invalid media notification") from exc
     session = SessionLocal()
     try:
+        _require_active_tenant(session, payload.tenant_id)
         artifact = record_media_notification(session, payload)
         session.commit()
         return {"status": "accepted", "artifact_id": artifact.id if artifact else None}
