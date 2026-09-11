@@ -8,8 +8,8 @@ dependencies = [
   "fastapi==0.112.2",
   "jinja2==3.1.4",
   "jsonschema[format-nongpl]==4.26.0",
-  "openai==2.11.0",
-  "openai-agents==0.7.0",
+  "openai==3.9.0",
+  "openai-agents==0.22.1",
   "opentelemetry-api==1.27.0",
   "opentelemetry-sdk==1.27.0",
   "opentelemetry-exporter-otlp-proto-http==1.27.0",
@@ -18,7 +18,7 @@ dependencies = [
   "python-multipart==0.0.9",
   "PyYAML==6.0.2",
   "sqlalchemy==2.0.32",
-  "uvicorn[standard]==0.30.6",
+  "uvicorn[standard]==0.31.1",
 ]
 
 [project.optional-dependencies]
