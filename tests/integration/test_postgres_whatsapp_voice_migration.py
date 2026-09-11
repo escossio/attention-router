@@ -90,6 +90,6 @@ def test_voice_schema_refuses_downgrade_with_media(migration_db):
     assert "WHATSAPP_VOICE_MEDIA_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == (
-            "0035_whatsapp_voice_media"
+            "0036_artifact_registry_v0"
         )
         assert connection.execute(text("SELECT count(*) FROM media_artifacts")).scalar() == 1
