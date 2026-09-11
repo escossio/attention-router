@@ -2,7 +2,7 @@
 
 Integration Contract V0 is the provider-neutral boundary between Attention Router and external channels/capability providers.
 
-The architectural rule is **contract first, SDK second, adapters third**. The contract must not depend on Gmail, WhatsApp, Telegram, Google Calendar, Home Assistant, or any other provider-specific payload shape. Provider adapters translate native APIs into this contract; future SDKs package the repetitive mechanics around the same versioned schema.
+The architectural rule is **contract first, SDK second, adapters third**. The contract must not depend on Gmail, WhatsApp, Telegram, Google Calendar, Home Assistant, or any other provider-specific payload shape. Provider adapters translate native APIs into this contract; [contract SDKs](integration-sdks-v0.md) package types and validation around the same versioned schema.
 
 ## Contract families
 
@@ -27,7 +27,7 @@ messages explicitly include `contract_type` and `schema_version`.
 Python constructors remain normalizers for trusted adapter inputs. For example,
 they can lowercase a SHA-256, uppercase a reason code, supply a version default or
 convert a timestamp to UTC. Their permissive input surface is **not** the public
-wire contract. Future SDKs must validate incoming JSON against the published
+wire contract. SDKs must validate incoming JSON against the published
 schema before constructing native models. Validators must enforce `date-time`
 formats and must not coerce types, inject defaults or remove unknown fields.
 Knowing that JSON is valid still grants no authority and establishes no tenant
@@ -91,6 +91,6 @@ External actor/thread/provider identifiers are intentionally not copied into can
 
 ## What V0 deliberately does not do
 
-V0 does not implement Gmail, Telegram, calendar, object upload APIs, OAuth, SDK packaging, connector discovery, webhooks, runtime delivery, or provider credentials. It also does not replace the existing WhatsApp transport. The next proof should use two materially different adapters — the existing WhatsApp path and an email adapter — to verify that both can satisfy the same contract without adding provider-specific conditionals to the core.
+V0 does not implement Gmail, Telegram, calendar, object upload APIs, OAuth, connector discovery, webhooks, runtime delivery, or provider credentials. It also does not replace the existing WhatsApp transport.
 
-Once that seam is proven, the repetitive client behavior (schema validation, auth/signing, tenant assertion, idempotency, retries, correlation, artifact handoff, health/observability) can be extracted into **Andy Integration SDKs**, initially Python and TypeScript.
+The [two-adapter proof](integration-adapter-proof-v0.md) exercises WhatsApp and email without provider-specific core conditionals. [Integration SDK extraction V0](integration-sdks-v0.md) packages the validated wire contract for Python and TypeScript. Auth/signing, trusted tenant binding, network retries, artifact upload and live providers require a separately defined transport boundary.

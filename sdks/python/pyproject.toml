@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "andy-integration-sdk"
+version = "0.1.0a1"
+description = "Standalone validation and types for the Andy integration wire contract"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["jsonschema[format-nongpl]==4.26.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+andy_integration_sdk = ["_schema.json", "py.typed"]

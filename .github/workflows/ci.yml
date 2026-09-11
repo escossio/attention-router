@@ -31,6 +31,10 @@ jobs:
       - run: python -m pip install -e '.[dev]'
       - run: python -m ruff check .
       - run: python -m compileall -q attention_router tests
+      - name: Check generated integration SDK types and schemas
+        run: python scripts/generate_integration_sdks.py --check
+      - name: Build and test the standalone Python SDK wheel
+        run: python scripts/test_python_integration_sdk.py
       - run: python -m pytest -q
   transport-tests:
     runs-on: ubuntu-latest
@@ -51,6 +55,7 @@ jobs:
           cache-dependency-path: |
             whatsapp-transport-local/package-lock.json
             contracts/integration/conformance/package-lock.json
+            sdks/typescript/package-lock.json
       - run: npm ci --ignore-scripts
       - run: node ../tests/fixtures/synthetic-identity-contract.cjs
       - run: npm test
@@ -59,6 +64,12 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Validate shared integration wire fixtures in JavaScript
         working-directory: contracts/integration/conformance
+        run: npm test
+      - name: Install TypeScript SDK build dependencies
+        working-directory: sdks/typescript
+        run: npm ci --ignore-scripts
+      - name: Build and test the installed TypeScript SDK tarball
+        working-directory: sdks/typescript
         run: npm test
   postgres-integration:
     runs-on: ubuntu-latest

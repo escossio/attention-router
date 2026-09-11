@@ -30,6 +30,7 @@ reproduction command.
 - Separate persistent memory with eligibility, provenance and disclosure controls.
 - Optional voice input/output, locale propagation, and Ogg/Opus normalization.
 - Transactional execution/outbox boundaries, delivery-state tracking and health endpoints.
+- Standalone Python and TypeScript [integration contract SDKs](docs/integration-sdks-v0.md), with generated types and offline wire validation.
 
 These are implemented components, not a promise that every configuration or provider is supported. The public baseline remains prerelease; PostgreSQL integration certification is an explicit release gate.
 

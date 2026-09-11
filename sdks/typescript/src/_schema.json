@@ -1,0 +1,828 @@
+{
+  "$defs": {
+    "ArtifactReceiptContract": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_kind": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Artifact Kind",
+          "type": "string"
+        },
+        "artifact_metadata": {
+          "additionalProperties": true,
+          "title": "Artifact Metadata",
+          "type": "object"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "contract_type": {
+          "const": "artifact_receipt",
+          "default": "artifact_receipt",
+          "title": "Contract Type",
+          "type": "string"
+        },
+        "external_receipt_id": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "External Receipt Id",
+          "type": "string"
+        },
+        "mime_type": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Mime Type",
+          "type": "string"
+        },
+        "original_filename": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Filename"
+        },
+        "receipt_metadata": {
+          "additionalProperties": true,
+          "title": "Receipt Metadata",
+          "type": "object"
+        },
+        "received_at": {
+          "format": "date-time",
+          "pattern": "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})(?![\\s\\S])",
+          "title": "Received At",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sender": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalActorRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/IntegrationSource"
+        },
+        "storage_provider": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Storage Provider",
+          "type": "string"
+        },
+        "storage_reference": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Storage Reference",
+          "type": "string"
+        },
+        "tenant_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_kind",
+        "content_sha256",
+        "contract_type",
+        "external_receipt_id",
+        "mime_type",
+        "received_at",
+        "schema_version",
+        "size_bytes",
+        "source",
+        "storage_provider",
+        "storage_reference",
+        "tenant_id"
+      ],
+      "title": "ArtifactReceiptContract",
+      "type": "object"
+    },
+    "CapabilityInvocationContract": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "maxLength": 160,
+          "minLength": 3,
+          "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+(?![\\s\\S])",
+          "title": "Capability",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "confidence": {
+          "default": "medium",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "contract_type": {
+          "const": "capability_invocation",
+          "default": "capability_invocation",
+          "title": "Contract Type",
+          "type": "string"
+        },
+        "correlation_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "integration": {
+          "$ref": "#/$defs/IntegrationSource",
+          "properties": {
+            "kind": {
+              "const": "CAPABILITY"
+            }
+          },
+          "type": "object"
+        },
+        "metadata_sanitized": {
+          "additionalProperties": true,
+          "title": "Metadata Sanitized",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "tenant_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        },
+        "user_requested": {
+          "default": false,
+          "title": "User Requested",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "capability",
+        "contract_type",
+        "correlation_id",
+        "idempotency_key",
+        "integration",
+        "schema_version",
+        "tenant_id"
+      ],
+      "title": "CapabilityInvocationContract",
+      "type": "object"
+    },
+    "ChannelDeliveryContract": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_ids": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[^\\u0009-\\u000d\\u001c-\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000](?:[\\s\\S]*[^\\u0009-\\u000d\\u001c-\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000])?(?![\\s\\S])",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Artifact Ids",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "contract_type": {
+          "const": "channel_delivery",
+          "default": "channel_delivery",
+          "title": "Contract Type",
+          "type": "string"
+        },
+        "correlation_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "integration": {
+          "$ref": "#/$defs/IntegrationSource",
+          "properties": {
+            "kind": {
+              "const": "CHANNEL"
+            }
+          },
+          "type": "object"
+        },
+        "metadata_sanitized": {
+          "additionalProperties": true,
+          "title": "Metadata Sanitized",
+          "type": "object"
+        },
+        "payload_ref": {
+          "additionalProperties": true,
+          "title": "Payload Ref",
+          "type": "object"
+        },
+        "payload_type": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Payload Type",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "target_binding_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Target Binding Id",
+          "type": "string"
+        },
+        "tenant_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contract_type",
+        "correlation_id",
+        "idempotency_key",
+        "integration",
+        "payload_type",
+        "schema_version",
+        "target_binding_id",
+        "tenant_id"
+      ],
+      "title": "ChannelDeliveryContract",
+      "type": "object"
+    },
+    "ExternalActorRef": {
+      "additionalProperties": false,
+      "properties": {
+        "display_name": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Display Name"
+        },
+        "external_actor_id": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "External Actor Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "external_actor_id"
+      ],
+      "title": "ExternalActorRef",
+      "type": "object"
+    },
+    "ExternalThreadRef": {
+      "additionalProperties": false,
+      "properties": {
+        "external_thread_id": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "External Thread Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/IntegrationThreadKind",
+          "default": "THREAD"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "maxLength": 240,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "external_thread_id"
+      ],
+      "title": "ExternalThreadRef",
+      "type": "object"
+    },
+    "InboundIntegrationEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalActorRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "artifact_ids": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[^\\u0009-\\u000d\\u001c-\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000](?:[\\s\\S]*[^\\u0009-\\u000d\\u001c-\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000])?(?![\\s\\S])",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Artifact Ids",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "contract_type": {
+          "const": "inbound_event",
+          "default": "inbound_event",
+          "title": "Contract Type",
+          "type": "string"
+        },
+        "correlation_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "event_type": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Event Type",
+          "type": "string"
+        },
+        "external_event_id": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "External Event Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "metadata_sanitized": {
+          "additionalProperties": true,
+          "title": "Metadata Sanitized",
+          "type": "object"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "pattern": "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})(?![\\s\\S])",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload_ref": {
+          "additionalProperties": true,
+          "title": "Payload Ref",
+          "type": "object"
+        },
+        "payload_type": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Payload Type",
+          "type": "string"
+        },
+        "received_at": {
+          "format": "date-time",
+          "pattern": "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](?:\\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})(?![\\s\\S])",
+          "title": "Received At",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/IntegrationSource"
+        },
+        "tenant_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        },
+        "thread": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalThreadRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "contract_type",
+        "correlation_id",
+        "event_type",
+        "external_event_id",
+        "idempotency_key",
+        "occurred_at",
+        "payload_type",
+        "received_at",
+        "schema_version",
+        "source",
+        "tenant_id"
+      ],
+      "title": "InboundIntegrationEvent",
+      "type": "object"
+    },
+    "IntegrationErrorClass": {
+      "enum": [
+        "AUTHENTICATION",
+        "AUTHORIZATION",
+        "RATE_LIMIT",
+        "TIMEOUT",
+        "PROVIDER_UNAVAILABLE",
+        "INVALID_REQUEST",
+        "NOT_FOUND",
+        "CONFLICT",
+        "UNKNOWN"
+      ],
+      "title": "IntegrationErrorClass",
+      "type": "string"
+    },
+    "IntegrationKind": {
+      "enum": [
+        "CHANNEL",
+        "CAPABILITY"
+      ],
+      "title": "IntegrationKind",
+      "type": "string"
+    },
+    "IntegrationResultContract": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "error_class": {
+                "type": "null"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "RETRYABLE_FAILURE",
+                  "PERMANENT_FAILURE"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "error_class": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error_class"
+            ]
+          }
+        },
+        {
+          "else": {
+            "properties": {
+              "retry_after_seconds": {
+                "type": "null"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "status": {
+                "const": "RETRYABLE_FAILURE"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "contract_type": {
+          "const": "integration_result",
+          "default": "integration_result",
+          "title": "Contract Type",
+          "type": "string"
+        },
+        "correlation_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "details_sanitized": {
+          "additionalProperties": true,
+          "title": "Details Sanitized",
+          "type": "object"
+        },
+        "error_class": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntegrationErrorClass"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "integration": {
+          "$ref": "#/$defs/IntegrationSource"
+        },
+        "provider_reference": {
+          "anyOf": [
+            {
+              "maxLength": 240,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Reference"
+        },
+        "reason_code": {
+          "maxLength": 120,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]{0,119}(?![\\s\\S])",
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "maximum": 86400,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Seconds"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/IntegrationResultStatus"
+        },
+        "tenant_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Tenant Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contract_type",
+        "correlation_id",
+        "integration",
+        "reason_code",
+        "request_id",
+        "schema_version",
+        "status",
+        "tenant_id"
+      ],
+      "title": "IntegrationResultContract",
+      "type": "object"
+    },
+    "IntegrationResultStatus": {
+      "enum": [
+        "SUCCEEDED",
+        "ACCEPTED",
+        "RETRYABLE_FAILURE",
+        "PERMANENT_FAILURE"
+      ],
+      "title": "IntegrationResultStatus",
+      "type": "string"
+    },
+    "IntegrationSource": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "maxLength": 180,
+              "pattern": "[^\\u0009-\\u000d\\u001c-\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
+        "instance_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "pattern": "[^\\u0009-\\u000d\\u001c-\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/IntegrationKind"
+        },
+        "name": {
+          "maxLength": 120,
+          "minLength": 3,
+          "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+(?![\\s\\S])",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "instance_id"
+      ],
+      "title": "IntegrationSource",
+      "type": "object"
+    },
+    "IntegrationThreadKind": {
+      "enum": [
+        "DIRECT",
+        "GROUP",
+        "THREAD",
+        "CHANNEL"
+      ],
+      "title": "IntegrationThreadKind",
+      "type": "string"
+    }
+  },
+  "$id": "urn:attention-router:integration-contract:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "artifact_receipt": "#/$defs/ArtifactReceiptContract",
+      "capability_invocation": "#/$defs/CapabilityInvocationContract",
+      "channel_delivery": "#/$defs/ChannelDeliveryContract",
+      "inbound_event": "#/$defs/InboundIntegrationEvent",
+      "integration_result": "#/$defs/IntegrationResultContract"
+    },
+    "propertyName": "contract_type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ArtifactReceiptContract"
+    },
+    {
+      "$ref": "#/$defs/InboundIntegrationEvent"
+    },
+    {
+      "$ref": "#/$defs/ChannelDeliveryContract"
+    },
+    {
+      "$ref": "#/$defs/CapabilityInvocationContract"
+    },
+    {
+      "$ref": "#/$defs/IntegrationResultContract"
+    }
+  ]
+}
