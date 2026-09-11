@@ -15,6 +15,7 @@ const {
 } = require('../src/spool');
 
 const logger = { info() {}, warn() {}, error() {} };
+const TENANT_ID = '00000000-0000-4000-8000-000000000001';
 
 function response(status, payload = {}) {
   return {
@@ -30,6 +31,7 @@ function tempConfig(t, overrides = {}) {
   return {
     root,
     config: {
+      tenantId: TENANT_ID,
       inboundSpoolDir: spool,
       inboundPendingDir: path.join(spool, 'pending'),
       inboundSendingDir: path.join(spool, 'sending'),
@@ -83,6 +85,7 @@ function voiceMessage(downloadMedia, id = 'wamid.voice.outage') {
 function normalizedText(id) {
   return {
     schema_version: '1',
+    tenant_id: TENANT_ID,
     source: 'wwebjs',
     external_event_id: id,
     event_type: 'message',
@@ -141,6 +144,8 @@ test('voice capture survives ingress 503 and recovers without a second download'
   assert.equal(listPending(config).length, 1);
   assert.equal(listPending(mediaSpoolConfig(config)).length, 1);
   assert.equal(fs.existsSync(path.join(config.mediaRoot, digest.slice(0, 2), digest)), true);
+  assert.equal(inboundBodies[0].tenant_id, TENANT_ID);
+  assert.equal(mediaBodies[0].tenant_id, TENANT_ID);
   assert.equal(mediaBodies[0].external_event_id, inboundBodies[0].external_event_id);
   assert.equal(mediaBodies[0].content_sha256, digest);
 
