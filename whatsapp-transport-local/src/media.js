@@ -67,6 +67,7 @@ async function notify(config, normalized, payload, logger, fetchImpl) {
 async function captureVoiceMedia(config, message, normalized, logger = console, fetchImpl = fetch) {
   if (!config.mediaRoot || !config.mediaNotificationUrl) return { status: 'media_capture_disabled' };
   const base = {
+    tenant_id: normalized.tenant_id,
     source: normalized.source,
     external_event_id: normalized.external_event_id,
     media_kind: normalized.message_type,
