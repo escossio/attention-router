@@ -1,6 +1,9 @@
 # Neutral Integration Transport and Tenant Binding V0
 
-**Status: proposed design, not implemented.** This specifies the next boundary
+**Status: proposed HTTP design; isolated offline binding proof implemented.**
+The [binding proof](integration-tenant-binding-proof-v0.md) covers a subset of the
+acceptance matrix, without implementing a receiver, database registry or client.
+This specifies the next boundary
 after the [contract SDK extraction](integration-sdks-v0.md), under
 [ADR 0020](adr/0020-neutral-ingress-and-authenticated-tenant-binding.md).
 V0 names this design increment; the proposed HTTP profile uses version `1`.
@@ -278,8 +281,10 @@ in this first profile; later completion evidence needs its own scoped contract.
 
 ## Synthetic acceptance matrix
 
-These are **required future implementation scenarios, not tests claimed to pass
-in this documentation change**. Let A and B be synthetic active tenants; E and W
+These are requirements for the complete transport. The
+[offline proof coverage](integration-tenant-binding-proof-v0.md) distinguishes
+implemented binding checks from future HTTP/durability scenarios. Let A and B be
+synthetic active tenants; E and W
 are their independently provisioned email/WhatsApp integration bindings.
 
 | ID | Scenario | Required observation |
@@ -311,9 +316,9 @@ are their independently provisioned email/WhatsApp integration bindings.
 
 ## Implementation gates and next safe increment
 
-1. Prove the credential-to-binding decision offline with synthetic A/B tenants,
-   distinct integrations/accounts, lifecycle, scope and mismatch cases. This is
-   the next increment; it needs no HTTP client or provider access.
+1. The [offline credential-to-binding proof](integration-tenant-binding-proof-v0.md)
+   implements synthetic A/B tenant, integration/account, lifecycle, scope and
+   mismatch cases. It does not establish registry freshness or durable admission.
 2. Implement the bounded receiver and durable admission with PostgreSQL unique
    constraints, concurrency, rollback/crash and revocation tests. Freeze a
    machine-readable HTTP request/response contract against those tests. Pass the

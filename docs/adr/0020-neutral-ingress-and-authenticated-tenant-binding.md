@@ -2,8 +2,10 @@
 
 ## Status
 
-Proposed, 2026-09-11. Design only; no endpoint, credential registry, migration or
-HTTP client is implemented by this ADR.
+Proposed HTTP design, 2026-09-11. An
+[isolated offline binding proof](../integration-tenant-binding-proof-v0.md) now
+implements the credential/tenant decision. No endpoint, production credential
+registry, migration or HTTP client is implemented by this increment.
 
 ## Context
 
@@ -79,6 +81,7 @@ This tradeoff must be explicit in the later client API.
 | OAuth/JWT or mutual TLS | Possible later credential mechanisms behind the same binding decision; provisioning and lifecycle integration are outside this increment. |
 | Tenant from provider JSON, a query parameter or `X-Tenant-ID` | Rejected as authority. Public webhooks must first authenticate the provider and resolve its account/resource through trusted server data. |
 
-The immediate next increment is an offline credential/binding decision proof
-against the acceptance matrix, followed by durable server admission. A production
-dispatcher, WhatsApp migration and outbound client are separate boundaries.
+The offline credential/binding decision proof covers the authorization subset of
+the acceptance matrix. Authoritative registry storage and durable server admission
+are next. A production dispatcher, WhatsApp migration and outbound client remain
+separate boundaries.
