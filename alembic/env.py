@@ -5,6 +5,7 @@ from alembic import context
 
 from attention_router.config import settings
 from attention_router.infrastructure.db import Base
+from attention_router.infrastructure import artifact_models  # noqa: F401
 from attention_router.infrastructure import models  # noqa: F401
 
 config = context.config
@@ -16,7 +17,11 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    context.configure(url=os.environ.get("DATABASE_URL", settings.database_url), target_metadata=target_metadata, literal_binds=True)
+    context.configure(
+        url=os.environ.get("DATABASE_URL", settings.database_url),
+        target_metadata=target_metadata,
+        literal_binds=True,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

@@ -2,6 +2,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from attention_router.infrastructure.db import Base
+from attention_router.infrastructure import artifact_models  # noqa: F401
 from attention_router.infrastructure import models  # noqa: F401
 
 
@@ -49,6 +50,13 @@ def test_platform_evolution_tables_and_structural_lineage_are_registered():
         assert str(columns["lineage_classification"].server_default.arg) == "HISTORICAL_UNKNOWN"
 
 
+def test_artifact_plane_tables_are_registered():
+    assert {"artifacts", "artifact_receipts"} <= set(Base.metadata.tables)
+    assert "uq_artifact_tenant_sha256" in _constraint_names("artifacts")
+    assert "uq_artifact_receipt_source" in _constraint_names("artifact_receipts")
+    assert "fk_artifact_receipt_tenant_artifact" in _constraint_names("artifact_receipts")
+
+
 def test_safety_constraints_and_partial_unique_indexes_are_registered():
     finding_indexes = {index.name: index for index in Base.metadata.tables["findings"].indexes}
     lease_indexes = {
@@ -77,7 +85,7 @@ def test_scenario_and_budget_tightening_constraints_are_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0035_whatsapp_voice_media"]
+    assert scripts.get_heads() == ["0036_artifact_registry_v0"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
@@ -94,3 +102,4 @@ def test_platform_evolution_migration_waves_form_one_chain():
     )
     assert revisions["0024_execution_intent"].down_revision == "0023_human_execution_auth"
     assert revisions["0025_human_auth_execution_intent"].down_revision == "0024_execution_intent"
+    assert revisions["0036_artifact_registry_v0"].down_revision == "0035_whatsapp_voice_media"
