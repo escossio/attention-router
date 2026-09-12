@@ -30,6 +30,7 @@ The following rules are mandatory:
 5. **Architecture is checked independently from behavior.** Passing unit tests does not compensate for violating repository architecture.
 6. **Legacy remains outside the initial blast radius.** Existing repository structure is preserved unless a future frontier explicitly governs it.
 7. **Fail closed.** Unknown, ambiguous, or unsupported frontier state fails validation rather than permitting the change.
+8. **Frontier selection is trusted.** A feature PR cannot choose its frontier through a candidate-controlled file, label, request body, or manifest edit.
 
 ## 3. Repository shape for newly governed Client API work
 
@@ -161,6 +162,7 @@ It records at least:
 
 - `frontier_id`;
 - manifest schema version;
+- exact approved feature branch name;
 - human-readable purpose;
 - allowed create/modify paths;
 - explicitly forbidden paths/prefixes;
@@ -173,6 +175,25 @@ It records at least:
 - the approved spec/plan paths that define the frontier.
 
 The manifest is not self-editable by a feature PR.
+
+### 6.1 Trusted frontier resolution
+
+The guard resolves the active frontier from the **trusted base-branch manifests plus the exact pull-request head branch name**. Candidate content does not select the frontier.
+
+For the first feature frontier, the approved branch name is exactly:
+
+`feat/client-api-bootstrap-v1`
+
+The governance change that installs the frontier writes this exact assignment into the trusted manifest. After that governance change is merged, the feature branch is created from the updated trusted `main` and handed to Codex.
+
+Resolution rules are fail-closed:
+
+- zero trusted manifests match the head branch -> `ARCH_FRONTIER_UNKNOWN`;
+- more than one trusted manifest matches -> `ARCH_POLICY_INVALID`;
+- candidate attempts to alter branch-to-frontier policy -> `ARCH_GOVERNANCE_MUTATION`;
+- candidate-controlled labels, PR body text, files, or workflow inputs do not grant a different frontier.
+
+This model supports future parallel frontiers by giving each one a unique exact approved feature branch in trusted governance.
 
 ## 7. First frontier: `client-api-bootstrap-v1`
 
@@ -338,43 +359,68 @@ If accepted, governance is updated in a separate reviewed change first. Feature 
 
 ## 13. Architecture Guard workflow
 
-A dedicated GitHub Actions workflow named conceptually `architecture-guard.yml` validates governed feature pull requests.
+A dedicated GitHub Actions workflow named `architecture-guard.yml` validates governed pull requests.
+
+The base design uses a **base-trusted GitHub Actions execution**, such as `pull_request_target`, because the workflow and checker used to judge a candidate must come from the base/default branch rather than from candidate-controlled workflow content.
 
 Required properties:
 
 - blocking CI result;
-- read-only repository permissions;
+- `contents: read` and otherwise minimal permissions;
 - no repository/application secrets;
+- never checks out and executes candidate code;
 - obtains the trusted guard/checker and manifest from the default/base branch state;
-- inspects the candidate diff/tree without executing untrusted feature code;
+- inspects candidate changed paths and blobs through Git/GitHub data access only;
+- statically parses candidate Python where dependency validation is needed;
 - emits deterministic machine-readable error codes and useful human-readable context;
 - fails closed if the frontier cannot be resolved or the policy is malformed.
 
-The workflow should not replace the existing Public CI or CodeQL. It adds a separate architecture gate.
+If `pull_request_target` is used, its elevated-context risks are controlled by the explicit no-secrets/minimal-permissions rule and the prohibition on executing candidate code. An equivalent future mechanism is acceptable only if tests prove that candidate workflow/checker edits cannot affect the judge used for that same PR.
 
-## 14. Error taxonomy
+The workflow does not replace the existing Public CI or CodeQL. It adds a separate architecture gate.
+
+## 14. Governance-only pull requests
+
+Normal feature frontiers are not allowed to mutate governance, but governance itself must still be maintainable.
+
+A governance-only branch uses the trusted branch prefix:
+
+`chore/architecture-governance/`
+
+In governance mode, the base-trusted guard enforces a different narrow scope:
+
+- governance files/checker/workflow/scoped `AGENTS.md` may change;
+- feature implementation artifacts for Client API, runtime, database, providers, Android, WhatsApp, or deployment may not be added in that same PR;
+- guardrail tests/documentation required by the governance plan must accompany behavioral policy changes;
+- the change requires human review before merge.
+
+A feature branch that tries to modify trusted governance still receives `ARCH_GOVERNANCE_MUTATION`. Naming a feature branch with the governance prefix does not authorize feature implementation because governance mode itself rejects feature-code paths.
+
+This separation prevents one PR from both changing the fence and placing feature code behind the newly weakened fence.
+
+## 15. Error taxonomy
 
 The first guard implementation must use stable error codes at least for:
 
-- `ARCH_GOVERNANCE_MUTATION` — candidate modifies trusted governance;
+- `ARCH_GOVERNANCE_MUTATION` — candidate feature PR modifies trusted governance;
 - `ARCH_PATH_NOT_ALLOWED` — candidate changes a path outside the frontier;
 - `ARCH_DEPENDENCY_FORBIDDEN` — governed code imports a forbidden dependency;
 - `ARCH_BOUNDARY_CROSSING` — candidate crosses a protected architectural area such as Integration API contracts;
 - `ARCH_REQUIRED_ARTIFACT_MISSING` — required frontier deliverable is absent;
-- `ARCH_FRONTIER_UNKNOWN` — no known frontier can safely validate the candidate;
-- `ARCH_POLICY_INVALID` — trusted manifest/check policy is malformed or internally inconsistent.
+- `ARCH_FRONTIER_UNKNOWN` — no trusted frontier is assigned to the exact feature branch;
+- `ARCH_POLICY_INVALID` — trusted manifest/check policy is malformed, ambiguous, or internally inconsistent.
 
-The CI log must report the error code, offending object/path, active frontier, and remediation direction rather than only returning a generic exit code.
+The CI log must report the error code, offending object/path, active frontier when known, and remediation direction rather than only returning a generic exit code.
 
-## 15. Governance-only installation change
+## 16. Governance-only installation change
 
 Guardrails are installed before any Codex implementation of the Client API feature.
 
-The first implementation change is therefore a **governance-only PR**, conceptually on a branch such as:
+The first implementation change is therefore a **governance-only PR**, on a branch under:
 
-`chore/repository-guardrails-client-frontier`
+`chore/architecture-governance/`
 
-That governance PR may create/update the trusted governance artifacts and the empty/new-zone structural instruction files required to establish the boundaries.
+That governance PR creates/updates the trusted governance artifacts, the exact branch assignment for `feat/client-api-bootstrap-v1`, and the empty/new-zone structural instruction files required to establish the boundaries.
 
 It must not implement:
 
@@ -391,7 +437,7 @@ It must not implement:
 
 This separation ensures the fence is installed and reviewed before feature code is placed inside it.
 
-## 16. Revised Client API plan requirement
+## 17. Revised Client API plan requirement
 
 The existing Client API implementation plan predates the final guardrail paths and must not be handed to Codex unchanged.
 
@@ -401,25 +447,27 @@ Before feature execution, the plan must be revised so that, at minimum:
 - Client API tests use `tests/client/**`;
 - the standalone Client contract checker uses `scripts/client_contract/check.py`;
 - Client API public status documentation uses `docs/architecture/client-api/bootstrap-v1.md`;
-- the plan declares frontier `client-api-bootstrap-v1`;
+- the plan declares frontier `client-api-bootstrap-v1` and exact implementation branch `feat/client-api-bootstrap-v1`;
 - no task instructs the feature implementer to edit `.github/architecture/**`, `scripts/architecture/**`, workflow guard files, or scoped governance `AGENTS.md` files.
 
 The revised plan and the manifest must describe the same file boundaries.
 
-## 17. Agent execution handoff
+## 18. Agent execution handoff
 
 Only after the governance PR is merged into the trusted default branch may Codex begin feature implementation.
+
+The exact approved feature branch `feat/client-api-bootstrap-v1` is then created from that updated trusted base and used for the isolated Codex worktree.
 
 The agent receives:
 
 1. approved Andy Android foundation spec;
 2. approved/revised Client API implementation plan;
-3. active frontier manifest;
+3. active trusted frontier manifest;
 4. applicable root/scoped `AGENTS.md` rules.
 
 The execution instruction requires:
 
-- isolated branch/worktree from the trusted updated base;
+- isolated worktree on the exact approved feature branch from the trusted updated base;
 - task-by-task TDD;
 - small commits;
 - no deployment;
@@ -429,7 +477,7 @@ The execution instruction requires:
 - no scope expansion outside the frontier;
 - stop and report `FRONTIER_EXPANSION_REQUIRED` when needed.
 
-## 18. Merge gates for governed feature work
+## 19. Merge gates for governed feature work
 
 A governed feature PR is not a merge candidate unless all applicable gates pass:
 
@@ -442,28 +490,31 @@ A governed feature PR is not a merge candidate unless all applicable gates pass:
 
 Behavioral test success never overrides an Architecture Guard failure.
 
-## 19. Test strategy for the guardrail system
+## 20. Test strategy for the guardrail system
 
 The guardrail implementation itself requires synthetic tests that prove both acceptance and rejection behavior.
 
 At minimum test:
 
+- exact approved feature branch resolves the expected frontier;
+- unassigned branch fails `ARCH_FRONTIER_UNKNOWN`;
+- ambiguous/malformed trusted assignments fail `ARCH_POLICY_INVALID`;
 - allowed path accepted;
 - unrelated legacy file change rejected for this frontier;
-- protected governance file change rejected;
+- protected governance file change rejected from a feature frontier;
+- governance-mode PR rejects feature implementation paths;
 - Integration API contract change rejected;
 - forbidden Python import rejected;
 - allowed standard-library import accepted;
 - missing required artifact rejected;
 - malformed manifest rejected fail-closed;
-- unknown frontier rejected fail-closed;
 - symlink/path indirection rejected;
 - clear stable error codes emitted;
-- candidate cannot make itself pass by editing its checker/manifest in the same feature change.
+- candidate cannot make itself pass by editing its checker/manifest/workflow in the same feature change.
 
 Tests use synthetic temporary trees/diffs; they do not need live provider access or production secrets.
 
-## 20. Non-goals
+## 21. Non-goals
 
 This design does not:
 
@@ -476,7 +527,7 @@ This design does not:
 - modify live runtime, database, containers, WhatsApp transport, provider accounts, or deployment;
 - allow feature PRs to self-authorize frontier expansion.
 
-## 21. Future extension
+## 22. Future extension
 
 The frontier model is intended to be reused for subsequent sub-projects, for example:
 
@@ -485,13 +536,13 @@ The frontier model is intended to be reused for subsequent sub-projects, for exa
 - `kotlin-sdk-bootstrap-v1`;
 - later Android repository frontiers for app shell, capabilities, sync, and integrations.
 
-Each frontier gets its own reviewed territory. A future `andy-android` repository should adopt the same principle from its first commit, with stronger layer-specific guards because it will not have the same legacy compatibility constraint.
+Each frontier gets its own reviewed territory and exact trusted feature-branch assignment. A future `andy-android` repository should adopt the same principle from its first commit, with stronger layer-specific guards because it will not have the same legacy compatibility constraint.
 
-## 22. Acceptance summary
+## 23. Acceptance summary
 
 The approved governance model is:
 
-`approved architecture -> explicit frontier -> trusted repository guardrails -> blocking CI -> isolated agent execution`
+`approved architecture -> explicit trusted frontier -> repository guardrails -> blocking CI -> isolated agent execution`
 
 For the first frontier:
 
@@ -499,11 +550,13 @@ For the first frontier:
 - structural violations are blocking;
 - implementation uses an exact path allowlist;
 - feature PRs cannot mutate their own governance;
+- frontier selection comes from trusted base manifests plus an exact approved feature branch;
 - the trusted checker/policy comes from the base/default branch;
 - `contracts/client` remains separate from `contracts/integration`;
 - new pure authority code lives under `attention_router/core/client/`;
 - tests live under `tests/client/`;
 - legitimate scope expansion requires a separate governance change first;
+- governance PRs and feature PRs cannot be combined;
 - guardrails are merged before Codex executes the Client API feature plan.
 
 No guardrail implementation starts from this document until this written specification is reviewed and explicitly approved for planning.
