@@ -1,0 +1,207 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Attention Router Client API",
+    "version": "1"
+  },
+  "servers": [],
+  "paths": {
+    "/api/v1/auth/google/challenges": {
+      "post": {
+        "operationId": "createGoogleHumanAuthChallenge",
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "Challenge issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthChallengeResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Human Identity feature unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/google/challenges/{challenge_id}/verify": {
+      "post": {
+        "operationId": "verifyGoogleHumanIdentity",
+        "security": [],
+        "parameters": [
+          {
+            "name": "challenge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^hac_[A-Za-z0-9_-]{20,}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleHumanIdentityVerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Human Identity validated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanIdentityValidatedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credential rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Challenge not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Challenge already consumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Challenge expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider or feature unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HumanAuthChallengeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "challenge_id",
+          "nonce",
+          "expires_at"
+        ],
+        "properties": {
+          "challenge_id": {
+            "type": "string",
+            "pattern": "^hac_[A-Za-z0-9_-]{20,}$"
+          },
+          "nonce": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 256
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "GoogleHumanIdentityVerifyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id_token"
+        ],
+        "properties": {
+          "id_token": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 8192
+          }
+        }
+      },
+      "HumanIdentityValidatedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "human_identity_id"
+        ],
+        "properties": {
+          "status": {
+            "const": "HUMAN_IDENTITY_VALIDATED"
+          },
+          "human_identity_id": {
+            "type": "string",
+            "pattern": "^hid_[A-Za-z0-9_-]{20,}$"
+          }
+        }
+      },
+      "HumanAuthErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "HUMAN_AUTH_DISABLED",
+              "HUMAN_AUTH_CHALLENGE_NOT_FOUND",
+              "HUMAN_AUTH_CHALLENGE_EXPIRED",
+              "HUMAN_AUTH_CHALLENGE_CONSUMED",
+              "HUMAN_AUTH_CREDENTIAL_REJECTED",
+              "HUMAN_AUTH_NONCE_MISMATCH",
+              "HUMAN_AUTH_PROVIDER_UNAVAILABLE"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
