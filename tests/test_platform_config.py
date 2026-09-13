@@ -94,3 +94,41 @@ def test_voice_processing_lease_must_exceed_provider_timeout(
         _settings(**{lease_field: 30, timeout_field: 30})
     configured = _settings(**{lease_field: 31, timeout_field: 30})
     assert getattr(configured, lease_field) == 31
+
+
+def test_human_identity_defaults_are_disabled_with_five_minute_challenges():
+    configured = _settings()
+    assert configured.human_identity_enabled is False
+    assert configured.human_auth_challenge_ttl_seconds == 300
+    assert configured.google_identity_audience is None
+
+
+@pytest.mark.parametrize("ttl", [60, 300, 900])
+def test_human_auth_challenge_ttl_accepts_inclusive_bounds(ttl):
+    configured = _settings(human_auth_challenge_ttl_seconds=ttl)
+    assert configured.human_auth_challenge_ttl_seconds == ttl
+
+
+@pytest.mark.parametrize("ttl", [59, 901])
+def test_human_auth_challenge_ttl_rejects_values_outside_bounds(ttl):
+    with pytest.raises(
+        ValidationError, match="HUMAN_AUTH_CHALLENGE_TTL_SECONDS must be between 60 and 900",
+    ):
+        _settings(human_auth_challenge_ttl_seconds=ttl)
+
+
+@pytest.mark.parametrize("audience", [None, ""])
+def test_enabled_human_identity_requires_google_audience(audience):
+    with pytest.raises(
+        ValidationError,
+        match="GOOGLE_IDENTITY_AUDIENCE is required when HUMAN_IDENTITY_ENABLED=true",
+    ):
+        _settings(human_identity_enabled=True, google_identity_audience=audience)
+
+
+def test_human_identity_can_be_enabled_with_explicit_synthetic_audience():
+    configured = _settings(
+        human_identity_enabled=True, google_identity_audience="synthetic-google-client-id",
+    )
+    assert configured.human_identity_enabled is True
+    assert configured.google_identity_audience == "synthetic-google-client-id"

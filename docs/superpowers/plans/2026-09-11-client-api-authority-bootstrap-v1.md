@@ -1,5 +1,7 @@
 # Client API Authority Bootstrap V1 Implementation Plan
 
+> **Human Identity scope superseded:** Human-login semantics in this 2026-09-11 plan are superseded by `2026-09-13-human-identity-v1-backend.md`, which implements the approved 2026-09-12 Human Identity + Device Permissions V1 design. Do not implement Google Human Identity from this older plan. Tenant, device-enrollment, and session work remains outside the Human Identity V1 frontier until separately authorized.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Publish the first language-neutral Client API V1 bootstrap contract and a pure fail-closed server authority model for human membership, device enrollment context, active tenant, and short client sessions, without shipping HTTP routes, persistence, provider calls, or mobile code.
