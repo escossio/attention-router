@@ -5,12 +5,17 @@ from collections.abc import Callable, Generator, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from attention_router.config import settings
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
+from attention_router.platform.capability_lab_probe import (
+    CapabilityLabProbeReport,
+    probe_named_scenario_t0,
+)
+from attention_router.platform.capability_lab_read_model import read_scenario_engine_snapshot
 from attention_router.platform.findings import FindingStatus, list_findings
 from attention_router.platform.operations import (
     RuntimeProvenance,
@@ -90,6 +95,7 @@ def build_operations_router(
         tags=["platform-operations"],
         dependencies=[Depends(require_admin)],
     )
+
     @router.get("/snapshot")
     def snapshot(
         session: Session = Depends(get_session),
@@ -130,5 +136,38 @@ def build_operations_router(
         status: list[FindingStatus] | None = Query(default=None),
     ) -> list[dict[str, Any]]:
         return list_findings(session, tenant_id=tenant_id, statuses=status)
+
+    @router.get("/capability-lab/scenario-engine")
+    def capability_lab_scenario_engine(
+        session: Session = Depends(get_session),
+        tenant_id: str = DEFAULT_TENANT_ID,
+        run_limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> dict[str, Any]:
+        """Expose Scenario Engine evidence to the lab without any mutation authority."""
+
+        return read_scenario_engine_snapshot(
+            session,
+            tenant_id=tenant_id,
+            run_limit=run_limit,
+        )
+
+    @router.get("/capability-lab/probe/{scenario_id}")
+    def capability_lab_t0_probe(
+        scenario_id: str,
+        session: Session = Depends(get_session),
+    ) -> CapabilityLabProbeReport:
+        """Probe T0 only for repository-owned synthetic hypotheses.
+
+        The HTTP client cannot choose capability, actor, policy, tenant, grant or
+        owner authorization. Unknown scenario ids fail closed.
+        """
+
+        try:
+            return probe_named_scenario_t0(session, scenario_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="CAPABILITY_LAB_SCENARIO_UNKNOWN",
+            ) from exc
 
     return router

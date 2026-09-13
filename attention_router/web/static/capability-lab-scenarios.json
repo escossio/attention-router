@@ -1,0 +1,65 @@
+[
+  {
+    "schema_version": "capability-lab.v0",
+    "scenario_id": "personal.identity.cpf.requires-approval-once",
+    "title": "CPF requires explicit approval",
+    "description": "A synthetic contact requests a restricted identity disclosure. The expected feature behavior is to require human approval and create only a one-time grant after simulated approval.",
+    "capability_key": "personal.identity.cpf",
+    "requester_actor_key": "synthetic:contact.requester-a",
+    "request_text": "Pode me informar o CPF do proprietário?",
+    "request_context": {
+      "relationship_category": "unknown",
+      "channel": "synthetic"
+    },
+    "expected_resolution": "REQUIRES_APPROVAL",
+    "simulated_human_decision": "APPROVE",
+    "expected_grant_mode": "ONE_TIME",
+    "engine_scenario_key": null,
+    "tags": ["disclosure", "restricted", "approval", "grant"],
+    "synthetic_only": true,
+    "uses_real_personal_data": false,
+    "production_effects_allowed": false
+  },
+  {
+    "schema_version": "capability-lab.v0",
+    "scenario_id": "personal.relationship.status.denied",
+    "title": "Relationship status denied by policy",
+    "description": "A synthetic contact asks for relationship status. This fixture validates a direct deny path with no approval request and no derived grant.",
+    "capability_key": "personal.relationship.status",
+    "requester_actor_key": "synthetic:contact.requester-b",
+    "request_text": "O proprietário está solteiro?",
+    "request_context": {
+      "relationship_category": "unknown",
+      "channel": "synthetic"
+    },
+    "expected_resolution": "DENY",
+    "simulated_human_decision": "NONE",
+    "expected_grant_mode": "NONE",
+    "engine_scenario_key": null,
+    "tags": ["disclosure", "personal", "deny"],
+    "synthetic_only": true,
+    "uses_real_personal_data": false,
+    "production_effects_allowed": false
+  },
+  {
+    "schema_version": "capability-lab.v0",
+    "scenario_id": "location.current.temporary-grant",
+    "title": "Current location uses bounded permission",
+    "description": "A synthetic trusted contact requests current location. The fixture validates explicit approval followed by a time-bounded grant without embedding a real location.",
+    "capability_key": "location.current",
+    "requester_actor_key": "synthetic:contact.trusted-a",
+    "request_text": "Você pode compartilhar a localização atual?",
+    "request_context": {
+      "relationship_category": "trusted",
+      "channel": "synthetic"
+    },
+    "expected_resolution": "REQUIRES_APPROVAL",
+    "simulated_human_decision": "APPROVE",
+    "expected_grant_mode": "TIME_BOUND",
+    "engine_scenario_key": null,
+    "tags": ["location", "sensitive", "approval", "time-bound"],
+    "synthetic_only": true,
+    "uses_real_personal_data": false,
+    "production_effects_allowed": false
+  }
+]

@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Andy Capability Lab</title>
+  <link rel="stylesheet" href="/static/control-plane.css">
+  <script defer src="/static/control-plane.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/static/control-plane.html" aria-label="Andy Capability Lab">
+        <span class="brand-mark">A</span>
+        <span>
+          <strong>Andy</strong>
+          <small>Capability Lab</small>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Navegação do laboratório">
+        <button class="nav-item active" data-view="overview" type="button">
+          <span class="nav-index">01</span><span>Visão geral</span>
+        </button>
+        <button class="nav-item" data-view="scenarios" type="button">
+          <span class="nav-index">02</span><span>Cenários</span>
+          <span class="nav-badge" id="nav-scenario-count">—</span>
+        </button>
+        <button class="nav-item" data-view="approvals" type="button">
+          <span class="nav-index">03</span><span>Autorizações</span>
+          <span class="nav-badge" id="nav-approval-count">—</span>
+        </button>
+        <button class="nav-item" data-view="capabilities" type="button">
+          <span class="nav-index">04</span><span>Capacidades</span>
+        </button>
+        <button class="nav-item" data-view="rules" type="button">
+          <span class="nav-index">05</span><span>Authority</span>
+        </button>
+        <button class="nav-item" data-view="grants" type="button">
+          <span class="nav-index">06</span><span>Grants</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div>
+          <strong>Engineering surface</strong>
+          <small>Capability Lab V0</small>
+        </div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Desenvolvimento e validação</p>
+          <h1 id="page-title">Visão geral</h1>
+        </div>
+
+        <div class="connection">
+          <label for="admin-token">Credencial administrativa</label>
+          <div class="connection-row">
+            <input id="admin-token" type="password" autocomplete="off"
+                   placeholder="Bearer token (não é armazenado)">
+            <button id="connect-button" class="button primary" type="button">Conectar</button>
+          </div>
+          <p id="connection-state" class="connection-state">
+            Somente memória da página; nada vai para localStorage.
+          </p>
+        </div>
+      </header>
+
+      <main>
+        <section class="view active" data-view-panel="overview">
+          <div class="hero">
+            <div>
+              <p class="eyebrow">Capability Lab</p>
+              <h2>Uma bancada para provar features antes de desenhar a experiência do usuário.</h2>
+              <p class="hero-copy">
+                Esta tela é uma superfície de engenharia: observa contratos, estados e fronteiras,
+                exercita hipóteses e ajuda a validar capacidades. Ela não define a UX comercial da Andy.
+              </p>
+            </div>
+            <div class="hero-state">
+              <span id="runtime-state" class="state-pill neutral">DESCONECTADO</span>
+              <small id="runtime-provenance">runtime não consultado</small>
+            </div>
+          </div>
+
+          <div class="metric-grid" aria-label="Resumo do laboratório">
+            <article class="metric">
+              <p>Hipóteses de feature</p>
+              <strong id="metric-scenarios">0</strong>
+              <small>fixtures sintéticos</small>
+            </article>
+            <article class="metric">
+              <p>Revisões pendentes</p>
+              <strong id="metric-approvals">—</strong>
+              <small>baseline humano existente</small>
+            </article>
+            <article class="metric">
+              <p>Policies ativas</p>
+              <strong id="metric-policies">—</strong>
+              <small>configuração observada</small>
+            </article>
+            <article class="metric">
+              <p>Capabilities canônicas</p>
+              <strong id="metric-capabilities">—</strong>
+              <small>registry do runtime</small>
+            </article>
+            <article class="metric">
+              <p>Execution intents pendentes</p>
+              <strong id="metric-intents">—</strong>
+              <small>efeitos ainda não liberados</small>
+            </article>
+          </div>
+
+          <div class="two-column">
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Objeto de teste</p>
+                  <h3>Capability Runtime</h3>
+                </div>
+                <span class="tag current">RUNTIME EXISTENTE</span>
+              </div>
+              <p>
+                O Attention Router já possui manifest versionado, registry, provider resolution,
+                grants e avaliação de authority. O laboratório exercita esse motor; não cria outro.
+              </p>
+              <div class="flow">
+                <span>Hipótese</span><i>→</i><span>CapabilityRequest</span><i>→</i>
+                <span>Authority</span><i>→</i><span>Evidência</span><i>→</i><span>Comparação</span>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Fronteira</p>
+                  <h3>Laboratório não é autoridade</h3>
+                </div>
+                <span class="tag safe">FAIL-CLOSED</span>
+              </div>
+              <p>
+                O Capability Lab observa e valida. Ele não transforma clique de desenvolvedor,
+                resposta do modelo ou estado de tela em autorização de produção.
+              </p>
+              <ul class="compact-list">
+                <li>nenhuma credencial embutida no frontend;</li>
+                <li>nenhum dado pessoal real no repositório público;</li>
+                <li>nenhuma execução externa nasce desta tela V0;</li>
+                <li>a UX final poderá ser muito mais simples que este cockpit.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="scenarios">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Feature acceptance</p>
+              <h2>Hipóteses sintéticas</h2>
+            </div>
+            <span class="tag safe">SEM EFEITO DE PRODUÇÃO</span>
+          </div>
+          <p class="section-copy">
+            Estes cards descrevem comportamento esperado. Sem vínculo explícito com um cenário do
+            engine e sem evidência suficiente, o resultado correto é INCOMPLETE — nunca PASS por aproximação.
+          </p>
+          <div id="scenario-list" class="record-list">
+            <div class="empty-state">Carregando hipóteses sintéticas…</div>
+          </div>
+
+          <article class="panel schema-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Runtime evidence</p>
+                <h3>Scenario Engine</h3>
+              </div>
+              <span class="tag safe">OBSERVATION ONLY</span>
+            </div>
+            <p>
+              Esta projeção lê ScenarioDefinition, ScenarioVersion, ScenarioRun, steps e referências
+              mínimas de evidência já persistidas. Ela não cria run, não executa step e não concede authority.
+            </p>
+            <div id="scenario-engine-metrics" class="grant-example">
+              <div><small>Autoridade</small><strong>OBSERVATION ONLY</strong></div>
+              <div><small>Cenários registrados</small><strong>—</strong></div>
+              <div><small>Runs recentes</small><strong>—</strong></div>
+              <div><small>Mutação</small><strong>NONE</strong></div>
+            </div>
+            <div id="scenario-engine-list" class="record-list">
+              <div class="empty-state">Conecte-se para observar o Scenario Engine persistido.</div>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" data-view-panel="approvals">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Validação de fronteira humana</p>
+              <h2>Autorizações</h2>
+            </div>
+            <span class="tag current">RUNTIME EXISTENTE</span>
+          </div>
+          <p class="section-copy">
+            O runtime já possui HumanExecutionAuthorization e evidência durável de aprovação.
+            Response Review continua sendo um conceito diferente; o Lab não funde os dois por conveniência.
+          </p>
+          <div id="approval-list" class="record-list">
+            <div class="empty-state">Conecte-se para carregar as revisões pendentes.</div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="capabilities">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Runtime registry</p>
+              <h2>Capabilities</h2>
+            </div>
+            <span class="tag current">CANÔNICO</span>
+          </div>
+          <p class="section-copy">
+            Esta visão mostra o registry versionado que já pertence ao Attention Router: estado,
+            provider, sensitivity e side-effect. Novas features devem evoluir esse contrato quando
+            necessário, não criar um segundo catálogo exclusivo do painel.
+          </p>
+          <div id="capability-list" class="record-list">
+            <div class="empty-state">Conecte-se para carregar o registry atual.</div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="rules">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Inspeção técnica</p>
+              <h2>Authority</h2>
+            </div>
+            <span class="tag current">RUNTIME EXISTENTE</span>
+          </div>
+          <div class="three-column">
+            <article class="concept-card">
+              <span>01</span>
+              <h3>Capability conhecida?</h3>
+              <p>Manifest, versão, availability e provider são resolvidos pelo registry existente.</p>
+            </article>
+            <article class="concept-card">
+              <span>02</span>
+              <h3>Existe authority?</h3>
+              <p>Policy, grant e propriedades da capability entram na avaliação determinística.</p>
+            </article>
+            <article class="concept-card">
+              <span>03</span>
+              <h3>Qual resultado?</h3>
+              <p>ALLOW, DENY, REQUIRES_APPROVAL ou UNAVAILABLE, com reason code observável.</p>
+            </article>
+          </div>
+          <article class="panel schema-panel">
+            <div class="panel-heading">
+              <h3>Primeiro gap de feature já visível</h3>
+              <span class="tag planned">EXPECTED × OBSERVED</span>
+            </div>
+            <p>
+              Hoje, a ausência de grant pode resultar em DENY antes do ramo REQUIRES_APPROVAL.
+              A hipótese “pedido sem grant → autorização humana → grant derivado” deve ser provada
+              no Lab antes de qualquer mudança deliberada no runtime.
+            </p>
+          </article>
+        </section>
+
+        <section class="view" data-view-panel="grants">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Validação de permissão derivada</p>
+              <h2>Grants</h2>
+            </div>
+            <span class="tag current">RUNTIME EXISTENTE</span>
+          </div>
+          <p class="section-copy">
+            O runtime já possui CapabilityGrantRow com grantor, grantee, capability, scope,
+            validade, constraints, provenance e revogação. O Lab não cria um segundo grant store;
+            ONE_TIME, TIME_BOUND e PERSISTENT são expectativas de comportamento a serem provadas.
+          </p>
+          <div class="grant-example">
+            <div><small>Capability</small><strong>personal.identity.cpf</strong></div>
+            <div><small>Beneficiário</small><strong>synthetic/contact</strong></div>
+            <div><small>Expectativa</small><strong>TIME_BOUND</strong></div>
+            <div><small>Authority</small><strong>HUMAN BOUNDARY</strong></div>
+          </div>
+          <div class="empty-state">
+            O Capability Lab V0 não cria, revoga ou consome grants de produção.
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
