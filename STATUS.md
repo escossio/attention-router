@@ -2,11 +2,10 @@
 
 Updated: 2026-09-09
 
-## Human Identity V1 HTTP frontier — local implementation complete, CI pending
+## Human Identity V1 HTTP frontier — contract fidelity correction awaiting CI
 
-- Task 7 HTTP boundary implemented on `feat/human-identity-v1-http`; routes remain
-  fail-closed while `HUMAN_IDENTITY_ENABLED=false`.
-- Task 8 PostgreSQL proof added; all validation is pending GitHub Actions by instruction.
+- The first GitHub Actions run for PR #53 closed green on required checks.
+- A final-review contract-fidelity correction was added; the PR awaits its new CI run.
 
 ## Freeze checkpoint — Phase 4F deferred
 

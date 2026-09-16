@@ -29,8 +29,8 @@ class GoogleHumanIdentityVerifyRequest(BaseModel):
 class HumanAuthChallengeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    challenge_id: str
-    nonce: str
+    challenge_id: str = Field(pattern=r"^hac_[A-Za-z0-9_-]{20,}$")
+    nonce: str = Field(min_length=32, max_length=256)
     expires_at: datetime
 
 
@@ -38,7 +38,7 @@ class HumanIdentityValidatedResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["HUMAN_IDENTITY_VALIDATED"]
-    human_identity_id: str
+    human_identity_id: str = Field(pattern=r"^hid_[A-Za-z0-9_-]{20,}$")
 
 
 HumanAuthErrorCode = Literal[
@@ -84,6 +84,8 @@ def build_human_identity_router(*, get_session, service: HumanIdentityService) -
         response_model=HumanAuthChallengeResponse,
         status_code=status.HTTP_201_CREATED,
         responses={503: {"model": HumanAuthErrorResponse}},
+        operation_id="createGoogleHumanAuthChallenge",
+        openapi_extra={"security": []},
     )
     def issue_google_challenge(
         session: Session = Depends(get_session),
@@ -108,6 +110,8 @@ def build_human_identity_router(*, get_session, service: HumanIdentityService) -
             410: {"model": HumanAuthErrorResponse},
             503: {"model": HumanAuthErrorResponse},
         },
+        operation_id="verifyGoogleHumanIdentity",
+        openapi_extra={"security": []},
     )
     def verify_google_challenge(
         challenge_id: Annotated[str, Path(pattern=r"^hac_[A-Za-z0-9_-]{20,}$")],

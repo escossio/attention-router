@@ -23,6 +23,7 @@ from attention_router.application.platform import devices as platform_devices
 from attention_router.application.platform.registry import matrix_status
 from attention_router.api.v1.contracts import DeviceBindingRequest, MatrixCapabilityView
 from attention_router.api.v1.human_identity import build_human_identity_router
+from attention_router.core.human_identity import HumanAuthProviderUnavailable, VerifiedProviderIdentity
 from attention_router.core.devices import (
     DeviceCapabilityAnnouncement,
     DeviceHeartbeat,
@@ -58,9 +59,20 @@ app = FastAPI(title="Attention Router", version="0.1.0")
 app.mount("/static", StaticFiles(directory="attention_router/web/static"), name="static")
 templates = Jinja2Templates(directory="attention_router/web/templates")
 synthetic_adapter = SyntheticInboundAdapter()
+
+
+class _UnavailableHumanIdentityVerifier:
+    def verify(self, id_token: str) -> VerifiedProviderIdentity:
+        raise HumanAuthProviderUnavailable()
+
+
 human_identity_service = HumanIdentityService(
     settings=settings,
-    verifier=GoogleIdentityVerifier(audience=settings.google_identity_audience),
+    verifier=(
+        GoogleIdentityVerifier(audience=settings.google_identity_audience)
+        if settings.google_identity_audience
+        else _UnavailableHumanIdentityVerifier()
+    ),
 )
 
 
