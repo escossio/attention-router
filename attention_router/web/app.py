@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from attention_router.application import agent_builder
 from attention_router.application import services
+from attention_router.application.human_identity import HumanIdentityService
 from attention_router.application.decision_pipeline import decision_to_dict
 from attention_router.application import response_review
 from attention_router.application import execution
@@ -21,6 +22,7 @@ from attention_router.application import memory
 from attention_router.application.platform import devices as platform_devices
 from attention_router.application.platform.registry import matrix_status
 from attention_router.api.v1.contracts import DeviceBindingRequest, MatrixCapabilityView
+from attention_router.api.v1.human_identity import build_human_identity_router
 from attention_router.core.devices import (
     DeviceCapabilityAnnouncement,
     DeviceHeartbeat,
@@ -31,6 +33,7 @@ from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.config import settings
 from attention_router.adapters.synthetic_inbound import SyntheticInboundAdapter
 from attention_router.infrastructure.db import SessionLocal
+from attention_router.integrations.google_identity import GoogleIdentityVerifier
 from attention_router.infrastructure.repository import (
     activate_policy_version,
     actor_binding_to_dict,
@@ -55,6 +58,10 @@ app = FastAPI(title="Attention Router", version="0.1.0")
 app.mount("/static", StaticFiles(directory="attention_router/web/static"), name="static")
 templates = Jinja2Templates(directory="attention_router/web/templates")
 synthetic_adapter = SyntheticInboundAdapter()
+human_identity_service = HumanIdentityService(
+    settings=settings,
+    verifier=GoogleIdentityVerifier(audience=settings.google_identity_audience),
+)
 
 
 def get_session():
@@ -151,6 +158,7 @@ def require_admin(authorization: Annotated[str | None, Header()] = None) -> None
 
 app.include_router(build_operations_router(get_session=get_session, require_admin=require_admin))
 app.include_router(build_governance_router(get_session=get_session, require_admin=require_admin))
+app.include_router(build_human_identity_router(get_session=get_session, service=human_identity_service))
 
 
 @app.on_event("startup")

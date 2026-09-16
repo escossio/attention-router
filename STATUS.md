@@ -2,6 +2,12 @@
 
 Updated: 2026-09-09
 
+## Human Identity V1 HTTP frontier — local implementation complete, CI pending
+
+- Task 7 HTTP boundary implemented on `feat/human-identity-v1-http`; routes remain
+  fail-closed while `HUMAN_IDENTITY_ENABLED=false`.
+- Task 8 PostgreSQL proof added; all validation is pending GitHub Actions by instruction.
+
 ## Freeze checkpoint — Phase 4F deferred
 
 The project is intentionally frozen at the Phase 4E public implementation baseline while development proceeds in other layers. Phase 4F (public API contract / developer experience) has partial local work but is **not complete**, has no remote PR/branch, and must not be resumed automatically.
