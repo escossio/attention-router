@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts/client/v1/client-api.openapi.json"
 CHALLENGES = "/api/v1/auth/google/challenges"
 VERIFY = CHALLENGES + "/{challenge_id}/verify"
+VERIFY_AND_CONTINUE = CHALLENGES + "/{challenge_id}/verify-and-continue"
 
 
 def load_contract() -> dict:
@@ -18,7 +19,7 @@ def load_contract() -> dict:
 def test_human_identity_contract_has_only_approved_auth_paths():
     document = load_contract()
     assert document["openapi"] == "3.1.0"
-    assert set(document["paths"]) == {CHALLENGES, VERIFY}
+    assert set(document["paths"]) == {CHALLENGES, VERIFY, VERIFY_AND_CONTINUE}
     for path in document["paths"].values():
         assert set(path) == {"post"}
 
@@ -56,6 +57,19 @@ def test_validated_response_exposes_opaque_identity_not_google_subject():
     assert response["required"] == ["status", "human_identity_id"]
     assert set(response["properties"]) == {"status", "human_identity_id"}
     assert response["properties"]["status"]["const"] == "HUMAN_IDENTITY_VALIDATED"
+    assert "not a credential or authority" in response["properties"]["human_identity_id"]["description"]
+
+
+def test_versioned_continuation_response_models_sensitive_grant_separately():
+    schemas = load_contract()["components"]["schemas"]
+    response = schemas["HumanIdentityContinuedResponse"]
+    grant = schemas["HumanAuthContinuationGrant"]
+    assert response["required"] == ["status", "human_identity_id", "continuation_grant"]
+    assert set(response["properties"]) == {"status", "human_identity_id", "continuation_grant"}
+    assert grant["required"] == ["token", "purpose", "expires_at"]
+    assert grant["properties"]["purpose"]["const"] == "DEVICE_BOOTSTRAP"
+    assert grant["properties"]["token"]["pattern"] == "^hcg_[A-Za-z0-9_-]{43}$"
+    assert "Sensitive opaque" in grant["properties"]["token"]["description"]
 
 
 @pytest.mark.parametrize(
@@ -67,7 +81,8 @@ def test_validated_response_exposes_opaque_identity_not_google_subject():
 )
 def test_ids_require_opaque_namespaced_references(schema_name, field, prefix):
     schema = load_contract()["components"]["schemas"][schema_name]["properties"][field]
-    assert schema == {"type": "string", "pattern": f"^{prefix}[A-Za-z0-9_-]{{20,}}$"}
+    assert schema["type"] == "string"
+    assert schema["pattern"] == f"^{prefix}[A-Za-z0-9_-]{{20,}}$"
     validator = Draft202012Validator(schema)
     assert validator.is_valid(prefix + "aB0_-" * 4)
     for invalid in ("", prefix, prefix + "a" * 19, "google:12345678901234567890",
@@ -88,6 +103,20 @@ def test_ids_require_opaque_namespaced_references(schema_name, field, prefix):
             "status": "HUMAN_IDENTITY_VALIDATED",
             "human_identity_id": "hid_abcdefghijklmnopqrst",
         }),
+        ("HumanIdentityContinuedResponse", {
+            "status": "HUMAN_IDENTITY_VALIDATED",
+            "human_identity_id": "hid_abcdefghijklmnopqrst",
+            "continuation_grant": {
+                "token": "hcg_" + "a" * 43,
+                "purpose": "DEVICE_BOOTSTRAP",
+                "expires_at": "2026-09-13T00:05:00Z",
+            },
+        }),
+        ("HumanAuthContinuationGrant", {
+            "token": "hcg_" + "a" * 43,
+            "purpose": "DEVICE_BOOTSTRAP",
+            "expires_at": "2026-09-13T00:05:00Z",
+        }),
         ("HumanAuthErrorResponse", {"code": "HUMAN_AUTH_CREDENTIAL_REJECTED"}),
     ],
 )
@@ -96,7 +125,10 @@ def test_wire_objects_validate_and_reject_extra_or_missing_properties(schema_nam
     Draft202012Validator.check_schema(schema)
     assert schema["type"] == "object"
     assert schema["additionalProperties"] is False
-    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    validator = Draft202012Validator(
+        schema, format_checker=FormatChecker(),
+        resolver=Draft202012Validator(load_contract()).resolver,
+    )
     assert validator.is_valid(payload)
     assert not validator.is_valid({**payload, "unexpected": True})
     for field in payload:
@@ -122,6 +154,8 @@ def test_operations_reference_the_frozen_wire_schemas():
         (create, "201", "HumanAuthChallengeResponse", {"201", "503"}),
         (verify, "200", "HumanIdentityValidatedResponse",
          {"200", "401", "404", "409", "410", "503"}),
+        (document["paths"][VERIFY_AND_CONTINUE]["post"], "200",
+         "HumanIdentityContinuedResponse", {"200", "401", "404", "409", "410", "503"}),
     ):
         assert set(operation["responses"]) == codes
         for code, response in operation["responses"].items():
@@ -135,7 +169,8 @@ def test_errors_expose_only_the_seven_approved_semantic_codes():
     schemas = load_contract()["components"]["schemas"]
     assert set(schemas) == {
         "HumanAuthChallengeResponse", "GoogleHumanIdentityVerifyRequest",
-        "HumanIdentityValidatedResponse", "HumanAuthErrorResponse",
+        "HumanIdentityValidatedResponse", "HumanIdentityContinuedResponse",
+        "HumanAuthContinuationGrant", "HumanAuthErrorResponse",
     }
     error = schemas["HumanAuthErrorResponse"]
     assert error["required"] == ["code"]

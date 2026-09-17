@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     admin_token: str | None = None
     human_identity_enabled: bool = False
     human_auth_challenge_ttl_seconds: int = 300
+    human_auth_continuation_grant_ttl_seconds: int = 300
     google_identity_audience: str | None = None
     ingress_http_host: str = "0.0.0.0"
     ingress_http_port: int = 18101
@@ -163,6 +164,8 @@ class Settings(BaseSettings):
             raise ValueError("ADMIN_TOKEN must have at least 16 characters")
         if not 60 <= self.human_auth_challenge_ttl_seconds <= 900:
             raise ValueError("HUMAN_AUTH_CHALLENGE_TTL_SECONDS must be between 60 and 900")
+        if not 60 <= self.human_auth_continuation_grant_ttl_seconds <= 900:
+            raise ValueError("HUMAN_AUTH_CONTINUATION_GRANT_TTL_SECONDS must be between 60 and 900")
         if self.human_identity_enabled and not self.google_identity_audience:
             raise ValueError("GOOGLE_IDENTITY_AUDIENCE is required when HUMAN_IDENTITY_ENABLED=true")
         if self.ingress_http_port <= 0:

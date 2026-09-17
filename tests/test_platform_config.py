@@ -100,6 +100,7 @@ def test_human_identity_defaults_are_disabled_with_five_minute_challenges():
     configured = _settings()
     assert configured.human_identity_enabled is False
     assert configured.human_auth_challenge_ttl_seconds == 300
+    assert configured.human_auth_continuation_grant_ttl_seconds == 300
     assert configured.google_identity_audience is None
 
 
@@ -115,6 +116,21 @@ def test_human_auth_challenge_ttl_rejects_values_outside_bounds(ttl):
         ValidationError, match="HUMAN_AUTH_CHALLENGE_TTL_SECONDS must be between 60 and 900",
     ):
         _settings(human_auth_challenge_ttl_seconds=ttl)
+
+
+@pytest.mark.parametrize("ttl", [60, 300, 900])
+def test_human_auth_continuation_grant_ttl_accepts_inclusive_bounds(ttl):
+    configured = _settings(human_auth_continuation_grant_ttl_seconds=ttl)
+    assert configured.human_auth_continuation_grant_ttl_seconds == ttl
+
+
+@pytest.mark.parametrize("ttl", [59, 901])
+def test_human_auth_continuation_grant_ttl_rejects_values_outside_bounds(ttl):
+    with pytest.raises(
+        ValidationError,
+        match="HUMAN_AUTH_CONTINUATION_GRANT_TTL_SECONDS must be between 60 and 900",
+    ):
+        _settings(human_auth_continuation_grant_ttl_seconds=ttl)
 
 
 @pytest.mark.parametrize("audience", [None, ""])

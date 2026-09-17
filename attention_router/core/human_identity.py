@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
@@ -29,6 +29,24 @@ class IssuedHumanAuthChallenge:
 class HumanIdentityValidated:
     human_identity_id: str
     status: str = "HUMAN_IDENTITY_VALIDATED"
+
+
+@dataclass(frozen=True)
+class HumanAuthContinuationGrant:
+    token: str = field(repr=False)
+    purpose: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class HumanIdentityContinued:
+    human_identity_id: str
+    continuation_grant: HumanAuthContinuationGrant = field(repr=False)
+    status: str = "HUMAN_IDENTITY_VALIDATED"
+
+
+class HumanAuthContinuationGrantRejected(Exception):
+    code = "HUMAN_AUTH_CONTINUATION_GRANT_REJECTED"
 
 
 class HumanAuthDisabled(Exception):

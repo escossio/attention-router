@@ -12,12 +12,14 @@ from attention_router.application.human_identity import HumanIdentityService
 from attention_router.config import Settings
 from attention_router.core.human_identity import (
     HumanAuthChallengeConsumed,
+    HumanAuthContinuationGrantRejected,
     VerifiedProviderIdentity,
 )
 from attention_router.infrastructure.human_identity_models import (
     ExternalIdentityBindingRow,
     HumanAuthTransactionRow,
     HumanIdentityRow,
+    HumanAuthContinuationGrantRow,
 )
 
 
@@ -166,6 +168,57 @@ def test_concurrent_and_subject_based_identity_resolution(Session):
         )
     assert same_subject_result.human_identity_id == first_result.human_identity_id
     assert different_subject_result.human_identity_id != first_result.human_identity_id
+
+
+def test_concurrent_verify_issues_one_grant_and_consume_is_single_use(Session):
+    verifier = FakeVerifier()
+    service = _service(verifier)
+    issued = _issue(Session, service)
+    verifier.add(TOKEN, subject="continuation-sub", nonce=issued.nonce, email="unused@example.test")
+    barrier = threading.Barrier(2)
+
+    def verify():
+        with Session.begin() as session:
+            barrier.wait()
+            try:
+                return service.verify_google_challenge_and_issue_continuation_grant(
+                    session, issued.challenge_id, TOKEN, now=NOW,
+                )
+            except HumanAuthChallengeConsumed:
+                return "consumed"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: verify(), range(2)))
+    continued = [result for result in results if result != "consumed"]
+    assert len(continued) == 1
+    assert results.count("consumed") == 1
+    with Session() as session:
+        grants = session.scalars(select(HumanAuthContinuationGrantRow)).all()
+        assert len(grants) == 1
+        assert continued[0].continuation_grant.token not in vars(grants[0]).values()
+
+    barrier = threading.Barrier(2)
+
+    def consume():
+        with Session.begin() as session:
+            barrier.wait()
+            try:
+                return service.consume_continuation_grant(
+                    session,
+                    token=continued[0].continuation_grant.token,
+                    expected_human_identity_id=continued[0].human_identity_id,
+                    now=NOW + timedelta(seconds=1),
+                )
+            except HumanAuthContinuationGrantRejected:
+                return "rejected"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        consumed = list(executor.map(lambda _: consume(), range(2)))
+    assert consumed.count(continued[0].human_identity_id) == 1
+    assert consumed.count("rejected") == 1
+    with Session() as session:
+        row = session.scalar(select(HumanAuthContinuationGrantRow))
+        assert row.state == "CONSUMED"
 
 
 def test_human_identity_does_not_persist_secrets_or_authority_side_effects(Session):

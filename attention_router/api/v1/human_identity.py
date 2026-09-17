@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from attention_router.application.human_identity import HumanIdentityService
 from attention_router.core.human_identity import (
     HumanAuthChallengeConsumed,
+    HumanIdentityContinued,
     HumanAuthChallengeExpired,
     HumanAuthChallengeNotFound,
     HumanAuthCredentialRejected,
@@ -38,7 +39,33 @@ class HumanIdentityValidatedResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["HUMAN_IDENTITY_VALIDATED"]
-    human_identity_id: str = Field(pattern=r"^hid_[A-Za-z0-9_-]{20,}$")
+    human_identity_id: str = Field(
+        pattern=r"^hid_[A-Za-z0-9_-]{20,}$",
+        description="Opaque Human Identity reference only; not a credential or authority.",
+    )
+
+
+class HumanAuthContinuationGrant(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(
+        min_length=47, max_length=47, pattern=r"^hcg_[A-Za-z0-9_-]{43}$", repr=False,
+        description="Sensitive opaque continuation credential; do not log or persist on clients.",
+    )
+    purpose: Literal["DEVICE_BOOTSTRAP"]
+    expires_at: datetime
+
+
+class HumanIdentityContinuedResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["HUMAN_IDENTITY_VALIDATED"]
+    # This is an opaque reference, not an authentication credential.
+    human_identity_id: str = Field(
+        pattern=r"^hid_[A-Za-z0-9_-]{20,}$",
+        description="Opaque Human Identity reference only; not a credential or authority.",
+    )
+    continuation_grant: HumanAuthContinuationGrant
 
 
 HumanAuthErrorCode = Literal[
@@ -127,6 +154,40 @@ def build_human_identity_router(*, get_session, service: HumanIdentityService) -
         return HumanIdentityValidatedResponse(
             status=validated.status,
             human_identity_id=validated.human_identity_id,
+        )
+
+    @router.post(
+        "/api/v1/auth/google/challenges/{challenge_id}/verify-and-continue",
+        response_model=HumanIdentityContinuedResponse,
+        responses={
+            401: {"model": HumanAuthErrorResponse},
+            404: {"model": HumanAuthErrorResponse},
+            409: {"model": HumanAuthErrorResponse},
+            410: {"model": HumanAuthErrorResponse},
+            503: {"model": HumanAuthErrorResponse},
+        },
+        operation_id="verifyGoogleHumanIdentityAndIssueContinuationGrant",
+        openapi_extra={"security": []},
+    )
+    def verify_google_challenge_and_continue(
+        challenge_id: Annotated[str, Path(pattern=r"^hac_[A-Za-z0-9_-]{20,}$")],
+        payload: GoogleHumanIdentityVerifyRequest,
+        session: Session = Depends(get_session),
+    ) -> HumanIdentityContinuedResponse | JSONResponse:
+        try:
+            continued: HumanIdentityContinued = service.verify_google_challenge_and_issue_continuation_grant(
+                session, challenge_id, payload.id_token
+            )
+        except tuple(_ERROR_STATUS) as error:
+            return _error_response(error)
+        return HumanIdentityContinuedResponse(
+            status=continued.status,
+            human_identity_id=continued.human_identity_id,
+            continuation_grant=HumanAuthContinuationGrant(
+                token=continued.continuation_grant.token,
+                purpose=continued.continuation_grant.purpose,
+                expires_at=continued.continuation_grant.expires_at,
+            ),
         )
 
     return router
