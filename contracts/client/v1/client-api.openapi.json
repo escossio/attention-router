@@ -122,6 +122,42 @@
           }
         }
       }
+    },
+    "/api/v1/auth/google/challenges/{challenge_id}/verify-and-continue": {
+      "post": {
+        "operationId": "verifyGoogleHumanIdentityAndIssueContinuationGrant",
+        "security": [],
+        "parameters": [
+          {
+            "name": "challenge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^hac_[A-Za-z0-9_-]{20,}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/GoogleHumanIdentityVerifyRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Human Identity validated and a short-lived continuation grant issued",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanIdentityContinuedResponse" } } }
+          },
+          "401": { "description": "Credential rejected", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } },
+          "404": { "description": "Challenge not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } },
+          "409": { "description": "Challenge already consumed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } },
+          "410": { "description": "Challenge expired", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } },
+          "503": { "description": "Provider or feature unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } }
+        }
+      }
     }
   },
   "components": {
@@ -177,8 +213,39 @@
           },
           "human_identity_id": {
             "type": "string",
-            "pattern": "^hid_[A-Za-z0-9_-]{20,}$"
+            "pattern": "^hid_[A-Za-z0-9_-]{20,}$",
+            "description": "Opaque Human Identity reference only; not a credential or authority."
           }
+        }
+      },
+      "HumanIdentityContinuedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "human_identity_id", "continuation_grant"],
+        "properties": {
+          "status": { "const": "HUMAN_IDENTITY_VALIDATED" },
+          "human_identity_id": {
+            "type": "string",
+            "pattern": "^hid_[A-Za-z0-9_-]{20,}$",
+            "description": "Opaque Human Identity reference only; not a credential or authority."
+          },
+          "continuation_grant": { "$ref": "#/components/schemas/HumanAuthContinuationGrant" }
+        }
+      },
+      "HumanAuthContinuationGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["token", "purpose", "expires_at"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 47,
+            "maxLength": 47,
+            "pattern": "^hcg_[A-Za-z0-9_-]{43}$",
+            "description": "Sensitive opaque continuation credential; do not log or persist on clients."
+          },
+          "purpose": { "const": "DEVICE_BOOTSTRAP" },
+          "expires_at": { "type": "string", "format": "date-time" }
         }
       },
       "HumanAuthErrorResponse": {

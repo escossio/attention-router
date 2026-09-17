@@ -2,6 +2,13 @@
 
 Updated: 2026-09-09
 
+## Human Auth Continuation Grant V0.3A — implementation in progress
+
+- Contract/backend work is being prepared from main `c377ffd5dbd6556e05561f95be71ea93a29a142f`.
+- Existing V0.2A `POST /verify` remains unchanged; the opt-in `/verify-and-continue` contract issues a short-lived, digest-only persisted `DEVICE_BOOTSTRAP` grant after successful verification.
+- Focused local validation: 103 tests pass; PostgreSQL concurrency/migration validation is delegated to required GitHub Actions gates.
+- No rollout or live authentication test has been performed for this frontier.
+
 ## Human Identity V1 HTTP frontier — contract fidelity correction awaiting CI
 
 - The first GitHub Actions run for PR #53 closed green on required checks.

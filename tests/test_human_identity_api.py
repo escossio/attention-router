@@ -16,12 +16,15 @@ from attention_router.core.human_identity import (
     HumanAuthNonceMismatch,
     HumanAuthProviderUnavailable,
     HumanIdentityValidated,
+    HumanIdentityContinued,
+    HumanAuthContinuationGrant,
     IssuedHumanAuthChallenge,
 )
 
 
 CHALLENGES = "/api/v1/auth/google/challenges"
 VERIFY = CHALLENGES + "/{challenge_id}/verify"
+VERIFY_AND_CONTINUE = CHALLENGES + "/{challenge_id}/verify-and-continue"
 CHALLENGE_ID = "hac_examplechallenge123456789"
 ID_TOKEN = "synthetic-token-value-that-is-at-least-32-characters"
 ERRORS = [
@@ -59,6 +62,20 @@ class FakeService:
         if self.error:
             raise self.error()
         return HumanIdentityValidated(human_identity_id="hid_exampleopaqueidentity123")
+
+    def verify_google_challenge_and_issue_continuation_grant(
+        self, session, challenge_id, id_token,
+    ):
+        self.calls.append((session, challenge_id, id_token))
+        if self.error:
+            raise self.error()
+        return HumanIdentityContinued(
+            human_identity_id="hid_exampleopaqueidentity123",
+            continuation_grant=HumanAuthContinuationGrant(
+                token="hcg_" + "x" * 43, purpose="DEVICE_BOOTSTRAP",
+                expires_at=datetime(2026, 9, 13, 12, 5, tzinfo=UTC),
+            ),
+        )
 
 
 def isolated_app(service, get_session):
@@ -99,6 +116,25 @@ def test_verify_success_passes_exact_arguments_without_admin(api):
         "human_identity_id": "hid_exampleopaqueidentity123",
     }
     assert service.calls == [(session, CHALLENGE_ID, ID_TOKEN)]
+
+
+def test_verify_and_continue_is_separate_and_returns_typed_grant(api):
+    client, service, session = api
+    response = client.post(
+        VERIFY_AND_CONTINUE.format(challenge_id=CHALLENGE_ID), json={"id_token": ID_TOKEN},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "HUMAN_IDENTITY_VALIDATED",
+        "human_identity_id": "hid_exampleopaqueidentity123",
+        "continuation_grant": {
+            "token": "hcg_" + "x" * 43,
+            "purpose": "DEVICE_BOOTSTRAP",
+            "expires_at": "2026-09-13T12:05:00Z",
+        },
+    }
+    assert service.calls == [(session, CHALLENGE_ID, ID_TOKEN)]
+    assert "hcg_" not in repr(service.calls)
 
 
 @pytest.mark.parametrize("error,status_code,code", ERRORS)

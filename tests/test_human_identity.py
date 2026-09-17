@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from attention_router.config import Settings
 from attention_router.core.human_identity import (
     HumanAuthChallengeConsumed,
+    HumanAuthContinuationGrantRejected,
     HumanAuthChallengeExpired,
     HumanAuthChallengeNotFound,
     HumanAuthCredentialRejected,
@@ -24,6 +25,7 @@ from attention_router.core.human_identity import (
 from attention_router.infrastructure.human_identity_models import (
     ExternalIdentityBindingRow,
     HumanAuthTransactionRow,
+    HumanAuthContinuationGrantRow,
     HumanIdentityRow,
 )
 from attention_router.application.human_identity import HumanIdentityService
@@ -479,3 +481,120 @@ def test_caller_can_rollback_verification_of_existing_challenge(
     assert row.resolved_human_identity_id is None
     assert _count(session, HumanIdentityRow) == 0
     assert _count(session, ExternalIdentityBindingRow) == 0
+
+
+def test_continuation_grant_issued_after_valid_verify_and_persists_digest_only(
+    session, service, issued, verifier, caplog,
+):
+    verifier.identity = _verified(issued)
+    continued = service.verify_google_challenge_and_issue_continuation_grant(
+        session, issued.challenge_id, TOKEN, now=NOW,
+    )
+    grant = continued.continuation_grant
+    row = session.scalar(select(HumanAuthContinuationGrantRow))
+    assert continued.status == "HUMAN_IDENTITY_VALIDATED"
+    assert continued.human_identity_id == row.human_identity_id
+    assert grant.purpose == row.purpose == "DEVICE_BOOTSTRAP"
+    assert grant.expires_at == _utc(row.expires_at) == NOW + timedelta(seconds=300)
+    assert row.state == "ACTIVE"
+    assert row.source_auth_transaction_id == issued.challenge_id
+    assert row.token_digest == hashlib.sha256(grant.token.encode("ascii")).hexdigest()
+    assert grant.token not in vars(row).values()
+    assert grant.token not in repr(grant)
+    assert grant.token not in repr(continued)
+    assert grant.token not in caplog.text
+
+
+def test_replaying_successful_auth_transaction_does_not_create_another_grant(
+    session, service, issued, verifier, caplog,
+):
+    verifier.identity = _verified(issued)
+    continued = service.verify_google_challenge_and_issue_continuation_grant(
+        session, issued.challenge_id, TOKEN, now=NOW,
+    )
+    with pytest.raises(HumanAuthChallengeConsumed):
+        service.verify_google_challenge_and_issue_continuation_grant(
+            session, issued.challenge_id, TOKEN, now=NOW + timedelta(seconds=1),
+        )
+    assert _count(session, HumanAuthContinuationGrantRow) == 1
+    assert verifier.calls == 1
+    assert continued.continuation_grant.token not in caplog.text
+
+
+def test_continuation_grant_can_be_revoked(session, service, issued, verifier):
+    verifier.identity = _verified(issued)
+    continued = service.verify_google_challenge_and_issue_continuation_grant(
+        session, issued.challenge_id, TOKEN, now=NOW,
+    )
+    assert service.revoke_continuation_grant(
+        session, token=continued.continuation_grant.token,
+        expected_human_identity_id=continued.human_identity_id,
+        now=NOW + timedelta(seconds=1),
+    ) is True
+    with pytest.raises(HumanAuthContinuationGrantRejected):
+        service.consume_continuation_grant(
+            session, token=continued.continuation_grant.token,
+            expected_human_identity_id=continued.human_identity_id,
+            now=NOW + timedelta(seconds=2),
+        )
+    row = session.scalar(select(HumanAuthContinuationGrantRow))
+    assert row.state == "REVOKED"
+    assert _utc(row.revoked_at) == NOW + timedelta(seconds=1)
+
+
+def test_continuation_grant_first_consume_succeeds_and_second_fails_closed(
+    session, service, issued, verifier,
+):
+    verifier.identity = _verified(issued)
+    continued = service.verify_google_challenge_and_issue_continuation_grant(
+        session, issued.challenge_id, TOKEN, now=NOW,
+    )
+    identity_id = continued.human_identity_id
+    assert service.consume_continuation_grant(
+        session, token=continued.continuation_grant.token,
+        expected_human_identity_id=identity_id, now=NOW + timedelta(seconds=1),
+    ) == identity_id
+    with pytest.raises(HumanAuthContinuationGrantRejected):
+        service.consume_continuation_grant(
+            session, token=continued.continuation_grant.token,
+            expected_human_identity_id=identity_id, now=NOW + timedelta(seconds=2),
+        )
+    row = session.scalar(select(HumanAuthContinuationGrantRow))
+    assert row.state == "CONSUMED"
+    assert _utc(row.consumed_at) == NOW + timedelta(seconds=1)
+
+
+@pytest.mark.parametrize("failure", ["expired", "unknown", "purpose", "identity"])
+def test_continuation_grant_failures_are_closed(session, service, issued, verifier, failure):
+    verifier.identity = _verified(issued)
+    continued = service.verify_google_challenge_and_issue_continuation_grant(
+        session, issued.challenge_id, TOKEN, now=NOW,
+    )
+    kwargs = {
+        "token": continued.continuation_grant.token,
+        "expected_human_identity_id": continued.human_identity_id,
+        "purpose": "DEVICE_BOOTSTRAP",
+        "now": NOW + timedelta(seconds=1),
+    }
+    if failure == "expired":
+        kwargs["now"] = NOW + timedelta(seconds=301)
+    elif failure == "unknown":
+        kwargs["token"] = "hcg_" + "x" * 43
+    elif failure == "purpose":
+        kwargs["purpose"] = "OTHER"
+    else:
+        kwargs["expected_human_identity_id"] = "hid_anotheropaqueidentity123"
+    with pytest.raises(HumanAuthContinuationGrantRejected):
+        service.consume_continuation_grant(session, **kwargs)
+    row = session.scalar(select(HumanAuthContinuationGrantRow))
+    assert row.state == "ACTIVE"
+    assert row.consumed_at is None
+
+
+def test_invalid_nonce_does_not_issue_continuation_grant(session, service, issued, verifier):
+    verifier.identity = _verified(issued, nonce="different-nonce")
+    with pytest.raises(HumanAuthNonceMismatch):
+        service.verify_google_challenge_and_issue_continuation_grant(
+            session, issued.challenge_id, TOKEN, now=NOW,
+        )
+    assert _count(session, HumanAuthContinuationGrantRow) == 0

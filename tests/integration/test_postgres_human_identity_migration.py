@@ -14,7 +14,7 @@ def test_human_identity_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0038_human_identity_v1"]
+            ).scalars().all() == ["0039_human_auth_continuation_grant"]
 
             schema = inspect(connection)
             expected_columns = {
@@ -40,6 +40,18 @@ def test_human_identity_migration_schema():
                     "consumed_at": (None, True),
                     "resolved_human_identity_id": (64, True),
                 },
+                "human_auth_continuation_grants": {
+                    "id": (64, False),
+                    "token_digest": (64, False),
+                    "human_identity_id": (64, False),
+                    "source_auth_transaction_id": (64, False),
+                    "purpose": (32, False),
+                    "state": (16, False),
+                    "created_at": (None, False),
+                    "expires_at": (None, False),
+                    "consumed_at": (None, True),
+                    "revoked_at": (None, True),
+                },
             }
             assert expected_columns.keys() <= set(schema.get_table_names())
             for table, expected in expected_columns.items():
@@ -63,6 +75,20 @@ def test_human_identity_migration_schema():
                 "tenant_id", "device_id", "session_id", "nonce", "id_token", "token",
                 "access_token", "refresh_token", "email", "name",
             })
+
+            grant_columns = {
+                column["name"] for column in schema.get_columns("human_auth_continuation_grants")
+            }
+            assert grant_columns.isdisjoint({
+                "token", "raw_token", "access_token", "refresh_token", "id_token",
+            })
+            assert {
+                item["name"]: item["column_names"]
+                for item in schema.get_unique_constraints("human_auth_continuation_grants")
+            } == {
+                "uq_hacg_token_digest": ["token_digest"],
+                "uq_hacg_source_auth_transaction": ["source_auth_transaction_id"],
+            }
 
             for table, expected_unique in (
                 ("external_identity_bindings", {

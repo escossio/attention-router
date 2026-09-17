@@ -72,3 +72,33 @@ class HumanAuthTransactionRow(Base):
             name="ck_human_auth_transaction_state",
         ),
     )
+
+
+class HumanAuthContinuationGrantRow(Base):
+    __tablename__ = "human_auth_continuation_grants"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    token_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    human_identity_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("human_identities.id", name="fk_hacg_human_identity"),
+        nullable=False,
+    )
+    source_auth_transaction_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("human_auth_transactions.id", name="fk_hacg_auth_transaction"),
+        nullable=False,
+    )
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_human_auth_continuation_grants"),
+        UniqueConstraint("token_digest", name="uq_hacg_token_digest"),
+        UniqueConstraint("source_auth_transaction_id", name="uq_hacg_source_auth_transaction"),
+        CheckConstraint("purpose = 'DEVICE_BOOTSTRAP'", name="ck_hacg_purpose"),
+        CheckConstraint("state IN ('ACTIVE', 'CONSUMED', 'REVOKED')", name="ck_hacg_state"),
+        CheckConstraint("expires_at > created_at", name="ck_hacg_lifetime"),
+    )
