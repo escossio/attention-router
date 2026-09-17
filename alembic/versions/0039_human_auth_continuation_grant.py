@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0039_human_auth_continuation_grant"
+revision = "0039_human_auth_cont_grant"
 down_revision = "0038_human_identity_v1"
 branch_labels = None
 depends_on = None
