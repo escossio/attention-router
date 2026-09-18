@@ -33,17 +33,26 @@ class DeviceBootstrapChallengeRequest(BaseModel):
         max_length=47,
         pattern=r"^hcg_[A-Za-z0-9_-]{43}$",
         repr=False,
+        description=(
+            "Sensitive single-use DEVICE_BOOTSTRAP continuation credential; "
+            "never persist or log."
+        ),
     )
     public_key_spki_b64url: str = Field(
         min_length=80,
         max_length=2048,
         pattern=r"^[A-Za-z0-9_-]+$",
+        description=(
+            "Unpadded base64url DER SubjectPublicKeyInfo. "
+            "Server validates P-256 and derives the fingerprint."
+        ),
     )
     canonical_device_name: str = Field(min_length=1, max_length=160)
     platform: Literal["ANDROID"]
     roles: list[Literal["CLIENT", "CAPABILITY_NODE"]] = Field(
         min_length=1,
         max_length=2,
+        json_schema_extra={"uniqueItems": True},
     )
 
 
@@ -67,10 +76,11 @@ class DeviceBootstrapCompleteRequest(BaseModel):
         max_length=512,
         pattern=r"^[A-Za-z0-9_-]+$",
         repr=False,
+        description="ECDSA/SHA-256 signature over the exact server challenge bytes.",
     )
 
 
-class ClientTenantMembershipResponse(BaseModel):
+class ClientTenantMembershipView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     membership_id: str = Field(min_length=1, max_length=64)
@@ -79,7 +89,7 @@ class ClientTenantMembershipResponse(BaseModel):
     status: Literal["ACTIVE"]
 
 
-class ClientDeviceResponse(BaseModel):
+class ClientDeviceView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     device_id: str = Field(pattern=r"^cdev_[A-Za-z0-9_-]{20,}$")
@@ -89,6 +99,7 @@ class ClientDeviceResponse(BaseModel):
     roles: list[Literal["CLIENT", "CAPABILITY_NODE"]] = Field(
         min_length=1,
         max_length=2,
+        json_schema_extra={"uniqueItems": True},
     )
     status: Literal["ACTIVE"]
 
@@ -98,9 +109,9 @@ class DeviceBootstrapEstablishedResponse(BaseModel):
 
     status: Literal["DEVICE_BOOTSTRAP_ESTABLISHED"]
     human_identity_id: str = Field(pattern=r"^hid_[A-Za-z0-9_-]{20,}$")
-    memberships: list[ClientTenantMembershipResponse] = Field(min_length=1, max_length=100)
-    initial_tenant_id: str | None = Field(default=None, min_length=1, max_length=64)
-    device: ClientDeviceResponse
+    memberships: list[ClientTenantMembershipView] = Field(min_length=1, max_length=100)
+    initial_tenant_id: str | None = Field(min_length=1, max_length=64)
+    device: ClientDeviceView
 
 
 DeviceBootstrapErrorCode = Literal[
@@ -220,7 +231,7 @@ def build_client_bootstrap_router(
             status=result.status,
             human_identity_id=result.human_identity_id,
             memberships=[
-                ClientTenantMembershipResponse(
+                ClientTenantMembershipView(
                     membership_id=item.membership_id,
                     tenant_id=item.tenant_id,
                     role=item.role.value,
@@ -229,7 +240,7 @@ def build_client_bootstrap_router(
                 for item in result.memberships
             ],
             initial_tenant_id=result.initial_tenant_id,
-            device=ClientDeviceResponse(
+            device=ClientDeviceView(
                 device_id=result.device.device_id,
                 public_key_fingerprint=result.device.public_key_fingerprint,
                 canonical_name=result.device.canonical_name,
