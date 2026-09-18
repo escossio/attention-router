@@ -142,9 +142,10 @@ def create_or_refresh_bootstrap_challenge(
         verified_at=None,
         rejected_at=None,
     )
-    session.add(row)
     try:
-        session.flush()
+        with session.begin_nested():
+            session.add(row)
+            session.flush()
     except IntegrityError as error:
         raise BootstrapChallengeConflict() from error
     return row
@@ -222,11 +223,12 @@ def resolve_or_create_memberships(
         created_at=now,
         updated_at=now,
     )
-    session.add(tenant)
-    session.flush()
-    session.add(membership)
     try:
-        session.flush()
+        with session.begin_nested():
+            session.add(tenant)
+            session.flush()
+            session.add(membership)
+            session.flush()
     except IntegrityError as error:
         raise MembershipResolutionConflict() from error
     return [membership]
