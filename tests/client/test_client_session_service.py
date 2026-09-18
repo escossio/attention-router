@@ -112,6 +112,7 @@ def test_wrong_signature_keeps_challenge_pending_and_creates_no_session(session)
     challenge = service.start_session(
         session, public_key_spki_b64url=public, requested_tenant_id=None, now=NOW
     )
+    session.commit()
     with pytest.raises(ClientSessionSignatureInvalid):
         service.complete_session(
             session, session_challenge_id=challenge.session_challenge_id,
