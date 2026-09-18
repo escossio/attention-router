@@ -168,14 +168,15 @@ def build_client_bootstrap_router(
         session: Session = Depends(get_session),
     ) -> DeviceBootstrapChallengeResponse | JSONResponse:
         try:
-            result = service.start_device_bootstrap(
-                session,
-                continuation_token=payload.continuation_token,
-                public_key_spki_b64url=payload.public_key_spki_b64url,
-                canonical_device_name=payload.canonical_device_name,
-                platform=payload.platform,
-                roles=list(payload.roles),
-            )
+            with session.begin_nested():
+                result = service.start_device_bootstrap(
+                    session,
+                    continuation_token=payload.continuation_token,
+                    public_key_spki_b64url=payload.public_key_spki_b64url,
+                    canonical_device_name=payload.canonical_device_name,
+                    platform=payload.platform,
+                    roles=list(payload.roles),
+                )
         except tuple(_ERROR_STATUS) as error:
             return _error_response(error)
         return DeviceBootstrapChallengeResponse(
@@ -207,11 +208,12 @@ def build_client_bootstrap_router(
         session: Session = Depends(get_session),
     ) -> DeviceBootstrapEstablishedResponse | JSONResponse:
         try:
-            result = service.complete_device_bootstrap(
-                session,
-                bootstrap_challenge_id=bootstrap_challenge_id,
-                device_signature_b64url=payload.device_signature_b64url,
-            )
+            with session.begin_nested():
+                result = service.complete_device_bootstrap(
+                    session,
+                    bootstrap_challenge_id=bootstrap_challenge_id,
+                    device_signature_b64url=payload.device_signature_b64url,
+                )
         except tuple(_ERROR_STATUS) as error:
             return _error_response(error)
         return DeviceBootstrapEstablishedResponse(
