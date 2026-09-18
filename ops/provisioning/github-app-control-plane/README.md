@@ -2,7 +2,7 @@
 
 This package reproduces the AGT-side ingress proven live for the `andy-github-control-plane` GitHub App.
 
-The initial installation is intentionally scoped to `escossio/attention-router`. It receives `ping`, `pull_request`, and `workflow_run` events and remains observation-only: it records bounded metadata but does not commit, merge, rerun workflows, or mutate repository state.
+The initial installation is intentionally scoped to `escossio/attention-router`. The GitHub App must explicitly subscribe to **Pull request** and **Workflow run** events; the receiver accepts `ping`, `pull_request`, and `workflow_run` deliveries and remains observation-only: it records bounded metadata but does not commit, merge, rerun workflows, or mutate repository state.
 
 ## Trust boundary
 
