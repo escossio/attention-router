@@ -101,6 +101,8 @@ def test_human_identity_defaults_are_disabled_with_five_minute_challenges():
     assert configured.human_identity_enabled is False
     assert configured.human_auth_challenge_ttl_seconds == 300
     assert configured.human_auth_continuation_grant_ttl_seconds == 300
+    assert configured.device_bootstrap_enabled is False
+    assert configured.device_bootstrap_challenge_ttl_seconds == 300
     assert configured.google_identity_audience is None
 
 
@@ -148,3 +150,35 @@ def test_human_identity_can_be_enabled_with_explicit_synthetic_audience():
     )
     assert configured.human_identity_enabled is True
     assert configured.google_identity_audience == "synthetic-google-client-id"
+
+
+@pytest.mark.parametrize("ttl", [60, 300, 900])
+def test_device_bootstrap_challenge_ttl_accepts_inclusive_bounds(ttl):
+    configured = _settings(device_bootstrap_challenge_ttl_seconds=ttl)
+    assert configured.device_bootstrap_challenge_ttl_seconds == ttl
+
+
+@pytest.mark.parametrize("ttl", [59, 901])
+def test_device_bootstrap_challenge_ttl_rejects_values_outside_bounds(ttl):
+    with pytest.raises(
+        ValidationError,
+        match="DEVICE_BOOTSTRAP_CHALLENGE_TTL_SECONDS must be between 60 and 900",
+    ):
+        _settings(device_bootstrap_challenge_ttl_seconds=ttl)
+
+
+def test_device_bootstrap_requires_human_identity_boundary_enabled():
+    with pytest.raises(
+        ValidationError,
+        match="DEVICE_BOOTSTRAP_ENABLED requires HUMAN_IDENTITY_ENABLED=true",
+    ):
+        _settings(device_bootstrap_enabled=True)
+
+
+def test_device_bootstrap_can_be_enabled_only_with_human_identity_configuration():
+    configured = _settings(
+        human_identity_enabled=True,
+        google_identity_audience="synthetic-client-id.example",
+        device_bootstrap_enabled=True,
+    )
+    assert configured.device_bootstrap_enabled is True
