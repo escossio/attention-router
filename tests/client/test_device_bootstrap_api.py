@@ -1,4 +1,6 @@
 from contextlib import nullcontext
+import json
+from pathlib import Path
 from datetime import UTC, datetime
 
 import pytest
@@ -30,6 +32,23 @@ from attention_router.core.client.bootstrap import (
     TenantRole,
 )
 
+
+
+ROOT = Path(__file__).resolve().parents[2]
+CONTRACT = json.loads(
+    (ROOT / "contracts/client/v1/client-api.openapi.json").read_text(encoding="utf-8")
+)
+START = "/api/v1/bootstrap/device/challenges"
+COMPLETE = START + "/{bootstrap_challenge_id}/complete"
+BOOTSTRAP_SCHEMAS = {
+    "DeviceBootstrapChallengeRequest",
+    "DeviceBootstrapChallengeResponse",
+    "DeviceBootstrapCompleteRequest",
+    "ClientTenantMembershipView",
+    "ClientDeviceView",
+    "DeviceBootstrapEstablishedResponse",
+    "DeviceBootstrapErrorResponse",
+}
 
 class FakeSession:
     def begin_nested(self):
@@ -189,3 +208,50 @@ def test_complete_maps_bounded_errors(client, error, status_code, code):
 
     assert response.status_code == status_code
     assert response.json() == {"code": code}
+
+
+def test_runtime_openapi_matches_frozen_v03b_contract(client):
+    http, _, _ = client
+    runtime = http.app.openapi()
+
+    assert set(runtime["paths"]) == {START, COMPLETE}
+
+    for path in (START, COMPLETE):
+        actual = runtime["paths"][path]["post"]
+        expected = CONTRACT["paths"][path]["post"]
+        assert actual["operationId"] == expected["operationId"]
+        assert actual["security"] == expected["security"] == []
+        assert not any(
+            parameter["in"] == "header"
+            for parameter in actual.get("parameters", [])
+        )
+        assert actual["requestBody"]["content"] == expected["requestBody"]["content"]
+        for status_code, response in expected["responses"].items():
+            assert actual["responses"][status_code]["content"] == response["content"]
+
+    expected_parameter = CONTRACT["paths"][COMPLETE]["post"]["parameters"][0]
+    actual_parameter = runtime["paths"][COMPLETE]["post"]["parameters"][0]
+    assert actual_parameter["name"] == expected_parameter["name"]
+    assert actual_parameter["in"] == expected_parameter["in"]
+    assert actual_parameter["required"] is True
+    assert actual_parameter["schema"]["pattern"] == expected_parameter["schema"]["pattern"]
+
+    for name in BOOTSTRAP_SCHEMAS:
+        expected = CONTRACT["components"]["schemas"][name]
+        actual = runtime["components"]["schemas"][name]
+        assert actual["additionalProperties"] is False
+        assert set(actual["required"]) == set(expected["required"])
+        assert set(actual["properties"]) == set(expected["properties"])
+        for field, constraints in expected["properties"].items():
+            for key, value in constraints.items():
+                assert actual["properties"][field][key] == value
+
+
+def test_runtime_rejects_duplicate_roles_before_service(client):
+    http, service, _ = client
+    payload = _start_payload()
+    payload["roles"] = ["CLIENT", "CLIENT"]
+    response = http.post(START, json=payload)
+
+    assert response.status_code == 422
+    assert service.start_calls == []
