@@ -378,6 +378,238 @@
           }
         }
       }
+    },
+    "/api/v1/session/device/challenges": {
+      "post": {
+        "operationId": "createClientSessionChallenge",
+        "description": "Starts short-lived client-session establishment for an already enrolled device. The supplied SPKI and optional tenant id are assertions only. The server derives the device fingerprint, resolves the enrolled ACTIVE device and Human Identity, and validates tenant membership before session issuance.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientSessionChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Session possession challenge issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionChallengeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid device key or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Enrolled device authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active tenant selection required or authority conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Client session establishment unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/session/device/challenges/{session_challenge_id}/complete": {
+      "post": {
+        "operationId": "completeClientSessionChallenge",
+        "description": "Verifies possession of the already enrolled Android P-256 key and, only after current device, membership and tenant authority are revalidated server-side, issues one short-lived opaque client-session bearer credential.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "session_challenge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^csc_[A-Za-z0-9_-]{20,}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientSessionCompleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Short client session established",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionEstablishedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or signature encoding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Device-possession or session authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session challenge not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Challenge consumed or active-tenant authority conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Session challenge expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Client session establishment unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/client/bootstrap": {
+      "get": {
+        "operationId": "getAuthenticatedClientBootstrap",
+        "description": "Returns a bounded bootstrap snapshot derived from the authenticated client session and current server-side Human Identity, device, tenant and membership authority. Cached client claims are not authoritative.",
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated bootstrap snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticatedClientBootstrapSnapshot"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, expired or revoked client session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current device/membership/tenant authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Current authority state is inconsistent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authenticated bootstrap unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientSessionErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -740,6 +972,216 @@
             ]
           }
         }
+      },
+      "ClientSessionChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "public_key_spki_b64url"
+        ],
+        "properties": {
+          "public_key_spki_b64url": {
+            "type": "string",
+            "minLength": 80,
+            "maxLength": 2048,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "Unpadded base64url DER SubjectPublicKeyInfo for the already enrolled P-256 device key. The server derives the fingerprint and resolves device authority; this value is not authority by itself."
+          },
+          "requested_tenant_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional tenant selection assertion. It grants no authority and must resolve to a current ACTIVE membership."
+          }
+        }
+      },
+      "ClientSessionChallengeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session_challenge_id",
+          "challenge_b64url",
+          "expires_at"
+        ],
+        "properties": {
+          "session_challenge_id": {
+            "type": "string",
+            "pattern": "^csc_[A-Za-z0-9_-]{20,}$"
+          },
+          "challenge_b64url": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClientSessionCompleteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_signature_b64url"
+        ],
+        "properties": {
+          "device_signature_b64url": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "ECDSA/SHA-256 signature over the exact server session challenge bytes."
+          }
+        }
+      },
+      "ClientSessionView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session_id",
+          "session_token",
+          "token_type",
+          "expires_at",
+          "human_identity_id",
+          "device_id",
+          "tenant_id"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^csn_[A-Za-z0-9_-]{20,}$"
+          },
+          "session_token": {
+            "type": "string",
+            "minLength": 47,
+            "maxLength": 47,
+            "pattern": "^cst_[A-Za-z0-9_-]{43}$",
+            "description": "Sensitive short-lived opaque bearer credential returned once. Never persist raw server-side or log."
+          },
+          "token_type": {
+            "const": "Bearer"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "human_identity_id": {
+            "type": "string",
+            "pattern": "^hid_[A-Za-z0-9_-]{20,}$"
+          },
+          "device_id": {
+            "type": "string",
+            "pattern": "^cdev_[A-Za-z0-9_-]{20,}$"
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "ClientSessionEstablishedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "session"
+        ],
+        "properties": {
+          "status": {
+            "const": "CLIENT_SESSION_ESTABLISHED"
+          },
+          "session": {
+            "$ref": "#/components/schemas/ClientSessionView"
+          }
+        }
+      },
+      "AuthenticatedClientBootstrapSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "human_identity_id",
+          "active_tenant_id",
+          "memberships",
+          "device",
+          "session_expires_at",
+          "server_time"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1"
+          },
+          "human_identity_id": {
+            "type": "string",
+            "pattern": "^hid_[A-Za-z0-9_-]{20,}$"
+          },
+          "active_tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "memberships": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ClientTenantMembershipView"
+            }
+          },
+          "device": {
+            "$ref": "#/components/schemas/ClientDeviceView"
+          },
+          "session_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClientSessionErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "CLIENT_SESSION_DEVICE_REJECTED",
+              "CLIENT_SESSION_CHALLENGE_NOT_FOUND",
+              "CLIENT_SESSION_CHALLENGE_EXPIRED",
+              "CLIENT_SESSION_CHALLENGE_CONSUMED",
+              "CLIENT_SESSION_SIGNATURE_INVALID",
+              "CLIENT_SESSION_ACTIVE_TENANT_REQUIRED",
+              "CLIENT_SESSION_TENANT_FORBIDDEN",
+              "CLIENT_SESSION_UNAUTHENTICATED",
+              "CLIENT_SESSION_AUTHORITY_REJECTED",
+              "CLIENT_SESSION_UNAVAILABLE"
+            ]
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "ClientSession": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque-client-session-v03c",
+        "description": "Short-lived opaque client-session credential scoped server-side to Human Identity, device and active tenant."
       }
     }
   }
