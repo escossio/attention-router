@@ -100,6 +100,7 @@ def _seed_grant(Session, *, suffix: str, human_identity_id=HUMAN_ID) -> str:
             consumed_at=NOW - timedelta(seconds=1),
             resolved_human_identity_id=human_identity_id,
         ))
+        session.flush()
         session.add(HumanAuthContinuationGrantRow(
             id="hcgi_" + (suffix * 24)[:24],
             token_digest=hashlib.sha256(token.encode("ascii")).hexdigest(),

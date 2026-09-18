@@ -278,7 +278,7 @@ def test_multiple_existing_memberships_defer_active_tenant_choice(session, servi
 
 
 def test_existing_device_key_cannot_cross_human_identity(session, service):
-    grant = _seed_grant(session)
+    _seed_grant(session)
     private, spki = _device_key()
     challenge = service.start_device_bootstrap(
         session,
