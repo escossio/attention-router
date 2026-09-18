@@ -41,7 +41,7 @@ def _aware(value: datetime, reference: datetime) -> datetime:
     return value
 
 
-def _grant_is_usable(
+def continuation_grant_is_usable(
     row: HumanAuthContinuationGrantRow,
     *,
     human_identity_id: str | None,
@@ -70,29 +70,20 @@ def lock_continuation_grant_by_token(
     )
     if row is None or not hmac.compare_digest(row.token_digest, digest):
         return None
-    return row if _grant_is_usable(row, human_identity_id=None, now=now) else None
+    return row if continuation_grant_is_usable(row, human_identity_id=None, now=now) else None
 
 
 def lock_continuation_grant_by_id(
     session: Session,
     *,
     grant_id: str,
-    human_identity_id: str,
-    now: datetime,
 ) -> HumanAuthContinuationGrantRow | None:
-    row = session.scalar(
+    return session.scalar(
         select(HumanAuthContinuationGrantRow)
         .where(HumanAuthContinuationGrantRow.id == grant_id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if row is None:
-        return None
-    return row if _grant_is_usable(
-        row,
-        human_identity_id=human_identity_id,
-        now=now,
-    ) else None
 
 
 def create_or_refresh_bootstrap_challenge(
@@ -157,6 +148,13 @@ def create_or_refresh_bootstrap_challenge(
     except IntegrityError as error:
         raise BootstrapChallengeConflict() from error
     return row
+
+
+def get_bootstrap_challenge(
+    session: Session,
+    challenge_id: str,
+) -> DeviceBootstrapChallengeRow | None:
+    return session.get(DeviceBootstrapChallengeRow, challenge_id)
 
 
 def lock_bootstrap_challenge(
@@ -318,7 +316,7 @@ def consume_locked_continuation_grant(
     *,
     now: datetime,
 ) -> None:
-    if not _grant_is_usable(
+    if not continuation_grant_is_usable(
         row,
         human_identity_id=row.human_identity_id,
         now=now,
