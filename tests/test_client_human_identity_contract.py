@@ -19,23 +19,38 @@ def load_contract() -> dict:
 def test_human_identity_contract_has_only_approved_auth_paths():
     document = load_contract()
     assert document["openapi"] == "3.1.0"
-    assert set(document["paths"]) == {CHALLENGES, VERIFY, VERIFY_AND_CONTINUE}
-    for path in document["paths"].values():
+    auth_paths = {
+        path: item for path, item in document["paths"].items()
+        if path.startswith("/api/v1/auth/")
+    }
+    assert set(auth_paths) == {CHALLENGES, VERIFY, VERIFY_AND_CONTINUE}
+    for path in auth_paths.values():
         assert set(path) == {"post"}
 
 
 def test_pre_session_human_auth_paths_require_no_bearer_session():
-    for path in load_contract()["paths"].values():
-        assert path["post"]["security"] == []
+    for path, item in load_contract()["paths"].items():
+        if path.startswith("/api/v1/auth/"):
+            assert item["post"]["security"] == []
 
 
 def test_human_identity_contract_excludes_forbidden_authority_fields():
-    raw = CONTRACT.read_text(encoding="utf-8")
+    schemas = load_contract()["components"]["schemas"]
+    human_identity_slice = json.dumps({
+        name: schemas[name] for name in {
+            "HumanAuthChallengeResponse",
+            "GoogleHumanIdentityVerifyRequest",
+            "HumanIdentityValidatedResponse",
+            "HumanIdentityContinuedResponse",
+            "HumanAuthContinuationGrant",
+            "HumanAuthErrorResponse",
+        }
+    })
     for field in {
         "tenant_id", "device_id", "session_id", "access_token", "refresh_token",
         "membership", "integration_credential", "sub", "google_sub", "subject", "email",
     }:
-        assert f'"{field}"' not in raw
+        assert f'"{field}"' not in human_identity_slice
 
 
 def test_verify_request_contains_only_id_token():
@@ -167,11 +182,11 @@ def test_operations_reference_the_frozen_wire_schemas():
 
 def test_errors_expose_only_the_seven_approved_semantic_codes():
     schemas = load_contract()["components"]["schemas"]
-    assert set(schemas) == {
+    assert {
         "HumanAuthChallengeResponse", "GoogleHumanIdentityVerifyRequest",
         "HumanIdentityValidatedResponse", "HumanIdentityContinuedResponse",
         "HumanAuthContinuationGrant", "HumanAuthErrorResponse",
-    }
+    } <= set(schemas)
     error = schemas["HumanAuthErrorResponse"]
     assert error["required"] == ["code"]
     assert set(error["properties"]) == {"code"}

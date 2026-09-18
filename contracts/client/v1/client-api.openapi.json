@@ -142,20 +142,240 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/GoogleHumanIdentityVerifyRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/GoogleHumanIdentityVerifyRequest"
+              }
             }
           }
         },
         "responses": {
           "200": {
             "description": "Human Identity validated and a short-lived continuation grant issued",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanIdentityContinuedResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanIdentityContinuedResponse"
+                }
+              }
+            }
           },
-          "401": { "description": "Credential rejected", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } },
-          "404": { "description": "Challenge not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } },
-          "409": { "description": "Challenge already consumed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } },
-          "410": { "description": "Challenge expired", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } },
-          "503": { "description": "Provider or feature unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HumanAuthErrorResponse" } } } }
+          "401": {
+            "description": "Credential rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Challenge not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Challenge already consumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Challenge expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider or feature unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bootstrap/device/challenges": {
+      "post": {
+        "operationId": "createDeviceBootstrapChallenge",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceBootstrapChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Device bootstrap challenge issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapChallengeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid device key or descriptor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Continuation grant rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bootstrap challenge conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Device bootstrap unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bootstrap/device/challenges/{bootstrap_challenge_id}/complete": {
+      "post": {
+        "operationId": "completeDeviceBootstrap",
+        "security": [],
+        "parameters": [
+          {
+            "name": "bootstrap_challenge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^dbc_[A-Za-z0-9_-]{20,}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceBootstrapCompleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Device bootstrap authority established",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapEstablishedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or device signature encoding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Device signature or continuation authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bootstrap challenge not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Challenge consumed or authority conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Bootstrap challenge expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Device bootstrap unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceBootstrapErrorResponse"
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -221,21 +441,33 @@
       "HumanIdentityContinuedResponse": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["status", "human_identity_id", "continuation_grant"],
+        "required": [
+          "status",
+          "human_identity_id",
+          "continuation_grant"
+        ],
         "properties": {
-          "status": { "const": "HUMAN_IDENTITY_VALIDATED" },
+          "status": {
+            "const": "HUMAN_IDENTITY_VALIDATED"
+          },
           "human_identity_id": {
             "type": "string",
             "pattern": "^hid_[A-Za-z0-9_-]{20,}$",
             "description": "Opaque Human Identity reference only; not a credential or authority."
           },
-          "continuation_grant": { "$ref": "#/components/schemas/HumanAuthContinuationGrant" }
+          "continuation_grant": {
+            "$ref": "#/components/schemas/HumanAuthContinuationGrant"
+          }
         }
       },
       "HumanAuthContinuationGrant": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["token", "purpose", "expires_at"],
+        "required": [
+          "token",
+          "purpose",
+          "expires_at"
+        ],
         "properties": {
           "token": {
             "type": "string",
@@ -244,8 +476,13 @@
             "pattern": "^hcg_[A-Za-z0-9_-]{43}$",
             "description": "Sensitive opaque continuation credential; do not log or persist on clients."
           },
-          "purpose": { "const": "DEVICE_BOOTSTRAP" },
-          "expires_at": { "type": "string", "format": "date-time" }
+          "purpose": {
+            "const": "DEVICE_BOOTSTRAP"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "HumanAuthErrorResponse": {
@@ -265,6 +502,241 @@
               "HUMAN_AUTH_CREDENTIAL_REJECTED",
               "HUMAN_AUTH_NONCE_MISMATCH",
               "HUMAN_AUTH_PROVIDER_UNAVAILABLE"
+            ]
+          }
+        }
+      },
+      "DeviceBootstrapChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "continuation_token",
+          "public_key_spki_b64url",
+          "canonical_device_name",
+          "platform",
+          "roles"
+        ],
+        "properties": {
+          "continuation_token": {
+            "type": "string",
+            "minLength": 47,
+            "maxLength": 47,
+            "pattern": "^hcg_[A-Za-z0-9_-]{43}$",
+            "description": "Sensitive single-use DEVICE_BOOTSTRAP continuation credential; never persist or log."
+          },
+          "public_key_spki_b64url": {
+            "type": "string",
+            "minLength": 80,
+            "maxLength": 2048,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "Unpadded base64url DER SubjectPublicKeyInfo. Server validates P-256 and derives the fingerprint."
+          },
+          "canonical_device_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "platform": {
+            "const": "ANDROID"
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "CLIENT",
+                "CAPABILITY_NODE"
+              ]
+            }
+          }
+        }
+      },
+      "DeviceBootstrapChallengeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bootstrap_challenge_id",
+          "challenge_b64url",
+          "expires_at"
+        ],
+        "properties": {
+          "bootstrap_challenge_id": {
+            "type": "string",
+            "pattern": "^dbc_[A-Za-z0-9_-]{20,}$"
+          },
+          "challenge_b64url": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeviceBootstrapCompleteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_signature_b64url"
+        ],
+        "properties": {
+          "device_signature_b64url": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "ECDSA/SHA-256 signature over the exact server challenge bytes."
+          }
+        }
+      },
+      "ClientTenantMembershipView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "membership_id",
+          "tenant_id",
+          "role",
+          "status"
+        ],
+        "properties": {
+          "membership_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MEMBER"
+            ]
+          },
+          "status": {
+            "const": "ACTIVE"
+          }
+        }
+      },
+      "ClientDeviceView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_id",
+          "public_key_fingerprint",
+          "canonical_name",
+          "platform",
+          "roles",
+          "status"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "pattern": "^cdev_[A-Za-z0-9_-]{20,}$"
+          },
+          "public_key_fingerprint": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "canonical_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "platform": {
+            "const": "ANDROID"
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "CLIENT",
+                "CAPABILITY_NODE"
+              ]
+            }
+          },
+          "status": {
+            "const": "ACTIVE"
+          }
+        }
+      },
+      "DeviceBootstrapEstablishedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "human_identity_id",
+          "memberships",
+          "initial_tenant_id",
+          "device"
+        ],
+        "properties": {
+          "status": {
+            "const": "DEVICE_BOOTSTRAP_ESTABLISHED"
+          },
+          "human_identity_id": {
+            "type": "string",
+            "pattern": "^hid_[A-Za-z0-9_-]{20,}$"
+          },
+          "memberships": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ClientTenantMembershipView"
+            }
+          },
+          "initial_tenant_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Server-resolved tenant when unambiguous; null when later active-tenant selection is required."
+          },
+          "device": {
+            "$ref": "#/components/schemas/ClientDeviceView"
+          }
+        }
+      },
+      "DeviceBootstrapErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "DEVICE_BOOTSTRAP_GRANT_REJECTED",
+              "DEVICE_BOOTSTRAP_CHALLENGE_NOT_FOUND",
+              "DEVICE_BOOTSTRAP_CHALLENGE_EXPIRED",
+              "DEVICE_BOOTSTRAP_CHALLENGE_CONSUMED",
+              "DEVICE_BOOTSTRAP_DEVICE_KEY_INVALID",
+              "DEVICE_BOOTSTRAP_SIGNATURE_INVALID",
+              "DEVICE_BOOTSTRAP_MEMBERSHIP_CONFLICT",
+              "DEVICE_BOOTSTRAP_DEVICE_CONFLICT",
+              "DEVICE_BOOTSTRAP_UNAVAILABLE"
             ]
           }
         }
