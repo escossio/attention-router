@@ -1,18 +1,24 @@
 # Project status
 
-Updated: 2026-09-09
+Updated: 2026-09-17
 
-## Human Auth Continuation Grant V0.3A — implementation in progress
+## Human Auth Continuation Grant V0.3A — live proof complete
 
-- Contract/backend work is being prepared from main `c377ffd5dbd6556e05561f95be71ea93a29a142f`.
-- Existing V0.2A `POST /verify` remains unchanged; the opt-in `/verify-and-continue` contract issues a short-lived, digest-only persisted `DEVICE_BOOTSTRAP` grant after successful verification.
-- Focused local validation: 103 tests pass; PostgreSQL concurrency/migration validation is delegated to required GitHub Actions gates.
-- No rollout or live authentication test has been performed for this frontier.
+- Backend implementation is merged and available from `05d5f7d462bf6d09eb5c765177f96329ac863480`.
+- Android V0.3A implementation is merged in `escossio/andy-android` at `a0f4ce7196b7f9fd40bbbb66ce9fcbc3c9f9b8d4`.
+- The public Client API surface at `https://api.escossio.com` exposes the Human Identity challenge, legacy `/verify`, and V0.3A `/verify-and-continue` routes over valid TLS.
+- A physical Android live proof completed successfully: challenge returned HTTP 201 and `/verify-and-continue` returned HTTP 200 after real Google account selection.
+- The Android UI reached `Human identity validated.`; the backend Human Auth transaction finished `VERIFIED`.
+- Exactly one `DEVICE_BOOTSTRAP` continuation grant was created for the proof. The backend persisted only the token digest; the grant remained `ACTIVE`, with `consumed_at` and `revoked_at` unset.
+- No continuation token matching the `hcg_` credential format was found in the app's private persisted files.
+- The proof stopped at the V0.3A boundary: no device bootstrap, tenant, membership, enrollment, or session was created.
+- See [`docs/checkpoints/V03A_LIVE_PROOF_20260917.md`](docs/checkpoints/V03A_LIVE_PROOF_20260917.md).
 
-## Human Identity V1 HTTP frontier — contract fidelity correction awaiting CI
+## Human Identity V1 HTTP frontier — complete
 
-- The first GitHub Actions run for PR #53 closed green on required checks.
-- A final-review contract-fidelity correction was added; the PR awaits its new CI run.
+- Human Identity challenge issuance, real Google verification, legacy `/verify`, and V0.3A `/verify-and-continue` are implemented and validated.
+- The real Google sign-in path was proven before V0.3A, and the continuation-grant path is now proven end to end.
+- The next product frontier must begin from the existing `ACTIVE` `DEVICE_BOOTSTRAP` grant rather than re-running or redesigning Human Identity.
 
 ## Freeze checkpoint — Phase 4F deferred
 
