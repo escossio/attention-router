@@ -1,6 +1,6 @@
 # Client API V0.3C — Client Session Authority
 
-Status: contract + pure authority model candidate. Runtime implementation is not included.
+Status: Git-first runtime candidate implemented behind `CLIENT_SESSION_ENABLED=false` by default; repository certification is required before merge or deployment.
 
 V0.3C starts from the completed V0.3B device enrollment boundary.
 
@@ -43,3 +43,19 @@ Do not revive the older email/device-verification flow from the 2026-09-11 clien
 ## Next gate
 
 After this contract/design slice is green and merged, implement isolated PostgreSQL persistence, session possession service, bearer authorization, FastAPI routes and concurrency tests as a separate runtime PR.
+
+
+## Runtime candidate
+
+The V0.3C backend runtime slice adds:
+
+- migration `0041_client_session_authority`;
+- digest-only session credential persistence;
+- short-lived session possession challenges;
+- exactly-once challenge completion;
+- server-side active membership/tenant resolution;
+- bearer authorization that re-checks current device/membership/tenant authority;
+- authenticated bootstrap snapshot;
+- unit, HTTP, migration and PostgreSQL concurrency proofs.
+
+No Android functional change, refresh token, renewal or live deployment is part of this runtime candidate.
