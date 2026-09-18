@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     human_auth_continuation_grant_ttl_seconds: int = 300
     device_bootstrap_enabled: bool = False
     device_bootstrap_challenge_ttl_seconds: int = 300
+    client_session_enabled: bool = False
+    client_session_challenge_ttl_seconds: int = 300
+    client_session_ttl_seconds: int = 900
     google_identity_audience: str | None = None
     ingress_http_host: str = "0.0.0.0"
     ingress_http_port: int = 18101
@@ -170,6 +173,10 @@ class Settings(BaseSettings):
             raise ValueError("HUMAN_AUTH_CONTINUATION_GRANT_TTL_SECONDS must be between 60 and 900")
         if not 60 <= self.device_bootstrap_challenge_ttl_seconds <= 900:
             raise ValueError("DEVICE_BOOTSTRAP_CHALLENGE_TTL_SECONDS must be between 60 and 900")
+        if not 60 <= self.client_session_challenge_ttl_seconds <= 900:
+            raise ValueError("CLIENT_SESSION_CHALLENGE_TTL_SECONDS must be between 60 and 900")
+        if not 300 <= self.client_session_ttl_seconds <= 3600:
+            raise ValueError("CLIENT_SESSION_TTL_SECONDS must be between 300 and 3600")
         if self.device_bootstrap_enabled and not self.human_identity_enabled:
             raise ValueError("DEVICE_BOOTSTRAP_ENABLED requires HUMAN_IDENTITY_ENABLED=true")
         if self.human_identity_enabled and not self.google_identity_audience:

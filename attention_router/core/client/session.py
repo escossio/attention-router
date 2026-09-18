@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -51,7 +51,7 @@ class ClientSessionChallenge:
 @dataclass(frozen=True, slots=True)
 class ClientSessionIssued:
     session_id: str
-    session_token: str
+    session_token: str = field(repr=False)
     expires_at: datetime
     human_identity_id: str
     device_id: str
