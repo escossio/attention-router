@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from attention_router.application.client_bootstrap import (
@@ -54,6 +54,13 @@ class DeviceBootstrapChallengeRequest(BaseModel):
         max_length=2,
         json_schema_extra={"uniqueItems": True},
     )
+
+    @field_validator("roles")
+    @classmethod
+    def _roles_are_unique(cls, value):
+        if len(set(value)) != len(value):
+            raise ValueError("device roles must be unique")
+        return value
 
 
 class DeviceBootstrapChallengeResponse(BaseModel):
@@ -110,7 +117,14 @@ class DeviceBootstrapEstablishedResponse(BaseModel):
     status: Literal["DEVICE_BOOTSTRAP_ESTABLISHED"]
     human_identity_id: str = Field(pattern=r"^hid_[A-Za-z0-9_-]{20,}$")
     memberships: list[ClientTenantMembershipView] = Field(min_length=1, max_length=100)
-    initial_tenant_id: str | None = Field(min_length=1, max_length=64)
+    initial_tenant_id: str | None = Field(
+        min_length=1,
+        max_length=64,
+        description=(
+            "Server-resolved tenant when unambiguous; null when later "
+            "active-tenant selection is required."
+        ),
+    )
     device: ClientDeviceView
 
 
