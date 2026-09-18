@@ -55,6 +55,15 @@ See [architecture and trust boundaries](docs/architecture/overview.md).
 Architecture governance: [decision records](docs/adr/README.md), [threat
 model](docs/security/threat-model.md), and [technical roadmap](ROADMAP.md).
 
+## Operational observability
+
+The AGT runtime now has an out-of-band lightweight observability layer:
+
+- **GoAccess** for realtime inspection of the public Client API HTTP access log, including route, method, status and latency.
+- **Dozzle** for browser-based inspection of Docker container logs.
+
+Both operator UIs are bound to the trusted LAN interface only; they are not part of the request path and are not exposed through the public Client API. See [lightweight operational observability](docs/operational-observability.md).
+
 ## Safety and human control
 
 The model does not grant itself permission to act. Owner pause, policies and approval gates remain outside model authority. Proposed text, synthesized audio and confirmed delivery are different states. Ambiguous delivery is not proof of a conversation turn and must not be blindly replayed.
