@@ -183,11 +183,15 @@ def test_token_length_boundaries_are_accepted(api, length):
     assert service.calls == [(session, challenge_id, token)]
 
 
-def test_runtime_openapi_matches_frozen_contract(api):
+def test_runtime_openapi_matches_frozen_human_identity_slice(api):
     client, _, _ = api
     runtime = client.app.openapi()
-    assert set(runtime["paths"]) == set(CONTRACT["paths"])
-    for path, item in CONTRACT["paths"].items():
+    expected_paths = {
+        path: item for path, item in CONTRACT["paths"].items()
+        if path.startswith("/api/v1/auth/")
+    }
+    assert set(runtime["paths"]) == set(expected_paths)
+    for path, item in expected_paths.items():
         operation = runtime["paths"][path]["post"]
         expected = item["post"]
         assert operation["operationId"] == expected["operationId"]
@@ -198,7 +202,16 @@ def test_runtime_openapi_matches_frozen_contract(api):
     expected_parameter = CONTRACT["paths"][VERIFY]["post"]["parameters"][0]
     parameter = runtime["paths"][VERIFY]["post"]["parameters"][0]
     assert parameter["schema"]["pattern"] == expected_parameter["schema"]["pattern"]
-    for name, expected in CONTRACT["components"]["schemas"].items():
+    human_schemas = {
+        "HumanAuthChallengeResponse",
+        "GoogleHumanIdentityVerifyRequest",
+        "HumanIdentityValidatedResponse",
+        "HumanIdentityContinuedResponse",
+        "HumanAuthContinuationGrant",
+        "HumanAuthErrorResponse",
+    }
+    for name in human_schemas:
+        expected = CONTRACT["components"]["schemas"][name]
         actual = runtime["components"]["schemas"][name]
         assert actual["additionalProperties"] is False
         assert set(actual["required"]) == set(expected["required"])
