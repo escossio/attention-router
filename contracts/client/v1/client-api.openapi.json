@@ -610,6 +610,144 @@
           }
         }
       }
+    },
+    "/api/v1/client/location/current": {
+      "put": {
+        "operationId": "putCurrentClientLocation",
+        "tags": [
+          "client-location"
+        ],
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientLocationWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current authenticated device and tenant location snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, stale or future location observation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ClientSession missing, unknown or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current device, membership or tenant authority rejected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Client location feature disabled or unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getCurrentClientLocation",
+        "tags": [
+          "client-location"
+        ],
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current authenticated device and tenant location snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationSnapshot"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ClientSession missing, unknown or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current device, membership or tenant authority rejected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No current location snapshot exists for this device and tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Client location feature disabled or unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1171,6 +1309,135 @@
               "CLIENT_SESSION_UNAUTHENTICATED",
               "CLIENT_SESSION_AUTHORITY_REJECTED",
               "CLIENT_SESSION_UNAVAILABLE"
+            ]
+          }
+        }
+      },
+      "ClientLocationPrecision": {
+        "type": "string",
+        "enum": [
+          "PRECISE",
+          "APPROXIMATE"
+        ],
+        "description": "Foreground Android permission precision metadata; observation only, never authority."
+      },
+      "ClientLocationWriteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "latitude",
+          "longitude",
+          "accuracy_m",
+          "captured_at"
+        ],
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "accuracy_m": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 10000
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/ClientLocationPrecision"
+          }
+        }
+      },
+      "ClientLocationSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "location_snapshot_id",
+          "human_identity_id",
+          "device_id",
+          "tenant_id",
+          "latitude",
+          "longitude",
+          "accuracy_m",
+          "captured_at",
+          "received_at"
+        ],
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "1"
+          },
+          "location_snapshot_id": {
+            "type": "string",
+            "pattern": "^cloc_[A-Za-z0-9_-]{20,}$"
+          },
+          "human_identity_id": {
+            "type": "string",
+            "pattern": "^hid_[A-Za-z0-9_-]{20,}$"
+          },
+          "device_id": {
+            "type": "string",
+            "pattern": "^cdev_[A-Za-z0-9_-]{20,}$"
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "accuracy_m": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 10000
+          },
+          "precision": {
+            "$ref": "#/components/schemas/ClientLocationPrecision"
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClientLocationErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "CLIENT_LOCATION_DISABLED",
+              "CLIENT_LOCATION_INVALID",
+              "CLIENT_LOCATION_STALE",
+              "CLIENT_LOCATION_FUTURE",
+              "CLIENT_LOCATION_UNAUTHENTICATED",
+              "CLIENT_LOCATION_AUTHORITY_REJECTED",
+              "CLIENT_LOCATION_NOT_FOUND",
+              "CLIENT_LOCATION_UNAVAILABLE"
             ]
           }
         }
