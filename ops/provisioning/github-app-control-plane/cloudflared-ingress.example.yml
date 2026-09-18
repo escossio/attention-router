@@ -1,0 +1,8 @@
+# Insert the path-specific rule before the existing hooks hostname fallback.
+- hostname: hooks.escossio.com
+  path: ^/github/webhook$
+  service: http://127.0.0.1:18104
+
+# Existing ingress remains authoritative for every other hooks path.
+- hostname: hooks.escossio.com
+  service: http://127.0.0.1:18101
