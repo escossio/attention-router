@@ -23,3 +23,31 @@ __all__ = [
     "TenantMembershipView",
     "TenantRole",
 ]
+
+from .session import (
+    ClientSessionAuthorityDecision,
+    ClientSessionAuthorityError,
+    ClientSessionChallenge,
+    ClientSessionGrant,
+    ClientSessionIssued,
+    ClientSessionState,
+    SessionDeviceAuthority,
+    SessionMembershipAuthority,
+    evaluate_client_session_authority,
+    require_client_session_authority,
+    resolve_session_tenant,
+)
+
+__all__ += [
+    "ClientSessionAuthorityDecision",
+    "ClientSessionAuthorityError",
+    "ClientSessionChallenge",
+    "ClientSessionGrant",
+    "ClientSessionIssued",
+    "ClientSessionState",
+    "SessionDeviceAuthority",
+    "SessionMembershipAuthority",
+    "evaluate_client_session_authority",
+    "require_client_session_authority",
+    "resolve_session_tenant",
+]
