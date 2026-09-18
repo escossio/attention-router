@@ -5,6 +5,7 @@ description = "Policy-controlled conversational routing for contextual personal 
 requires-python = ">=3.11"
 dependencies = [
   "alembic==1.13.2",
+  "cryptography==50.0.1",
   "fastapi==0.112.2",
   "google-auth==2.58.0",
   "jinja2==3.1.4",
