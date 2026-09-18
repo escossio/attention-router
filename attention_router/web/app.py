@@ -15,6 +15,7 @@ from attention_router.application import agent_builder
 from attention_router.application import services
 from attention_router.application.human_identity import HumanIdentityService
 from attention_router.application.client_bootstrap import DeviceBootstrapService
+from attention_router.application.client_session import ClientSessionService
 from attention_router.application.decision_pipeline import decision_to_dict
 from attention_router.application import response_review
 from attention_router.application import execution
@@ -25,6 +26,7 @@ from attention_router.application.platform.registry import matrix_status
 from attention_router.api.v1.contracts import DeviceBindingRequest, MatrixCapabilityView
 from attention_router.api.v1.human_identity import build_human_identity_router
 from attention_router.api.v1.client_bootstrap import build_client_bootstrap_router
+from attention_router.api.v1.client_session import build_client_session_router
 from attention_router.core.human_identity import HumanAuthProviderUnavailable, VerifiedProviderIdentity
 from attention_router.core.devices import (
     DeviceCapabilityAnnouncement,
@@ -77,6 +79,7 @@ human_identity_service = HumanIdentityService(
     ),
 )
 device_bootstrap_service = DeviceBootstrapService(settings=settings)
+client_session_service = ClientSessionService(settings=settings)
 
 
 def get_session():
@@ -177,6 +180,10 @@ app.include_router(build_human_identity_router(get_session=get_session, service=
 app.include_router(build_client_bootstrap_router(
     get_session=get_session,
     service=device_bootstrap_service,
+))
+app.include_router(build_client_session_router(
+    get_session=get_session,
+    service=client_session_service,
 ))
 
 

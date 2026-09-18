@@ -103,6 +103,9 @@ def test_human_identity_defaults_are_disabled_with_five_minute_challenges():
     assert configured.human_auth_continuation_grant_ttl_seconds == 300
     assert configured.device_bootstrap_enabled is False
     assert configured.device_bootstrap_challenge_ttl_seconds == 300
+    assert configured.client_session_enabled is False
+    assert configured.client_session_challenge_ttl_seconds == 300
+    assert configured.client_session_ttl_seconds == 900
     assert configured.google_identity_audience is None
 
 
@@ -182,3 +185,33 @@ def test_device_bootstrap_can_be_enabled_only_with_human_identity_configuration(
         device_bootstrap_enabled=True,
     )
     assert configured.device_bootstrap_enabled is True
+
+
+@pytest.mark.parametrize("ttl", [60, 300, 900])
+def test_client_session_challenge_ttl_accepts_inclusive_bounds(ttl):
+    configured = _settings(client_session_challenge_ttl_seconds=ttl)
+    assert configured.client_session_challenge_ttl_seconds == ttl
+
+
+@pytest.mark.parametrize("ttl", [59, 901])
+def test_client_session_challenge_ttl_rejects_values_outside_bounds(ttl):
+    with pytest.raises(
+        ValidationError,
+        match="CLIENT_SESSION_CHALLENGE_TTL_SECONDS must be between 60 and 900",
+    ):
+        _settings(client_session_challenge_ttl_seconds=ttl)
+
+
+@pytest.mark.parametrize("ttl", [300, 900, 3600])
+def test_client_session_ttl_accepts_inclusive_bounds(ttl):
+    configured = _settings(client_session_ttl_seconds=ttl)
+    assert configured.client_session_ttl_seconds == ttl
+
+
+@pytest.mark.parametrize("ttl", [299, 3601])
+def test_client_session_ttl_rejects_values_outside_bounds(ttl):
+    with pytest.raises(
+        ValidationError,
+        match="CLIENT_SESSION_TTL_SECONDS must be between 300 and 3600",
+    ):
+        _settings(client_session_ttl_seconds=ttl)
