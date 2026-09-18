@@ -315,7 +315,7 @@ def test_populated_downgrade_refuses_to_drop_receipts(Session, world, pg_url):
     assert count(Session) == 1
     with Session() as session:
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0039_human_auth_cont_grant"
+            "0040_client_device_bootstrap"
         )
 
 

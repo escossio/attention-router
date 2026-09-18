@@ -1,6 +1,6 @@
 # Client API V0.3B — Device Bootstrap Authority
 
-Status: contract/pure-authority implementation in progress.
+Status: runtime candidate implemented in Git; PostgreSQL/CI certification is required before merge or deployment.
 
 V0.3B begins only after Human Identity V0.3A has produced a valid short-lived `DEVICE_BOOTSTRAP` continuation grant.
 
@@ -69,3 +69,18 @@ The successful response contains Human Identity, membership and device authority
 Detailed design:
 
 [`docs/superpowers/specs/2026-09-17-v03b-device-bootstrap-authority-design.md`](../../superpowers/specs/2026-09-17-v03b-device-bootstrap-authority-design.md)
+
+
+## Runtime candidate
+
+The Git-first runtime slice is implemented behind `DEVICE_BOOTSTRAP_ENABLED=false` by default. It includes:
+
+- migration `0040_client_device_bootstrap`;
+- isolated client membership, client-device and bootstrap-challenge persistence;
+- server-side P-256 SPKI validation and fingerprint derivation;
+- ECDSA/SHA-256 device-possession verification;
+- atomic membership/device resolution plus continuation-grant consumption;
+- bounded FastAPI start/complete routes;
+- unit, contract, API, migration and PostgreSQL concurrency proofs.
+
+This status is not a live-runtime claim. AGT deployment remains blocked until repository gates pass and the candidate is merged.
