@@ -80,6 +80,20 @@ def upgrade() -> None:
             "selected_candidate_key is null or state = 'RESOLVED'",
             name="ck_pending_intent_selected_only_when_resolved",
         ),
+        sa.CheckConstraint(
+            "state != 'RESOLVED' or "
+            "(selected_candidate_key is not null and "
+            "resolution_inbound_event_id is not null and resolved_at is not null)",
+            name="ck_pending_intent_resolved_complete",
+        ),
+    )
+    op.create_index(
+        "uq_pending_intent_resolution_event",
+        "pending_intents",
+        ["resolution_inbound_event_id"],
+        unique=True,
+        postgresql_where=sa.text("resolution_inbound_event_id IS NOT NULL"),
+        sqlite_where=sa.text("resolution_inbound_event_id IS NOT NULL"),
     )
     op.create_index(
         "uq_pending_intent_active_scope",
@@ -111,4 +125,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_pending_intent_lookup", table_name="pending_intents")
     op.drop_index("uq_pending_intent_active_scope", table_name="pending_intents")
+    op.drop_index("uq_pending_intent_resolution_event", table_name="pending_intents")
     op.drop_table("pending_intents")
