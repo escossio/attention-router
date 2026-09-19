@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+BASE=/srv/andy-ci
+MIRROR="$BASE/repos/attention-router.git"
+REPO_URL=https://github.com/escossio/attention-router.git
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: andy-ci-run <40-char-sha> <fast|python|postgres|transport|docker|full>" >&2
+  exit 64
+fi
+SHA="$1"
+SUITE="$2"
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid SHA" >&2; exit 64; }
+case "$SUITE" in fast|python|postgres|transport|docker|full) ;; *) echo "invalid suite" >&2; exit 64 ;; esac
+
+SHORT="${SHA:0:12}"
+START_EPOCH=$(date +%s)
+STARTED_AT=$(date --iso-8601=seconds)
+RUN_ID="$(date +%Y%m%dT%H%M%S)-$SHORT-$SUITE"
+WORK="$BASE/work/$RUN_ID"
+LOG="$BASE/logs/$RUN_ID.log"
+RESULT="$BASE/results/$RUN_ID.json"
+PG_NAME="andy-ci-pg-$SHORT-$$"
+mkdir -p "$BASE"/{repos,work,logs,results,envs,shards,cache/pip,cache/npm}
+exec 9>"$BASE/worker.lock"
+if ! flock -n 9; then
+  echo "CI_WORKER_BUSY"
+  exit 75
+fi
+
+exec > >(tee -a "$LOG") 2>&1
+echo "CI_HOST=$(hostname)"
+echo "CI_SHA=$SHA"
+echo "CI_SUITE=$SUITE"
+echo "CI_STARTED_AT=$STARTED_AT"
+
+finish() {
+  rc=$?
+  trap - EXIT
+  if [[ $rc -ne 0 ]] && docker inspect "$PG_NAME" >/dev/null 2>&1; then
+    echo "CI_POSTGRES_CONTAINER_LOG_BEGIN"
+    docker logs --tail 100 "$PG_NAME" 2>&1 || true
+    echo "CI_POSTGRES_CONTAINER_LOG_END"
+  fi
+  docker rm -f "$PG_NAME" >/dev/null 2>&1 || true
+  if [[ -d "$WORK" ]]; then
+    git --git-dir="$MIRROR" worktree remove --force "$WORK" >/dev/null 2>&1 || rm -rf "$WORK"
+  fi
+  ended_at=$(date --iso-8601=seconds)
+  duration=$(( $(date +%s) - START_EPOCH ))
+  status=PASS; [[ $rc -eq 0 ]] || status=FAIL
+  jq -n \
+    --arg host "$(hostname)" \
+    --arg sha "$SHA" \
+    --arg suite "$SUITE" \
+    --arg status "$status" \
+    --arg started_at "$STARTED_AT" \
+    --arg ended_at "$ended_at" \
+    --arg log "$LOG" \
+    --argjson duration_seconds "$duration" \
+    '{host:$host,sha:$sha,suite:$suite,status:$status,started_at:$started_at,ended_at:$ended_at,duration_seconds:$duration_seconds,log:$log}' \
+    > "$RESULT"
+  echo "CI_STATUS=$status"
+  echo "CI_DURATION_SECONDS=$duration"
+  echo "CI_RESULT=$RESULT"
+  exit "$rc"
+}
+trap finish EXIT
+
+if [[ ! -d "$MIRROR" ]]; then
+  git clone --mirror "$REPO_URL" "$MIRROR"
+else
+  git --git-dir="$MIRROR" remote update --prune
+fi
+git --git-dir="$MIRROR" cat-file -e "$SHA^{commit}"
+git --git-dir="$MIRROR" worktree prune
+git --git-dir="$MIRROR" worktree add --detach "$WORK" "$SHA"
+cd "$WORK"
+
+ensure_python() {
+  export PIP_CACHE_DIR="$BASE/cache/pip"
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+  PY_ABI="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  DEP_HASH="$( { python3 -V; cat pyproject.toml; } | sha256sum | cut -c1-16 )"
+  ENV_PATH="$BASE/envs/py${PY_ABI}-${DEP_HASH}"
+  ENV_LOCK="$BASE/envs/py${PY_ABI}-${DEP_HASH}.lock"
+  exec 8>"$ENV_LOCK"
+  flock 8
+  if [[ ! -f "$ENV_PATH/.ready" ]]; then
+    echo "CI_PYTHON_ENV_CACHE=MISS"
+    rm -rf "$ENV_PATH"
+    python3 -m venv "$ENV_PATH"
+    source "$ENV_PATH/bin/activate"
+    python -m pip install -q -e '.[dev]'
+    touch "$ENV_PATH/.ready"
+  else
+    echo "CI_PYTHON_ENV_CACHE=HIT"
+    source "$ENV_PATH/bin/activate"
+  fi
+  flock -u 8
+  hash -r
+  python -m pip install -q --no-deps -e "$WORK"
+  export ANDY_CI_PYTHON_ENV_HASH="$DEP_HASH"
+  echo "CI_PYTHON_ENV_HASH=$DEP_HASH"
+}
+
+run_fast() {
+  ensure_python
+  python -m ruff check .
+  python -m compileall -q attention_router tests
+  python scripts/generate_integration_sdks.py --check
+}
+
+run_python() {
+  run_fast
+  python scripts/test_python_integration_sdk.py
+  python -m pytest -q
+}
+
+run_postgres() {
+  ensure_python
+  PG_PASSWORD=$(python -c 'import secrets; print(secrets.token_urlsafe(24))')
+  export ADMIN_AUTH_ENABLED=true
+  export ADMIN_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+  export INTERNAL_INGRESS_HMAC_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+  export DATABASE_URL="postgresql+psycopg://ar_test:${PG_PASSWORD}@127.0.0.1:55432/attention_router_test"
+  export PUBLIC_POSTGRES_TEST_URL="$DATABASE_URL"
+  MEM_MB=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 ))
+  PG_TMPFS_MB=$(( MEM_MB * 40 / 100 ))
+  (( PG_TMPFS_MB > 6144 )) && PG_TMPFS_MB=6144
+  (( PG_TMPFS_MB < 2048 )) && PG_TMPFS_MB=2048
+  echo "CI_POSTGRES_TMPFS_MB=$PG_TMPFS_MB"
+  echo "CI_POSTGRES_STAGE=docker_start"
+  docker run -d --name "$PG_NAME" \
+    -e POSTGRES_USER=ar_test \
+    -e POSTGRES_PASSWORD="$PG_PASSWORD" \
+    -e POSTGRES_DB=attention_router_test \
+    --tmpfs "/var/lib/postgresql/data:rw,size=${PG_TMPFS_MB}m" \
+    -p 127.0.0.1:55432:5432 \
+    postgres:16-alpine \
+    -c fsync=off -c synchronous_commit=off -c full_page_writes=off >/dev/null
+  echo "CI_POSTGRES_STAGE=wait_ready"
+  for _ in $(seq 1 60); do
+    docker exec "$PG_NAME" pg_isready -U ar_test -d attention_router_test >/dev/null 2>&1 && break
+    sleep 1
+  done
+  docker exec "$PG_NAME" pg_isready -U ar_test -d attention_router_test >/dev/null
+  echo "CI_POSTGRES_STAGE=settings"
+  python scripts/ci_settings_check.py --self-test
+  python scripts/ci_settings_check.py
+  echo "CI_POSTGRES_STAGE=alembic"
+  python -m alembic upgrade head
+  echo "CI_POSTGRES_STAGE=pytest"
+  PYTEST_ARGS=(-m postgres -q)
+  if [[ "${ANDY_CI_PROFILE_DURATIONS:-0}" == "1" ]]; then
+    PYTEST_ARGS+=(--durations=0 --durations-min=0)
+  fi
+  if [[ -n "${ANDY_CI_PYTEST_TARGETS_FILE:-}" ]]; then
+    [[ -f "$ANDY_CI_PYTEST_TARGETS_FILE" ]] || { echo "missing targets file" >&2; return 64; }
+    mapfile -t PYTEST_TARGETS < <(grep -vE '^[[:space:]]*(#|$)' "$ANDY_CI_PYTEST_TARGETS_FILE")
+    TARGET_COUNT=${#PYTEST_TARGETS[@]}
+    (( TARGET_COUNT > 0 )) || { echo "empty targets file" >&2; return 64; }
+    for target in "${PYTEST_TARGETS[@]}"; do
+      [[ "$target" == tests/* ]] || { echo "invalid pytest target: $target" >&2; return 64; }
+    done
+    echo "CI_POSTGRES_TARGET_COUNT=$TARGET_COUNT"
+    PYTEST_ARGS+=("${PYTEST_TARGETS[@]}")
+  else
+    echo "CI_POSTGRES_TARGET_COUNT=ALL"
+  fi
+  python -m pytest "${PYTEST_ARGS[@]}"
+  docker rm -f "$PG_NAME" >/dev/null
+  unset DATABASE_URL PUBLIC_POSTGRES_TEST_URL ADMIN_TOKEN INTERNAL_INGRESS_HMAC_SECRET
+}
+
+run_transport() {
+  export npm_config_cache="$BASE/cache/npm"
+  export PUPPETEER_SKIP_DOWNLOAD=true
+  pushd whatsapp-transport-local >/dev/null
+  npm ci --ignore-scripts
+  node ../tests/fixtures/synthetic-identity-contract.cjs
+  npm test
+  popd >/dev/null
+
+  pushd contracts/integration/conformance >/dev/null
+  npm ci --ignore-scripts
+  npm test
+  popd >/dev/null
+
+  pushd sdks/typescript >/dev/null
+  npm ci --ignore-scripts
+  npm test
+  popd >/dev/null
+}
+
+run_docker() {
+  docker build \
+    --build-arg ATTENTION_ROUTER_BUILD_SHA="$SHA" \
+    -t "attention-router:ci-$SHORT" .
+}
+
+case "$SUITE" in
+  fast) run_fast ;;
+  python) run_python ;;
+  postgres) run_postgres ;;
+  transport) run_transport ;;
+  docker) run_docker ;;
+  full)
+    run_python
+    run_postgres
+    run_transport
+    run_docker
+    ;;
+esac
