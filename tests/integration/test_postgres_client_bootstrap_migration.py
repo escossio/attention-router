@@ -14,7 +14,7 @@ def test_client_device_bootstrap_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0042_client_location_snapshot"]
+            ).scalars().all() == ["0043_pending_intents_v1"]
 
             schema = inspect(connection)
             assert {

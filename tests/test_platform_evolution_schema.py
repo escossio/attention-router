@@ -85,7 +85,7 @@ def test_scenario_and_budget_tightening_constraints_are_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0042_client_location_snapshot"]
+    assert scripts.get_heads() == ["0043_pending_intents_v1"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -102,6 +102,9 @@ def test_platform_evolution_migration_waves_form_one_chain():
     )
     assert revisions["0042_client_location_snapshot"].down_revision == (
         "0041_client_session_authority"
+    )
+    assert revisions["0043_pending_intents_v1"].down_revision == (
+        "0042_client_location_snapshot"
     )
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"
