@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-09-19",
+  "commit_sha": "733386337cdad9a92e5950c39df3c75d0f487463",
+  "suite": {
+    "marker": "postgres",
+    "tests": 403,
+    "files": 41
+  },
+  "baseline": {
+    "worker": "ci01",
+    "total_seconds": 286
+  },
+  "distributed": {
+    "worker_wall_seconds": 99,
+    "control_plane_elapsed_seconds_approx": 103,
+    "reduction_percent_vs_baseline": 64,
+    "speedup_vs_baseline": 2.78,
+    "workers": {
+      "ci03": {
+        "class": "kvm-virtualized",
+        "target_files": 17,
+        "passed_tests": 161,
+        "duration_seconds": 96
+      },
+      "ci01": {
+        "class": "bare-metal",
+        "target_files": 15,
+        "passed_tests": 106,
+        "duration_seconds": 96
+      },
+      "ci02": {
+        "class": "bare-metal",
+        "target_files": 9,
+        "passed_tests": 136,
+        "duration_seconds": 99
+      }
+    }
+  },
+  "warm_fast_gate_seconds": {
+    "ci03": 4,
+    "ci01": 4,
+    "ci02": 6
+  }
+}
