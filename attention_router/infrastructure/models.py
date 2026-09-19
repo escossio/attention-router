@@ -562,6 +562,110 @@ class OutboxMessageRow(Base):
     __table_args__ = (UniqueConstraint("idempotency_key", name="uq_outbox_idempotency_key"),)
 
 
+class PendingIntentRow(Base):
+    __tablename__ = "pending_intents"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("tenants.id"), nullable=False
+    )
+    represented_owner_actor_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_inbound_event_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("inbound_events.id"), nullable=False
+    )
+    source_interaction_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("interactions.id"), nullable=False
+    )
+    source_channel: Mapped[str] = mapped_column(String(80), nullable=False)
+    conversation_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    semantic_registry_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="PENDING")
+    ambiguity_reason: Mapped[str] = mapped_column(String(120), nullable=False)
+    candidate_set: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False)
+    candidate_set_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    clarification_outbox_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("outbox_messages.id")
+    )
+    clarification_delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution_inbound_event_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("inbound_events.id")
+    )
+    selected_candidate_key: Mapped[str | None] = mapped_column(String(64))
+    resolution_kind: Mapped[str | None] = mapped_column(String(40))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    correlation_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        UniqueConstraint(
+            "source_inbound_event_id",
+            name="uq_pending_intent_source_event",
+        ),
+        CheckConstraint(
+            "state in ('PENDING','RESOLVED','CANCELED','SUPERSEDED','EXPIRED')",
+            name="ck_pending_intent_state",
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name="ck_pending_intent_validity",
+        ),
+        CheckConstraint(
+            "version > 0",
+            name="ck_pending_intent_version_positive",
+        ),
+        CheckConstraint(
+            "selected_candidate_key is null or state = 'RESOLVED'",
+            name="ck_pending_intent_selected_only_when_resolved",
+        ),
+        CheckConstraint(
+            "state != 'RESOLVED' or "
+            "(selected_candidate_key is not null and "
+            "resolution_inbound_event_id is not null and "
+            "resolution_kind is not null and resolved_at is not null)",
+            name="ck_pending_intent_resolved_complete",
+        ),
+        CheckConstraint(
+            "clarification_delivered_at is null or clarification_outbox_id is not null",
+            name="ck_pending_intent_delivery_requires_outbox",
+        ),
+        Index(
+            "uq_pending_intent_clarification_outbox",
+            "clarification_outbox_id",
+            unique=True,
+            postgresql_where=text("clarification_outbox_id IS NOT NULL"),
+            sqlite_where=text("clarification_outbox_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_pending_intent_resolution_event",
+            "resolution_inbound_event_id",
+            unique=True,
+            postgresql_where=text("resolution_inbound_event_id IS NOT NULL"),
+            sqlite_where=text("resolution_inbound_event_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_pending_intent_active_scope",
+            "tenant_id",
+            "represented_owner_actor_key",
+            "source_channel",
+            "conversation_key_hash",
+            unique=True,
+            postgresql_where=text("state = 'PENDING'"),
+            sqlite_where=text("state = 'PENDING'"),
+        ),
+        Index(
+            "ix_pending_intent_lookup",
+            "tenant_id",
+            "represented_owner_actor_key",
+            "source_channel",
+            "conversation_key_hash",
+            "state",
+            "expires_at",
+        ),
+    )
+
+
 class MetaDeliveryReconciliationRow(Base):
     __tablename__ = "meta_delivery_reconciliations"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
