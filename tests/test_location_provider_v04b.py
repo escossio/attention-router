@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from attention_router.application.platform.capability_pack import execute_owner_capability
 from attention_router.core.capabilities import CapabilityRequest
@@ -114,6 +114,10 @@ def _seed_snapshot(
     return row
 
 
+def _normalized_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 def _run(session, tenant_id: str = DEFAULT_TENANT_ID):
     return execute_owner_capability(
         session,
@@ -143,8 +147,8 @@ def test_current_location_reads_single_authorized_owner_snapshot(session):
         snapshot.longitude,
         snapshot.accuracy_m,
         snapshot.precision,
-        snapshot.captured_at,
-        snapshot.received_at,
+        _normalized_utc(snapshot.captured_at),
+        _normalized_utc(snapshot.received_at),
     )
 
     result = _run(session)
@@ -164,8 +168,8 @@ def test_current_location_reads_single_authorized_owner_snapshot(session):
         snapshot.longitude,
         snapshot.accuracy_m,
         snapshot.precision,
-        snapshot.captured_at,
-        snapshot.received_at,
+        _normalized_utc(snapshot.captured_at),
+        _normalized_utc(snapshot.received_at),
     ) == before
 
 
