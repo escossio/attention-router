@@ -1,0 +1,19 @@
+# Host-specific addresses and private keys stay outside Git.
+Host ci01
+  HostName <bare-metal-worker-1-address>
+  User andy-ci
+  IdentityFile <control-plane-ci-key>
+  IdentitiesOnly yes
+
+Host ci02
+  HostName <bare-metal-worker-2-address>
+  User andy-ci
+  IdentityFile <control-plane-ci-key>
+  IdentitiesOnly yes
+
+Host ci03
+  HostName <virtualized-worker-address>
+  User andy-ci
+  IdentityFile <control-plane-ci-key>
+  IdentitiesOnly yes
+  ProxyJump <virtualization-host-alias>
