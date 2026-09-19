@@ -622,8 +622,20 @@ class PendingIntentRow(Base):
         CheckConstraint(
             "state != 'RESOLVED' or "
             "(selected_candidate_key is not null and "
-            "resolution_inbound_event_id is not null and resolved_at is not null)",
+            "resolution_inbound_event_id is not null and "
+            "resolution_kind is not null and resolved_at is not null)",
             name="ck_pending_intent_resolved_complete",
+        ),
+        CheckConstraint(
+            "clarification_delivered_at is null or clarification_outbox_id is not null",
+            name="ck_pending_intent_delivery_requires_outbox",
+        ),
+        Index(
+            "uq_pending_intent_clarification_outbox",
+            "clarification_outbox_id",
+            unique=True,
+            postgresql_where=text("clarification_outbox_id IS NOT NULL"),
+            sqlite_where=text("clarification_outbox_id IS NOT NULL"),
         ),
         Index(
             "uq_pending_intent_resolution_event",
