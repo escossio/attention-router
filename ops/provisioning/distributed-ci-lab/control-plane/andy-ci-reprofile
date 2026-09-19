@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+BASE=/usr/local/lib/andy-ci
+LOG_ROOT=/var/log/andy-ci
+SHA="${1:-}"
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'usage: andy-ci-reprofile <40-char-sha>' >&2; exit 64; }
+
+RUN_ID="$(date +%Y%m%dT%H%M%S)-${SHA:0:12}-postgres-profile"
+RUN_DIR="$LOG_ROOT/$RUN_ID"
+mkdir -p "$RUN_DIR"
+
+echo "CI_REPROFILE_SHA=$SHA"
+set +e
+ssh -o BatchMode=yes ci03 "ANDY_CI_PROFILE_DURATIONS=1 /srv/andy-ci/bin/andy-ci-run '$SHA' postgres" | tee "$RUN_DIR/ci03-profile.stdout.log"
+RC=${PIPESTATUS[0]}
+set -e
+(( RC == 0 )) || { echo 'CI_REPROFILE_STATUS=FAIL'; exit "$RC"; }
+
+RESULT_PATH="$(grep '^CI_RESULT=' "$RUN_DIR/ci03-profile.stdout.log" | tail -n1 | cut -d= -f2-)"
+[[ -n "$RESULT_PATH" ]] || { echo 'missing CI_RESULT' >&2; exit 70; }
+REMOTE_LOG="$(ssh -o BatchMode=yes ci03 "python3 -c \"import json; print(json.load(open('$RESULT_PATH'))['log'])\"")"
+[[ -n "$REMOTE_LOG" ]] || { echo 'missing remote log path' >&2; exit 70; }
+scp -q -o BatchMode=yes "ci03:$REMOTE_LOG" "$RUN_DIR/profile.log"
+
+NEW_PROFILE="$BASE/profile.new"
+rm -rf "$NEW_PROFILE"
+mkdir -p "$NEW_PROFILE"
+"$BASE/bin/plan-postgres.py" \
+  --log "$RUN_DIR/profile.log" \
+  --capacity "$BASE/worker-capacity.json" \
+  --output-dir "$NEW_PROFILE" \
+  --source-sha "$SHA"
+
+rm -rf "$BASE/profile.prev"
+[[ -d "$BASE/profile" ]] && mv "$BASE/profile" "$BASE/profile.prev"
+mv "$NEW_PROFILE" "$BASE/profile"
+
+echo 'CI_REPROFILE_STATUS=PASS'
+echo "CI_REPROFILE_MANIFEST=$BASE/profile/manifest.json"
