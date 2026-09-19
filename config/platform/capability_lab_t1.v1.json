@@ -1,0 +1,15 @@
+[
+  {
+    "schema_version": "capability-lab.t1.v1",
+    "scenario_id": "location.current.pending-human-approval",
+    "title": "Current location reaches canonical pending human approval boundary",
+    "capability_key": "location.current",
+    "t0_scenario_id": "location.current.no-grant",
+    "requester_actor_key": "synthetic:capability-lab.location",
+    "expected_approver": "synthetic:represented-owner",
+    "ttl_seconds": 300,
+    "expected_authorization_state": "PENDING_HUMAN_APPROVAL",
+    "synthetic_only": true,
+    "production_effects_allowed": false
+  }
+]
