@@ -7,37 +7,15 @@
       "domain": "conversation",
       "description": "Deliver one validated conversational reply through the existing review, execution and channel path.",
       "operation_type": "ACTION",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "response_text"
-        ],
-        "properties": {
-          "response_text": {
-            "type": "string"
-          }
-        }
-      },
-      "output_schema": {
-        "type": "object",
-        "properties": {
-          "delivery_reference": {
-            "type": "string"
-          }
-        }
-      },
-      "required_permissions": [
-        "conversation.reply"
-      ],
+      "input_schema": {"type": "object", "required": ["response_text"], "properties": {"response_text": {"type": "string"}}},
+      "output_schema": {"type": "object", "properties": {"delivery_reference": {"type": "string"}}},
+      "required_permissions": ["conversation.reply"],
       "required_provider_interface": "InternalReplyProvider",
       "sensitivity": "NORMAL",
       "side_effect": true,
       "default_approval_policy": "REQUIRES_APPROVAL",
       "availability_state": "OPERATIONAL",
-      "metadata": {
-        "runtime": "existing_execution_outbox",
-        "channel_agnostic": true
-      }
+      "metadata": {"runtime": "existing_execution_outbox", "channel_agnostic": true}
     },
     {
       "canonical_name": "callback.request",
@@ -45,34 +23,15 @@
       "domain": "conversation",
       "description": "Propose that a known contact receive a callback; no callback is executed by the Agent.",
       "operation_type": "ACTION",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "callback_number": {
-            "type": "string"
-          }
-        }
-      },
-      "output_schema": {
-        "type": "object",
-        "properties": {
-          "proposal_id": {
-            "type": "string"
-          }
-        }
-      },
-      "required_permissions": [
-        "callback.request"
-      ],
+      "input_schema": {"type": "object", "properties": {"callback_number": {"type": "string"}}},
+      "output_schema": {"type": "object", "properties": {"proposal_id": {"type": "string"}}},
+      "required_permissions": ["callback.request"],
       "required_provider_interface": null,
       "sensitivity": "NORMAL",
       "side_effect": false,
       "default_approval_policy": "REQUIRES_APPROVAL",
       "availability_state": "OPERATIONAL",
-      "metadata": {
-        "proposal_only": true,
-        "callback_number_optional": true
-      }
+      "metadata": {"proposal_only": true, "callback_number_optional": true}
     },
     {
       "canonical_name": "message.leave",
@@ -80,36 +39,15 @@
       "domain": "conversation",
       "description": "Propose a message for the owner without performing a separate notification side effect.",
       "operation_type": "ACTION",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "output_schema": {
-        "type": "object",
-        "properties": {
-          "proposal_id": {
-            "type": "string"
-          }
-        }
-      },
-      "required_permissions": [
-        "message.leave"
-      ],
+      "input_schema": {"type": "object", "required": ["message"], "properties": {"message": {"type": "string"}}},
+      "output_schema": {"type": "object", "properties": {"proposal_id": {"type": "string"}}},
+      "required_permissions": ["message.leave"],
       "required_provider_interface": null,
       "sensitivity": "NORMAL",
       "side_effect": false,
       "default_approval_policy": "REQUIRES_APPROVAL",
       "availability_state": "OPERATIONAL",
-      "metadata": {
-        "proposal_only": true
-      }
+      "metadata": {"proposal_only": true}
     },
     {
       "canonical_name": "state.read",
@@ -117,28 +55,15 @@
       "domain": "state",
       "description": "Read current operational state for an authorized entity or resource.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "subject",
-          "namespace",
-          "key"
-        ]
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "state.read"
-      ],
+      "input_schema": {"type": "object", "required": ["subject", "namespace", "key"]},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["state.read"],
       "required_provider_interface": null,
       "sensitivity": "MEDIUM",
       "side_effect": false,
       "default_approval_policy": "POLICY",
       "availability_state": "OPERATIONAL",
-      "metadata": {
-        "runtime": "entity_state_core"
-      }
+      "metadata": {"runtime": "entity_state_core"}
     },
     {
       "canonical_name": "state.set",
@@ -146,34 +71,15 @@
       "domain": "state",
       "description": "Write versioned operational state after deterministic authority evaluation.",
       "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "subject",
-          "namespace",
-          "key",
-          "value"
-        ]
-      },
-      "output_schema": {
-        "type": "object",
-        "properties": {
-          "version": {
-            "type": "integer"
-          }
-        }
-      },
-      "required_permissions": [
-        "state.set"
-      ],
+      "input_schema": {"type": "object", "required": ["subject", "namespace", "key", "value"]},
+      "output_schema": {"type": "object", "properties": {"version": {"type": "integer"}}},
+      "required_permissions": ["state.set"],
       "required_provider_interface": null,
       "sensitivity": "MEDIUM",
       "side_effect": true,
       "default_approval_policy": "REQUIRES_APPROVAL",
       "availability_state": "OPERATIONAL",
-      "metadata": {
-        "runtime": "entity_state_core"
-      }
+      "metadata": {"runtime": "entity_state_core"}
     },
     {
       "canonical_name": "presence.set",
@@ -183,67 +89,25 @@
       "operation_type": "WRITE",
       "input_schema": {
         "type": "object",
-        "required": [
-          "state"
-        ],
+        "required": ["state"],
         "properties": {
-          "state": {
-            "type": "string",
-            "enum": [
-              "available",
-              "busy",
-              "sleeping",
-              "away",
-              "do_not_disturb",
-              "custom"
-            ]
-          },
-          "audience_scope": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "ttl_seconds": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 86400
-          }
+          "state": {"type": "string", "enum": ["available", "busy", "sleeping", "away", "do_not_disturb", "custom"]},
+          "audience_scope": {"type": "string"},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}
         }
       },
       "output_schema": {
         "type": "object",
-        "required": [
-          "status",
-          "version",
-          "expires_at",
-          "expiry_source"
-        ],
+        "required": ["status", "version", "expires_at", "expiry_source"],
         "properties": {
-          "status": {
-            "type": "string"
-          },
-          "version": {
-            "type": "integer"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expiry_source": {
-            "type": "string",
-            "enum": [
-              "EXPLICIT_EXPIRES_AT",
-              "EXPLICIT_TTL",
-              "DEFAULT_TTL"
-            ]
-          }
+          "status": {"type": "string"},
+          "version": {"type": "integer"},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "expiry_source": {"type": "string", "enum": ["EXPLICIT_EXPIRES_AT", "EXPLICIT_TTL", "DEFAULT_TTL"]}
         }
       },
-      "required_permissions": [
-        "presence.set"
-      ],
+      "required_permissions": ["presence.set"],
       "required_provider_interface": "InternalPresenceProvider",
       "sensitivity": "MEDIUM",
       "side_effect": false,
@@ -262,15 +126,9 @@
       "domain": "commitment",
       "description": "Create a structured commitment in the tenant-scoped internal ledger.",
       "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "commitment.create"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["commitment.create"],
       "required_provider_interface": "InternalCommitmentProvider",
       "sensitivity": "MEDIUM",
       "side_effect": false,
@@ -279,297 +137,40 @@
       "metadata": {}
     },
     {
-      "canonical_name": "capability.list",
-      "version": 1,
-      "domain": "capability",
-      "description": "List safe capability availability for the current tenant.",
-      "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "capability.list"
-      ],
-      "required_provider_interface": "InternalCapabilityRegistryProvider",
-      "sensitivity": "NORMAL",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "capability.list", "version": 1, "domain": "capability", "description": "List safe capability availability for the current tenant.", "operation_type": "READ", "input_schema": {"type": "object"}, "output_schema": {"type": "object"}, "required_permissions": ["capability.list"], "required_provider_interface": "InternalCapabilityRegistryProvider", "sensitivity": "NORMAL", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "capability.inspect",
-      "version": 1,
-      "domain": "capability",
-      "description": "Inspect one known capability without exposing provider configuration.",
-      "operation_type": "READ",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "capability_name"
-        ]
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "capability.inspect"
-      ],
-      "required_provider_interface": "InternalCapabilityRegistryProvider",
-      "sensitivity": "NORMAL",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "capability.inspect", "version": 1, "domain": "capability", "description": "Inspect one known capability without exposing provider configuration.", "operation_type": "READ", "input_schema": {"type": "object", "required": ["capability_name"]}, "output_schema": {"type": "object"}, "required_permissions": ["capability.inspect"], "required_provider_interface": "InternalCapabilityRegistryProvider", "sensitivity": "NORMAL", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "commitment.list",
-      "version": 1,
-      "domain": "commitment",
-      "description": "List persisted commitments in the current tenant.",
-      "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "commitment.list"
-      ],
-      "required_provider_interface": "InternalCommitmentProvider",
-      "sensitivity": "MEDIUM",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "commitment.list", "version": 1, "domain": "commitment", "description": "List persisted commitments in the current tenant.", "operation_type": "READ", "input_schema": {"type": "object"}, "output_schema": {"type": "object"}, "required_permissions": ["commitment.list"], "required_provider_interface": "InternalCommitmentProvider", "sensitivity": "MEDIUM", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "commitment.complete",
-      "version": 1,
-      "domain": "commitment",
-      "description": "Mark one resolved tenant-scoped commitment completed.",
-      "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "commitment_id"
-        ]
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "commitment.complete"
-      ],
-      "required_provider_interface": "InternalCommitmentProvider",
-      "sensitivity": "MEDIUM",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "commitment.complete", "version": 1, "domain": "commitment", "description": "Mark one resolved tenant-scoped commitment completed.", "operation_type": "WRITE", "input_schema": {"type": "object", "required": ["commitment_id"]}, "output_schema": {"type": "object"}, "required_permissions": ["commitment.complete"], "required_provider_interface": "InternalCommitmentProvider", "sensitivity": "MEDIUM", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "commitment.cancel",
-      "version": 1,
-      "domain": "commitment",
-      "description": "Cancel one resolved tenant-scoped commitment without deleting history.",
-      "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "commitment_id"
-        ]
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "commitment.cancel"
-      ],
-      "required_provider_interface": "InternalCommitmentProvider",
-      "sensitivity": "MEDIUM",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "commitment.cancel", "version": 1, "domain": "commitment", "description": "Cancel one resolved tenant-scoped commitment without deleting history.", "operation_type": "WRITE", "input_schema": {"type": "object", "required": ["commitment_id"]}, "output_schema": {"type": "object"}, "required_permissions": ["commitment.cancel"], "required_provider_interface": "InternalCommitmentProvider", "sensitivity": "MEDIUM", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "reminder.create",
-      "version": 1,
-      "domain": "reminder",
-      "description": "Schedule an internal reminder event; this does not deliver external notifications.",
-      "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "summary",
-          "trigger_at"
-        ]
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "reminder.create"
-      ],
-      "required_provider_interface": "InternalSchedulerProvider",
-      "sensitivity": "MEDIUM",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "reminder.create", "version": 1, "domain": "reminder", "description": "Schedule an internal reminder event; this does not deliver external notifications.", "operation_type": "WRITE", "input_schema": {"type": "object", "required": ["summary", "trigger_at"]}, "output_schema": {"type": "object"}, "required_permissions": ["reminder.create"], "required_provider_interface": "InternalSchedulerProvider", "sensitivity": "MEDIUM", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "reminder.list",
-      "version": 1,
-      "domain": "reminder",
-      "description": "List tenant-scoped scheduled or historical reminders.",
-      "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "reminder.list"
-      ],
-      "required_provider_interface": "InternalSchedulerProvider",
-      "sensitivity": "MEDIUM",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "reminder.list", "version": 1, "domain": "reminder", "description": "List tenant-scoped scheduled or historical reminders.", "operation_type": "READ", "input_schema": {"type": "object"}, "output_schema": {"type": "object"}, "required_permissions": ["reminder.list"], "required_provider_interface": "InternalSchedulerProvider", "sensitivity": "MEDIUM", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "reminder.cancel",
-      "version": 1,
-      "domain": "reminder",
-      "description": "Cancel one resolved reminder without deleting history.",
-      "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "reminder_id"
-        ]
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "reminder.cancel"
-      ],
-      "required_provider_interface": "InternalSchedulerProvider",
-      "sensitivity": "MEDIUM",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "reminder.cancel", "version": 1, "domain": "reminder", "description": "Cancel one resolved reminder without deleting history.", "operation_type": "WRITE", "input_schema": {"type": "object", "required": ["reminder_id"]}, "output_schema": {"type": "object"}, "required_permissions": ["reminder.cancel"], "required_provider_interface": "InternalSchedulerProvider", "sensitivity": "MEDIUM", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "grant.list",
-      "version": 1,
-      "domain": "grant",
-      "description": "List effective and historical grants in the current tenant.",
-      "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "grant.list"
-      ],
-      "required_provider_interface": "InternalGrantProvider",
-      "sensitivity": "HIGH",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {}
+      "canonical_name": "grant.list", "version": 1, "domain": "grant", "description": "List effective and historical grants in the current tenant.", "operation_type": "READ", "input_schema": {"type": "object"}, "output_schema": {"type": "object"}, "required_permissions": ["grant.list"], "required_provider_interface": "InternalGrantProvider", "sensitivity": "HIGH", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {}
     },
     {
-      "canonical_name": "grant.create",
-      "version": 1,
-      "domain": "grant",
-      "description": "Owner-only creation of a bounded capability grant.",
-      "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "grantee_id",
-          "capability_name"
-        ]
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "grant.create"
-      ],
-      "required_provider_interface": "InternalGrantProvider",
-      "sensitivity": "HIGH",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {
-        "owner_only": true
-      }
+      "canonical_name": "grant.create", "version": 1, "domain": "grant", "description": "Owner-only creation of a bounded capability grant.", "operation_type": "WRITE", "input_schema": {"type": "object", "required": ["grantee_id", "capability_name"]}, "output_schema": {"type": "object"}, "required_permissions": ["grant.create"], "required_provider_interface": "InternalGrantProvider", "sensitivity": "HIGH", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {"owner_only": true}
     },
     {
-      "canonical_name": "grant.revoke",
-      "version": 1,
-      "domain": "grant",
-      "description": "Owner-only revocation of a tenant-scoped grant.",
-      "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "grant_id"
-        ]
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "grant.revoke"
-      ],
-      "required_provider_interface": "InternalGrantProvider",
-      "sensitivity": "HIGH",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {
-        "owner_only": true
-      }
+      "canonical_name": "grant.revoke", "version": 1, "domain": "grant", "description": "Owner-only revocation of a tenant-scoped grant.", "operation_type": "WRITE", "input_schema": {"type": "object", "required": ["grant_id"]}, "output_schema": {"type": "object"}, "required_permissions": ["grant.revoke"], "required_provider_interface": "InternalGrantProvider", "sensitivity": "HIGH", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {"owner_only": true}
     },
     {
-      "canonical_name": "timeline.query",
-      "version": 1,
-      "domain": "timeline",
-      "description": "Query recorded tenant timeline events; results do not imply complete message history.",
-      "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "timeline.query"
-      ],
-      "required_provider_interface": "InternalTimelineProvider",
-      "sensitivity": "MEDIUM",
-      "side_effect": false,
-      "default_approval_policy": "ALLOW",
-      "availability_state": "OPERATIONAL",
-      "metadata": {
-        "coverage": "recorded_timeline_only"
-      }
+      "canonical_name": "timeline.query", "version": 1, "domain": "timeline", "description": "Query recorded tenant timeline events; results do not imply complete message history.", "operation_type": "READ", "input_schema": {"type": "object"}, "output_schema": {"type": "object"}, "required_permissions": ["timeline.query"], "required_provider_interface": "InternalTimelineProvider", "sensitivity": "MEDIUM", "side_effect": false, "default_approval_policy": "ALLOW", "availability_state": "OPERATIONAL", "metadata": {"coverage": "recorded_timeline_only"}
     },
     {
       "canonical_name": "artifact.store",
@@ -577,15 +178,9 @@
       "domain": "artifact",
       "description": "Store an artifact through an object-storage provider.",
       "operation_type": "WRITE",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "artifact.store"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["artifact.store"],
       "required_provider_interface": "ObjectStorageProvider",
       "sensitivity": "HIGH",
       "side_effect": true,
@@ -599,15 +194,9 @@
       "domain": "artifact",
       "description": "Search authorized artifact metadata through an object-storage provider.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "artifact.search"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["artifact.search"],
       "required_provider_interface": "ObjectStorageProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
@@ -621,15 +210,9 @@
       "domain": "artifact",
       "description": "Retrieve an authorized artifact through an object-storage provider.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "artifact.retrieve"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["artifact.retrieve"],
       "required_provider_interface": "ObjectStorageProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
@@ -643,15 +226,9 @@
       "domain": "artifact",
       "description": "Create bounded temporary artifact access through an object-storage provider.",
       "operation_type": "ACTION",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "artifact.temporary_access"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["artifact.temporary_access"],
       "required_provider_interface": "ObjectStorageProvider",
       "sensitivity": "HIGH",
       "side_effect": true,
@@ -665,15 +242,9 @@
       "domain": "artifact",
       "description": "Expose an artifact portal contract; no portal is provisioned.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "artifact.portal"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["artifact.portal"],
       "required_provider_interface": "ObjectStorageProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
@@ -687,65 +258,22 @@
       "domain": "location",
       "description": "Read current authorized location from a location provider.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
+      "input_schema": {"type": "object"},
       "output_schema": {
         "type": "object",
-        "required": [
-          "latitude",
-          "longitude",
-          "accuracy_m",
-          "captured_at",
-          "received_at",
-          "age_seconds",
-          "freshness_state"
-        ],
+        "required": ["latitude", "longitude", "accuracy_m", "captured_at", "received_at", "age_seconds", "freshness_state"],
         "properties": {
-          "latitude": {
-            "type": "number"
-          },
-          "longitude": {
-            "type": "number"
-          },
-          "accuracy_m": {
-            "type": "number"
-          },
-          "precision": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "enum": [
-              "PRECISE",
-              "APPROXIMATE",
-              null
-            ]
-          },
-          "captured_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "received_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "age_seconds": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "freshness_state": {
-            "type": "string",
-            "enum": [
-              "CURRENT",
-              "STALE"
-            ]
-          }
+          "latitude": {"type": "number"},
+          "longitude": {"type": "number"},
+          "accuracy_m": {"type": "number"},
+          "precision": {"type": ["string", "null"], "enum": ["PRECISE", "APPROXIMATE", null]},
+          "captured_at": {"type": "string", "format": "date-time"},
+          "received_at": {"type": "string", "format": "date-time"},
+          "age_seconds": {"type": "integer", "minimum": 0},
+          "freshness_state": {"type": "string", "enum": ["CURRENT", "STALE"]}
         }
       },
-      "required_permissions": [
-        "location.current"
-      ],
+      "required_permissions": ["location.current"],
       "required_provider_interface": "LocationProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
@@ -764,15 +292,9 @@
       "domain": "payment",
       "description": "Read payment instructions from a configured payment provider.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "payment.instructions"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["payment.instructions"],
       "required_provider_interface": "PaymentProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
@@ -786,15 +308,9 @@
       "domain": "payment",
       "description": "Create a charge through a configured payment provider.",
       "operation_type": "ACTION",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "payment.create_charge"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["payment.create_charge"],
       "required_provider_interface": "PaymentProvider",
       "sensitivity": "HIGH",
       "side_effect": true,
@@ -808,15 +324,9 @@
       "domain": "payment",
       "description": "Verify a payment through an authoritative payment provider.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "payment.verify"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["payment.verify"],
       "required_provider_interface": "PaymentProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
@@ -830,15 +340,9 @@
       "domain": "device",
       "description": "Read location announced by an authorized capability node.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "device.location"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["device.location"],
       "required_provider_interface": "DeviceProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
@@ -852,15 +356,9 @@
       "domain": "device",
       "description": "Read battery state from an authorized capability node.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "device.battery"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["device.battery"],
       "required_provider_interface": "DeviceProvider",
       "sensitivity": "MEDIUM",
       "side_effect": false,
@@ -874,15 +372,9 @@
       "domain": "device",
       "description": "Read connectivity state from an authorized capability node.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "device.connectivity"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["device.connectivity"],
       "required_provider_interface": "DeviceProvider",
       "sensitivity": "MEDIUM",
       "side_effect": false,
@@ -896,15 +388,9 @@
       "domain": "calendar",
       "description": "Read authorized calendar availability.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "calendar.availability"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["calendar.availability"],
       "required_provider_interface": "CalendarProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
@@ -918,15 +404,9 @@
       "domain": "calendar",
       "description": "Schedule through an authorized calendar provider.",
       "operation_type": "ACTION",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "calendar.schedule"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["calendar.schedule"],
       "required_provider_interface": "CalendarProvider",
       "sensitivity": "HIGH",
       "side_effect": true,
@@ -940,15 +420,9 @@
       "domain": "vehicle",
       "description": "Read an authorized vehicle location from a vehicle provider.",
       "operation_type": "READ",
-      "input_schema": {
-        "type": "object"
-      },
-      "output_schema": {
-        "type": "object"
-      },
-      "required_permissions": [
-        "vehicle.location"
-      ],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "required_permissions": ["vehicle.location"],
       "required_provider_interface": "VehicleProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
