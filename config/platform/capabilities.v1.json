@@ -254,19 +254,37 @@
     },
     {
       "canonical_name": "location.current",
-      "version": 1,
+      "version": 2,
       "domain": "location",
       "description": "Read current authorized location from a location provider.",
       "operation_type": "READ",
       "input_schema": {"type": "object"},
-      "output_schema": {"type": "object"},
+      "output_schema": {
+        "type": "object",
+        "required": ["latitude", "longitude", "accuracy_m", "captured_at", "received_at", "age_seconds", "freshness_state"],
+        "properties": {
+          "latitude": {"type": "number"},
+          "longitude": {"type": "number"},
+          "accuracy_m": {"type": "number"},
+          "precision": {"type": ["string", "null"], "enum": ["PRECISE", "APPROXIMATE", null]},
+          "captured_at": {"type": "string", "format": "date-time"},
+          "received_at": {"type": "string", "format": "date-time"},
+          "age_seconds": {"type": "integer", "minimum": 0},
+          "freshness_state": {"type": "string", "enum": ["CURRENT", "STALE"]}
+        }
+      },
       "required_permissions": ["location.current"],
       "required_provider_interface": "LocationProvider",
       "sensitivity": "HIGH",
       "side_effect": false,
       "default_approval_policy": "POLICY",
-      "availability_state": "PROVIDER_MISSING",
-      "metadata": {}
+      "availability_state": "OPERATIONAL",
+      "metadata": {
+        "provider": "internal:location-snapshot",
+        "selector": "unique_active_owner_then_unique_active_device_snapshot",
+        "max_current_age_seconds": 600,
+        "multi_device_behavior": "fail_closed"
+      }
     },
     {
       "canonical_name": "payment.instructions",

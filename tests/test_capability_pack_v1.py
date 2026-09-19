@@ -65,8 +65,8 @@ def test_pack_materializes_all_internal_bindings_and_discovery(session):
         assert status[name]["bound_provider"] == CAPABILITY_PROVIDER[name]
     result = _run(session, "capability.inspect", {"capability_name": "location.current"})
     assert result.status == "EXECUTED"
-    assert result.result["availability_state"] == "PROVIDER_MISSING"
-    assert result.result["bound_provider_status"] == "PROVIDER_MISSING"
+    assert result.result["availability_state"] == "OPERATIONAL"
+    assert result.result["bound_provider_status"] == "PROVIDER_RESOLVED"
     listed = _run(session, "capability.list", {})
     assert any(item["capability_name"] == "presence.set" for item in listed.result["capabilities"])
 
