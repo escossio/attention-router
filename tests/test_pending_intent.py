@@ -202,6 +202,25 @@ def test_create_is_idempotent_for_same_source_and_candidate_set(session):
     )
 
 
+def test_same_source_with_changed_expiry_fails_closed(session):
+    row = create_fixture(session, "source-expiry-conflict")
+    with pytest.raises(PendingIntentConflict, match="SOURCE_REPLAY_CONFLICT"):
+        create_pending_intent(
+            session,
+            tenant_id=row.tenant_id,
+            represented_owner_actor_key=row.represented_owner_actor_key,
+            source_inbound_event_id=row.source_inbound_event_id,
+            source_interaction_id=row.source_interaction_id,
+            source_channel=row.source_channel,
+            conversation_key_hash=row.conversation_key_hash,
+            semantic_registry_version=row.semantic_registry_version,
+            ambiguity_reason=row.ambiguity_reason,
+            candidates=candidates(),
+            expires_at=row.expires_at + timedelta(seconds=1),
+            timestamp=STAMP + timedelta(seconds=1),
+        )
+
+
 def test_same_source_with_changed_candidate_set_fails_closed(session):
     row = create_fixture(session, "source-conflict")
     changed = candidates()
@@ -545,6 +564,21 @@ def test_cancel_is_terminal_idempotent_and_blocks_later_resolution(session):
             resolution_kind="EXPLICIT_SELECTION",
             timestamp=STAMP + timedelta(seconds=5),
         )
+
+    another_cancellation, _ = source(
+        session,
+        "cancel-answer-other",
+        received_at=STAMP + timedelta(seconds=6),
+    )
+    with pytest.raises(PendingIntentConflict, match="ALREADY_CANCELED"):
+        cancel_pending_intent(
+            session,
+            pending_intent_id=row.id,
+            reason="USER_CANCELED",
+            resolution_inbound_event_id=another_cancellation.id,
+            timestamp=STAMP + timedelta(seconds=7),
+        )
+
 
 
 def test_clarification_outbox_cannot_be_linked_to_another_intent(session):
