@@ -67,6 +67,7 @@ def _install(Session):
                 updated_at=STAMP,
             )
         )
+        session.flush()
         sources = []
         for suffix, offset in [("a", 0), ("b", 1), ("resolution", 2)]:
             stamp = STAMP + timedelta(seconds=offset)
