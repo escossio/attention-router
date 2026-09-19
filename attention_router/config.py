@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     andy_agent_model: str = "gpt-5.6-sol"
     andy_agent_timeout_seconds: float = 20.0
     andy_agent_max_turns: int = 3
+    owner_control_semantic_enabled: bool = False
+    owner_control_semantic_model: str = "gpt-5.6-sol"
     andy_behavior_profile_path: str = "config/andy_behavior_profile.json"
     legacy_external_fallback_enabled: bool = False
     persistent_memory_enabled: bool = False
@@ -239,6 +241,10 @@ class Settings(BaseSettings):
             raise ValueError("LEGACY_EXTERNAL_FALLBACK_ENABLED is test/development only")
         if self.andy_agent_timeout_seconds <= 0 or self.andy_agent_max_turns <= 0:
             raise ValueError("ANDY_AGENT limits must be positive")
+        if self.owner_control_semantic_enabled and not self.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY is required when OWNER_CONTROL_SEMANTIC_ENABLED=true"
+            )
         if self.tts_profile != "andy":
             raise ValueError("TTS_PROFILE must be andy")
         if self.tts_enabled and not self.tts_internal_token:
