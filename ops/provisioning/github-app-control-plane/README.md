@@ -2,7 +2,7 @@
 
 This package reproduces the AGT-side ingress proven live for the `andy-github-control-plane` GitHub App.
 
-The initial installation is intentionally scoped to `escossio/attention-router`. The GitHub App must explicitly subscribe to **Pull request** and **Workflow run** events; the receiver accepts `ping`, `pull_request`, and `workflow_run` deliveries and remains observation-only: it records bounded metadata but does not commit, merge, rerun workflows, or mutate repository state.
+The initial installation is intentionally scoped to `escossio/attention-router`. The GitHub App must explicitly subscribe to **Pull request**, **Workflow run**, and **Check run** events; the receiver accepts `ping`, `pull_request`, `workflow_run`, and `check_run` deliveries. It records bounded metadata and may advance a pre-registered AGT-local continuation stage, but it does not commit, merge, rerun workflows, deploy, execute shell commands, or mutate repository state.
 
 ## Trust boundary
 
@@ -15,6 +15,8 @@ GitHub App
   -> repository + installation allowlist
   -> delivery-id deduplication
   -> SQLite metadata receipt
+  -> exact stage correlation (repo + PR + SHA + event kind + target name)
+  -> monotonic local completion signal
 ```
 
 The webhook receiver does not load the GitHub App private key. Systemd exposes only the webhook secret through `LoadCredential=`. The private key is reserved for short-lived App JWT / installation-token operations such as the provisioning probe.
@@ -29,6 +31,7 @@ Expected host-local paths:
 /etc/andy-github-app/credentials/private-key.pem
 /etc/andy-github-app/credentials/webhook-secret
 /usr/local/lib/andy-github-app/webhook_receiver.py
+/usr/local/lib/andy-github-app/continuation_control.py
 /var/lib/andy-github-app/events.sqlite3
 ```
 
@@ -45,6 +48,7 @@ Install the receiver and unit:
 ```bash
 install -d -m 0755 /usr/local/lib/andy-github-app
 install -m 0755 webhook_receiver.py /usr/local/lib/andy-github-app/webhook_receiver.py
+install -m 0755 continuation_control.py /usr/local/lib/andy-github-app/continuation_control.py
 install -m 0644 andy-github-webhook.service /etc/systemd/system/andy-github-webhook.service
 systemctl daemon-reload
 systemctl enable --now andy-github-webhook.service
@@ -83,15 +87,67 @@ SQLite stores only bounded routing/status metadata:
 - event/action;
 - repository and installation ID;
 - PR number and exact head SHA when available;
-- workflow run ID/name/status/conclusion when available.
+- workflow run ID/name/status/conclusion when available;
+- check run ID/name/status/conclusion when available.
 
 Raw webhook bodies, private keys, signatures, tokens, conversations and provider credentials are not persisted.
+
+
+## Event-driven continuation stages
+
+A controller may pre-register a bounded stage that it is waiting for. Correlation is exact across:
+
+- repository;
+- pull request number;
+- exact 40-character head SHA;
+- event kind (`workflow_run` or `check_run`);
+- target name (workflow name or check/job name).
+
+For a whole workflow:
+
+```bash
+continuation_control.py register \
+  --stage-id pr80-public-ci \
+  --pr-number 80 \
+  --head-sha <exact-head-sha> \
+  --event-kind workflow_run \
+  --target-name "Public CI"
+```
+
+For one gate such as PostgreSQL integration:
+
+```bash
+continuation_control.py register \
+  --stage-id pr80-postgres \
+  --pr-number 80 \
+  --head-sha <exact-head-sha> \
+  --event-kind check_run \
+  --target-name postgres-integration
+```
+
+A matching signed GitHub completion moves the stage exactly once from `RUNNING` to one terminal state:
+
+- `COMPLETED_SUCCESS`;
+- `COMPLETED_FAILURE`;
+- `CANCELLED`.
+
+A stale SHA, wrong PR, wrong target name, replayed delivery, or later contradictory event cannot regress or advance the stage. Successful transitions emit one local `continuation_signals` row.
+
+The next controller pass can read pending signals without polling GitHub:
+
+```bash
+continuation_control.py list-ready
+continuation_control.py show pr80-postgres
+continuation_control.py ack pr80-postgres
+```
+
+Acknowledgement marks only the local signal as consumed. It does not mutate GitHub and does not execute the next action by itself.
 
 ## Current authority split
 
 GitHub Actions remains the repository-native CI control plane. Existing CI Agent / Copilot Advisor / bounded autofix jobs are not copied to AGT.
 
-This package adds an independent ingress bridge so AGT-local services can later consume trusted GitHub events. Any future mutation authority must be introduced separately, with exact-head validation and the repository's existing approval/safety gates.
+This package adds an independent ingress bridge plus bounded AGT-local continuation state. Trusted GitHub completions may mark a pre-registered local stage complete, but the resulting signal carries no repository or host mutation authority. Any future automatic next-step execution must be introduced separately, with exact-head validation and the repository's existing approval/safety gates.
 
 The Remote Desktop Commander operator bridge is documented separately in `../agt-remote-access/`; it is an administrative transport, not an application dependency and not GitHub App authority.
 
