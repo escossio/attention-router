@@ -8,6 +8,7 @@ from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attention_router.application.platform.registry import resolve_capability_request
@@ -288,6 +289,14 @@ def record_named_capability_t1_request(
             f"{tenant_id}:{scenario.scenario_id}:{correlation_id}".encode()
         ).hexdigest()
     )
+    existing_intent = session.scalar(
+        select(ExecutionIntentRow.id).where(
+            ExecutionIntentRow.idempotency_key == idempotency_key
+        )
+    )
+    if existing_intent is not None:
+        raise PermissionError("CAPABILITY_LAB_T1_CORRELATION_REUSED")
+
     intent = ExecutionIntentRow(
         id=intent_id,
         idempotency_key=idempotency_key,
