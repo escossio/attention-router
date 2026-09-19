@@ -440,24 +440,25 @@ def test_private_projection_is_authority_enforced():
     assert "secret-location" not in json.dumps(projection)
 
 
-def test_location_stays_unavailable_without_grants(session):
-    from attention_router.application.platform.registry import (
-        sync_platform_registry,
-        resolve_capability_request,
-    )
+def test_location_is_operational_but_denied_without_grant(session):
+    from attention_router.application.platform.capability_pack import provision_internal_providers
+    from attention_router.application.platform.registry import resolve_capability_request
     from attention_router.core.capabilities import CapabilityRequest
     from attention_router.infrastructure.models import CapabilityGrantRow
 
-    sync_platform_registry(session)
+    provision_internal_providers(session, DEFAULT_TENANT_ID)
     result = resolve_capability_request(
         session,
         CapabilityRequest(capability="location.current"),
         tenant_id=DEFAULT_TENANT_ID,
         grantee_type="ACTOR",
         grantee_id="unknown",
-        policy_allows=False,
+        policy_allows=True,
     )
-    assert result.status.value == "KNOWN_BUT_UNAVAILABLE"
+    assert result.status.value == "AVAILABLE_NOT_AUTHORIZED"
+    assert result.authority_result == "DENY"
+    assert result.reason_code == "CAPABILITY_GRANT_MISSING"
+    assert result.provider_interface == "LocationProvider"
     assert session.scalar(select(func.count()).select_from(CapabilityGrantRow)) == 0
 
 
