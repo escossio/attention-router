@@ -2,6 +2,7 @@ from sqlalchemy import func, select
 
 from attention_router.application.platform.capability_pack import provision_internal_providers
 from attention_router.core.capability_lab import T0ComparisonStatus
+from attention_router.infrastructure.human_identity_models import HumanIdentityRow
 from attention_router.infrastructure.models import (
     CapabilityGrantRow,
     EvidenceReferenceRow,
@@ -57,6 +58,7 @@ def test_unknown_t0_scenario_fails_closed():
 def test_ephemeral_location_t0_proves_operational_provider_but_no_grant(session):
     _prepare_location_runtime(session)
     protected_before = {
+        HumanIdentityRow: _count(session, HumanIdentityRow),
         CapabilityGrantRow: _count(session, CapabilityGrantRow),
         HumanExecutionAuthorizationRow: _count(session, HumanExecutionAuthorizationRow),
         ScenarioRunRow: _count(session, ScenarioRunRow),
@@ -83,6 +85,7 @@ def test_ephemeral_location_t0_proves_operational_provider_but_no_grant(session)
 def test_durable_location_t0_certifies_semantics_without_authority_side_effects(session):
     _prepare_location_runtime(session)
     protected_before = {
+        HumanIdentityRow: _count(session, HumanIdentityRow),
         CapabilityGrantRow: _count(session, CapabilityGrantRow),
         HumanExecutionAuthorizationRow: _count(session, HumanExecutionAuthorizationRow),
         ScenarioRunRow: _count(session, ScenarioRunRow),
