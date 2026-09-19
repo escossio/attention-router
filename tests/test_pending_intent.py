@@ -10,6 +10,7 @@ from attention_router.application.pending_intent import (
     PendingIntentScopeError,
     attach_clarification_outbox,
     build_candidate_set,
+    cancel_pending_intent,
     candidate_set_fingerprint,
     create_pending_intent,
     expire_due_pending_intents,
@@ -500,3 +501,87 @@ def test_clarification_outbox_link_and_delivery_are_idempotent(session):
     )
     assert row.version == delivered_version
     assert row.clarification_delivered_at == STAMP + timedelta(seconds=3)
+
+
+
+def test_cancel_is_terminal_idempotent_and_blocks_later_resolution(session):
+    row = create_fixture(session, "cancel")
+    cancellation, _ = source(
+        session,
+        "cancel-answer",
+        received_at=STAMP + timedelta(seconds=2),
+    )
+    canceled = cancel_pending_intent(
+        session,
+        pending_intent_id=row.id,
+        reason="USER_CANCELED",
+        resolution_inbound_event_id=cancellation.id,
+        timestamp=STAMP + timedelta(seconds=3),
+    )
+    version = canceled.version
+    duplicate = cancel_pending_intent(
+        session,
+        pending_intent_id=row.id,
+        reason="USER_CANCELED",
+        resolution_inbound_event_id=cancellation.id,
+        timestamp=STAMP + timedelta(seconds=4),
+    )
+    assert duplicate.id == row.id
+    assert duplicate.version == version
+    assert row.state == "CANCELED"
+    assert row.resolution_inbound_event_id == cancellation.id
+    assert row.selected_candidate_key is None
+
+    with pytest.raises(PendingIntentConflict, match="PENDING_INTENT_TERMINAL"):
+        resolve_pending_intent(
+            session,
+            pending_intent_id=row.id,
+            tenant_id=DEFAULT_TENANT_ID,
+            represented_owner_actor_key=OWNER,
+            source_channel=CHANNEL,
+            conversation_key_hash=CONVERSATION,
+            resolution_inbound_event_id=cancellation.id,
+            selected_candidate_key="configure-grace",
+            resolution_kind="EXPLICIT_SELECTION",
+            timestamp=STAMP + timedelta(seconds=5),
+        )
+
+
+def test_clarification_outbox_cannot_be_linked_to_another_intent(session):
+    first = create_fixture(session, "outbox-owner-a", conversation="a" * 64)
+    second = create_fixture(session, "outbox-owner-b", conversation="b" * 64)
+    outbox = OutboxMessageRow(
+        id="shared-clarification-outbox",
+        interaction_id=first.source_interaction_id,
+        action_type="intent_clarification_text",
+        destination="local_transport",
+        payload={"text": "Clarificação fixture"},
+        status="PENDING",
+        created_at=STAMP,
+        available_at=STAMP,
+        claimed_at=None,
+        claimed_by=None,
+        attempt_count=0,
+        last_error=None,
+        completed_at=None,
+        idempotency_key="intent-clarification:shared-fixture",
+        correlation_id=first.correlation_id,
+        causation_id=first.source_inbound_event_id,
+        execution_intent_id=None,
+    )
+    session.add(outbox)
+    session.flush()
+    attach_clarification_outbox(
+        session,
+        pending_intent_id=first.id,
+        outbox_id=outbox.id,
+        timestamp=STAMP + timedelta(seconds=1),
+    )
+
+    with pytest.raises(PendingIntentScopeError, match="OUTBOX_SCOPE_MISMATCH"):
+        attach_clarification_outbox(
+            session,
+            pending_intent_id=second.id,
+            outbox_id=outbox.id,
+            timestamp=STAMP + timedelta(seconds=2),
+        )
