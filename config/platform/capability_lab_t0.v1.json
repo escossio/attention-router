@@ -1,0 +1,14 @@
+[
+  {
+    "schema_version": "capability-lab.t0.v1",
+    "scenario_id": "location.current.no-grant",
+    "title": "Current location is operational but synthetic actor has no grant",
+    "capability_key": "location.current",
+    "requester_actor_key": "synthetic:capability-lab.location",
+    "expected_resolution_status": "AVAILABLE_NOT_AUTHORIZED",
+    "expected_authority_result": "DENY",
+    "expected_reason_code": "CAPABILITY_GRANT_MISSING",
+    "synthetic_only": true,
+    "production_effects_allowed": false
+  }
+]
