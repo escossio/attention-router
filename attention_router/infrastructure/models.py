@@ -619,6 +619,19 @@ class PendingIntentRow(Base):
             "selected_candidate_key is null or state = 'RESOLVED'",
             name="ck_pending_intent_selected_only_when_resolved",
         ),
+        CheckConstraint(
+            "state != 'RESOLVED' or "
+            "(selected_candidate_key is not null and "
+            "resolution_inbound_event_id is not null and resolved_at is not null)",
+            name="ck_pending_intent_resolved_complete",
+        ),
+        Index(
+            "uq_pending_intent_resolution_event",
+            "resolution_inbound_event_id",
+            unique=True,
+            postgresql_where=text("resolution_inbound_event_id IS NOT NULL"),
+            sqlite_where=text("resolution_inbound_event_id IS NOT NULL"),
+        ),
         Index(
             "uq_pending_intent_active_scope",
             "tenant_id",
