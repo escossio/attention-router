@@ -640,15 +640,18 @@ def cancel_pending_intent(
         raise PendingIntentConflict("PENDING_INTENT_TERMINAL")
     if not reason or len(reason) > 120:
         raise PendingIntentError("PENDING_INTENT_CANCEL_REASON_INVALID")
+    resolution_event_id = None
     if resolution_inbound_event_id is not None:
         event = session.get(InboundEventRow, resolution_inbound_event_id)
         if event is None or event.tenant_id != row.tenant_id:
             raise PendingIntentScopeError("PENDING_INTENT_RESOLUTION_EVENT_SCOPE_MISMATCH")
         if event.id == row.source_inbound_event_id:
             raise PendingIntentScopeError("PENDING_INTENT_SOURCE_CANNOT_RESOLVE_ITSELF")
-        row.resolution_inbound_event_id = event.id
+        resolution_event_id = event.id
     try:
         with session.begin_nested():
+            if resolution_event_id is not None:
+                row.resolution_inbound_event_id = resolution_event_id
             row.state = "CANCELED"
             row.resolution_kind = reason
             row.version += 1
