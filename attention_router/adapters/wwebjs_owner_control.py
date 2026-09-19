@@ -256,6 +256,10 @@ def render_owner_control_confirmation(
 def render_owner_control_error(reason_code: str) -> str:
     if reason_code == "CONTROL_COMMAND_AMBIGUOUS":
         return "Não consegui aplicar o comando: comando ambíguo."
+    if reason_code == "CONTROL_COMMAND_NEEDS_CLARIFICATION":
+        return "Não consegui ter certeza do comando. Pode reformular de forma mais direta?"
+    if reason_code == "CONTROL_COMMAND_SEMANTIC_INVALID":
+        return "Não consegui interpretar o comando com segurança."
     if reason_code in {"CONTROL_COMMAND_INVALID_VALUE", "GRACE_SECONDS_MUST_BE_INTEGER"}:
         return "Não consegui alterar a espera: valor inválido."
     if reason_code == "GRACE_SECONDS_OUT_OF_POLICY_BOUNDS":

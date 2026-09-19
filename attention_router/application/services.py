@@ -28,6 +28,10 @@ from attention_router.application.owner_control import (
     build_owner_operator_authority,
     dispatch_owner_control_signal,
 )
+from attention_router.application.owner_control_semantic import (
+    OwnerControlSemanticError,
+    interpret_owner_control_semantically,
+)
 from attention_router.application.owner_operational_control import (
     OperationalControlConflict,
     OperationalControlError,
@@ -294,6 +298,18 @@ def _handle_owner_control_command(
     if not isinstance(persisted_text, str):
         raise OwnerControlError("OWNER_CONTROL_COMMAND_TEXT_INVALID")
     parsed = parse_owner_grace_control(persisted_text)
+    normalization_source = "DETERMINISTIC"
+    if (
+        parsed.status == OwnerControlParseStatus.NOT_CONTROL_COMMAND
+        and settings.owner_control_semantic_enabled
+    ):
+        try:
+            parsed = interpret_owner_control_semantically(persisted_text)
+        except OwnerControlSemanticError:
+            # Semantic interpretation is never authority. Provider failure leaves
+            # the message on the ordinary owner-message path without mutation.
+            return None
+        normalization_source = "SEMANTIC_AI"
     if parsed.status == OwnerControlParseStatus.NOT_CONTROL_COMMAND:
         return None
 
@@ -367,7 +383,11 @@ def _handle_owner_control_command(
             session,
             interaction.id,
             "owner_control.command_normalized",
-            {"signal_kind": signal.signal_kind.value, "action": signal.action.value},
+            {
+                "signal_kind": signal.signal_kind.value,
+                "action": signal.action.value,
+                "normalization_source": normalization_source,
+            },
             receipt.correlation_id,
             receipt.id,
             origin="owner_control",
