@@ -586,32 +586,39 @@ def resolve_pending_intent(
         resolution_inbound_event_id=resolution_inbound_event_id,
     )
     previous = row.state
-    row.state = "RESOLVED"
-    row.resolution_inbound_event_id = resolution_inbound_event_id
-    row.selected_candidate_key = selected_candidate_key
-    row.resolution_kind = resolution_kind
-    row.resolved_at = stamp
-    row.version += 1
-    row.updated_at = stamp
-    audit(
-        session,
-        row.source_interaction_id,
-        "intent_clarification.resolved",
-        {
-            "pending_intent_id": row.id,
-            "selected_candidate_key": selected_candidate_key,
-            "candidate_set_fingerprint": row.candidate_set_fingerprint,
-            "resolution_kind": resolution_kind,
-        },
-        row.correlation_id,
-        resolution_inbound_event_id,
-        previous_state=previous,
-        next_state="RESOLVED",
-        origin="intent_clarification",
-        tenant_id=row.tenant_id,
-        created_at=stamp,
-    )
-    session.flush()
+    try:
+        with session.begin_nested():
+            row.state = "RESOLVED"
+            row.resolution_inbound_event_id = resolution_inbound_event_id
+            row.selected_candidate_key = selected_candidate_key
+            row.resolution_kind = resolution_kind
+            row.resolved_at = stamp
+            row.version += 1
+            row.updated_at = stamp
+            audit(
+                session,
+                row.source_interaction_id,
+                "intent_clarification.resolved",
+                {
+                    "pending_intent_id": row.id,
+                    "selected_candidate_key": selected_candidate_key,
+                    "candidate_set_fingerprint": row.candidate_set_fingerprint,
+                    "resolution_kind": resolution_kind,
+                },
+                row.correlation_id,
+                resolution_inbound_event_id,
+                previous_state=previous,
+                next_state="RESOLVED",
+                origin="intent_clarification",
+                tenant_id=row.tenant_id,
+                created_at=stamp,
+            )
+            session.flush()
+    except IntegrityError as exc:
+        session.refresh(row)
+        raise PendingIntentConflict(
+            "PENDING_INTENT_RESOLUTION_EVENT_ALREADY_USED"
+        ) from exc
     return row
 
 
@@ -640,24 +647,31 @@ def cancel_pending_intent(
         if event.id == row.source_inbound_event_id:
             raise PendingIntentScopeError("PENDING_INTENT_SOURCE_CANNOT_RESOLVE_ITSELF")
         row.resolution_inbound_event_id = event.id
-    row.state = "CANCELED"
-    row.resolution_kind = reason
-    row.version += 1
-    row.updated_at = stamp
-    audit(
-        session,
-        row.source_interaction_id,
-        "intent_clarification.canceled",
-        {"pending_intent_id": row.id, "reason": reason},
-        row.correlation_id,
-        resolution_inbound_event_id or row.source_inbound_event_id,
-        previous_state="PENDING",
-        next_state="CANCELED",
-        origin="intent_clarification",
-        tenant_id=row.tenant_id,
-        created_at=stamp,
-    )
-    session.flush()
+    try:
+        with session.begin_nested():
+            row.state = "CANCELED"
+            row.resolution_kind = reason
+            row.version += 1
+            row.updated_at = stamp
+            audit(
+                session,
+                row.source_interaction_id,
+                "intent_clarification.canceled",
+                {"pending_intent_id": row.id, "reason": reason},
+                row.correlation_id,
+                resolution_inbound_event_id or row.source_inbound_event_id,
+                previous_state="PENDING",
+                next_state="CANCELED",
+                origin="intent_clarification",
+                tenant_id=row.tenant_id,
+                created_at=stamp,
+            )
+            session.flush()
+    except IntegrityError as exc:
+        session.refresh(row)
+        raise PendingIntentConflict(
+            "PENDING_INTENT_RESOLUTION_EVENT_ALREADY_USED"
+        ) from exc
     return row
 
 
