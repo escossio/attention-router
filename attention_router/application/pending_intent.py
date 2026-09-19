@@ -331,6 +331,8 @@ def create_pending_intent(
             and existing.source_interaction_id == source_interaction_id
             and existing.candidate_set_fingerprint == fingerprint
             and existing.semantic_registry_version == semantic_registry_version
+            and existing.ambiguity_reason == ambiguity_reason
+            and _utc(existing.expires_at) == expiry
         ):
             return existing
         raise PendingIntentConflict("PENDING_INTENT_SOURCE_REPLAY_CONFLICT")
@@ -452,21 +454,28 @@ def attach_clarification_outbox(
     if linked is not None:
         raise PendingIntentConflict("PENDING_INTENT_OUTBOX_ALREADY_LINKED")
 
-    row.clarification_outbox_id = outbox_id
-    row.version += 1
-    row.updated_at = stamp
-    audit(
-        session,
-        row.source_interaction_id,
-        "intent_clarification.prompt_enqueued",
-        {"pending_intent_id": row.id, "outbox_id": outbox_id},
-        row.correlation_id,
-        row.source_inbound_event_id,
-        origin="intent_clarification",
-        tenant_id=row.tenant_id,
-        created_at=stamp,
-    )
-    session.flush()
+    try:
+        with session.begin_nested():
+            row.clarification_outbox_id = outbox_id
+            row.version += 1
+            row.updated_at = stamp
+            audit(
+                session,
+                row.source_interaction_id,
+                "intent_clarification.prompt_enqueued",
+                {"pending_intent_id": row.id, "outbox_id": outbox_id},
+                row.correlation_id,
+                row.source_inbound_event_id,
+                origin="intent_clarification",
+                tenant_id=row.tenant_id,
+                created_at=stamp,
+            )
+            session.flush()
+    except IntegrityError as exc:
+        session.refresh(row)
+        raise PendingIntentConflict(
+            "PENDING_INTENT_OUTBOX_ALREADY_LINKED"
+        ) from exc
     return row
 
 
@@ -635,7 +644,12 @@ def cancel_pending_intent(
     if row is None:
         raise PendingIntentError("PENDING_INTENT_NOT_FOUND")
     if row.state == "CANCELED":
-        return row
+        if (
+            row.resolution_inbound_event_id == resolution_inbound_event_id
+            and row.resolution_kind == reason
+        ):
+            return row
+        raise PendingIntentConflict("PENDING_INTENT_ALREADY_CANCELED")
     if row.state != "PENDING":
         raise PendingIntentConflict("PENDING_INTENT_TERMINAL")
     if not reason or len(reason) > 120:
@@ -690,8 +704,16 @@ def supersede_pending_intent(
     row = _lock_row(session, pending_intent_id)
     if row is None:
         raise PendingIntentError("PENDING_INTENT_NOT_FOUND")
+    if not reason or len(reason) > 120:
+        raise PendingIntentError("PENDING_INTENT_SUPERSEDE_REASON_INVALID")
     if row.state == "SUPERSEDED":
-        return row
+        if (
+            (row.provenance or {}).get("superseding_source_inbound_event_id")
+            == superseding_source_inbound_event_id
+            and row.resolution_kind == reason[:40]
+        ):
+            return row
+        raise PendingIntentConflict("PENDING_INTENT_ALREADY_SUPERSEDED")
     if row.state != "PENDING":
         raise PendingIntentConflict("PENDING_INTENT_TERMINAL")
     event = session.get(InboundEventRow, superseding_source_inbound_event_id)
