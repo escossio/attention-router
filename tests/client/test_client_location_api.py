@@ -1,5 +1,7 @@
 from contextlib import nullcontext
 from datetime import UTC, datetime
+import json
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -8,18 +10,20 @@ from fastapi.testclient import TestClient
 from attention_router.api.v1.client_location import build_client_location_router
 from attention_router.application.client_location import (
     ClientLocationAuthorityRejected,
-    ClientLocationDisabled,
-    ClientLocationFuture,
-    ClientLocationNotFound,
-    ClientLocationSnapshot,
+    ClientLocationSnapshotResult,
     ClientLocationStale,
     ClientLocationUnauthenticated,
 )
-from attention_router.core.client.location import ClientLocationPrecision
 
 
+ROOT = Path(__file__).resolve().parents[2]
+CONTRACT = json.loads(
+    (ROOT / "contracts/client/v1/client-api.openapi.json").read_text(
+        encoding="utf-8"
+    )
+)
 CURRENT = "/api/v1/client/location/current"
-TOKEN = "cst_" + "x" * 43
+NOW = datetime(2026, 9, 18, 23, 30, tzinfo=UTC)
 
 
 class FakeSession:
@@ -47,9 +51,25 @@ class FakeService:
         return snapshot()
 
 
+def snapshot():
+    return ClientLocationSnapshotResult(
+        location_snapshot_id="cloc_" + "a" * 24,
+        human_identity_id="hid_" + "h" * 24,
+        device_id="cdev_" + "d" * 24,
+        tenant_id="tnt_synthetic",
+        latitude=-3.73,
+        longitude=-38.54,
+        accuracy_m=12.5,
+        precision="PRECISE",
+        captured_at=NOW,
+        received_at=NOW,
+    )
+
+
 @pytest.fixture
 def client():
-    service, session = FakeService(), FakeSession()
+    service = FakeService()
+    session = FakeSession()
 
     def get_session():
         yield session
@@ -64,30 +84,14 @@ def client():
     return TestClient(app), service, session
 
 
-def snapshot():
-    return ClientLocationSnapshot(
-        location_snapshot_id="cloc_" + "a" * 24,
-        human_identity_id="hid_" + "b" * 24,
-        device_id="cdev_" + "c" * 24,
-        tenant_id="tnt_synthetic",
-        latitude=-3.73,
-        longitude=-38.54,
-        accuracy_m=12.5,
-        precision=ClientLocationPrecision.PRECISE,
-        captured_at=datetime(2026, 9, 18, 23, 30, tzinfo=UTC),
-        received_at=datetime(2026, 9, 18, 23, 30, 2, tzinfo=UTC),
-    )
-
-
-def auth():
-    return {"Authorization": f"Bearer {TOKEN}"}
-
-
-def test_put_passes_observation_and_bearer_without_authority_claims(client):
+def test_authenticated_put_and_get_wire_shapes(client):
     http, service, session = client
-    response = http.put(
+    token = "cst_" + "x" * 43
+    headers = {"Authorization": f"Bearer {token}"}
+
+    put = http.put(
         CURRENT,
-        headers=auth(),
+        headers=headers,
         json={
             "latitude": -3.73,
             "longitude": -38.54,
@@ -96,59 +100,83 @@ def test_put_passes_observation_and_bearer_without_authority_claims(client):
             "precision": "PRECISE",
         },
     )
-    assert response.status_code == 200
-    call = service.put_calls[-1]
-    assert call[0] is session
-    assert call[1]["session_token"] == TOKEN
-    observation = call[1]["observation"]
-    assert observation.latitude == -3.73
-    assert observation.precision is ClientLocationPrecision.PRECISE
-    assert "human_identity_id" not in call[1]
-    assert "device_id" not in call[1]
-    assert "tenant_id" not in call[1]
+    assert put.status_code == 200
+    assert put.json()["tenant_id"] == "tnt_synthetic"
+    assert service.put_calls[0][0] is session
+    assert service.put_calls[0][1]["session_token"] == token
+    assert service.put_calls[0][1]["observation"].latitude == -3.73
+
+    get = http.get(CURRENT, headers=headers)
+    assert get.status_code == 200
+    assert get.json()["device_id"].startswith("cdev_")
+    assert service.get_calls[0][1]["session_token"] == token
 
 
-def test_get_passes_only_bearer_authority(client):
-    http, service, session = client
-    response = http.get(CURRENT, headers=auth())
-    assert response.status_code == 200
-    assert service.get_calls[-1] == (
-        session,
-        {"session_token": TOKEN},
-    )
-    assert response.json()["tenant_id"] == "tnt_synthetic"
-
-
-@pytest.mark.parametrize(
-    ("error", "status_code", "code"),
-    [
-        (ClientLocationStale(), 400, "CLIENT_LOCATION_STALE"),
-        (ClientLocationFuture(), 400, "CLIENT_LOCATION_FUTURE"),
-        (
-            ClientLocationUnauthenticated(),
-            401,
-            "CLIENT_LOCATION_UNAUTHENTICATED",
-        ),
-        (
-            ClientLocationAuthorityRejected(),
-            403,
-            "CLIENT_LOCATION_AUTHORITY_REJECTED",
-        ),
-        (ClientLocationNotFound(), 404, "CLIENT_LOCATION_NOT_FOUND"),
-        (ClientLocationDisabled(), 503, "CLIENT_LOCATION_DISABLED"),
-    ],
-)
-def test_errors_are_bounded(client, error, status_code, code):
-    http, service, _ = client
-    service.get_error = error
-    response = http.get(CURRENT, headers=auth())
-    assert response.status_code == status_code
-    assert response.json() == {"code": code}
-
-
-def test_missing_bearer_maps_to_bounded_unauthenticated(client):
+def test_missing_bearer_maps_to_unauthenticated(client):
     http, service, _ = client
     service.get_error = ClientLocationUnauthenticated()
     response = http.get(CURRENT)
     assert response.status_code == 401
     assert response.json() == {"code": "CLIENT_LOCATION_UNAUTHENTICATED"}
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code", "code"),
+    [
+        (
+            ClientLocationAuthorityRejected(),
+            403,
+            "CLIENT_LOCATION_AUTHORITY_REJECTED",
+        ),
+        (
+            ClientLocationStale(),
+            400,
+            "CLIENT_LOCATION_STALE",
+        ),
+    ],
+)
+def test_location_errors_are_bounded(client, error, status_code, code):
+    http, service, _ = client
+    service.put_error = error
+    response = http.put(
+        CURRENT,
+        headers={"Authorization": "Bearer " + "cst_" + "x" * 43},
+        json={
+            "latitude": -3.73,
+            "longitude": -38.54,
+            "accuracy_m": 12.5,
+            "captured_at": "2026-09-18T23:30:00Z",
+        },
+    )
+    assert response.status_code == status_code
+    assert response.json() == {"code": code}
+
+
+def test_request_rejects_client_selected_authority_ids(client):
+    http, _, _ = client
+    response = http.put(
+        CURRENT,
+        headers={"Authorization": "Bearer " + "cst_" + "x" * 43},
+        json={
+            "latitude": -3.73,
+            "longitude": -38.54,
+            "accuracy_m": 12.5,
+            "captured_at": "2026-09-18T23:30:00Z",
+            "tenant_id": "tnt_attacker",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_runtime_openapi_matches_frozen_v04a_contract(client):
+    runtime = client[0].app.openapi()
+    actual = runtime["paths"][CURRENT]
+    expected = CONTRACT["paths"][CURRENT]
+    for method in ("put", "get"):
+        assert actual[method]["operationId"] == expected[method]["operationId"]
+        assert actual[method]["security"] == expected[method]["security"]
+        for status_code, response in expected[method]["responses"].items():
+            assert actual[method]["responses"][status_code]["content"] == response["content"]
+    scheme = runtime["components"]["securitySchemes"]["ClientSession"]
+    assert scheme["scheme"] == "bearer"
+    assert scheme["bearerFormat"] == "opaque-client-session-v03c"

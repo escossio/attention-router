@@ -1,4 +1,4 @@
-"""HTTP boundary for V0.4A current client location snapshots."""
+"""V0.4A authenticated current-location API."""
 
 from __future__ import annotations
 
@@ -30,59 +30,58 @@ from attention_router.core.client.location import (
 
 class ClientLocationWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    latitude: float = Field(ge=-90, le=90)
-    longitude: float = Field(ge=-180, le=180)
-    accuracy_m: float = Field(gt=0, le=10_000)
+
+    latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    accuracy_m: float = Field(gt=0, le=10_000, allow_inf_nan=False)
     captured_at: datetime
-    precision: ClientLocationPrecision | None = None
+    precision: Literal["PRECISE", "APPROXIMATE"] | None = None
 
 
-class ClientLocationSnapshotResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class ClientLocationSnapshot(BaseModel):
     contract_version: Literal["1"]
-    location_snapshot_id: str = Field(pattern=r"^cloc_[A-Za-z0-9_-]{20,}$")
-    human_identity_id: str = Field(pattern=r"^hid_[A-Za-z0-9_-]{20,}$")
-    device_id: str = Field(pattern=r"^cdev_[A-Za-z0-9_-]{20,}$")
-    tenant_id: str = Field(min_length=1, max_length=64)
-    latitude: float = Field(ge=-90, le=90)
-    longitude: float = Field(ge=-180, le=180)
-    accuracy_m: float = Field(gt=0, le=10_000)
-    precision: ClientLocationPrecision | None = None
+    location_snapshot_id: str
+    human_identity_id: str
+    device_id: str
+    tenant_id: str
+    latitude: float
+    longitude: float
+    accuracy_m: float
+    precision: Literal["PRECISE", "APPROXIMATE"] | None = None
     captured_at: datetime
     received_at: datetime
 
 
-ClientLocationErrorCode = Literal[
-    "CLIENT_LOCATION_DISABLED",
-    "CLIENT_LOCATION_INVALID",
-    "CLIENT_LOCATION_STALE",
-    "CLIENT_LOCATION_FUTURE",
-    "CLIENT_LOCATION_UNAUTHENTICATED",
-    "CLIENT_LOCATION_AUTHORITY_REJECTED",
-    "CLIENT_LOCATION_NOT_FOUND",
-    "CLIENT_LOCATION_UNAVAILABLE",
-]
-
-
 class ClientLocationErrorResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    code: ClientLocationErrorCode
-
+    code: Literal[
+        "CLIENT_LOCATION_DISABLED",
+        "CLIENT_LOCATION_INVALID",
+        "CLIENT_LOCATION_STALE",
+        "CLIENT_LOCATION_FUTURE",
+        "CLIENT_LOCATION_UNAUTHENTICATED",
+        "CLIENT_LOCATION_AUTHORITY_REJECTED",
+        "CLIENT_LOCATION_NOT_FOUND",
+        "CLIENT_LOCATION_UNAVAILABLE",
+    ]
 
 _BEARER = HTTPBearer(
     scheme_name="ClientSession",
     bearerFormat="opaque-client-session-v03c",
+    description=(
+        "Short-lived opaque client-session credential scoped server-side to "
+        "Human Identity, device and active tenant."
+    ),
     auto_error=False,
 )
 
 _ERROR_STATUS = {
+    ClientLocationDisabled: status.HTTP_503_SERVICE_UNAVAILABLE,
     ClientLocationInvalid: status.HTTP_400_BAD_REQUEST,
     ClientLocationStale: status.HTTP_400_BAD_REQUEST,
     ClientLocationFuture: status.HTTP_400_BAD_REQUEST,
     ClientLocationUnauthenticated: status.HTTP_401_UNAUTHORIZED,
     ClientLocationAuthorityRejected: status.HTTP_403_FORBIDDEN,
     ClientLocationNotFound: status.HTTP_404_NOT_FOUND,
-    ClientLocationDisabled: status.HTTP_503_SERVICE_UNAVAILABLE,
     ClientLocationUnavailable: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 
@@ -94,19 +93,19 @@ def _error_response(error: Exception) -> JSONResponse:
     )
 
 
-def _response(snapshot) -> ClientLocationSnapshotResponse:
-    return ClientLocationSnapshotResponse(
-        contract_version="1",
-        location_snapshot_id=snapshot.location_snapshot_id,
-        human_identity_id=snapshot.human_identity_id,
-        device_id=snapshot.device_id,
-        tenant_id=snapshot.tenant_id,
-        latitude=snapshot.latitude,
-        longitude=snapshot.longitude,
-        accuracy_m=snapshot.accuracy_m,
-        precision=snapshot.precision,
-        captured_at=snapshot.captured_at,
-        received_at=snapshot.received_at,
+def _snapshot(result) -> ClientLocationSnapshot:
+    return ClientLocationSnapshot(
+        contract_version=result.contract_version,
+        location_snapshot_id=result.location_snapshot_id,
+        human_identity_id=result.human_identity_id,
+        device_id=result.device_id,
+        tenant_id=result.tenant_id,
+        latitude=result.latitude,
+        longitude=result.longitude,
+        accuracy_m=result.accuracy_m,
+        precision=result.precision,
+        captured_at=result.captured_at,
+        received_at=result.received_at,
     )
 
 
@@ -119,7 +118,7 @@ def build_client_location_router(
 
     @router.put(
         "/api/v1/client/location/current",
-        response_model=ClientLocationSnapshotResponse,
+        response_model=ClientLocationSnapshot,
         responses={
             400: {"model": ClientLocationErrorResponse},
             401: {"model": ClientLocationErrorResponse},
@@ -128,35 +127,40 @@ def build_client_location_router(
         },
         operation_id="putCurrentClientLocation",
     )
-    def put_current(
+    def put_current_location(
         payload: ClientLocationWriteRequest,
         credentials: Annotated[
             HTTPAuthorizationCredentials | None,
             Security(_BEARER),
         ],
         session: Session = Depends(get_session),
-    ) -> ClientLocationSnapshotResponse | JSONResponse:
+    ) -> ClientLocationSnapshot | JSONResponse:
         token = credentials.credentials if credentials is not None else None
+        observation = CurrentLocationObservation(
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy_m=payload.accuracy_m,
+            captured_at=payload.captured_at,
+            precision=(
+                ClientLocationPrecision(payload.precision)
+                if payload.precision is not None
+                else None
+            ),
+        )
         try:
             with session.begin_nested():
-                snapshot = service.put_current(
+                result = service.put_current(
                     session,
                     session_token=token,
-                    observation=CurrentLocationObservation(
-                        latitude=payload.latitude,
-                        longitude=payload.longitude,
-                        accuracy_m=payload.accuracy_m,
-                        captured_at=payload.captured_at,
-                        precision=payload.precision,
-                    ),
+                    observation=observation,
                 )
         except tuple(_ERROR_STATUS) as error:
             return _error_response(error)
-        return _response(snapshot)
+        return _snapshot(result)
 
     @router.get(
         "/api/v1/client/location/current",
-        response_model=ClientLocationSnapshotResponse,
+        response_model=ClientLocationSnapshot,
         responses={
             401: {"model": ClientLocationErrorResponse},
             403: {"model": ClientLocationErrorResponse},
@@ -165,21 +169,21 @@ def build_client_location_router(
         },
         operation_id="getCurrentClientLocation",
     )
-    def get_current(
+    def get_current_location(
         credentials: Annotated[
             HTTPAuthorizationCredentials | None,
             Security(_BEARER),
         ],
         session: Session = Depends(get_session),
-    ) -> ClientLocationSnapshotResponse | JSONResponse:
+    ) -> ClientLocationSnapshot | JSONResponse:
         token = credentials.credentials if credentials is not None else None
         try:
-            snapshot = service.get_current(
+            result = service.get_current(
                 session,
                 session_token=token,
             )
         except tuple(_ERROR_STATUS) as error:
             return _error_response(error)
-        return _response(snapshot)
+        return _snapshot(result)
 
     return router

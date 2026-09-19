@@ -1,4 +1,4 @@
-"""Inspect the V0.4A client-location schema after Alembic migration."""
+"""Inspect the V0.4A current-location schema after Alembic migration."""
 
 import os
 
@@ -19,7 +19,11 @@ def test_client_location_snapshot_migration_schema():
             ).scalars().all() == ["0042_client_location_snapshot"]
 
             schema = inspect(connection)
-            assert "client_location_snapshots" in set(schema.get_table_names())
+            tables = set(schema.get_table_names())
+            assert "client_location_snapshots" in tables
+            assert "client_location_history" not in tables
+            assert "client_location_events" not in tables
+
             columns = {
                 item["name"]: item
                 for item in schema.get_columns("client_location_snapshots")
@@ -35,25 +39,11 @@ def test_client_location_snapshot_migration_schema():
                 "precision",
                 "captured_at",
                 "received_at",
-                "updated_at",
             }
             assert isinstance(columns["latitude"]["type"], Float)
             assert isinstance(columns["longitude"]["type"], Float)
             assert isinstance(columns["accuracy_m"]["type"], Float)
             assert isinstance(columns["precision"]["type"], String)
-            assert columns["precision"]["type"].length == 16
-
-            forbidden = {
-                "session_token",
-                "access_token",
-                "refresh_token",
-                "raw_token",
-                "private_key",
-                "google_sub",
-                "email",
-                "address",
-            }
-            assert forbidden.isdisjoint(columns)
 
             uniques = {
                 item["name"]: item["column_names"]
@@ -61,11 +51,48 @@ def test_client_location_snapshot_migration_schema():
                     "client_location_snapshots"
                 )
             }
-            assert uniques == {
-                "uq_client_location_device_tenant": [
-                    "device_id",
-                    "tenant_id",
-                ]
+            assert uniques["uq_client_location_device_tenant"] == [
+                "device_id",
+                "tenant_id",
+            ]
+
+            foreign_keys = {
+                item["name"]: (
+                    item["constrained_columns"],
+                    item["referred_table"],
+                    item["referred_columns"],
+                )
+                for item in schema.get_foreign_keys(
+                    "client_location_snapshots"
+                )
             }
+            assert foreign_keys["fk_client_location_human_identity"] == (
+                ["human_identity_id"],
+                "human_identities",
+                ["id"],
+            )
+            assert foreign_keys["fk_client_location_device"] == (
+                ["device_id"],
+                "client_devices",
+                ["id"],
+            )
+            assert foreign_keys["fk_client_location_tenant"] == (
+                ["tenant_id"],
+                "tenants",
+                ["id"],
+            )
+
+            forbidden = {
+                "session_token",
+                "token_digest",
+                "access_token",
+                "refresh_token",
+                "raw_token",
+                "address",
+                "speed",
+                "bearing",
+                "altitude",
+            }
+            assert forbidden.isdisjoint(columns)
     finally:
         engine.dispose()

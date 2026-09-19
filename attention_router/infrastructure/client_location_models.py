@@ -1,4 +1,4 @@
-"""Persistence row for the V0.4A latest client location snapshot."""
+"""Persistence row for V0.4A current client-location snapshot."""
 
 from __future__ import annotations
 
@@ -25,10 +25,7 @@ class ClientLocationSnapshotRow(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     human_identity_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey(
-            "human_identities.id",
-            name="fk_client_location_human_identity",
-        ),
+        ForeignKey("human_identities.id", name="fk_client_location_human_identity"),
         nullable=False,
     )
     device_id: Mapped[str] = mapped_column(
@@ -45,18 +42,8 @@ class ClientLocationSnapshotRow(Base):
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
     accuracy_m: Mapped[float] = mapped_column(Float, nullable=False)
     precision: Mapped[str | None] = mapped_column(String(16))
-    captured_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-    received_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
         PrimaryKeyConstraint("id", name="pk_client_location_snapshots"),
@@ -66,19 +53,19 @@ class ClientLocationSnapshotRow(Base):
             name="uq_client_location_device_tenant",
         ),
         CheckConstraint(
-            "latitude >= -90 AND latitude <= 90",
+            "latitude >= -90 and latitude <= 90",
             name="ck_client_location_latitude",
         ),
         CheckConstraint(
-            "longitude >= -180 AND longitude <= 180",
+            "longitude >= -180 and longitude <= 180",
             name="ck_client_location_longitude",
         ),
         CheckConstraint(
-            "accuracy_m > 0 AND accuracy_m <= 10000",
+            "accuracy_m > 0 and accuracy_m <= 10000",
             name="ck_client_location_accuracy",
         ),
         CheckConstraint(
-            "precision IS NULL OR precision IN ('PRECISE', 'APPROXIMATE')",
+            "precision is null or precision in ('PRECISE','APPROXIMATE')",
             name="ck_client_location_precision",
         ),
         Index(

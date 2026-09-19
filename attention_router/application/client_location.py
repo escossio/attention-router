@@ -1,4 +1,4 @@
-"""Application authority for V0.4A current client location snapshots."""
+"""V0.4A authenticated current-location snapshot service."""
 
 from __future__ import annotations
 
@@ -7,33 +7,22 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from attention_router.application.client_session import (
+    ClientSessionAuthorityRejected,
+    ClientSessionError,
+    ClientSessionService,
+    ClientSessionUnauthenticated,
+)
 from attention_router.config import Settings
 from attention_router.core.client.location import (
-    ClientLocationPrecision,
     ClientLocationValidationError,
     CurrentLocationObservation,
     require_current_location_observation,
 )
-from attention_router.infrastructure import (
-    client_location_repository as location_repository,
-)
-from attention_router.infrastructure import client_session_repository as session_repository
-from attention_router.application.client_session import (
-    ClientSessionAuthorityRejected,
-    ClientSessionGrant,
-    ClientSessionState,
-    ClientSessionUnauthenticated,
-    _aware,
-    _device_authority,
-    _membership_authority,
-)
-from attention_router.core.client.session import (
-    ClientSessionAuthorityError,
-    require_client_session_authority,
-)
+from attention_router.infrastructure import client_location_repository as repository
 
 
-class ClientLocationError(RuntimeError):
+class ClientLocationError(Exception):
     code = "CLIENT_LOCATION_UNAVAILABLE"
 
 
@@ -67,10 +56,8 @@ class ClientLocationNotFound(ClientLocationError):
 
 class ClientLocationUnavailable(ClientLocationError):
     code = "CLIENT_LOCATION_UNAVAILABLE"
-
-
 @dataclass(frozen=True, slots=True)
-class ClientLocationSnapshot:
+class ClientLocationSnapshotResult:
     location_snapshot_id: str
     human_identity_id: str
     device_id: str
@@ -78,14 +65,25 @@ class ClientLocationSnapshot:
     latitude: float
     longitude: float
     accuracy_m: float
-    precision: ClientLocationPrecision | None
+    precision: str | None
     captured_at: datetime
     received_at: datetime
+    contract_version: str = "1"
+
+
+def _aware(value: datetime, reference: datetime) -> datetime:
+    return value.replace(tzinfo=reference.tzinfo or UTC) if value.tzinfo is None else value
 
 
 class ClientLocationService:
-    def __init__(self, *, settings: Settings):
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        session_service: ClientSessionService,
+    ):
         self.settings = settings
+        self.session_service = session_service
 
     def _require_enabled(self) -> None:
         if not self.settings.client_location_enabled:
@@ -98,55 +96,18 @@ class ClientLocationService:
         session_token: str | None,
         now: datetime,
     ):
-        if not isinstance(session_token, str):
-            raise ClientLocationUnauthenticated()
         try:
-            session_row = session_repository.get_client_session_by_token(
+            return self.session_service.authenticated_bootstrap(
                 session,
-                token=session_token,
-            )
-        except (UnicodeEncodeError, ValueError):
-            raise ClientLocationUnauthenticated() from None
-        if (
-            session_row is None
-            or session_row.state != "ACTIVE"
-            or _aware(session_row.expires_at, now) <= now
-        ):
-            raise ClientLocationUnauthenticated()
-        device = session_repository.get_client_device(
-            session,
-            device_id=session_row.device_id,
-        )
-        membership = session_repository.get_membership(
-            session,
-            human_identity_id=session_row.human_identity_id,
-            tenant_id=session_row.tenant_id,
-        )
-        tenant = session_repository.get_tenant(
-            session,
-            tenant_id=session_row.tenant_id,
-        )
-        if device is None or membership is None or tenant is None:
-            raise ClientLocationAuthorityRejected()
-        grant = ClientSessionGrant(
-            session_id=session_row.id,
-            human_identity_id=session_row.human_identity_id,
-            device_id=session_row.device_id,
-            tenant_id=session_row.tenant_id,
-            state=ClientSessionState(session_row.state),
-            expires_at=_aware(session_row.expires_at, now),
-        )
-        try:
-            require_client_session_authority(
-                session=grant,
-                device=_device_authority(device),
-                membership=_membership_authority(membership),
-                tenant_active=tenant.status == "ACTIVE",
+                session_token=session_token,
                 now=now,
             )
-        except (ValueError, ClientSessionAuthorityError) as error:
+        except ClientSessionUnauthenticated as error:
+            raise ClientLocationUnauthenticated() from error
+        except ClientSessionAuthorityRejected as error:
             raise ClientLocationAuthorityRejected() from error
-        return session_row
+        except ClientSessionError as error:
+            raise ClientLocationUnavailable() from error
 
     def put_current(
         self,
@@ -155,7 +116,7 @@ class ClientLocationService:
         session_token: str | None,
         observation: CurrentLocationObservation,
         now: datetime | None = None,
-    ) -> ClientLocationSnapshot:
+    ) -> ClientLocationSnapshotResult:
         self._require_enabled()
         current = now if now is not None else datetime.now(UTC)
         authority = self._authority(
@@ -171,23 +132,28 @@ class ClientLocationService:
             if error.reason_code == "LOCATION_FUTURE":
                 raise ClientLocationFuture() from error
             raise ClientLocationInvalid() from error
-        row = location_repository.upsert_current_location(
-            session,
-            human_identity_id=authority.human_identity_id,
-            device_id=authority.device_id,
-            tenant_id=authority.tenant_id,
-            latitude=observation.latitude,
-            longitude=observation.longitude,
-            accuracy_m=observation.accuracy_m,
-            precision=(
-                observation.precision.value
-                if observation.precision is not None
-                else None
-            ),
-            captured_at=observation.captured_at,
-            now=current,
-        )
-        return _snapshot(row)
+        try:
+            row = repository.upsert_current_location(
+                session,
+                human_identity_id=authority.human_identity_id,
+                device_id=authority.device.device_id,
+                tenant_id=authority.active_tenant_id,
+                latitude=observation.latitude,
+                longitude=observation.longitude,
+                accuracy_m=observation.accuracy_m,
+                precision=(
+                    observation.precision.value
+                    if observation.precision is not None
+                    else None
+                ),
+                captured_at=observation.captured_at,
+                received_at=current,
+            )
+        except repository.LocationSnapshotStale as error:
+            raise ClientLocationStale() from error
+        except repository.LocationSnapshotConflict as error:
+            raise ClientLocationUnavailable() from error
+        return self._result(row, reference=current)
 
     def get_current(
         self,
@@ -195,7 +161,7 @@ class ClientLocationService:
         *,
         session_token: str | None,
         now: datetime | None = None,
-    ) -> ClientLocationSnapshot:
+    ) -> ClientLocationSnapshotResult:
         self._require_enabled()
         current = now if now is not None else datetime.now(UTC)
         authority = self._authority(
@@ -203,32 +169,32 @@ class ClientLocationService:
             session_token=session_token,
             now=current,
         )
-        row = location_repository.get_current_location(
+        row = repository.get_current_location(
             session,
-            device_id=authority.device_id,
-            tenant_id=authority.tenant_id,
+            device_id=authority.device.device_id,
+            tenant_id=authority.active_tenant_id,
         )
         if row is None:
             raise ClientLocationNotFound()
         if row.human_identity_id != authority.human_identity_id:
             raise ClientLocationAuthorityRejected()
-        return _snapshot(row)
+        return self._result(row, reference=current)
 
-
-def _snapshot(row) -> ClientLocationSnapshot:
-    return ClientLocationSnapshot(
-        location_snapshot_id=row.id,
-        human_identity_id=row.human_identity_id,
-        device_id=row.device_id,
-        tenant_id=row.tenant_id,
-        latitude=row.latitude,
-        longitude=row.longitude,
-        accuracy_m=row.accuracy_m,
-        precision=(
-            ClientLocationPrecision(row.precision)
-            if row.precision is not None
-            else None
-        ),
-        captured_at=row.captured_at,
-        received_at=row.received_at,
-    )
+    @staticmethod
+    def _result(
+        row,
+        *,
+        reference: datetime,
+    ) -> ClientLocationSnapshotResult:
+        return ClientLocationSnapshotResult(
+            location_snapshot_id=row.id,
+            human_identity_id=row.human_identity_id,
+            device_id=row.device_id,
+            tenant_id=row.tenant_id,
+            latitude=row.latitude,
+            longitude=row.longitude,
+            accuracy_m=row.accuracy_m,
+            precision=row.precision,
+            captured_at=_aware(row.captured_at, reference),
+            received_at=_aware(row.received_at, reference),
+        )

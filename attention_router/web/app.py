@@ -82,7 +82,10 @@ human_identity_service = HumanIdentityService(
 )
 device_bootstrap_service = DeviceBootstrapService(settings=settings)
 client_session_service = ClientSessionService(settings=settings)
-client_location_service = ClientLocationService(settings=settings)
+client_location_service = ClientLocationService(
+    settings=settings,
+    session_service=client_session_service,
+)
 
 
 def get_session():
