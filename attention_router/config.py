@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     client_session_enabled: bool = False
     client_session_challenge_ttl_seconds: int = 300
     client_session_ttl_seconds: int = 900
+    client_location_enabled: bool = False
     google_identity_audience: str | None = None
     ingress_http_host: str = "0.0.0.0"
     ingress_http_port: int = 18101

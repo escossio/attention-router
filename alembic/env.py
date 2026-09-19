@@ -7,6 +7,7 @@ from attention_router.config import settings
 from attention_router.infrastructure.db import Base
 from attention_router.infrastructure import artifact_models  # noqa: F401
 from attention_router.infrastructure import human_identity_models  # noqa: F401
+from attention_router.infrastructure import client_location_models  # noqa: F401
 from attention_router.infrastructure import models  # noqa: F401
 
 config = context.config
