@@ -68,6 +68,14 @@ Both operator UIs are bound to the trusted LAN interface only; they are not part
 
 The AGT host has reproducible out-of-band provisioning packages for the [GitHub App control-plane ingress](ops/provisioning/github-app-control-plane/README.md) and [authorized remote operator access](ops/provisioning/agt-remote-access/README.md). These packages keep host secrets outside Git and do not replace the repository-native CI Agent or application authority boundaries.
 
+## Distributed CI Lab
+
+Attention Router also uses a capacity-aware three-worker local CI lab for fast pre-certification of an exact approved SHA. The PostgreSQL suite is weighted by measured test cost rather than split by test count, and GitHub Actions remains the independent public certification path.
+
+A 2026-09-19 benchmark reduced the full 403-test PostgreSQL gate from **286 s on the original single worker to 99 s wall-clock across three heterogeneous workers** (~2.9x faster). Warm dependency caching also reduced the fast validation gate to 4–6 seconds per worker.
+
+See [Distributed CI Lab](docs/distributed-ci-lab.md) for the architecture, worker model, security boundaries and benchmark methodology.
+
 ## Safety and human control
 
 The model does not grant itself permission to act. Owner pause, policies and approval gates remain outside model authority. Proposed text, synthesized audio and confirmed delivery are different states. Ambiguous delivery is not proof of a conversation turn and must not be blindly replayed.
