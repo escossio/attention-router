@@ -142,7 +142,19 @@ def test_manifest_sync_and_future_capabilities_fail_closed(session):
     assert ensure_default_tenant(session).id == DEFAULT_TENANT_ID
     status = {item["capability"]: item for item in matrix_status(session)}
     assert status["conversation.reply"]["state"] == "OPERATIONAL"
-    for name in ("location.current", "payment.verify", "artifact.temporary_access"):
+    assert status["location.current"]["state"] == "OPERATIONAL"
+    location = resolve_capability_request(
+        session,
+        CapabilityRequest(capability="location.current"),
+        tenant_id=DEFAULT_TENANT_ID,
+        grantee_type="ACTOR",
+        grantee_id="actor",
+        policy_allows=True,
+    )
+    assert location.status == CapabilityResolutionStatus.KNOWN_BUT_UNAVAILABLE
+    assert location.reason_code == "CAPABILITY_UNAVAILABLE"
+
+    for name in ("payment.verify", "artifact.temporary_access"):
         assert status[name]["state"] == "PROVIDER_MISSING"
         resolution = resolve_capability_request(
             session,
