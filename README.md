@@ -68,6 +68,12 @@ Both operator UIs are bound to the trusted LAN interface only; they are not part
 
 The AGT host has reproducible out-of-band provisioning packages for the [GitHub App control-plane ingress](ops/provisioning/github-app-control-plane/README.md) and [authorized remote operator access](ops/provisioning/agt-remote-access/README.md). These packages keep host secrets outside Git and do not replace the repository-native CI Agent or application authority boundaries.
 
+## Distributed CI acceleration
+
+A self-managed heterogeneous CI control plane accelerates the PostgreSQL integration gate by profiling test duration and weighting work across two bare-metal workers and one KVM virtualized worker. On the measured 403-test suite, distributed worker wall time fell from a 286-second initial single-worker baseline to **99 seconds**; the complete control-plane invocation finished in about **103 seconds**.
+
+The lab executes explicit commit SHAs with disposable worktrees and synthetic PostgreSQL instances. It is a preflight accelerator, not a replacement for GitHub Actions or CodeQL. See the [heterogeneous distributed CI lab](ops/provisioning/distributed-ci-lab/README.md) for architecture, benchmark evidence and security boundaries.
+
 ## Safety and human control
 
 The model does not grant itself permission to act. Owner pause, policies and approval gates remain outside model authority. Proposed text, synthesized audio and confirmed delivery are different states. Ambiguous delivery is not proof of a conversation turn and must not be blindly replayed.
