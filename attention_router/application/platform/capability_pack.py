@@ -30,10 +30,16 @@ from attention_router.application.platform.registry import (
     sync_platform_registry,
 )
 from attention_router.core.capabilities import CapabilityRequest
+from attention_router.core.client.location import MAX_LOCATION_AGE_SECONDS
 from attention_router.core.entities import EntityReference
 from attention_router.core.events import EventOrigin
 from attention_router.core.providers import ProviderResult, ProviderRuntimeRegistry
 from attention_router.domain.models import new_id, now_utc
+from attention_router.infrastructure.client_location_repository import (
+    LocationSnapshotAuthorityUnavailable,
+    LocationSnapshotDeviceAmbiguous,
+    resolve_owner_current_location,
+)
 from attention_router.infrastructure.models import (
     CapabilityDefinitionRow,
     CapabilityGrantRow,
@@ -56,6 +62,7 @@ INTERNAL_PROVIDERS = {
     "internal:grants": "internal_grants",
     "internal:timeline": "internal_timeline",
     "internal:reply": "internal_reply",
+    "internal:location-snapshot": "location",
 }
 
 CAPABILITY_PROVIDER = {
@@ -74,6 +81,7 @@ CAPABILITY_PROVIDER = {
     "grant.revoke": "internal:grants",
     "timeline.query": "internal:timeline",
     "conversation.reply": "internal:reply",
+    "location.current": "internal:location-snapshot",
 }
 
 
@@ -718,6 +726,61 @@ class InternalTimelineProvider(_InternalProvider):
         )
 
 
+class CurrentLocationSnapshotProvider:
+    interface_name = "LocationProvider"
+
+    def __init__(self, session: Session, tenant_id: str) -> None:
+        self.session = session
+        self.tenant_id = tenant_id
+
+    def health(self) -> str:
+        return "HEALTHY"
+
+    def current_location(self, subject_ref: str) -> ProviderResult:
+        if subject_ref != "represented_owner":
+            return ProviderResult(False, reason_code="LOCATION_SUBJECT_UNSUPPORTED")
+        try:
+            row = resolve_owner_current_location(self.session, tenant_id=self.tenant_id)
+        except (LocationSnapshotAuthorityUnavailable, LocationSnapshotDeviceAmbiguous) as exc:
+            return ProviderResult(False, reason_code=str(exc))
+
+        captured_at = _dt(row.captured_at)
+        received_at = _dt(row.received_at)
+        if captured_at is None or received_at is None:
+            return ProviderResult(False, reason_code="LOCATION_TIMESTAMP_INVALID")
+        age_seconds = max(
+            0,
+            int((now_utc().astimezone(timezone.utc) - captured_at.astimezone(timezone.utc)).total_seconds()),
+        )
+        freshness_state = (
+            "CURRENT" if age_seconds <= MAX_LOCATION_AGE_SECONDS else "STALE"
+        )
+        return ProviderResult(
+            True,
+            {
+                "latitude": row.latitude,
+                "longitude": row.longitude,
+                "accuracy_m": row.accuracy_m,
+                "precision": row.precision,
+                "captured_at": captured_at.isoformat(),
+                "received_at": received_at.isoformat(),
+                "age_seconds": age_seconds,
+                "freshness_state": freshness_state,
+            },
+            "LOCATION_CURRENT_RESOLVED",
+        )
+
+    def execute(self, capability: str, parameters: Mapping[str, Any]) -> ProviderResult:
+        if capability != "location.current":
+            return ProviderResult(False, reason_code="CAPABILITY_NOT_SUPPORTED")
+        execution = _execution(parameters)
+        if execution.get("owner_authenticated") is not True:
+            return ProviderResult(False, reason_code="OWNER_AUTHORITY_REQUIRED")
+        if any(key != "_execution" for key in parameters):
+            return ProviderResult(False, reason_code="LOCATION_PARAMETERS_NOT_ALLOWED")
+        return self.current_location("represented_owner")
+
+
 def internal_runtime_registry(session: Session, tenant_id: str) -> ProviderRuntimeRegistry:
     provision_internal_providers(session, tenant_id)
     registry = ProviderRuntimeRegistry()
@@ -739,6 +802,7 @@ def internal_runtime_registry(session: Session, tenant_id: str) -> ProviderRunti
             session, tenant_id, "InternalTimelineProvider"
         ),
         "internal:reply": InternalReplyProvider(session, tenant_id),
+        "internal:location-snapshot": CurrentLocationSnapshotProvider(session, tenant_id),
     }
     for name, implementation in implementations.items():
         instance = session.scalar(
