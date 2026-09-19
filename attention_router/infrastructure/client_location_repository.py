@@ -9,9 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from attention_router.infrastructure.client_bootstrap_models import (
+    ClientDeviceRow,
+    ClientTenantMembershipRow,
+)
 from attention_router.infrastructure.client_location_models import (
     ClientLocationSnapshotRow,
 )
+from attention_router.infrastructure.models import TenantRow
 
 
 class LocationSnapshotConflict(RuntimeError):
@@ -20,6 +25,64 @@ class LocationSnapshotConflict(RuntimeError):
 
 class LocationSnapshotStale(RuntimeError):
     pass
+
+
+class LocationSnapshotAuthorityUnavailable(RuntimeError):
+    pass
+
+
+class LocationSnapshotDeviceAmbiguous(RuntimeError):
+    pass
+
+
+def resolve_owner_current_location(
+    session: Session,
+    *,
+    tenant_id: str,
+) -> ClientLocationSnapshotRow:
+    """Resolve one current owner snapshot without implicit device fallback."""
+    tenant = session.get(TenantRow, tenant_id)
+    if tenant is None or tenant.status != "ACTIVE":
+        raise LocationSnapshotAuthorityUnavailable("LOCATION_TENANT_INACTIVE")
+
+    owners = list(
+        session.scalars(
+            select(ClientTenantMembershipRow).where(
+                ClientTenantMembershipRow.tenant_id == tenant_id,
+                ClientTenantMembershipRow.role == "OWNER",
+                ClientTenantMembershipRow.status == "ACTIVE",
+            )
+        ).all()
+    )
+    if len(owners) != 1:
+        raise LocationSnapshotAuthorityUnavailable("LOCATION_OWNER_UNAVAILABLE")
+    human_identity_id = owners[0].human_identity_id
+
+    all_snapshots = list(
+        session.scalars(
+            select(ClientLocationSnapshotRow).where(
+                ClientLocationSnapshotRow.tenant_id == tenant_id,
+                ClientLocationSnapshotRow.human_identity_id == human_identity_id,
+            )
+        ).all()
+    )
+    if not all_snapshots:
+        raise LocationSnapshotAuthorityUnavailable("LOCATION_SNAPSHOT_UNAVAILABLE")
+
+    active_device_ids = set(
+        session.scalars(
+            select(ClientDeviceRow.id).where(
+                ClientDeviceRow.human_identity_id == human_identity_id,
+                ClientDeviceRow.status == "ACTIVE",
+            )
+        ).all()
+    )
+    candidates = [row for row in all_snapshots if row.device_id in active_device_ids]
+    if not candidates:
+        raise LocationSnapshotAuthorityUnavailable("LOCATION_DEVICE_INACTIVE")
+    if len(candidates) != 1:
+        raise LocationSnapshotDeviceAmbiguous("LOCATION_DEVICE_AMBIGUOUS")
+    return candidates[0]
 
 
 def _aware(value: datetime, reference: datetime) -> datetime:
