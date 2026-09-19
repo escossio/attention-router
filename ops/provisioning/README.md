@@ -6,6 +6,7 @@ This directory holds host-level operational packages that are deliberately kept 
 
 - [GitHub App control plane](github-app-control-plane/README.md): provisions the AGT webhook ingress used by the `andy-github-control-plane` GitHub App.
 - [AGT remote operator access](agt-remote-access/README.md): documents the isolated Remote Desktop Commander bridge used for authorized terminal/filesystem access.
+- [Heterogeneous distributed CI lab](distributed-ci-lab/README.md): exact-SHA preflight scheduler with duration-aware sharding across bare-metal and KVM workers.
 
 These packages are not tenant contracts and do not expand application authority.
 
