@@ -20,7 +20,7 @@ from attention_router.core.capabilities import (
     CapabilityResolutionStatus,
 )
 from attention_router.domain.policies import resolve_policy
-from attention_router.domain.models import new_id, now_utc
+from attention_router.domain.models import new_id
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import (
     ActorBindingRow,
