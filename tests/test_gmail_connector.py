@@ -113,6 +113,37 @@ def _message(message_id: str = "m1"):
     }
 
 
+def test_config_reads_integration_credential_from_private_file(
+    tmp_path,
+    monkeypatch,
+):
+    secret = tmp_path / "integration-bearer"
+    secret.write_text("integration-secret-from-file\\n", encoding="utf-8")
+    secret.chmod(0o600)
+
+    values = {
+        "GMAIL_TENANT_ID": "tenant-1",
+        "GMAIL_INTEGRATION_INSTANCE_ID": "gmail-primary",
+        "GMAIL_INTEGRATION_ACCOUNT_ID": "gmail-account-opaque",
+        "GMAIL_CONNECTOR_STATE_PATH": str(tmp_path / "cursor.json"),
+        "ATTENTION_ROUTER_INTEGRATION_ENDPOINT": (
+            "https://router.example/api/v1/ingress/integrations/events"
+        ),
+        "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_FILE": str(secret),
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv(
+        "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL",
+        raising=False,
+    )
+
+    config = GmailConnectorConfig.from_env()
+
+    assert config.integration_credential == "integration-secret-from-file"
+    assert config.cursor_path == tmp_path / "cursor.json"
+
+
 def test_first_poll_bootstraps_current_history_without_ingesting_old_mail():
     calls = []
 
