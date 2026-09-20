@@ -7,7 +7,11 @@ from attention_router.application.personal_context_patterns import (
 )
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.models import new_id, now_utc
-from attention_router.infrastructure.models import TenantRow, TimelineEventRow
+from attention_router.infrastructure.models import (
+    RelationshipRow,
+    TenantRow,
+    TimelineEventRow,
+)
 
 
 ACTOR = "owner-pattern-actor"
@@ -39,6 +43,7 @@ def _event(
     pattern_key: str | None = "gym-arrival",
     event_type: str = "LOCATION_ARRIVAL",
     provenance: str = "android-location",
+    relationship_id: str | None = None,
 ) -> TimelineEventRow:
     _ensure_tenant(session, tenant_id)
     row = TimelineEventRow(
@@ -46,7 +51,7 @@ def _event(
         tenant_id=tenant_id,
         canonical_event_id=None,
         actor_id=actor_id,
-        relationship_id=None,
+        relationship_id=relationship_id,
         resource_id=None,
         event_type=event_type,
         event_ref=(
@@ -58,6 +63,34 @@ def _event(
         visibility="PRIVATE",
         provenance=provenance,
         metadata_json={},
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def _relationship(
+    session,
+    *,
+    tenant_id: str = DEFAULT_TENANT_ID,
+    relationship_type: str = "FREQUENT_CONTACT",
+) -> RelationshipRow:
+    _ensure_tenant(session, tenant_id)
+    stamp = now_utc()
+    row = RelationshipRow(
+        id=new_id(),
+        tenant_id=tenant_id,
+        source_entity_type="ACTOR",
+        source_entity_id=ACTOR,
+        target_entity_type="ACTOR",
+        target_entity_id="contact-pattern-actor",
+        relationship_type=relationship_type,
+        status="ACTIVE",
+        valid_from=stamp - timedelta(days=30),
+        valid_until=None,
+        metadata_json={},
+        created_at=stamp,
+        updated_at=stamp,
     )
     session.add(row)
     session.flush()
@@ -239,3 +272,65 @@ def test_unscoped_repeated_events_are_not_generalized_into_patterns(session):
     )
 
     assert hypotheses == ()
+
+
+def test_relationship_scoped_recurrence_correlates_multiple_provenance_sources(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    relationship = _relationship(session)
+    other_relationship = _relationship(
+        session,
+        relationship_type="OTHER_CONTACT",
+    )
+
+    first = _event(
+        session,
+        occurred_at=stamp - timedelta(days=2),
+        event_type="CONTACT_INTERACTION",
+        provenance="whatsapp",
+        relationship_id=relationship.id,
+    )
+    second = _event(
+        session,
+        occurred_at=stamp - timedelta(days=1),
+        event_type="CONTACT_INTERACTION",
+        provenance="calendar",
+        relationship_id=relationship.id,
+    )
+    third = _event(
+        session,
+        occurred_at=stamp,
+        event_type="CONTACT_INTERACTION",
+        provenance="sms",
+        relationship_id=relationship.id,
+    )
+    _event(
+        session,
+        occurred_at=stamp - timedelta(hours=12),
+        event_type="CONTACT_INTERACTION",
+        provenance="telegram",
+        relationship_id=other_relationship.id,
+    )
+
+    hypotheses = detect_temporal_recurrence_hypotheses(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_id=ACTOR,
+        now=stamp,
+    )
+
+    assert len(hypotheses) == 1
+    item = hypotheses[0]
+    assert item.pattern_type == "TEMPORAL_RECURRENCE"
+    assert item.event_type == "CONTACT_INTERACTION"
+    assert item.signature_kind == "RELATIONSHIP"
+    assert item.signature_value == relationship.id
+    assert item.evidence_timeline_event_ids == (
+        first.id,
+        second.id,
+        third.id,
+    )
+    assert item.source_provenance == ("calendar", "sms", "whatsapp")
+    assert item.occurrence_count == 3
+    assert item.support_ratio == 1.0
+    assert item.grants_authority is False
+    assert item.recommendation_ready is False
