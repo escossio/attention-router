@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
+from email.utils import getaddresses, parsedate_to_datetime
 import json
 from typing import Any, Protocol
+from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
@@ -74,8 +75,16 @@ class GmailApiReader(GmailReader):
             )
             status = int(response.status)
             body = response.read()
-        except Exception as exc:
-            # Do not leak provider response bodies, tokens, or request URLs.
+        except urllib_error.HTTPError as exc:
+            if exc.code in {401, 403}:
+                reason = "GMAIL_API_UNAUTHENTICATED"
+            elif exc.code == 429 or 500 <= exc.code <= 599:
+                reason = "GMAIL_API_UNAVAILABLE"
+            else:
+                reason = "GMAIL_API_REJECTED"
+            # Never expose provider response bodies, URLs or access tokens.
+            raise GmailConnectorError(reason) from exc
+        except (OSError, TimeoutError) as exc:
             raise GmailConnectorError("GMAIL_API_UNAVAILABLE") from exc
 
         if status != 200:
@@ -159,9 +168,9 @@ def _recipient_values(raw: str | None) -> tuple[str, ...]:
     if raw is None:
         return ()
     return tuple(
-        item.strip()
-        for item in raw.split(",")
-        if item.strip()
+        address.strip()
+        for _display, address in getaddresses([raw])
+        if address.strip()
     )
 
 
