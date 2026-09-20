@@ -223,15 +223,6 @@ def persist_missing_step_anomaly(
             "ANOMALY_EXPECTED_STEP_PRESENT"
         )
 
-    existing = session.scalar(
-        select(MemoryClaimRow).where(
-            MemoryClaimRow.subject_actor_id == actor.id,
-            MemoryClaimRow.predicate == ANOMALY_CLAIM_PREDICATE,
-            MemoryClaimRow.source_quality == ANOMALY_CLAIM_SOURCE_QUALITY,
-            MemoryClaimRow.status == "ACTIVE",
-        )
-        .order_by(MemoryClaimRow.updated_at.desc(), MemoryClaimRow.id.desc())
-    )
     rows = session.scalars(
         select(MemoryClaimRow).where(
             MemoryClaimRow.subject_actor_id == actor.id,
@@ -258,7 +249,6 @@ def persist_missing_step_anomaly(
             )
         return row, False
 
-    _ = existing
     row = MemoryClaimRow(
         id=new_id(),
         subject_actor_id=actor.id,
