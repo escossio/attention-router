@@ -199,6 +199,40 @@ def _message_timestamp(
     raise GmailConnectorError("GMAIL_API_MESSAGE_TIMESTAMP_INVALID")
 
 
+def _mime_body_present(root: dict[str, Any]) -> bool:
+    found = False
+
+    def visit(part: Any) -> None:
+        nonlocal found
+        if found or not isinstance(part, dict):
+            return
+        mime_type = part.get("mimeType")
+        body = part.get("body")
+        if (
+            isinstance(mime_type, str)
+            and mime_type.casefold() in {"text/plain", "text/html"}
+            and isinstance(body, dict)
+        ):
+            size = body.get("size")
+            data = body.get("data")
+            if (
+                isinstance(size, int)
+                and size > 0
+            ) or (
+                isinstance(data, str)
+                and bool(data)
+            ):
+                found = True
+                return
+        children = part.get("parts")
+        if isinstance(children, list):
+            for child in children:
+                visit(child)
+
+    visit(root)
+    return found
+
+
 def _attachment_summaries(
     root: dict[str, Any],
 ) -> tuple[GmailAttachmentSummary, ...]:
@@ -273,10 +307,6 @@ def _gmail_api_payload_to_message(
         raise GmailConnectorError("GMAIL_API_SENDER_MISSING")
 
     root = payload["payload"]
-    snippet = payload.get("snippet")
-    if snippet is not None and not isinstance(snippet, str):
-        raise GmailConnectorError("GMAIL_API_RESPONSE_INVALID")
-
     return GmailMessage(
         message_id=message_id,
         thread_id=thread_id,
@@ -285,9 +315,8 @@ def _gmail_api_payload_to_message(
         cc=_recipient_values(headers.get("cc")),
         bcc=_recipient_values(headers.get("bcc")),
         subject=headers.get("subject", ""),
-        # Snippet is sufficient for bounded body-presence detection. The
-        # connector never serializes it into Integration Contract V1.
-        body=snippet or "",
+        # Structural marker only; no body/snippet text crosses this boundary.
+        body="present" if _mime_body_present(root) else "",
         email_ts=_message_timestamp(payload, headers),
         attachments=_attachment_summaries(root),
     )
