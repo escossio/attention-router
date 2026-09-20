@@ -8,6 +8,7 @@ import yaml
 from attention_router.integrations.gmail_canary_runtime import (
     GmailCanaryRuntimeSecrets,
     render_gmail_canary_env,
+    set_gmail_canary_integration_enabled,
     write_gmail_canary_env,
 )
 
@@ -137,3 +138,48 @@ def test_gmail_canary_env_file_is_create_once_mode_0600(tmp_path):
 def test_canary_env_file_is_gitignored():
     gitignore = (ROOT / ".gitignore").read_text()
     assert ".env.*" in gitignore
+
+
+
+def test_canary_integration_flags_toggle_atomically_without_changing_secrets(
+    tmp_path,
+):
+    target = (tmp_path / ".env.gmail-canary").resolve()
+    bundle = GmailCanaryRuntimeSecrets(
+        postgres_password="P" * 43,
+        internal_ingress_hmac_secret="H" * 43,
+    )
+    write_gmail_canary_env(target, secrets_bundle=bundle)
+    original = _env_map(target.read_text())
+
+    set_gmail_canary_integration_enabled(target, enabled=True)
+    enabled = _env_map(target.read_text())
+    assert enabled["INTEGRATION_INGRESS_ENABLED"] == "true"
+    assert enabled["INTEGRATION_DISPATCH_ENABLED"] == "true"
+    assert enabled["POSTGRES_PASSWORD"] == original["POSTGRES_PASSWORD"]
+    assert enabled["DATABASE_URL"] == original["DATABASE_URL"]
+    assert enabled["INTERNAL_INGRESS_HMAC_SECRET"] == (
+        original["INTERNAL_INGRESS_HMAC_SECRET"]
+    )
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+    set_gmail_canary_integration_enabled(target, enabled=False)
+    disabled = _env_map(target.read_text())
+    assert disabled["INTEGRATION_INGRESS_ENABLED"] == "false"
+    assert disabled["INTEGRATION_DISPATCH_ENABLED"] == "false"
+    assert disabled["POSTGRES_PASSWORD"] == original["POSTGRES_PASSWORD"]
+
+
+def test_canary_integration_toggle_fails_closed_on_missing_flags(tmp_path):
+    target = (tmp_path / ".env.gmail-canary").resolve()
+    target.write_text("APP_ENV=private\n")
+    target.chmod(0o600)
+
+    try:
+        set_gmail_canary_integration_enabled(target, enabled=True)
+    except ValueError as exc:
+        assert str(exc) == "GMAIL_CANARY_ENV_INTEGRATION_FLAGS_INVALID"
+    else:
+        raise AssertionError("missing integration flags must fail closed")
+
+    assert target.read_text() == "APP_ENV=private\n"
