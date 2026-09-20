@@ -366,6 +366,52 @@ def evaluate_accepted_recommendation_authority(
         now=stamp,
     )
 
+    source_claim_id = (recommendation_claim.context or {}).get("source_claim_id")
+    source_claim = (
+        session.get(MemoryClaimRow, source_claim_id)
+        if isinstance(source_claim_id, str)
+        else None
+    )
+    source_value = source_claim.object_json if source_claim is not None else {}
+    source_is_current = (
+        source_claim is not None
+        and source_claim.subject_actor_id == _actor.id
+        and source_claim.predicate == "context.pattern.temporal_recurrence"
+        and source_claim.source_quality == "DERIVED_PATTERN"
+        and source_claim.status == "ACTIVE"
+        and (source_value or {}).get("evidence_class") == "INFERRED"
+        and (source_value or {}).get("hypothesis_status") == "HYPOTHESIS"
+        and (source_value or {}).get("grants_authority") is False
+        and (
+            source_claim.valid_until is None
+            or _utc(source_claim.valid_until) > stamp
+        )
+    )
+    if not source_is_current:
+        assessment = RecommendationAuthorityAssessment(
+            tenant_id=tenant_id,
+            actor_id=actor_key,
+            recommendation_id=recommendation_id,
+            recommendation_claim_id=recommendation_claim.id,
+            capability_name=REMINDER_CAPABILITY,
+            policy_id=None,
+            policy_version_id=None,
+            policy_allows=False,
+            active_grant_ids=(),
+            capability_status="UNRESOLVED",
+            authority_result="UNAVAILABLE",
+            reason_code="RECOMMENDATION_SOURCE_HYPOTHESIS_INVALIDATED",
+            execution_allowed=False,
+            approval_required=False,
+            provider_instance_id=None,
+            assessment_status="SOURCE_INVALIDATED",
+            execution_intent_id=None,
+            evaluated_at=stamp,
+        )
+        _audit_assessment(session, assessment)
+        session.flush()
+        return assessment
+
     policy_id, policy_version_id, policy_allows, policy_reason = _resolved_policy(
         session,
         tenant_id=tenant_id,

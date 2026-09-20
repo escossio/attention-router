@@ -250,6 +250,44 @@ def persist_context_pattern_hypothesis(
         tenant_id=hypothesis.tenant_id,
         actor_key=hypothesis.actor_id,
     )
+    corrections = session.scalars(
+        select(MemoryClaimRow)
+        .where(
+            MemoryClaimRow.subject_actor_id == actor.id,
+            MemoryClaimRow.predicate == "context.pattern.owner_correction",
+            MemoryClaimRow.source_quality == "USER_DECLARED",
+            MemoryClaimRow.status == "ACTIVE",
+        )
+        .order_by(MemoryClaimRow.updated_at.desc(), MemoryClaimRow.id.desc())
+    ).all()
+    active_corrections = [
+        row
+        for row in corrections
+        if (row.context or {}).get("hypothesis_id") == hypothesis.hypothesis_id
+        and row.valid_until is not None
+        and _utc(row.valid_until) > stamp
+    ]
+    if len(active_corrections) > 1:
+        raise ContextHypothesisPersistenceError(
+            "PATTERN_CORRECTION_ACTIVE_CONFLICT"
+        )
+    requalifying_correction: MemoryClaimRow | None = None
+    if active_corrections:
+        correction = active_corrections[0]
+        correction_at = _utc(
+            correction.valid_from
+            or correction.first_observed_at
+            or stamp
+        )
+        post_correction_evidence = sum(
+            _utc(row.occurred_at) > correction_at
+            for row in evidence
+        )
+        if post_correction_evidence < 3:
+            raise ContextHypothesisPersistenceError(
+                "PATTERN_HYPOTHESIS_SUPPRESSED_BY_OWNER_CORRECTION"
+            )
+        requalifying_correction = correction
 
     active = _active_same_hypothesis(
         session,
@@ -279,6 +317,14 @@ def persist_context_pattern_hypothesis(
             else replacement_time
         )
         previous.updated_at = now_utc()
+
+    if requalifying_correction is not None:
+        requalifying_correction.status = "SUPERSEDED"
+        requalifying_correction.valid_until = min(
+            _utc(requalifying_correction.valid_until),
+            stamp,
+        )
+        requalifying_correction.updated_at = now_utc()
 
     claim = MemoryClaimRow(
         id=new_id(),
