@@ -13,7 +13,12 @@ from attention_router.application.owner_control_semantic_registry import (
     normalize_semantic_parameters,
 )
 from attention_router.core.entities import FactClass
-from attention_router.infrastructure.models import FactRow
+from attention_router.infrastructure.models import (
+    ActorBindingRow,
+    FactRow,
+    MemoryActorRow,
+    MemoryClaimRow,
+)
 
 
 PREDICATE = "idiolect.pragmatic_mapping"
@@ -30,6 +35,26 @@ class IdiolectInterpretationEvidence:
     reuse_policy: str
     source_type: str
     source_ref: str | None
+    observed_at: datetime
+    valid_until: datetime | None
+
+
+EXPLICIT_CONFIRMED_PRECEDENCE = 400
+REPEATED_OBSERVED_PRECEDENCE = 200
+
+
+@dataclass(frozen=True, slots=True)
+class IdiolectContextEvidence:
+    item_id: str
+    evidence_kind: str
+    predicate: str
+    structured_value: dict[str, object]
+    evidence_confidence: float
+    generalization_confidence: float
+    direction: str
+    reuse_policy: str
+    source_quality: str
+    precedence: int
     observed_at: datetime
     valid_until: datetime | None
 
@@ -142,6 +167,133 @@ def retrieve_idiolect_interpretation_evidence(
 
 
 
+
+
+def retrieve_idiolect_context(
+    session: Session,
+    *,
+    tenant_id: str,
+    actor_key: str,
+    utterance: str,
+    source_channel: str,
+    conversation_key_hash: str,
+    limit: int = 8,
+    now: datetime | None = None,
+) -> tuple[IdiolectContextEvidence, ...]:
+    """Return bounded idiolect context with explicit evidence ranked first.
+
+    Repeated observed patterns are available as contextual evidence but cannot
+    become semantic parse results through this contract.
+    """
+
+    if limit < 1 or limit > 20:
+        raise ValueError("IDIOLECT_RETRIEVAL_LIMIT_OUT_OF_RANGE")
+    stamp = _utc(now or datetime.now(UTC))
+
+    explicit = retrieve_idiolect_interpretation_evidence(
+        session,
+        tenant_id=tenant_id,
+        actor_key=actor_key,
+        utterance=utterance,
+        source_channel=source_channel,
+        conversation_key_hash=conversation_key_hash,
+        limit=limit,
+        now=stamp,
+    )
+
+    items: list[IdiolectContextEvidence] = [
+        IdiolectContextEvidence(
+            item_id=item.fact_id,
+            evidence_kind="EXPLICIT_CONFIRMED_MAPPING",
+            predicate=PREDICATE,
+            structured_value={
+                "semantic_intent_key": item.semantic_intent_key,
+                "parameters": dict(item.parameters),
+            },
+            evidence_confidence=item.evidence_confidence,
+            generalization_confidence=item.generalization_confidence,
+            direction=item.direction,
+            reuse_policy=item.reuse_policy,
+            source_quality="EXPLICITLY_CONFIRMED",
+            precedence=EXPLICIT_CONFIRMED_PRECEDENCE,
+            observed_at=item.observed_at,
+            valid_until=item.valid_until,
+        )
+        for item in explicit
+    ]
+
+    bindings = session.scalars(
+        select(ActorBindingRow).where(
+            ActorBindingRow.tenant_id == tenant_id,
+            ActorBindingRow.actor_key == actor_key,
+            ActorBindingRow.is_active.is_(True),
+        )
+    ).all()
+    aliases = {actor_key, *(binding.external_actor_id for binding in bindings)}
+    memory_actor_ids = session.scalars(
+        select(MemoryActorRow.id).where(
+            MemoryActorRow.tenant_id == tenant_id,
+            MemoryActorRow.actor_key.in_(aliases),
+        )
+    ).all()
+
+    if memory_actor_ids:
+        claims = session.scalars(
+            select(MemoryClaimRow)
+            .where(
+                MemoryClaimRow.subject_actor_id.in_(memory_actor_ids),
+                MemoryClaimRow.status == "ACTIVE",
+                MemoryClaimRow.source_quality == "REPEATED_OBSERVATION",
+                MemoryClaimRow.sensitivity_class != "SECRET",
+                or_(MemoryClaimRow.valid_from.is_(None), MemoryClaimRow.valid_from <= stamp),
+                or_(MemoryClaimRow.valid_until.is_(None), MemoryClaimRow.valid_until > stamp),
+            )
+            .order_by(MemoryClaimRow.last_observed_at.desc())
+            .limit(limit * 4)
+        ).all()
+
+        for claim in claims:
+            value = claim.object_json or {}
+            if value.get("direction") != "USER_TO_ANDY_LANGUAGE":
+                continue
+            if value.get("evidence_class") != "OBSERVED":
+                continue
+            if value.get("reuse_policy") != "INTERPRET_ONLY":
+                continue
+            if value.get("generalization_scope") != "PERSON":
+                continue
+
+            items.append(
+                IdiolectContextEvidence(
+                    item_id=claim.id,
+                    evidence_kind="REPEATED_OBSERVED_PATTERN",
+                    predicate=claim.predicate,
+                    structured_value=dict(value),
+                    evidence_confidence=float(claim.confidence),
+                    generalization_confidence=float(
+                        value.get("generalization_confidence", 0.0)
+                    ),
+                    direction=str(value.get("direction")),
+                    reuse_policy=str(value.get("reuse_policy")),
+                    source_quality=claim.source_quality,
+                    precedence=REPEATED_OBSERVED_PRECEDENCE,
+                    observed_at=claim.last_observed_at,
+                    valid_until=claim.valid_until,
+                )
+            )
+
+    items.sort(
+        key=lambda item: (
+            -item.precedence,
+            -item.evidence_confidence,
+            -item.generalization_confidence,
+            -_utc(item.observed_at).timestamp(),
+            item.item_id,
+        )
+    )
+    return tuple(items[:limit])
+
+
 def select_unique_confirmed_candidate(
     evidence: tuple[IdiolectInterpretationEvidence, ...],
     candidate_set: dict[str, object],
@@ -182,9 +334,13 @@ def select_unique_confirmed_candidate(
 
 
 __all__ = [
+    "EXPLICIT_CONFIRMED_PRECEDENCE",
+    "IdiolectContextEvidence",
     "IdiolectInterpretationEvidence",
     "PREDICATE",
+    "REPEATED_OBSERVED_PRECEDENCE",
     "normalize_user_expression",
+    "retrieve_idiolect_context",
     "retrieve_idiolect_interpretation_evidence",
     "select_unique_confirmed_candidate",
 ]
