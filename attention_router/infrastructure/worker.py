@@ -170,6 +170,15 @@ def process_agent_decisions(session, worker: str, limit: int = 10) -> int:
     return processed
 
 
+def process_integration_dispatch_if_enabled(session):
+    if not settings.integration_dispatch_enabled:
+        return None
+    return process_integration_inbox(
+        session,
+        limit=settings.integration_dispatch_batch_size,
+    )
+
+
 def process_scheduled_events_if_available(session) -> int:
     """Keep the worker live when the optional scheduler schema is not deployed yet."""
     if not inspect(session.bind).has_table("reminders"):
@@ -274,20 +283,19 @@ def run_forever() -> None:
             scheduled_event_count = process_scheduled_events_if_available(session)
             media_cleanup_count = cleanup_expired_media(session)
             integration_dispatch_result = None
-            if settings.integration_dispatch_enabled:
-                try:
-                    integration_dispatch_result = process_integration_inbox(
-                        session,
-                        limit=settings.integration_dispatch_batch_size,
-                    )
+            try:
+                integration_dispatch_result = (
+                    process_integration_dispatch_if_enabled(session)
+                )
+                if integration_dispatch_result is not None:
                     session.commit()
-                except Exception as exc:
-                    session.rollback()
-                    logger.exception(
-                        "integration inbox dispatch failed worker_id=%s error=%s",
-                        identity,
-                        exc,
-                    )
+            except Exception as exc:
+                session.rollback()
+                logger.exception(
+                    "integration inbox dispatch failed worker_id=%s error=%s",
+                    identity,
+                    exc,
+                )
 
             if settings.memory_ingestion_enabled:
                 with start_span("memory.extract") as memory_span:
