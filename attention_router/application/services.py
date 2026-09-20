@@ -826,6 +826,7 @@ def _handle_owner_control_command(
                             binding=binding,
                             text=prompt,
                         )
+                        session.flush()
                         attach_clarification_outbox(
                             session,
                             pending_intent_id=pending.id,
