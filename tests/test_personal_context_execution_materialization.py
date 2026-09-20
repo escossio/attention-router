@@ -468,3 +468,31 @@ def test_prepared_scope_tamper_fails_closed_before_materialization(session):
         )
 
     assert session.scalar(select(func.count()).select_from(ReminderRow)) == 0
+
+
+def test_invalidated_source_retires_prepared_intent_before_reminder(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    accepted, _grant, _assessment, intent = _prepared(session, stamp)
+    source = session.get(
+        MemoryClaimRow,
+        accepted.context["source_claim_id"],
+    )
+    assert source is not None
+    source.status = "SUPERSEDED"
+    source.valid_until = stamp + timedelta(minutes=2)
+    session.flush()
+
+    outcome = materialize_prepared_recommendation_execution(
+        session,
+        execution_intent_id=intent.id,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+        recommendation_id=RECOMMENDATION_ID,
+        now=stamp + timedelta(minutes=3),
+    )
+    session.refresh(intent)
+
+    assert outcome.status == "AUTHORITY_REVALIDATION_BLOCKED"
+    assert outcome.reason_code == "RECOMMENDATION_SOURCE_HYPOTHESIS_INVALIDATED"
+    assert intent.state == "RETIRED"
+    assert session.scalar(select(func.count()).select_from(ReminderRow)) == 0
