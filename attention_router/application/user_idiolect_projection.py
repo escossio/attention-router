@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
-import re
-import unicodedata
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.user_idiolect import normalize_user_expression
 from attention_router.application.owner_control_semantic_registry import (
     OwnerSemanticRegistryError,
     normalize_semantic_parameters,
@@ -104,7 +102,7 @@ def project_resolved_pending_intent_language_fact(
 
     value = {
         "expression": expression.strip(),
-        "normalized_expression": _normalize_expression(expression),
+        "normalized_expression": normalize_user_expression(expression),
         "meaning_kind": "SEMANTIC_INTENT",
         "semantic_intent_key": semantic_key,
         "parameters": normalized_parameters,
