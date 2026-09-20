@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import UTC
 from typing import Any
 
@@ -11,12 +10,12 @@ from attention_router.config import settings
 from attention_router.domain.models import new_id
 from attention_router.infrastructure.db import SessionLocal
 from attention_router.integrations.admission import AdmissionResult, admit_inbound
+from attention_router.integrations.tenant_binding import credential_digest
 
 
 INTEGRATION_INGRESS_PATH = "/api/v1/ingress/integrations/events"
 INTEGRATION_TRANSPORT_VERSION = "1"
 INTEGRATION_MAX_BODY_BYTES = 65_536
-_AUTHORIZATION = re.compile(r"^Bearer ([A-Za-z0-9._~+/-]+=*)$")
 
 # These headers belong to other Attention Router authority surfaces. They never
 # authenticate the neutral integration ingress, and mixing them with bearer auth
@@ -125,10 +124,14 @@ def _extract_bearer(request: Request) -> tuple[str | None, str | None]:
         value = values[0].decode("ascii")
     except UnicodeDecodeError:
         return None, "INVALID"
-    match = _AUTHORIZATION.fullmatch(value)
-    if match is None:
+    if not value.startswith("Bearer "):
         return None, "INVALID"
-    return match.group(1), None
+    token = value[len("Bearer "):]
+    try:
+        credential_digest(token)
+    except ValueError:
+        return None, "INVALID"
+    return token, None
 
 
 async def _bounded_body(request: Request) -> bytes | None:
