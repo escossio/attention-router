@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -93,6 +95,58 @@ Rules:
    other optional parameter fields must be null.
 9. Return only the requested structured schema. Do not add explanations.
 """.strip()
+
+
+def _normalize_timed_reply_text(text: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", text.strip().casefold())
+    ascii_text = "".join(
+        ch for ch in decomposed if not unicodedata.combining(ch)
+    )
+    return " ".join(re.sub(r"[^a-z0-9\\s]", " ", ascii_text).split())
+
+
+_TIMED_REPLY_PATTERNS = (
+    re.compile(
+        r"^(?:retorne|responda) em (?P<value>\\d+) "
+        r"(?P<unit>segundos?|minutos?)$"
+    ),
+    re.compile(
+        r"^volta a responder daqui a (?P<value>\\d+) "
+        r"(?P<unit>segundos?|minutos?)$"
+    ),
+)
+
+
+def _deterministic_timed_reply_candidate_set(
+    text: str,
+) -> dict[str, object] | None:
+    normalized = _normalize_timed_reply_text(text)
+    match = next(
+        (pattern.fullmatch(normalized) for pattern in _TIMED_REPLY_PATTERNS
+         if pattern.fullmatch(normalized) is not None),
+        None,
+    )
+    if match is None:
+        return None
+    value = int(match.group("value"))
+    unit = match.group("unit")
+    seconds = value * 60 if unit.startswith("minuto") else value
+    candidates = [
+        build_registered_semantic_candidate(
+            intent_key="CONFIGURE_OWNER_REPLY_GRACE",
+            parameters={"seconds": seconds},
+            confidence="medium",
+        ),
+        build_registered_semantic_candidate(
+            intent_key="ONE_SHOT_REPLY_DELAY",
+            parameters={"seconds": seconds},
+            confidence="medium",
+        ),
+    ]
+    return build_candidate_set(
+        candidates,
+        semantic_registry_version=OWNER_CONTROL_SEMANTIC_REGISTRY_VERSION,
+    )
 
 
 def _build_agent():
@@ -235,6 +289,9 @@ def candidate_set_from_semantic_output(
 def interpret_owner_control_candidates(text: str) -> dict[str, object] | None:
     if not isinstance(text, str) or not text.strip():
         return None
+    deterministic = _deterministic_timed_reply_candidate_set(text)
+    if deterministic is not None:
+        return deterministic
     return candidate_set_from_semantic_output(_run_model(text))
 
 
