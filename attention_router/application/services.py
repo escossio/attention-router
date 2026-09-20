@@ -80,6 +80,9 @@ from attention_router.application.owner_operational_control import (
     OperationalControlUnauthorized,
 )
 from attention_router.application.memory import archive_incremental_message, enqueue_memory_ingestion
+from attention_router.application.personal_context_runtime import (
+    PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION,
+)
 from attention_router.application.execution import (
     automatic_intent_denial_reason,
     execution_gate,
@@ -2257,43 +2260,82 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                     audit(session, row.interaction_id, "execution.dispatch_succeeded", {"intent_id": intent.id, "outbox_id": row.id, "message_reference_present": bool((result.response or {}).get("message_reference"))})
                     if row.action_type == "agent_execution_voice":
                         _mark_voice_outbox_artifact_terminal(session, row)
-            elif row.action_type == OWNER_CONTROL_OUTBOX_ACTION and row.destination == "local_transport":
+            elif (
+                row.action_type
+                in {
+                    OWNER_CONTROL_OUTBOX_ACTION,
+                    PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION,
+                }
+                and row.destination == "local_transport"
+            ):
                 external_attempted = True
                 with start_span("transport.send") as transport_span:
                     result = local_transport_outbound.dispatch_outbox(row)
                     provider_confirmed = result.status in {"sent", "already_sent"}
-                    safe_set_attribute(transport_span, "attention.delivery_type", "local_transport")
+                    safe_set_attribute(
+                        transport_span,
+                        "attention.delivery_type",
+                        "local_transport",
+                    )
                     safe_set_attribute(
                         transport_span,
                         "attention.message_reference_present",
                         bool((result.response or {}).get("message_reference")),
                     )
                     set_outcome(transport_span, "SENT")
-                audit(
-                    session,
-                    row.interaction_id,
-                    "owner_control.confirmation_delivered",
-                    {
-                        "outbox_id": row.id,
-                        "transport_status": result.status,
-                        "message_reference_present": bool(
-                            (result.response or {}).get("message_reference")
-                        ),
-                    },
-                    row.correlation_id,
-                    row.causation_id,
-                    origin="owner_control",
-                )
-                pending_intent_id = session.scalar(
-                    select(PendingIntentRow.id).where(
-                        PendingIntentRow.clarification_outbox_id == row.id
-                    )
-                )
-                if pending_intent_id is not None:
-                    mark_clarification_delivered(
+
+                if row.action_type == OWNER_CONTROL_OUTBOX_ACTION:
+                    audit(
                         session,
-                        pending_intent_id=pending_intent_id,
-                        outbox_id=row.id,
+                        row.interaction_id,
+                        "owner_control.confirmation_delivered",
+                        {
+                            "outbox_id": row.id,
+                            "transport_status": result.status,
+                            "message_reference_present": bool(
+                                (result.response or {}).get(
+                                    "message_reference"
+                                )
+                            ),
+                        },
+                        row.correlation_id,
+                        row.causation_id,
+                        origin="owner_control",
+                    )
+                    pending_intent_id = session.scalar(
+                        select(PendingIntentRow.id).where(
+                            PendingIntentRow.clarification_outbox_id == row.id
+                        )
+                    )
+                    if pending_intent_id is not None:
+                        mark_clarification_delivered(
+                            session,
+                            pending_intent_id=pending_intent_id,
+                            outbox_id=row.id,
+                        )
+                else:
+                    audit(
+                        session,
+                        row.interaction_id,
+                        "personal_context.recommendation_delivered",
+                        {
+                            "outbox_id": row.id,
+                            "recommendation_id": row.payload.get(
+                                "recommendation_id"
+                            ),
+                            "recommendation_claim_id": row.payload.get(
+                                "recommendation_claim_id"
+                            ),
+                            "transport_status": result.status,
+                            "message_reference_present": bool(
+                                (result.response or {}).get(
+                                    "message_reference"
+                                )
+                            ),
+                        },
+                        row.correlation_id,
+                        row.causation_id,
+                        origin="personal_context",
                     )
             else:
                 actions.dispatch(row.destination, row.interaction_id)
