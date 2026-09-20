@@ -844,6 +844,28 @@ def test_dispatch_blocks_work_if_binding_is_disabled_after_admission(
         ) == 0
 
 
+def test_dispatch_blocks_work_if_binding_scope_is_removed_after_admission(
+    Session,
+    world,
+):
+    admitted = send(Session, world, _payload_with_actor(world))
+    assert admitted.code == "ACCEPTED"
+    with Session.begin() as session:
+        session.get(BindingRow, world[0].binding_id).scopes = []
+
+    with Session.begin() as session:
+        result = process_integration_inbox(session)
+
+    assert result.blocked == 1
+    with Session() as session:
+        inbox = session.get(InboxRow, admitted.receipt_id)
+        assert inbox.state == "BLOCKED"
+        assert inbox.dispatch_reason == "INTEGRATION_BINDING_SCOPE_INACTIVE"
+        assert session.scalar(
+            select(func.count()).select_from(CanonicalEventRow)
+        ) == 0
+
+
 def test_dispatch_blocks_work_if_tenant_is_disabled_after_admission(
     Session,
     world,
