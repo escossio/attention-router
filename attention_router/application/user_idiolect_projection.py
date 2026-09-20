@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
-import re
-import unicodedata
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.user_idiolect import normalize_user_expression
 from attention_router.application.owner_control_semantic_registry import (
     OwnerSemanticRegistryError,
     normalize_semantic_parameters,
@@ -27,12 +25,6 @@ SOURCE_TYPE = "INTENT_CLARIFICATION"
 
 class IdiolectProjectionError(RuntimeError):
     pass
-
-
-def _normalize_expression(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value.strip().casefold())
-    ascii_text = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return " ".join(re.sub(r"[^a-z0-9\s]", " ", ascii_text).split())
 
 
 def _selected_candidate(row: PendingIntentRow) -> dict:
@@ -104,7 +96,7 @@ def project_resolved_pending_intent_language_fact(
 
     value = {
         "expression": expression.strip(),
-        "normalized_expression": _normalize_expression(expression),
+        "normalized_expression": normalize_user_expression(expression),
         "meaning_kind": "SEMANTIC_INTENT",
         "semantic_intent_key": semantic_key,
         "parameters": normalized_parameters,
