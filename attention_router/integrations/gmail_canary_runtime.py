@@ -5,6 +5,8 @@ from pathlib import Path
 import os
 import secrets
 
+from attention_router.core.tenancy import DEFAULT_TENANT_ID
+
 
 @dataclass(frozen=True, slots=True)
 class GmailCanaryRuntimeSecrets:
@@ -47,6 +49,11 @@ def render_gmail_canary_env(
         "INTEGRATION_INGRESS_AUDIENCE": "andy-gmail-canary",
         "INTEGRATION_DISPATCH_ENABLED": "false",
         "INTEGRATION_DISPATCH_BATCH_SIZE": "5",
+        "GMAIL_CONNECTOR_TENANT_ID": DEFAULT_TENANT_ID,
+        "GMAIL_CONNECTOR_INSTANCE_ID": "gmail-canary",
+        "ATTENTION_ROUTER_INTEGRATION_INGRESS_URL": (
+            "http://ingress:18101/api/v1/ingress/integrations/events"
+        ),
         "WORKER_POLL_INTERVAL_SECONDS": "1",
         "LOCAL_TRANSPORT_OUTBOUND_URL": (
             "http://127.0.0.1:1/internal/send"
