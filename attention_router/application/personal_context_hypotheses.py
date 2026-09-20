@@ -272,9 +272,26 @@ def persist_context_pattern_hypothesis(
             "PATTERN_CORRECTION_ACTIVE_CONFLICT"
         )
     if active_corrections:
-        raise ContextHypothesisPersistenceError(
-            "PATTERN_HYPOTHESIS_SUPPRESSED_BY_OWNER_CORRECTION"
+        correction = active_corrections[0]
+        correction_at = _utc(
+            correction.valid_from
+            or correction.first_observed_at
+            or stamp
         )
+        post_correction_evidence = sum(
+            _utc(row.occurred_at) > correction_at
+            for row in evidence
+        )
+        if post_correction_evidence < 3:
+            raise ContextHypothesisPersistenceError(
+                "PATTERN_HYPOTHESIS_SUPPRESSED_BY_OWNER_CORRECTION"
+            )
+        correction.status = "SUPERSEDED"
+        correction.valid_until = min(
+            _utc(correction.valid_until),
+            stamp,
+        )
+        correction.updated_at = now_utc()
 
     active = _active_same_hypothesis(
         session,
