@@ -29,6 +29,14 @@ from attention_router.application.personal_context_anomaly_hypotheses import (
     persist_missing_step_anomaly,
     reconcile_missing_step_anomalies,
 )
+from attention_router.application.personal_context_anomaly_suggestions import (
+    build_anomaly_suggestions,
+)
+from attention_router.application.personal_context_suggestion_lifecycle import (
+    ContextSuggestionPersistenceError,
+    persist_anomaly_suggestion,
+    reconcile_anomaly_suggestions,
+)
 from attention_router.application.personal_context_recommendation_lifecycle import (
     RECOMMENDATION_CLAIM_PREDICATE,
     RECOMMENDATION_SOURCE_QUALITY,
@@ -70,6 +78,9 @@ class PersonalContextRuntimeCycleResult:
     anomaly_hypotheses_detected: int = 0
     anomaly_hypotheses_persisted: int = 0
     anomaly_hypotheses_reconciled: int = 0
+    suggestions_built: int = 0
+    suggestions_persisted: int = 0
+    suggestions_reconciled: int = 0
     recommendations_built: int = 0
     recommendations_persisted: int = 0
     recommendations_enqueued: int = 0
@@ -389,6 +400,9 @@ def run_personal_context_runtime_cycle(
         "anomaly_hypotheses_detected": 0,
         "anomaly_hypotheses_persisted": 0,
         "anomaly_hypotheses_reconciled": 0,
+        "suggestions_built": 0,
+        "suggestions_persisted": 0,
+        "suggestions_reconciled": 0,
         "recommendations_built": 0,
         "recommendations_persisted": 0,
         "recommendations_enqueued": 0,
@@ -476,6 +490,34 @@ def run_personal_context_runtime_cycle(
                     if changed:
                         counters["hypotheses_persisted"] += 1
                         counters["anomaly_hypotheses_persisted"] += 1
+
+                counters["suggestions_reconciled"] += (
+                    reconcile_anomaly_suggestions(
+                        session,
+                        tenant_id=tenant_id,
+                        actor_key=actor_key,
+                        now=stamp,
+                    )
+                )
+                suggestions = build_anomaly_suggestions(
+                    session,
+                    tenant_id=tenant_id,
+                    actor_key=actor_key,
+                    now=stamp,
+                    limit=1,
+                )
+                counters["suggestions_built"] += len(suggestions)
+                for suggestion in suggestions:
+                    try:
+                        _suggestion_claim, changed = persist_anomaly_suggestion(
+                            session,
+                            suggestion=suggestion,
+                            now=stamp,
+                        )
+                    except ContextSuggestionPersistenceError:
+                        continue
+                    if changed:
+                        counters["suggestions_persisted"] += 1
 
                 recommendations = build_context_recommendations(
                     session,
