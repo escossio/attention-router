@@ -498,7 +498,7 @@ def _handle_owner_control_command(
             elif suggestion_reply.decision.value == "INTERESTED":
                 confirmation = (
                     "Certo. Registrei que você quer revisar esse contexto. "
-                    "Isso não autoriza execução nem revela informações adicionais automaticamente."
+                    "Isso não autoriza execução e não revela informações adicionais automaticamente."
                 )
             else:
                 confirmation = "Certo. Descartei essa sugestão de revisão."
