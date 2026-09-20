@@ -20,6 +20,7 @@ from attention_router.infrastructure.models import (
     AgentExecutionIntentRow,
     ExecutionIntentRow,
     FactRow,
+    InboundEventRow,
     MemoryClaimRow,
     OutboxMessageRow,
     ReminderRow,
@@ -270,13 +271,7 @@ def test_reply_before_delivery_does_not_resolve_suggestion(session):
             detected_at + timedelta(minutes=1),
         ),
     )
-    event = session.get(
-        __import__(
-            "attention_router.infrastructure.models",
-            fromlist=["InboundEventRow"],
-        ).InboundEventRow,
-        receipt["inbound_event_id"],
-    )
+    event = session.get(InboundEventRow, receipt["inbound_event_id"])
     assert event is not None
     resolved = resolve_explicit_suggestion_reply(
         session,
