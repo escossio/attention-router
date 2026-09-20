@@ -8,6 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attention_router.domain.models import new_id, now_utc
+from attention_router.application.personal_context_controls import (
+    claim_is_owner_private,
+)
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     InboundEventRow,
@@ -153,6 +156,9 @@ def _source_chain(
             and _utc(sequence.valid_until) <= now
         )
     ):
+        return None
+
+    if claim_is_owner_private(session, claim=sequence):
         return None
 
     anomaly_value = anomaly.object_json or {}
