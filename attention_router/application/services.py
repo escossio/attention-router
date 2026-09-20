@@ -77,6 +77,10 @@ from attention_router.application.personal_context_suggestion_reply import (
     SuggestionReplyError,
     resolve_explicit_suggestion_reply,
 )
+from attention_router.application.personal_context_review import (
+    ContextReviewError,
+    resolve_bounded_context_review,
+)
 from attention_router.application.user_idiolect_preference import (
     UserStylePreferenceError,
     parse_user_style_preference,
@@ -460,6 +464,112 @@ def _handle_owner_control_command(
 
     if active_pending is None and binding is not None:
         try:
+            context_review = resolve_bounded_context_review(
+                session,
+                receipt=receipt,
+                actor_key=owner_actor_key,
+                text=persisted_text,
+            )
+        except ContextReviewError as exc:
+            interaction = _create_owner_control_interaction(
+                session,
+                receipt=receipt,
+                owner_actor_key=owner_actor_key,
+                canonical_text=(
+                    "PERSONAL_CONTEXT_REVIEW status=REJECTED "
+                    f"reason={str(exc)}"
+                ),
+            )
+            confirmation = (
+                "Não consegui identificar com segurança qual revisão mostrar. "
+                "Nenhum contexto foi revelado."
+            )
+            _enqueue_owner_control_confirmation(
+                session,
+                receipt=receipt,
+                interaction=interaction,
+                binding=binding,
+                text=confirmation,
+            )
+            audit(
+                session,
+                interaction.id,
+                "personal_context.review_rejected",
+                {"reason_code": str(exc)},
+                receipt.correlation_id,
+                receipt.id,
+                origin="personal_context",
+                tenant_id=receipt.tenant_id,
+            )
+            session.flush()
+            result = interaction_to_dict(session, interaction)
+            result["inbound_event_id"] = receipt.id
+            return result
+
+        if context_review is not None:
+            interaction = _create_owner_control_interaction(
+                session,
+                receipt=receipt,
+                owner_actor_key=owner_actor_key,
+                canonical_text=(
+                    "PERSONAL_CONTEXT_REVIEW "
+                    f"status={context_review.status} "
+                    f"suggestion_id={context_review.suggestion_id or 'none'}"
+                ),
+            )
+            if context_review.status == "REVIEWED":
+                confirmation = (
+                    f"{context_review.summary} Nenhuma ação foi executada."
+                )
+            elif context_review.status == "SOURCE_INVALIDATED":
+                confirmation = (
+                    "Essa revisão não está mais disponível porque o contexto "
+                    "que a originou mudou. Nenhum contexto adicional foi revelado."
+                )
+            elif context_review.status == "NO_ACTIVE_REVIEW":
+                confirmation = (
+                    "Não há uma revisão ativa pronta para mostrar. "
+                    "Nenhum contexto foi revelado."
+                )
+            else:
+                confirmation = (
+                    "Não foi possível autorizar essa revisão. "
+                    "Nenhum contexto foi revelado."
+                )
+            _enqueue_owner_control_confirmation(
+                session,
+                receipt=receipt,
+                interaction=interaction,
+                binding=binding,
+                text=confirmation,
+            )
+            audit(
+                session,
+                interaction.id,
+                "personal_context.review_resolved",
+                {
+                    "suggestion_id": context_review.suggestion_id,
+                    "status": context_review.status,
+                    "reason_code": context_review.reason_code,
+                    "lifecycle_claim_id": context_review.lifecycle_claim_id,
+                    "disclosure_class": (
+                        "STRUCTURAL_ONLY"
+                        if context_review.status == "REVIEWED"
+                        else "NONE"
+                    ),
+                },
+                receipt.correlation_id,
+                receipt.id,
+                origin="personal_context",
+                tenant_id=receipt.tenant_id,
+            )
+            session.flush()
+            result = interaction_to_dict(session, interaction)
+            result["inbound_event_id"] = receipt.id
+            return result
+
+    if active_pending is None and binding is not None:
+        try:
             suggestion_reply = resolve_explicit_suggestion_reply(
                 session,
                 receipt=receipt,
@@ -498,7 +608,8 @@ def _handle_owner_control_command(
             elif suggestion_reply.decision.value == "INTERESTED":
                 confirmation = (
                     "Certo. Registrei que você quer revisar esse contexto. "
-                    "Isso não autoriza execução e não revela informações adicionais automaticamente."
+                    "Isso não autoriza execução e não revela informações adicionais automaticamente. "
+                    "Para ver apenas o resumo mínimo, responda 'mostrar revisão'."
                 )
             else:
                 confirmation = "Certo. Descartei essa sugestão de revisão."
