@@ -166,8 +166,10 @@ def _recommendation_delivery_text(
     if recommendation.recommendation_type != "REMINDER_FOR_RECURRENT_ARRIVAL":
         raise RecommendationLifecycleError("RECOMMENDATION_TYPE_UNSUPPORTED")
     return (
-        recommendation.explanation.rstrip().rstrip("?")
-        + ". Não vou criar nada sem uma confirmação explícita."
+        "Percebi uma recorrência de chegada com "
+        f"{recommendation.occurrence_count} ocorrências. "
+        "Sugestão: preparar um lembrete para a próxima ocorrência "
+        "prevista. Não vou criar nada sem uma confirmação explícita."
     )
 
 
