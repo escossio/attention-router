@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "measured_sha": "733386337cdad9a92e5950c39df3c75d0f487463",
+  "pytest_full_seconds": {
+    "ci03": 181.38,
+    "ci01": 251.55,
+    "ci02": 414.04
+  },
+  "workers": {
+    "ci03": {
+      "kind": "kvm-virtualized",
+      "vcpu": 8,
+      "memory_gib": 10,
+      "role": "primary-compute"
+    },
+    "ci01": {
+      "kind": "bare-metal",
+      "logical_cpus": 8,
+      "memory_gib": 16,
+      "role": "secondary-compute"
+    },
+    "ci02": {
+      "kind": "bare-metal",
+      "logical_cpus": 4,
+      "memory_gib": 8,
+      "role": "light-compute"
+    }
+  }
+}

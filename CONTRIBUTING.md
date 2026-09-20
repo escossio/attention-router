@@ -32,6 +32,12 @@ The Docker harness uses a disposable database and a dedicated test URL. `PUBLIC_
 
 The existing integration suite is under certification. Failures involving old expectations or product semantics must be investigated explicitly, not fixed by weakening assertions, skipping tests or altering product behavior merely to make CI green.
 
+## Distributed local preflight
+
+The optional self-managed distributed CI lab can shard the PostgreSQL-marked suite across heterogeneous workers for faster local/pre-merge feedback. It operates on explicit commit SHAs, disposable worktrees and synthetic PostgreSQL databases.
+
+A distributed local PASS does **not** replace GitHub Actions, CodeQL, secret scanning or other repository-native gates. When the PostgreSQL test-file set changes, the scheduler requires a fresh duration profile before running another distributed shard set. See [distributed CI lab](ops/provisioning/distributed-ci-lab/README.md).
+
 ## Pull requests
 
 Include targeted tests and relevant regression results. Keep test data synthetic and preserve identity/ordering relationships. Architectural changes should state authority, privacy, failure and rollback implications. Do not introduce provider calls into tests.
