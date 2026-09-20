@@ -71,5 +71,20 @@ services:
       timeout: 5s
       retries: 5
 
+  tools:
+    profiles:
+      - tools
+    build: .
+    env_file:
+      - .env.gmail-canary
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./secrets/gmail-canary:/run/secrets/gmail-canary
+    command:
+      - python
+      - --version
+
 volumes:
   gmail_canary_database:
