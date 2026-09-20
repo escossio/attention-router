@@ -6,7 +6,6 @@ from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import getaddresses, parsedate_to_datetime
 import hashlib
-from typing import Iterable
 
 from attention_router.integrations.channel_adapters import (
     AdapterNormalizationError,
