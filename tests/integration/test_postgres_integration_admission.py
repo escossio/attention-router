@@ -23,7 +23,12 @@ from attention_router.infrastructure.models import (
     TimelineEventRow,
 )
 from attention_router.integrations.admission import (
-    admit_inbound, disable_binding, provision_binding, provision_credential, revoke_credential,
+    admit_inbound,
+    disable_binding,
+    provision_binding,
+    provision_credential,
+    provision_installation,
+    revoke_credential,
 )
 from attention_router.integrations.tenant_binding import (
     INBOUND_SCOPE, IntegrationBinding, CredentialRecord, credential_digest,
@@ -82,6 +87,123 @@ def send(Session, world, payload=None, token=None, raw=None):
 def count(Session):
     with Session() as session:
         return session.scalar(select(func.count()).select_from(InboxRow))
+
+
+def test_atomic_first_install_creates_binding_and_credential(Session, world):
+    now = datetime.now(timezone.utc)
+    binding_id = "binding-" + new_id()
+    credential_id = "credential-" + new_id()
+    instance_id = "mailbox-" + new_id()[:20]
+    binding = IntegrationBinding(
+        binding_id,
+        "test-ingress",
+        A,
+        "CHANNEL",
+        "channel.email",
+        instance_id,
+        "owner@example.invalid",
+        True,
+        frozenset({INBOUND_SCOPE}),
+    )
+    token = secrets.token_urlsafe(32)
+    credential = CredentialRecord(
+        credential_id,
+        credential_digest(token),
+        binding_id,
+        now - timedelta(minutes=1),
+        now + timedelta(hours=24),
+        False,
+        binding.scopes,
+    )
+
+    provision_installation(Session, binding, credential)
+
+    with Session() as session:
+        stored_binding = session.get(BindingRow, binding_id)
+        stored_credential = session.get(CredentialRow, credential_id)
+        assert stored_binding is not None
+        assert stored_binding.name == "channel.email"
+        assert stored_binding.instance_id == instance_id
+        assert stored_credential is not None
+        assert stored_credential.binding_id == binding_id
+        assert stored_credential.digest == credential_digest(token)
+
+
+def test_atomic_first_install_rejects_mismatched_credential_without_partial_state(
+    Session,
+    world,
+):
+    now = datetime.now(timezone.utc)
+    binding_id = "binding-" + new_id()
+    binding = IntegrationBinding(
+        binding_id,
+        "test-ingress",
+        A,
+        "CHANNEL",
+        "channel.email",
+        "mailbox-" + new_id()[:20],
+        None,
+        True,
+        frozenset({INBOUND_SCOPE}),
+    )
+    credential = CredentialRecord(
+        "credential-" + new_id(),
+        credential_digest(secrets.token_urlsafe(32)),
+        "different-binding",
+        now - timedelta(minutes=1),
+        now + timedelta(hours=1),
+        False,
+        binding.scopes,
+    )
+
+    with pytest.raises(ValueError, match="Credential binding mismatch"):
+        provision_installation(Session, binding, credential)
+
+    with Session() as session:
+        assert session.get(BindingRow, binding_id) is None
+        assert session.get(
+            CredentialRow,
+            credential.credential_id,
+        ) is None
+
+
+def test_atomic_first_install_namespace_conflict_rolls_back_credential(
+    Session,
+    world,
+):
+    now = datetime.now(timezone.utc)
+    binding_id = "binding-" + new_id()
+    credential_id = "credential-" + new_id()
+    conflicting = IntegrationBinding(
+        binding_id,
+        world[0].audience,
+        world[0].tenant_id,
+        world[0].kind,
+        world[0].name,
+        world[0].instance_id,
+        world[0].account_id,
+        True,
+        world[0].scopes,
+    )
+    credential = CredentialRecord(
+        credential_id,
+        credential_digest(secrets.token_urlsafe(32)),
+        binding_id,
+        now - timedelta(minutes=1),
+        now + timedelta(hours=1),
+        False,
+        conflicting.scopes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Integration namespace already exists",
+    ):
+        provision_installation(Session, conflicting, credential)
+
+    with Session() as session:
+        assert session.get(BindingRow, binding_id) is None
+        assert session.get(CredentialRow, credential_id) is None
 
 
 def test_commit_retry_rotation_and_revocation(Session, world):

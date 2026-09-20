@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import or_, select, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from attention_router.contracts.integration import integration_contract_json_schema
 from attention_router.infrastructure.models import (
@@ -81,6 +81,76 @@ class _Snapshot:
 
     def tenant_by_id(self, identity):
         return self.tenant if self.tenant and self.tenant.tenant_id == identity else None
+
+
+def provision_installation(
+    session_factory,
+    binding: IntegrationBinding,
+    credential: CredentialRecord,
+):
+    """Atomically create one first-install binding and digest-only credential.
+
+    The raw credential secret never crosses this boundary. Rotation continues to
+    use provision_credential() against the immutable binding identity.
+    """
+    if credential.binding_id != binding.binding_id:
+        raise ValueError("Credential binding mismatch")
+    if credential.scopes != binding.scopes:
+        raise ValueError("Credential scope mismatch")
+
+    try:
+        with session_factory.begin() as session:
+            _limits(session)
+            tenant = _lock(session, TenantRow, binding.tenant_id)
+            if tenant is None:
+                raise ValueError("Unknown tenant")
+            if tenant.status != "ACTIVE":
+                raise ValueError("Inactive tenant")
+
+            existing_id = session.get(BindingRow, binding.binding_id)
+            if existing_id is not None:
+                raise ValueError("Integration binding already exists")
+
+            existing_namespace = session.scalar(
+                select(BindingRow.id).where(
+                    BindingRow.audience == binding.audience,
+                    BindingRow.tenant_id == binding.tenant_id,
+                    BindingRow.kind == binding.kind,
+                    BindingRow.name == binding.name,
+                    BindingRow.instance_id == binding.instance_id,
+                    BindingRow.account_key == (binding.account_id or ""),
+                )
+            )
+            if existing_namespace is not None:
+                raise ValueError("Integration namespace already exists")
+
+            session.add(
+                BindingRow(
+                    id=binding.binding_id,
+                    audience=binding.audience,
+                    tenant_id=binding.tenant_id,
+                    kind=binding.kind,
+                    name=binding.name,
+                    instance_id=binding.instance_id,
+                    account_key=binding.account_id or "",
+                    active=binding.active,
+                    scopes=sorted(binding.scopes),
+                )
+            )
+            session.add(
+                CredentialRow(
+                    id=credential.credential_id,
+                    digest=credential.digest,
+                    binding_id=credential.binding_id,
+                    not_before=credential.not_before,
+                    expires_at=credential.expires_at,
+                    revoked=credential.revoked,
+                    scopes=sorted(credential.scopes),
+                )
+            )
+            session.flush()
+    except IntegrityError:
+        raise ValueError("Integration installation conflict") from None
 
 
 def provision_binding(session_factory, binding: IntegrationBinding):
