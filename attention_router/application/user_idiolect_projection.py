@@ -27,12 +27,6 @@ class IdiolectProjectionError(RuntimeError):
     pass
 
 
-def _normalize_expression(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value.strip().casefold())
-    ascii_text = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return " ".join(re.sub(r"[^a-z0-9\s]", " ", ascii_text).split())
-
-
 def _selected_candidate(row: PendingIntentRow) -> dict:
     candidate_set = row.candidate_set or {}
     candidates = candidate_set.get("candidates")
