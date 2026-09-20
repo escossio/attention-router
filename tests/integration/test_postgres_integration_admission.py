@@ -447,6 +447,37 @@ def test_neutral_http_receiver_preserves_binding_and_idempotency_fail_closed(
     assert count(Session) == 1
 
 
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "Basic synthetic",
+        "Bearer short",
+        "Bearer " + ("A" * 42 + "=A"),
+        "Bearer " + ("A" * 513),
+    ],
+)
+def test_neutral_http_receiver_rejects_malformed_bearer_representation(
+    Session,
+    world,
+    integration_http_client,
+    authorization,
+):
+    response = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=_http_raw(world),
+        headers={
+            "Authorization": authorization,
+            "Content-Type": "application/json",
+        },
+    )
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "UNAUTHENTICATED"
+    assert response.headers["www-authenticate"] == (
+        'Bearer realm="andy-integration-ingress", error="invalid_token"'
+    )
+    assert count(Session) == 0
+
+
 def test_neutral_http_receiver_auth_precedes_private_payload_diagnostics(
     Session,
     world,
