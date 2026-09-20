@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from attention_router.domain.models import new_id, now_utc
 from attention_router.application.user_idiolect_observation import (
     detect_passive_idiolect_observations,
+    promote_recurrent_passive_observation,
 )
 from attention_router.core.tenancy import DEFAULT_TENANT_ID, TenantScopeError
 from attention_router.infrastructure.hashing import stable_hash
@@ -441,7 +442,24 @@ def ingest_message(session: Session, message_id: str, mode: str = "INCREMENTAL")
     session.flush()
     try:
         candidates = extract_candidates(session, message, run)
-        claims = [_promote(session, c, message, run) for c in candidates if c.eligibility == "PROMOTE"]
+        # Runtime sessions use autoflush=False. Recurrence queries must see the
+        # candidates emitted by this extraction run before evaluating promotion.
+        session.flush()
+        claims = [
+            _promote(session, c, message, run)
+            for c in candidates
+            if c.eligibility == "PROMOTE"
+        ]
+        for candidate in candidates:
+            recurrent = promote_recurrent_passive_observation(
+                session,
+                candidate=candidate,
+                message=message,
+            )
+            if recurrent is not None and all(
+                item.id != recurrent.id for item in claims
+            ):
+                claims.append(recurrent)
         run.status = "DONE"
         run.completed_at = now_utc()
         job.status = "DONE"
