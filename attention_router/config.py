@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     andy_agent_max_turns: int = 3
     owner_control_semantic_enabled: bool = False
     owner_control_semantic_model: str = "gpt-5.6-sol"
+    owner_control_clarification_ttl_seconds: int = 120
     andy_behavior_profile_path: str = "config/andy_behavior_profile.json"
     legacy_external_fallback_enabled: bool = False
     persistent_memory_enabled: bool = False
@@ -244,6 +245,10 @@ class Settings(BaseSettings):
         if self.owner_control_semantic_enabled and not self.openai_api_key:
             raise ValueError(
                 "OPENAI_API_KEY is required when OWNER_CONTROL_SEMANTIC_ENABLED=true"
+            )
+        if not 1 <= self.owner_control_clarification_ttl_seconds <= 900:
+            raise ValueError(
+                "OWNER_CONTROL_CLARIFICATION_TTL_SECONDS must be between 1 and 900"
             )
         if self.tts_profile != "andy":
             raise ValueError("TTS_PROFILE must be andy")

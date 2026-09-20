@@ -433,7 +433,7 @@ def attach_clarification_outbox(
         raise PendingIntentError("PENDING_INTENT_NOT_FOUND")
     if row.state != "PENDING":
         raise PendingIntentConflict("PENDING_INTENT_NOT_PENDING")
-    if row.expires_at <= stamp:
+    if _utc(row.expires_at) <= stamp:
         _expire_row(session, row, timestamp=stamp)
         session.flush()
         raise PendingIntentExpired("PENDING_INTENT_EXPIRED")
@@ -576,7 +576,7 @@ def resolve_pending_intent(
         raise PendingIntentConflict("PENDING_INTENT_ALREADY_RESOLVED")
     if row.state != "PENDING":
         raise PendingIntentConflict("PENDING_INTENT_TERMINAL")
-    if row.expires_at <= stamp:
+    if _utc(row.expires_at) <= stamp:
         _expire_row(session, row, timestamp=stamp)
         session.flush()
         raise PendingIntentExpired("PENDING_INTENT_EXPIRED")

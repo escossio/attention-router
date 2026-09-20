@@ -137,10 +137,13 @@ def test_disabled_semantic_interpreter_never_calls_model(monkeypatch):
     assert parsed.status == OwnerControlParseStatus.NOT_CONTROL_COMMAND
 
 
-def test_issue_82_example_reaches_existing_executor(owner_control_session, monkeypatch):
+def test_explicit_semantic_configuration_reaches_existing_executor(
+    owner_control_session,
+    monkeypatch,
+):
     session = owner_control_session
     assert (
-        parse_owner_grace_control("retorne em 30 segundos").status
+        parse_owner_grace_control("configure a espera padrão para 30 segundos").status
         == OwnerControlParseStatus.NOT_CONTROL_COMMAND
     )
     monkeypatch.setattr(settings, "owner_control_semantic_enabled", True)
@@ -157,7 +160,10 @@ def test_issue_82_example_reaches_existing_executor(owner_control_session, monke
 
     result = services.receive_normalized_inbound_event(
         session,
-        _owner_event("semantic-delay-30", "retorne em 30 segundos"),
+        _owner_event(
+            "semantic-delay-30",
+            "configure a espera padrão para 30 segundos",
+        ),
     )
 
     outbox = session.scalar(
