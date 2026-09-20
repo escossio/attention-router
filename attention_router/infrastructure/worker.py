@@ -196,6 +196,9 @@ def process_personal_context_runtime_if_due(
         delivery_enabled=(
             settings.personal_context_recommendation_delivery_enabled
         ),
+        suggestion_delivery_enabled=(
+            settings.personal_context_suggestion_delivery_enabled
+        ),
         owner_limit=settings.personal_context_runtime_owner_limit,
     )
     return result, now_monotonic

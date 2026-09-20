@@ -73,6 +73,10 @@ from attention_router.application.personal_context_recommendation_reply import (
     RecommendationReplyError,
     resolve_explicit_recommendation_reply,
 )
+from attention_router.application.personal_context_suggestion_reply import (
+    SuggestionReplyError,
+    resolve_explicit_suggestion_reply,
+)
 from attention_router.application.user_idiolect_preference import (
     UserStylePreferenceError,
     parse_user_style_preference,
@@ -86,6 +90,7 @@ from attention_router.application.owner_operational_control import (
 from attention_router.application.memory import archive_incremental_message, enqueue_memory_ingestion
 from attention_router.application.personal_context_runtime import (
     PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION,
+    PERSONAL_CONTEXT_SUGGESTION_OUTBOX_ACTION,
 )
 from attention_router.application.execution import (
     automatic_intent_denial_reason,
@@ -452,6 +457,78 @@ def _handle_owner_control_command(
             source_channel=OWNER_CONTROL_SOURCE_CHANNEL,
             conversation_key_hash=conversation_key_hash,
         )
+
+    if active_pending is None and binding is not None:
+        try:
+            suggestion_reply = resolve_explicit_suggestion_reply(
+                session,
+                receipt=receipt,
+                actor_key=owner_actor_key,
+                text=persisted_text,
+            )
+        except SuggestionReplyError as exc:
+            audit(
+                session,
+                None,
+                "personal_context.suggestion_reply_rejected",
+                {"reason_code": str(exc)},
+                receipt.correlation_id,
+                receipt.id,
+                origin="personal_context",
+                tenant_id=receipt.tenant_id,
+            )
+            suggestion_reply = None
+        if suggestion_reply is not None:
+            interaction = _create_owner_control_interaction(
+                session,
+                receipt=receipt,
+                owner_actor_key=owner_actor_key,
+                canonical_text=(
+                    "PERSONAL_CONTEXT_SUGGESTION_REPLY "
+                    f"status={suggestion_reply.status} "
+                    f"decision={suggestion_reply.decision.value} "
+                    f"suggestion_id={suggestion_reply.suggestion_id}"
+                ),
+            )
+            if suggestion_reply.status == "SOURCE_INVALIDATED":
+                confirmation = (
+                    "Essa sugestão não é mais válida porque o contexto que a "
+                    "originou mudou. Não vou executar nem revelar nada a partir dela."
+                )
+            elif suggestion_reply.decision.value == "INTERESTED":
+                confirmation = (
+                    "Certo. Registrei que você quer revisar esse contexto. "
+                    "Isso não autoriza execução e não revela informações adicionais automaticamente."
+                )
+            else:
+                confirmation = "Certo. Descartei essa sugestão de revisão."
+            _enqueue_owner_control_confirmation(
+                session,
+                receipt=receipt,
+                interaction=interaction,
+                binding=binding,
+                text=confirmation,
+            )
+            audit(
+                session,
+                interaction.id,
+                "personal_context.suggestion_reply_resolved",
+                {
+                    "suggestion_id": suggestion_reply.suggestion_id,
+                    "decision": suggestion_reply.decision.value,
+                    "status": suggestion_reply.status,
+                    "reason_code": suggestion_reply.reason_code,
+                    "lifecycle_claim_id": suggestion_reply.lifecycle_claim_id,
+                },
+                receipt.correlation_id,
+                receipt.id,
+                origin="personal_context",
+                tenant_id=receipt.tenant_id,
+            )
+            session.flush()
+            result = interaction_to_dict(session, interaction)
+            result["inbound_event_id"] = receipt.id
+            return result
 
     if active_pending is None and binding is not None:
         try:
@@ -2341,6 +2418,7 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                 in {
                     OWNER_CONTROL_OUTBOX_ACTION,
                     PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION,
+                    PERSONAL_CONTEXT_SUGGESTION_OUTBOX_ACTION,
                 }
                 and row.destination == "local_transport"
             ):
@@ -2389,7 +2467,7 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                             pending_intent_id=pending_intent_id,
                             outbox_id=row.id,
                         )
-                else:
+                elif row.action_type == PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION:
                     audit(
                         session,
                         row.interaction_id,
@@ -2401,6 +2479,28 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                             ),
                             "recommendation_claim_id": row.payload.get(
                                 "recommendation_claim_id"
+                            ),
+                            "transport_status": result.status,
+                            "message_reference_present": bool(
+                                (result.response or {}).get(
+                                    "message_reference"
+                                )
+                            ),
+                        },
+                        row.correlation_id,
+                        row.causation_id,
+                        origin="personal_context",
+                    )
+                else:
+                    audit(
+                        session,
+                        row.interaction_id,
+                        "personal_context.suggestion_delivered",
+                        {
+                            "outbox_id": row.id,
+                            "suggestion_id": row.payload.get("suggestion_id"),
+                            "suggestion_claim_id": row.payload.get(
+                                "suggestion_claim_id"
                             ),
                             "transport_status": result.status,
                             "message_reference_present": bool(
