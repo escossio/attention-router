@@ -194,7 +194,10 @@ def test_canary_integration_toggle_fails_closed_on_missing_flags(tmp_path):
 
 
 
-def test_generated_canary_env_loads_real_settings_fail_closed(tmp_path):
+def test_generated_canary_env_loads_real_settings_fail_closed(
+    tmp_path,
+    monkeypatch,
+):
     target = (tmp_path / ".env.gmail-canary").resolve()
     write_gmail_canary_env(
         target,
@@ -203,6 +206,8 @@ def test_generated_canary_env_loads_real_settings_fail_closed(tmp_path):
             internal_ingress_hmac_secret="H" * 43,
         ),
     )
+    for key in _env_map(target.read_text()):
+        monkeypatch.delenv(key, raising=False)
 
     settings = Settings(_env_file=target)
 
