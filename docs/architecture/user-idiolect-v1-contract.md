@@ -1,12 +1,19 @@
 # User Idiolect V1 — Storage & Retrieval Contract
 
-Status: frozen design candidate / no runtime implementation
+Status: active runtime implementation — V1D/V1E/V1F/V1G implemented; V1H isolation and directionality verification
 
 Related:
 - #84 Personal Context V1
 - #89 Intent Clarification V1
 - #90 User Idiolect V1
 - docs/architecture/pending-intent-v1-contract.md
+
+Implementation checkpoint (2026-09-20):
+- V1D: resolved clarification -> bounded confirmed language FactRow;
+- V1E: tenant/person/conversation-scoped deterministic retrieval;
+- V1F: confirmed meaning may resolve only an already-ambiguous closed candidate set;
+- V1G: explicit correction records supersession and removes superseded facts from active retrieval;
+- V1H: proves tenant/person isolation plus USER_TO_ANDY vs ANDY_TO_USER/reuse-policy directionality.
 
 ## 1. Goal
 
