@@ -1,12 +1,14 @@
 # Neutral Integration Transport and Tenant Binding V0
 
-**Status: bounded HTTP receiver + binding + durable admission implemented; dispatcher and provider clients remain gated.**
+**Status: bounded HTTP receiver + binding + durable admission + canonical dispatcher implemented; provider clients remain gated.**
 The [offline binding proof](integration-tenant-binding-proof-v0.md),
 [PostgreSQL admission proof](integration-admission-proof-v0.md) and the neutral
 `POST /api/v1/ingress/integrations/events` receiver cover the authenticated
 admission boundary. The receiver is disabled by default and creates recoverable
-`integration_inbox` work only; no dispatcher or provider network client is
-activated. This specifies the boundary
+`integration_inbox` work. A separately gated dispatcher can project admitted
+events into Canonical Event + Timeline while preserving the exact V1 request by
+durable inbox reference. No provider network client is activated. This
+specifies the boundary
 after the [contract SDK extraction](integration-sdks-v0.md), under
 [ADR 0020](adr/0020-neutral-ingress-and-authenticated-tenant-binding.md).
 V0 names this design increment; the proposed HTTP profile uses version `1`.
@@ -329,7 +331,8 @@ are their independently provisioned email/WhatsApp integration bindings.
 3. Next, add thin Python/TypeScript HTTP clients with synthetic server tests
    for auth isolation, byte-preserving retries, timeout ambiguity and redirects.
 
-Runtime dispatch remains an explicit gate before production intake is enabled.
+Runtime dispatch is implemented behind `INTEGRATION_DISPATCH_ENABLED=false`
+and remains an explicit rollout gate before production intake is enabled.
 The [current native DTO](../attention_router/adapters/inbound.py) requires actor
 and content and limits event types/identifier lengths differently from the V1
 wire event; the current database receipt also has narrower fields. The neutral
