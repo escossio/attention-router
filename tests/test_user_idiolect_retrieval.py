@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import timedelta
 
 from attention_router.application.user_idiolect import (
+    EXPLICIT_CONFIRMED_PRECEDENCE,
+    REPEATED_OBSERVED_PRECEDENCE,
+    retrieve_idiolect_context,
     retrieve_idiolect_interpretation_evidence,
 )
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.models import new_id, now_utc
-from attention_router.infrastructure.models import FactRow
+from attention_router.infrastructure.models import FactRow, MemoryActorRow, MemoryClaimRow
 from attention_router.infrastructure.repository import upsert_actor_binding
 
 
@@ -78,6 +81,67 @@ def _fact(
     session.add(row)
     session.flush()
     return row
+
+
+
+
+def _observed_claim(
+    session,
+    *,
+    actor_key: str = "owner-a-ext",
+    predicate: str = "communication.observed.profanity_tolerance",
+    valid_until=None,
+) -> MemoryClaimRow:
+    stamp = now_utc()
+    actor = MemoryActorRow(
+        id=new_id(),
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=actor_key,
+        metadata_json={},
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    session.add(actor)
+    session.flush()
+    claim = MemoryClaimRow(
+        id=new_id(),
+        subject_actor_id=actor.id,
+        subject_entity_id=None,
+        predicate=predicate,
+        object_type="JSON",
+        object_text=None,
+        object_actor_id=None,
+        object_entity_id=None,
+        object_json={
+            "signal": "PROFANITY_PRESENT",
+            "direction": "USER_TO_ANDY_LANGUAGE",
+            "evidence_class": "OBSERVED",
+            "reuse_policy": "INTERPRET_ONLY",
+            "generalization_scope": "PERSON",
+            "generalization_confidence": 0.25,
+        },
+        context={
+            "promotion_rule": "RECURRENCE_V1",
+            "observation_threshold": 3,
+            "observation_count": 3,
+        },
+        confidence=0.70,
+        sensitivity_class="NORMAL",
+        source_quality="REPEATED_OBSERVATION",
+        valid_from=stamp - timedelta(days=1),
+        valid_until=valid_until or stamp + timedelta(days=30),
+        status="ACTIVE",
+        staleness_class="PERISHABLE",
+        supersedes_claim_id=None,
+        conflict_group_id=None,
+        first_observed_at=stamp - timedelta(days=3),
+        last_observed_at=stamp,
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    session.add(claim)
+    session.flush()
+    return claim
 
 
 def test_exact_confirmed_mapping_is_retrieved_in_same_context(session):
@@ -200,3 +264,97 @@ def test_superseded_confirmed_mapping_is_excluded_from_retrieval(session):
     assert len(items) == 1
     assert items[0].fact_id == new.id
     assert items[0].semantic_intent_key == "CONFIGURE_OWNER_REPLY_GRACE"
+
+
+
+def test_context_retrieval_ranks_explicit_confirmation_above_observed_pattern(session):
+    _install_actor(session, ACTOR_A, "owner-a-ext")
+    fact = _fact(
+        session,
+        semantic_intent_key="CONFIGURE_OWNER_REPLY_GRACE",
+        parameters={"seconds": 30},
+    )
+    claim = _observed_claim(session)
+
+    items = retrieve_idiolect_context(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR_A,
+        utterance="retorne em 30 segundos",
+        source_channel="wwebjs-owner-control",
+        conversation_key_hash=CONVERSATION,
+    )
+
+    assert len(items) == 2
+    assert items[0].item_id == fact.id
+    assert items[0].evidence_kind == "EXPLICIT_CONFIRMED_MAPPING"
+    assert items[0].precedence == EXPLICIT_CONFIRMED_PRECEDENCE
+    assert items[1].item_id == claim.id
+    assert items[1].evidence_kind == "REPEATED_OBSERVED_PATTERN"
+    assert items[1].precedence == REPEATED_OBSERVED_PRECEDENCE
+    assert items[1].evidence_confidence == 0.70
+    assert items[1].generalization_confidence == 0.25
+    assert items[1].reuse_policy == "INTERPRET_ONLY"
+
+
+def test_context_retrieval_excludes_expired_observed_pattern(session):
+    _install_actor(session, ACTOR_A, "owner-a-ext")
+    _observed_claim(
+        session,
+        valid_until=now_utc() - timedelta(seconds=1),
+    )
+
+    items = retrieve_idiolect_context(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR_A,
+        utterance="mensagem qualquer",
+        source_channel="wwebjs-owner-control",
+        conversation_key_hash=CONVERSATION,
+    )
+
+    assert items == ()
+
+
+def test_context_retrieval_resolves_observed_pattern_through_binding_alias(session):
+    _install_actor(session, ACTOR_A, "owner-a-ext")
+    claim = _observed_claim(session, actor_key="owner-a-ext")
+
+    items = retrieve_idiolect_context(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR_A,
+        utterance="mensagem qualquer",
+        source_channel="wwebjs-owner-control",
+        conversation_key_hash=CONVERSATION,
+    )
+
+    assert len(items) == 1
+    assert items[0].item_id == claim.id
+
+
+def test_repeated_observed_pattern_cannot_become_semantic_parse_evidence(session):
+    _install_actor(session, ACTOR_A, "owner-a-ext")
+    _observed_claim(session)
+
+    interpretation = retrieve_idiolect_interpretation_evidence(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR_A,
+        utterance="retorne em 30 segundos",
+        source_channel="wwebjs-owner-control",
+        conversation_key_hash=CONVERSATION,
+    )
+    context = retrieve_idiolect_context(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR_A,
+        utterance="retorne em 30 segundos",
+        source_channel="wwebjs-owner-control",
+        conversation_key_hash=CONVERSATION,
+    )
+
+    assert interpretation == ()
+    assert len(context) == 1
+    assert context[0].evidence_kind == "REPEATED_OBSERVED_PATTERN"
+    assert context[0].reuse_policy == "INTERPRET_ONLY"
