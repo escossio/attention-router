@@ -61,6 +61,10 @@ from attention_router.application.pending_intent import (
     resolve_pending_intent,
     supersede_pending_intent,
 )
+from attention_router.application.user_idiolect_projection import (
+    IdiolectProjectionError,
+    project_resolved_pending_intent_language_fact,
+)
 from attention_router.application.owner_operational_control import (
     OperationalControlConflict,
     OperationalControlError,
@@ -531,6 +535,25 @@ def _handle_owner_control_command(
                     "CONTROL_COMMAND_NEEDS_CLARIFICATION"
                 )
             else:
+                try:
+                    project_resolved_pending_intent_language_fact(
+                        session,
+                        pending_intent_id=active_pending.id,
+                    )
+                except IdiolectProjectionError as exc:
+                    audit(
+                        session,
+                        active_pending.source_interaction_id,
+                        "idiolect.confirmed_projection_failed",
+                        {
+                            "pending_intent_id": active_pending.id,
+                            "error_code": str(exc),
+                        },
+                        active_pending.correlation_id,
+                        receipt.id,
+                        origin="user_idiolect",
+                        tenant_id=receipt.tenant_id,
+                    )
                 materialized = materialize_owner_control_candidate(
                     intent_key=candidate["semantic_intent_key"],
                     parameters=candidate["parameters"],
