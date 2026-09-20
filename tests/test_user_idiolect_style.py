@@ -280,3 +280,23 @@ def test_superseded_and_expired_explicit_preferences_are_not_active(session):
 
     assert profile.response_length == "short"
     assert profile.directness == "neutral"
+
+
+
+def test_invalid_explicit_style_value_fails_closed_to_default(session):
+    _install_actor(session)
+    _explicit_preference(
+        session,
+        dimension="response_length",
+        value="ultra_short",
+    )
+
+    profile = build_response_style_profile(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+    )
+
+    assert profile.response_length == "medium"
+    assert profile.adaptation_applied is False
+    assert dict(profile.sources)["response_length"] == "DEFAULT"
