@@ -65,6 +65,7 @@ def _reply(event_id: str, text: str, stamp: datetime):
         update={
             "occurred_at": stamp,
             "received_at": stamp,
+            "actor_id": "owner-v1g@c.us",
         }
     )
 
