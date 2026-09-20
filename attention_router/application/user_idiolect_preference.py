@@ -49,7 +49,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], UserStylePreferenceCommand], ...] = (
     ),
     (
         re.compile(
-            r"^(?:fale|fala)(?: comigo)? mais tecnico$"
+            r"^(?:fale|fala)(?: comigo)? mais tecnico(?: comigo)?$"
             r"|^(?:seja|pode ser) mais tecnico$"
         ),
         UserStylePreferenceCommand(
@@ -60,8 +60,8 @@ _PATTERNS: tuple[tuple[re.Pattern[str], UserStylePreferenceCommand], ...] = (
     ),
     (
         re.compile(
-            r"^(?:fale|fala)(?: comigo)? menos tecnico$"
-            r"|^(?:fale|fala)(?: comigo)? mais simples$"
+            r"^(?:fale|fala)(?: comigo)? menos tecnico(?: comigo)?$"
+            r"|^(?:fale|fala)(?: comigo)? mais simples(?: comigo)?$"
             r"|^(?:seja|pode ser) menos tecnico$"
         ),
         UserStylePreferenceCommand(
@@ -72,7 +72,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], UserStylePreferenceCommand], ...] = (
     ),
     (
         re.compile(
-            r"^(?:fale|fala)(?: comigo)? mais informal$"
+            r"^(?:fale|fala)(?: comigo)? mais informal(?: comigo)?$"
             r"|^(?:seja|pode ser) mais informal$"
         ),
         UserStylePreferenceCommand(
@@ -83,7 +83,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], UserStylePreferenceCommand], ...] = (
     ),
     (
         re.compile(
-            r"^(?:fale|fala)(?: comigo)? mais formal$"
+            r"^(?:fale|fala)(?: comigo)? mais formal(?: comigo)?$"
             r"|^(?:seja|pode ser) mais formal$"
         ),
         UserStylePreferenceCommand(
