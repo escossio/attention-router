@@ -310,7 +310,12 @@ def test_full_revalidation_materializes_one_reminder_and_nothing_else(session):
     assert reminder.status == "SCHEDULED"
     assert reminder.idempotency_key == intent.idempotency_key
     assert reminder.summary == "Recorrência observada pela Andy"
-    assert reminder.trigger_at == stamp + timedelta(days=1)
+    trigger_at = (
+        reminder.trigger_at.replace(tzinfo=UTC)
+        if reminder.trigger_at.tzinfo is None
+        else reminder.trigger_at.astimezone(UTC)
+    )
+    assert trigger_at == stamp + timedelta(days=1)
     assert after == before
 
     session.refresh(accepted)
