@@ -20,6 +20,7 @@ TARGET_REPO = "escossio/attention-router"
 CI_RUN = "/usr/local/lib/andy-ci/bin/andy-ci-distributed"
 CI_REPROFILE = "/usr/local/lib/andy-ci/bin/andy-ci-reprofile"
 ACTIONS = {"opened", "synchronize", "reopened", "ready_for_review"}
+DEBOUNCE_SECONDS = 5
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -108,6 +109,14 @@ def enqueue_new_deliveries() -> int:
                     (delivery_id, repo, pr_number, sha.lower(), stamp, stamp),
                 )
                 created += cur.rowcount
+                if cur.rowcount:
+                    db.execute(
+                        """UPDATE distributed_postgres_jobs
+                           SET state='STALE', detail='superseded before execution', updated_at=?
+                           WHERE repository=? AND pr_number=? AND state='PENDING'
+                             AND head_sha<>?""",
+                        (stamp, repo, pr_number, sha.lower()),
+                    )
         if last != cursor:
             db.execute(
                 "UPDATE distributed_postgres_meta SET value=? WHERE key='delivery_cursor'",
@@ -121,7 +130,7 @@ def claim_job() -> dict | None:
         db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             """SELECT * FROM distributed_postgres_jobs
-               WHERE state='PENDING' ORDER BY id LIMIT 1"""
+               WHERE state='PENDING' ORDER BY id DESC LIMIT 1"""
         ).fetchone()
         if row is None:
             db.commit()
@@ -277,6 +286,7 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, in
         finally:
             return "FAIL", detail, check_id
 def run_job(job: dict) -> None:
+    time.sleep(DEBOUNCE_SECONDS)
     state, detail, check_id = execute_exact_sha(
         job["repository"],
         int(job["pr_number"]),
