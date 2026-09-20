@@ -86,7 +86,12 @@ def test_explicit_yes_accepts_one_delivered_recommendation_without_execution(
         _reply(
             "v1h-accept",
             "sim",
-            stamp + timedelta(minutes=1),
+            (
+                delivered.completed_at.replace(tzinfo=UTC)
+                if delivered.completed_at.tzinfo is None
+                else delivered.completed_at.astimezone(UTC)
+            )
+            + timedelta(minutes=1),
         ),
     )
 
@@ -130,14 +135,23 @@ def test_explicit_yes_accepts_one_delivered_recommendation_without_execution(
 
 def test_explicit_no_dismisses_delivered_recommendation(session, monkeypatch):
     stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    _delivered_proposal(session, monkeypatch, stamp)
+    _binding, delivered = _delivered_proposal(
+        session,
+        monkeypatch,
+        stamp,
+    )
 
+    delivered_at = (
+        delivered.completed_at.replace(tzinfo=UTC)
+        if delivered.completed_at.tzinfo is None
+        else delivered.completed_at.astimezone(UTC)
+    )
     services.receive_normalized_inbound_event(
         session,
         _reply(
             "v1h-dismiss",
             "não",
-            stamp + timedelta(minutes=1),
+            delivered_at + timedelta(minutes=1),
         ),
     )
 
