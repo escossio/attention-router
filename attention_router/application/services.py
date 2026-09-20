@@ -81,6 +81,12 @@ from attention_router.application.personal_context_review import (
     ContextReviewError,
     resolve_bounded_context_review,
 )
+from attention_router.application.personal_context_controls import (
+    ContextControlCommandKind,
+    ContextControlError,
+    apply_context_control,
+    parse_context_control,
+)
 from attention_router.application.user_idiolect_preference import (
     UserStylePreferenceError,
     parse_user_style_preference,
@@ -461,6 +467,93 @@ def _handle_owner_control_command(
             source_channel=OWNER_CONTROL_SOURCE_CHANNEL,
             conversation_key_hash=conversation_key_hash,
         )
+
+    if active_pending is None and binding is not None:
+        context_control = parse_context_control(persisted_text)
+        if context_control is not None:
+            interaction = _create_owner_control_interaction(
+                session,
+                receipt=receipt,
+                owner_actor_key=owner_actor_key,
+                canonical_text=(
+                    "PERSONAL_CONTEXT_CONTROL "
+                    f"command={context_control.kind.value}"
+                ),
+            )
+            try:
+                resolution = apply_context_control(
+                    session,
+                    tenant_id=receipt.tenant_id,
+                    actor_key=owner_actor_key,
+                    command=context_control,
+                    control_event=receipt,
+                    now=receipt.received_at,
+                )
+            except ContextControlError as exc:
+                audit(
+                    session,
+                    interaction.id,
+                    "personal_context.control_rejected",
+                    {"reason_code": str(exc)},
+                    receipt.correlation_id,
+                    receipt.id,
+                    origin="personal_context",
+                    tenant_id=receipt.tenant_id,
+                )
+                confirmation = (
+                    "Não consegui aplicar esse controle com segurança. "
+                    "Nenhum contexto foi alterado."
+                )
+            else:
+                if resolution.command is ContextControlCommandKind.SET_PRIVATE:
+                    confirmation = (
+                        "Marquei este contexto como privado. A evidência histórica "
+                        "foi preservada, mas esse contexto fica fora das revisões e "
+                        "não será usado para novas sugestões enquanto a marca estiver ativa."
+                    )
+                elif resolution.command is ContextControlCommandKind.CLEAR_PRIVATE:
+                    confirmation = (
+                        "Removi a marcação privada deste contexto. Isso não concede "
+                        "divulgação automática nem autoridade de execução."
+                    )
+                elif resolution.command is ContextControlCommandKind.SET_NON_ACTIONABLE:
+                    confirmation = (
+                        "Marquei este contexto como não acionável. Ele pode continuar "
+                        "como conhecimento interno, mas não será usado para novas sugestões "
+                        "ou ações enquanto essa marca estiver ativa."
+                    )
+                else:
+                    confirmation = (
+                        "Voltei a permitir que este contexto seja considerado para sugestões. "
+                        "Isso não concede execução, capability, grant ou divulgação automática."
+                    )
+                audit(
+                    session,
+                    interaction.id,
+                    "personal_context.control_applied",
+                    {
+                        "control_claim_id": resolution.control_claim_id,
+                        "command": resolution.command.value,
+                        "private": resolution.private,
+                        "non_actionable": resolution.non_actionable,
+                        "changed": resolution.changed,
+                    },
+                    receipt.correlation_id,
+                    receipt.id,
+                    origin="personal_context",
+                    tenant_id=receipt.tenant_id,
+                )
+            _enqueue_owner_control_confirmation(
+                session,
+                receipt=receipt,
+                interaction=interaction,
+                binding=binding,
+                text=confirmation,
+            )
+            session.flush()
+            result = interaction_to_dict(session, interaction)
+            result["inbound_event_id"] = receipt.id
+            return result
 
     if active_pending is None and binding is not None:
         try:
