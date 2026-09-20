@@ -125,6 +125,12 @@ def _validated_timeline_evidence(
             )
         ordered.append(row)
 
+    actual_provenance = {row.provenance for row in ordered}
+    if actual_provenance != set(hypothesis.source_provenance):
+        raise ContextHypothesisPersistenceError(
+            "PATTERN_HYPOTHESIS_PROVENANCE_MISMATCH"
+        )
+
     return tuple(ordered)
 
 
@@ -266,14 +272,11 @@ def persist_context_pattern_hypothesis(
 
     if previous is not None:
         previous.status = "SUPERSEDED"
-        previous.valid_until = min(
-            filter(
-                None,
-                [
-                    previous.valid_until,
-                    _utc(hypothesis.last_observed_at),
-                ],
-            )
+        replacement_time = _utc(hypothesis.last_observed_at)
+        previous.valid_until = (
+            min(_utc(previous.valid_until), replacement_time)
+            if previous.valid_until is not None
+            else replacement_time
         )
         previous.updated_at = now_utc()
 
