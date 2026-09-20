@@ -49,6 +49,8 @@ def _claim(
     actor_key: str = ACTOR,
     now: datetime,
     event_type: str = "LOCATION_ARRIVAL",
+    signature_kind: str = "PATTERN_KEY",
+    signature_value: str = "gym-arrival",
     confidence: float = 0.85,
     support_ratio: float = 1.0,
     valid_until=None,
@@ -76,8 +78,8 @@ def _claim(
         object_json={
             "pattern_type": "TEMPORAL_RECURRENCE",
             "event_type": event_type,
-            "signature_kind": "PATTERN_KEY",
-            "signature_value": "gym-arrival",
+            "signature_kind": signature_kind,
+            "signature_value": signature_value,
             "cadence_seconds": 24 * 60 * 60,
             "evidence_class": "INFERRED",
             "hypothesis_status": "HYPOTHESIS",
@@ -291,3 +293,23 @@ def test_actor_and_tenant_scope_are_fail_closed(session):
             now=stamp,
         )
     ) == 1
+
+
+def test_relationship_scoped_recurrence_stays_non_actionable(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    _ensure_tenant(session)
+    sync_capability_definitions(session)
+    _claim(
+        session,
+        now=stamp,
+        event_type="LOCATION_ARRIVAL",
+        signature_kind="RELATIONSHIP",
+        signature_value="relationship-123",
+    )
+
+    assert build_context_recommendations(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+        now=stamp,
+    ) == ()
