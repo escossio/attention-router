@@ -18,7 +18,9 @@ from typing import Protocol
 
 INBOUND_SCOPE = "integration:inbound_event:write"
 _NAME = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+")
-_BEARER = re.compile(r"[A-Za-z0-9._~+/-]+=*")
+_BEARER_BODY_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~+/-"
+)
 
 
 def _identifier(value: object, maximum: int) -> bool:
@@ -40,9 +42,19 @@ def credential_digest(secret: str) -> str:
 
     Syntax/length checks cannot establish entropy. Provisioning must generate
     at least 32 random bytes, and keep credentials out of repository fixtures.
+    Validation is deliberately linear because this function is reachable from
+    an unauthenticated network bearer header.
     """
-    if type(secret) is not str or not 43 <= len(secret) <= 512 or not _BEARER.fullmatch(secret):
+    if type(secret) is not str or not 43 <= len(secret) <= 512:
         raise ValueError("Invalid credential representation")
+    body = secret.rstrip("=")
+    if (
+        not body
+        or any(character not in _BEARER_BODY_CHARS for character in body)
+        or "=" in body
+    ):
+        raise ValueError("Invalid credential representation")
+    # Any '=' that was not trailing remains in body and is rejected above.
     return hashlib.sha256(secret.encode("ascii")).hexdigest()
 
 
