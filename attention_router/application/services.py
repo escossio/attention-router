@@ -61,6 +61,10 @@ from attention_router.application.pending_intent import (
     resolve_pending_intent,
     supersede_pending_intent,
 )
+from attention_router.application.user_idiolect import (
+    retrieve_idiolect_interpretation_evidence,
+    select_unique_confirmed_candidate,
+)
 from attention_router.application.user_idiolect_projection import (
     IdiolectProjectionError,
     project_resolved_pending_intent_language_fact,
@@ -649,6 +653,7 @@ def _handle_owner_control_command(
             result["inbound_event_id"] = receipt.id
             return result
 
+    candidate_set: dict[str, object] | None = None
     if parsed is None:
         parsed = parse_owner_grace_control(persisted_text)
     if (
@@ -662,6 +667,49 @@ def _handle_owner_control_command(
             # the message on the ordinary owner-message path without mutation.
             return None
         normalization_source = "SEMANTIC_AI"
+
+    if (
+        parsed.status == OwnerControlParseStatus.REJECTED
+        and parsed.reason_code == "CONTROL_COMMAND_NEEDS_CLARIFICATION"
+        and binding is not None
+        and conversation_key_hash is not None
+    ):
+        try:
+            candidate_set = interpret_owner_control_candidates(persisted_text)
+        except OwnerControlCandidateBuilderError:
+            candidate_set = None
+        if candidate_set is not None:
+            try:
+                idiolect_evidence = retrieve_idiolect_interpretation_evidence(
+                    session,
+                    tenant_id=receipt.tenant_id,
+                    actor_key=owner_actor_key,
+                    utterance=persisted_text,
+                    source_channel=OWNER_CONTROL_SOURCE_CHANNEL,
+                    conversation_key_hash=conversation_key_hash,
+                )
+            except Exception:
+                idiolect_evidence = ()
+            selected_idiolect_candidate = select_unique_confirmed_candidate(
+                idiolect_evidence,
+                candidate_set,
+            )
+            if selected_idiolect_candidate is not None:
+                materialized = materialize_owner_control_candidate(
+                    intent_key=str(
+                        selected_idiolect_candidate["semantic_intent_key"]
+                    ),
+                    parameters=dict(selected_idiolect_candidate["parameters"]),
+                )
+                if materialized is not None:
+                    action, parameters = materialized
+                    parsed = OwnerControlParseResult(
+                        OwnerControlParseStatus.MATCHED,
+                        action,
+                        parameters,
+                    )
+                    normalization_source = "SEMANTIC_AI+IDIOLECT_CONFIRMED"
+
     if parsed.status == OwnerControlParseStatus.NOT_CONTROL_COMMAND:
         return None
 
@@ -710,10 +758,13 @@ def _handle_owner_control_command(
             and conversation_key_hash is not None
             and binding is not None
         ):
-            try:
-                candidate_set = interpret_owner_control_candidates(persisted_text)
-            except OwnerControlCandidateBuilderError:
-                candidate_set = None
+            if candidate_set is None:
+                try:
+                    candidate_set = interpret_owner_control_candidates(
+                        persisted_text
+                    )
+                except OwnerControlCandidateBuilderError:
+                    candidate_set = None
             if candidate_set is not None:
                 try:
                     with session.begin_nested():
