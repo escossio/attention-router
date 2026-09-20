@@ -11,6 +11,12 @@ from attention_router.application.personal_context_corrections import (
 from attention_router.application.personal_context_runtime import (
     run_personal_context_runtime_cycle,
 )
+from attention_router.application.personal_context_recommendations import (
+    build_context_recommendations,
+)
+from attention_router.application.platform.registry import (
+    sync_capability_definitions,
+)
 from attention_router.application.personal_context_sequence_hypotheses import (
     ContextSequencePersistenceError,
     SEQUENCE_CLAIM_PREDICATE,
@@ -392,3 +398,29 @@ def test_runtime_persists_sequence_without_creating_actionable_recommendation(se
     assert session.scalar(
         select(func.count()).select_from(OutboxMessageRow)
     ) == 0
+
+
+def test_sequence_claim_stays_non_actionable_even_when_reminder_capability_exists(
+    session,
+):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    _three_irregular_occurrences(session, stamp)
+    hypothesis = detect_event_sequence_hypotheses(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_id=ACTOR,
+        now=stamp,
+    )[0]
+    persist_context_event_sequence_hypothesis(
+        session,
+        hypothesis=hypothesis,
+        now=stamp,
+    )
+    sync_capability_definitions(session)
+
+    assert build_context_recommendations(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+        now=stamp,
+    ) == ()
