@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attention_router.domain.models import new_id, now_utc
-from attention_router.infrastructure.models import (
-    ActorBindingRow,
-    InboundEventRow,
-    MemoryActorRow,
-    MemoryClaimRow,
-)
+from attention_router.infrastructure.models import MemoryActorRow, MemoryClaimRow
+
+if TYPE_CHECKING:
+    from attention_router.infrastructure.models import InboundEventRow
 
 
 PATTERN_CORRECTION_PREDICATE: Final = "context.pattern.owner_correction"
@@ -39,6 +37,8 @@ def _explicit_owner_correction_event(
     tenant_id: str,
     actor_key: str,
 ) -> None:
+    from attention_router.infrastructure.models import ActorBindingRow
+
     if event.tenant_id != tenant_id:
         raise ContextPatternCorrectionError("PATTERN_CORRECTION_TENANT_MISMATCH")
     payload = event.payload or {}
