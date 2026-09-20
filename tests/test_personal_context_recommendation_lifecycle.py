@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -483,3 +484,43 @@ def test_accept_after_expiry_is_rejected_without_execution(session):
     after = _side_effect_counts(session)
 
     assert after == before
+
+
+
+def test_forged_capability_or_confidence_is_rejected(session):
+    actor = _install_owner(session)
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    source = _source_claim(session, actor=actor, stamp=stamp)
+    recommendation = _recommendation(source_claim=source, stamp=stamp)
+
+    with pytest.raises(
+        RecommendationLifecycleError,
+        match="RECOMMENDATION_CAPABILITY_INVALID",
+    ):
+        persist_context_recommendation(
+            session,
+            recommendation=replace(
+                recommendation,
+                capability_name="presence.set",
+            ),
+        )
+
+    with pytest.raises(
+        RecommendationLifecycleError,
+        match="RECOMMENDATION_SOURCE_CONFIDENCE_MISMATCH",
+    ):
+        persist_context_recommendation(
+            session,
+            recommendation=replace(
+                recommendation,
+                confidence=0.95,
+            ),
+        )
+
+    assert session.scalar(
+        select(func.count())
+        .select_from(MemoryClaimRow)
+        .where(
+            MemoryClaimRow.predicate == RECOMMENDATION_CLAIM_PREDICATE
+        )
+    ) == 0
