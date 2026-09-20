@@ -20,6 +20,7 @@ from attention_router.application.personal_context_patterns import (
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.hashing import stable_hash
+from attention_router.infrastructure import human_identity_models as _human_identity_models  # noqa: F401
 from attention_router.infrastructure.models import (
     InboundEventRow,
     MemoryClaimRow,
