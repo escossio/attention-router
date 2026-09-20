@@ -12,13 +12,15 @@ from attention_router.infrastructure.db import SessionLocal
 def main() -> int:
     with SessionLocal.begin() as session:
         tenant = ensure_default_tenant(session)
+        tenant_id = tenant.id
+        tenant_status = tenant.status
 
     print(
         json.dumps(
             {
                 "status": "READY",
-                "tenant_id": tenant.id,
-                "tenant_status": tenant.status,
+                "tenant_id": tenant_id,
+                "tenant_status": tenant_status,
             },
             sort_keys=True,
         )
