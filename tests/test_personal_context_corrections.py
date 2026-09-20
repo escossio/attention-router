@@ -363,3 +363,106 @@ def test_three_fresh_occurrences_requalify_pattern_before_correction_expiry(sess
     assert claim.context["hypothesis_id"] == hypothesis.hypothesis_id
     assert correction.status == "SUPERSEDED"
     assert correction.valid_until is not None
+
+
+def test_bound_other_owner_cannot_correct_this_persons_hypothesis(session):
+    _install_owner(session)
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    hypothesis, inferred = _persisted_hypothesis(session, stamp)
+    upsert_actor_binding(
+        session,
+        "wwebjs",
+        "other-owner-external",
+        "other-owner",
+        "owner",
+        metadata={"owner": True},
+        tenant_id=DEFAULT_TENANT_ID,
+    )
+    event = _correction_event(
+        session,
+        stamp + timedelta(minutes=1),
+        actor_id="other-owner-external",
+    )
+
+    with pytest.raises(
+        ContextPatternCorrectionError,
+        match="PATTERN_CORRECTION_ACTOR_MISMATCH",
+    ):
+        invalidate_context_pattern_hypothesis(
+            session,
+            tenant_id=DEFAULT_TENANT_ID,
+            actor_key=ACTOR,
+            hypothesis_id=hypothesis.hypothesis_id,
+            correction_event=event,
+        )
+
+    session.refresh(inferred)
+    assert inferred.status == "ACTIVE"
+
+
+def test_cross_tenant_correction_fails_closed(session):
+    _install_owner(session)
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    hypothesis, inferred = _persisted_hypothesis(session, stamp)
+    other_tenant = "other-personal-context-tenant"
+    if session.get(TenantRow, other_tenant) is None:
+        now = now_utc()
+        session.add(
+            TenantRow(
+                id=other_tenant,
+                slug=other_tenant,
+                name=other_tenant,
+                status="ACTIVE",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.flush()
+
+    payload = {
+        "actor_id": EXTERNAL_ACTOR,
+        "content": "isso nao e uma rotina",
+        "event_origin": "OWNER_COMMAND",
+        "owner_authenticated": True,
+        "metadata": {
+            "from_me": True,
+            "owner_self_chat": True,
+            "from_me_classification": "OWNER_COMMAND",
+            "final_from_me_classification": "OWNER_COMMAND",
+        },
+    }
+    event = InboundEventRow(
+        id=new_id(),
+        tenant_id=other_tenant,
+        source="wwebjs",
+        external_event_id=new_id(),
+        event_type="message",
+        payload=payload,
+        payload_hash=stable_hash(payload),
+        received_at=stamp + timedelta(minutes=1),
+        processed_at=None,
+        interaction_id=None,
+        status="RECEIVED",
+        error=None,
+        correlation_id=new_id(),
+        lineage_classification="ORGANIC",
+        scenario_run_id=None,
+        scenario_step_run_id=None,
+    )
+    session.add(event)
+    session.flush()
+
+    with pytest.raises(
+        ContextPatternCorrectionError,
+        match="PATTERN_CORRECTION_TENANT_MISMATCH",
+    ):
+        invalidate_context_pattern_hypothesis(
+            session,
+            tenant_id=DEFAULT_TENANT_ID,
+            actor_key=ACTOR,
+            hypothesis_id=hypothesis.hypothesis_id,
+            correction_event=event,
+        )
+
+    session.refresh(inferred)
+    assert inferred.status == "ACTIVE"
