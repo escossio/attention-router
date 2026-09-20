@@ -35,6 +35,7 @@ from attention_router.infrastructure.models import (
     MemoryActorRow,
     MemoryClaimRow,
     OutboxMessageRow,
+    PolicyRow,
     ReminderRow,
     TenantRow,
 )
@@ -274,6 +275,14 @@ def test_accepted_recommendation_without_policy_prepares_no_intent(session):
     stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
     _accepted_recommendation(session, stamp)
     provision_internal_providers(session, DEFAULT_TENANT_ID)
+    for policy in session.scalars(
+        select(PolicyRow).where(
+            PolicyRow.tenant_id == DEFAULT_TENANT_ID,
+            PolicyRow.is_active.is_(True),
+        )
+    ).all():
+        policy.is_active = False
+    session.flush()
 
     assessment = evaluate_accepted_recommendation_authority(
         session,
