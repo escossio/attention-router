@@ -6,6 +6,10 @@ from typing import Final
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.personal_context_corrections import (
+    ContextPatternCorrectionError,
+    active_pattern_correction,
+)
 from attention_router.application.personal_context_patterns import (
     ContextPatternHypothesis,
 )
@@ -250,6 +254,19 @@ def persist_context_pattern_hypothesis(
         tenant_id=hypothesis.tenant_id,
         actor_key=hypothesis.actor_id,
     )
+    try:
+        correction = active_pattern_correction(
+            session,
+            actor_id=actor.id,
+            hypothesis_id=hypothesis.hypothesis_id,
+            now=stamp,
+        )
+    except ContextPatternCorrectionError as exc:
+        raise ContextHypothesisPersistenceError(str(exc)) from exc
+    if correction is not None:
+        raise ContextHypothesisPersistenceError(
+            "PATTERN_HYPOTHESIS_SUPPRESSED_BY_OWNER_CORRECTION"
+        )
 
     active = _active_same_hypothesis(
         session,
