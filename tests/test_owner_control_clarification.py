@@ -216,6 +216,20 @@ def test_ambiguous_command_creates_linked_pending_intent(
     ) is None
 
 
+def test_ambiguous_command_links_pending_with_runtime_autoflush_disabled(
+    owner_control_session,
+    monkeypatch,
+):
+    owner_control_session.autoflush = False
+    result, pending = _start_pending(owner_control_session, monkeypatch)
+    outbox = _outbox_for(owner_control_session, result["id"])
+
+    assert pending.state == "PENDING"
+    assert pending.clarification_outbox_id == outbox.id
+    assert "1)" in outbox.payload["text"]
+    assert "2)" in outbox.payload["text"]
+
+
 def test_bare_yes_keeps_two_candidate_intent_pending(
     owner_control_session,
     monkeypatch,
