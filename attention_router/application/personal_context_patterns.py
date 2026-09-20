@@ -53,6 +53,8 @@ def _utc(value: datetime) -> datetime:
 def _event_signature(row: TimelineEventRow) -> tuple[str, str] | None:
     if row.resource_id:
         return "RESOURCE", row.resource_id
+    if row.relationship_id:
+        return "RELATIONSHIP", row.relationship_id
     pattern_key = (row.event_ref or {}).get("pattern_key")
     if isinstance(pattern_key, str) and pattern_key.strip():
         return "PATTERN_KEY", pattern_key.strip()
