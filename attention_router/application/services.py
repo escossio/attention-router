@@ -676,7 +676,20 @@ def _handle_owner_control_command(
     ):
         try:
             candidate_set = interpret_owner_control_candidates(persisted_text)
-        except OwnerControlCandidateBuilderError:
+        except OwnerControlCandidateBuilderError as exc:
+            audit(
+                session,
+                None,
+                "owner_control.candidate_builder_failed",
+                {
+                    "reason_code": str(exc),
+                    "phase": "PRE_IDIOLECT",
+                },
+                receipt.correlation_id,
+                receipt.id,
+                origin="intent_clarification",
+                tenant_id=receipt.tenant_id,
+            )
             candidate_set = None
         if candidate_set is not None:
             try:
@@ -763,7 +776,20 @@ def _handle_owner_control_command(
                     candidate_set = interpret_owner_control_candidates(
                         persisted_text
                     )
-                except OwnerControlCandidateBuilderError:
+                except OwnerControlCandidateBuilderError as exc:
+                    audit(
+                        session,
+                        interaction.id,
+                        "owner_control.candidate_builder_failed",
+                        {
+                            "reason_code": str(exc),
+                            "phase": "CLARIFICATION_CREATE",
+                        },
+                        receipt.correlation_id,
+                        receipt.id,
+                        origin="intent_clarification",
+                        tenant_id=receipt.tenant_id,
+                    )
                     candidate_set = None
             if candidate_set is not None:
                 try:
