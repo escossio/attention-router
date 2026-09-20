@@ -94,6 +94,17 @@ def _source_claim_for(
         raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_NOT_HYPOTHESIS")
     if value.get("grants_authority") is not False:
         raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_AUTHORITY_INVALID")
+    generated_at = _utc(recommendation.generated_at)
+    if claim.valid_from is not None and _utc(claim.valid_from) > generated_at:
+        raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_NOT_YET_VALID")
+    if claim.valid_until is not None:
+        source_valid_until = _utc(claim.valid_until)
+        if source_valid_until <= generated_at:
+            raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_EXPIRED")
+        if _utc(recommendation.valid_until) > source_valid_until:
+            raise RecommendationLifecycleError(
+                "RECOMMENDATION_OUTLIVES_SOURCE"
+            )
     return claim
 
 
