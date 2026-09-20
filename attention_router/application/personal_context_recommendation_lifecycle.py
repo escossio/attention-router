@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Final
@@ -94,6 +93,27 @@ def _source_claim_for(
         raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_NOT_HYPOTHESIS")
     if value.get("grants_authority") is not False:
         raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_AUTHORITY_INVALID")
+    if value.get("pattern_type") != "TEMPORAL_RECURRENCE":
+        raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_PATTERN_INVALID")
+    if value.get("event_type") != "LOCATION_ARRIVAL":
+        raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_EVENT_INVALID")
+    context = claim.context or {}
+    if float(context.get("support_ratio", -1.0)) != recommendation.support_ratio:
+        raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_SUPPORT_MISMATCH")
+    if context.get("occurrence_count") != recommendation.occurrence_count:
+        raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_COUNT_MISMATCH")
+    if context.get("anomaly_count") != recommendation.anomaly_count:
+        raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_ANOMALY_MISMATCH")
+    if tuple(sorted(context.get("source_provenance") or [])) != tuple(
+        sorted(recommendation.source_provenance)
+    ):
+        raise RecommendationLifecycleError(
+            "RECOMMENDATION_SOURCE_PROVENANCE_MISMATCH"
+        )
+    if recommendation.confidence != claim.confidence:
+        raise RecommendationLifecycleError(
+            "RECOMMENDATION_SOURCE_CONFIDENCE_MISMATCH"
+        )
     generated_at = _utc(recommendation.generated_at)
     if claim.valid_from is not None and _utc(claim.valid_from) > generated_at:
         raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_NOT_YET_VALID")
@@ -205,6 +225,10 @@ def persist_context_recommendation(
     *,
     recommendation: ContextRecommendation,
 ) -> tuple[MemoryClaimRow, bool]:
+    if recommendation.recommendation_type != "REMINDER_FOR_RECURRENT_ARRIVAL":
+        raise RecommendationLifecycleError("RECOMMENDATION_TYPE_UNSUPPORTED")
+    if recommendation.capability_name != "reminder.create":
+        raise RecommendationLifecycleError("RECOMMENDATION_CAPABILITY_INVALID")
     if recommendation.status != "PROPOSED":
         raise RecommendationLifecycleError("RECOMMENDATION_STATUS_INVALID")
     if recommendation.execution_requested:
@@ -311,6 +335,7 @@ def _explicit_owner_decision_event(
         select(ActorBindingRow).where(
             ActorBindingRow.tenant_id == tenant_id,
             ActorBindingRow.actor_key == actor_key,
+            ActorBindingRow.source == event.source,
             ActorBindingRow.external_actor_id == external_actor_id,
             ActorBindingRow.is_active.is_(True),
         )
