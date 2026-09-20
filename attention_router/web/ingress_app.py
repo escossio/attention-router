@@ -26,6 +26,9 @@ from attention_router.platform.meta_observability import (
     provider_message_id_fingerprint,
 )
 from attention_router.web.meta_security import verify_meta_signature
+from attention_router.web.integration_ingress import (
+    build_integration_ingress_router,
+)
 
 
 meta_adapter = MetaWhatsAppInboundAdapter()
@@ -132,6 +135,7 @@ def get_callback_session_factory():
 
 def create_ingress_app() -> FastAPI:
     app = FastAPI(title="Attention Router Ingress", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
+    app.include_router(build_integration_ingress_router())
 
     @app.get("/health/live", tags=["health"])
     def live() -> dict[str, str]:
