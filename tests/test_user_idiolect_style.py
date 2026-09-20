@@ -252,6 +252,32 @@ def test_conflicting_explicit_preferences_fail_closed_to_default(session):
     assert dict(profile.sources)["formality"] == "DEFAULT"
 
 
+def test_superseded_preference_stays_excluded_when_same_dimension_is_filtered(
+    session,
+):
+    _install_actor(session)
+    old = _explicit_preference(
+        session,
+        dimension="response_length",
+        value="short",
+    )
+    _explicit_preference(
+        session,
+        dimension="response_length",
+        value="long",
+        supersedes_fact_id=old.id,
+    )
+
+    profile = build_response_style_profile(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+    )
+
+    assert profile.response_length == "long"
+    assert "response_length" not in profile.conflict_dimensions
+
+
 def test_superseded_and_expired_explicit_preferences_are_not_active(session):
     _install_actor(session)
     old = _explicit_preference(
