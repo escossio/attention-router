@@ -1,5 +1,5 @@
 import socket
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import case, or_, select, update
@@ -16,6 +16,7 @@ from attention_router.adapters.wwebjs_outbound import (
 )
 from attention_router.adapters.local_transport_outbound import local_transport_outbound
 from attention_router.adapters.wwebjs_owner_control import (
+    OwnerControlParseResult,
     OwnerControlParseStatus,
     canonical_command_text,
     parse_owner_grace_control,
@@ -23,6 +24,7 @@ from attention_router.adapters.wwebjs_owner_control import (
     render_owner_control_error,
 )
 from attention_router.application.owner_control import (
+    OWNER_CONTROL_SOURCE_CHANNEL,
     OwnerControlError,
     build_owner_control_signal,
     build_owner_operator_authority,
@@ -31,6 +33,33 @@ from attention_router.application.owner_control import (
 from attention_router.application.owner_control_semantic import (
     OwnerControlSemanticError,
     interpret_owner_control_semantically,
+)
+from attention_router.application.owner_control_semantic_candidates import (
+    OwnerControlCandidateBuilderError,
+    interpret_owner_control_candidates,
+)
+from attention_router.application.owner_control_semantic_registry import (
+    materialize_owner_control_candidate,
+)
+from attention_router.application.owner_control_clarification import (
+    OwnerClarificationResolutionKind,
+    OwnerControlClarificationError,
+    render_owner_control_clarification,
+    render_owner_control_clarification_canceled,
+    render_owner_control_clarification_unavailable,
+    resolve_owner_control_clarification_reply,
+    selected_candidate,
+)
+from attention_router.application.pending_intent import (
+    PendingIntentError,
+    attach_clarification_outbox,
+    cancel_pending_intent,
+    create_pending_intent,
+    expire_due_pending_intents,
+    find_active_pending_intent,
+    mark_clarification_delivered,
+    resolve_pending_intent,
+    supersede_pending_intent,
 )
 from attention_router.application.owner_operational_control import (
     OperationalControlConflict,
@@ -75,6 +104,7 @@ from attention_router.infrastructure.models import (
     InboundEventRow,
     InteractionRow,
     OutboxMessageRow,
+    PendingIntentRow,
     QueueRow,
     TimerRow,
     AgentExecutionIntentRow,
@@ -273,6 +303,95 @@ def _enqueue_owner_control_confirmation(
     return row
 
 
+def _owner_control_conversation_hash(receipt: InboundEventRow) -> str | None:
+    metadata = (receipt.payload or {}).get("metadata") or {}
+    conversation_key = metadata.get("conversation_key")
+    if not isinstance(conversation_key, str) or not conversation_key.strip():
+        return None
+    return stable_hash(conversation_key)
+
+
+def _utc_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _dispatch_owner_control_parse(
+    session: Session,
+    *,
+    receipt: InboundEventRow,
+    binding: ActorBindingRow,
+    interaction: InteractionRow,
+    parsed: OwnerControlParseResult,
+    authority: Any,
+    evidence: Any,
+    normalization_source: str,
+) -> str:
+    if parsed.action is None or parsed.parameters is None:
+        raise OwnerControlError("OWNER_CONTROL_NORMALIZATION_INVALID")
+    signal = build_owner_control_signal(
+        receipt=receipt,
+        binding=binding,
+        action=parsed.action,
+        parameters=parsed.parameters,
+        authority_evidence=evidence,
+    )
+    audit(
+        session,
+        interaction.id,
+        "owner_control.command_normalized",
+        {
+            "signal_kind": signal.signal_kind.value,
+            "action": signal.action.value,
+            "normalization_source": normalization_source,
+        },
+        receipt.correlation_id,
+        receipt.id,
+        origin="owner_control",
+    )
+    try:
+        dispatched = dispatch_owner_control_signal(
+            session,
+            signal=signal,
+            authority=authority,
+        )
+    except (
+        OperationalControlConflict,
+        OperationalControlError,
+        OperationalControlUnauthorized,
+        OwnerCommandUnauthorized,
+        OwnerControlError,
+    ) as exc:
+        reason_code = str(exc)
+        audit(
+            session,
+            interaction.id,
+            "owner_control.command_rejected",
+            {"action": signal.action.value, "reason_code": reason_code},
+            receipt.correlation_id,
+            receipt.id,
+            origin="owner_control",
+        )
+        return render_owner_control_error(reason_code)
+
+    audit(
+        session,
+        interaction.id,
+        "owner_control.command_dispatched",
+        {
+            "action": signal.action.value,
+            "policy_id": dispatched.policy_id,
+            "changed": dispatched.mutation.changed,
+            "duplicate": dispatched.mutation.duplicate,
+        },
+        receipt.correlation_id,
+        receipt.id,
+        origin="owner_control",
+    )
+    return render_owner_control_confirmation(dispatched, action=signal.action)
+
+
 def _handle_owner_control_command(
     session: Session,
     *,
@@ -297,8 +416,218 @@ def _handle_owner_control_command(
     persisted_text = payload.get("content")
     if not isinstance(persisted_text, str):
         raise OwnerControlError("OWNER_CONTROL_COMMAND_TEXT_INVALID")
-    parsed = parse_owner_grace_control(persisted_text)
+
+    owner_actor_key = binding.actor_key if binding is not None else fallback_actor_key
+    conversation_key_hash = _owner_control_conversation_hash(receipt)
+    parsed: OwnerControlParseResult | None = None
     normalization_source = "DETERMINISTIC"
+
+    active_pending = None
+    if binding is not None and conversation_key_hash is not None:
+        expire_due_pending_intents(session, limit=100)
+        active_pending = find_active_pending_intent(
+            session,
+            tenant_id=receipt.tenant_id,
+            represented_owner_actor_key=owner_actor_key,
+            source_channel=OWNER_CONTROL_SOURCE_CHANNEL,
+            conversation_key_hash=conversation_key_hash,
+        )
+
+    if active_pending is not None:
+        try:
+            resolution = resolve_owner_control_clarification_reply(
+                persisted_text,
+                active_pending.candidate_set,
+            )
+        except OwnerControlClarificationError:
+            resolution = None
+
+        if resolution is not None and resolution.kind in {
+            OwnerClarificationResolutionKind.SELECT,
+            OwnerClarificationResolutionKind.CANCEL,
+        }:
+            interaction = _create_owner_control_interaction(
+                session,
+                receipt=receipt,
+                owner_actor_key=owner_actor_key,
+                canonical_text=(
+                    "OWNER_CONTROL_CLARIFICATION_REPLY "
+                    f"kind={resolution.kind.value}"
+                ),
+            )
+            audit(
+                session,
+                active_pending.source_interaction_id,
+                "intent_clarification.resolution_received",
+                {
+                    "pending_intent_id": active_pending.id,
+                    "resolution_kind": resolution.kind.value,
+                },
+                active_pending.correlation_id,
+                receipt.id,
+                origin="intent_clarification",
+                tenant_id=receipt.tenant_id,
+            )
+
+            if resolution.kind == OwnerClarificationResolutionKind.CANCEL:
+                if _utc_timestamp(receipt.received_at) < _utc_timestamp(
+                    active_pending.created_at
+                ):
+                    audit(
+                        session,
+                        active_pending.source_interaction_id,
+                        "intent_clarification.unresolved_reply",
+                        {
+                            "pending_intent_id": active_pending.id,
+                            "reason": "RESOLUTION_PRECEDES_CLARIFICATION",
+                        },
+                        active_pending.correlation_id,
+                        receipt.id,
+                        origin="intent_clarification",
+                        tenant_id=receipt.tenant_id,
+                    )
+                    confirmation = render_owner_control_clarification(
+                        active_pending.candidate_set
+                    )
+                else:
+                    cancel_pending_intent(
+                        session,
+                        pending_intent_id=active_pending.id,
+                        reason="OWNER_REJECTED_CLARIFICATION",
+                        resolution_inbound_event_id=receipt.id,
+                    )
+                    confirmation = render_owner_control_clarification_canceled()
+                _enqueue_owner_control_confirmation(
+                    session,
+                    receipt=receipt,
+                    interaction=interaction,
+                    binding=binding,
+                    text=confirmation,
+                )
+                session.flush()
+                result = interaction_to_dict(session, interaction)
+                result["inbound_event_id"] = receipt.id
+                return result
+
+            assert resolution.candidate_key is not None
+            try:
+                resolve_pending_intent(
+                    session,
+                    pending_intent_id=active_pending.id,
+                    tenant_id=receipt.tenant_id,
+                    represented_owner_actor_key=owner_actor_key,
+                    source_channel=OWNER_CONTROL_SOURCE_CHANNEL,
+                    conversation_key_hash=conversation_key_hash,
+                    resolution_inbound_event_id=receipt.id,
+                    selected_candidate_key=resolution.candidate_key,
+                    resolution_kind="EXPLICIT_OPTION_SELECTION",
+                )
+                candidate = selected_candidate(
+                    active_pending.candidate_set,
+                    resolution.candidate_key,
+                )
+            except (PendingIntentError, OwnerControlClarificationError):
+                confirmation = render_owner_control_error(
+                    "CONTROL_COMMAND_NEEDS_CLARIFICATION"
+                )
+            else:
+                materialized = materialize_owner_control_candidate(
+                    intent_key=candidate["semantic_intent_key"],
+                    parameters=candidate["parameters"],
+                )
+                if materialized is None:
+                    confirmation = render_owner_control_clarification_unavailable(
+                        candidate
+                    )
+                else:
+                    action, parameters = materialized
+                    resolved_parse = OwnerControlParseResult(
+                        OwnerControlParseStatus.MATCHED,
+                        action,
+                        parameters,
+                    )
+                    try:
+                        authority, evidence = build_owner_operator_authority(
+                            session,
+                            receipt=receipt,
+                            binding=binding,
+                        )
+                    except OwnerControlError as exc:
+                        audit(
+                            session,
+                            interaction.id,
+                            "owner_control.command_rejected",
+                            {"reason_code": str(exc)},
+                            receipt.correlation_id,
+                            receipt.id,
+                            origin="owner_control",
+                        )
+                        confirmation = render_owner_control_error(str(exc))
+                    else:
+                        confirmation = _dispatch_owner_control_parse(
+                            session,
+                            receipt=receipt,
+                            binding=binding,
+                            interaction=interaction,
+                            parsed=resolved_parse,
+                            authority=authority,
+                            evidence=evidence,
+                            normalization_source="CLARIFICATION_RESOLUTION",
+                        )
+            _enqueue_owner_control_confirmation(
+                session,
+                receipt=receipt,
+                interaction=interaction,
+                binding=binding,
+                text=confirmation,
+            )
+            session.flush()
+            result = interaction_to_dict(session, interaction)
+            result["inbound_event_id"] = receipt.id
+            return result
+
+        fresh = parse_owner_grace_control(persisted_text)
+        if fresh.status != OwnerControlParseStatus.NOT_CONTROL_COMMAND:
+            supersede_pending_intent(
+                session,
+                pending_intent_id=active_pending.id,
+                superseding_source_inbound_event_id=receipt.id,
+                reason="NEWER_EXPLICIT_OWNER_COMMAND",
+            )
+            parsed = fresh
+        else:
+            interaction = _create_owner_control_interaction(
+                session,
+                receipt=receipt,
+                owner_actor_key=owner_actor_key,
+                canonical_text="OWNER_CONTROL_CLARIFICATION_REPLY kind=UNRESOLVED",
+            )
+            audit(
+                session,
+                active_pending.source_interaction_id,
+                "intent_clarification.unresolved_reply",
+                {"pending_intent_id": active_pending.id},
+                active_pending.correlation_id,
+                receipt.id,
+                origin="intent_clarification",
+                tenant_id=receipt.tenant_id,
+            )
+            _enqueue_owner_control_confirmation(
+                session,
+                receipt=receipt,
+                interaction=interaction,
+                binding=binding,
+                text=render_owner_control_clarification(
+                    active_pending.candidate_set
+                ),
+            )
+            session.flush()
+            result = interaction_to_dict(session, interaction)
+            result["inbound_event_id"] = receipt.id
+            return result
+
+    if parsed is None:
+        parsed = parse_owner_grace_control(persisted_text)
     if (
         parsed.status == OwnerControlParseStatus.NOT_CONTROL_COMMAND
         and settings.owner_control_semantic_enabled
@@ -353,6 +682,77 @@ def _handle_owner_control_command(
 
     if parsed.status == OwnerControlParseStatus.REJECTED:
         reason_code = parsed.reason_code or "CONTROL_COMMAND_INVALID_VALUE"
+        if (
+            reason_code == "CONTROL_COMMAND_NEEDS_CLARIFICATION"
+            and conversation_key_hash is not None
+            and binding is not None
+        ):
+            try:
+                candidate_set = interpret_owner_control_candidates(persisted_text)
+            except OwnerControlCandidateBuilderError:
+                candidate_set = None
+            if candidate_set is not None:
+                try:
+                    with session.begin_nested():
+                        pending = create_pending_intent(
+                            session,
+                            tenant_id=receipt.tenant_id,
+                            represented_owner_actor_key=owner_actor_key,
+                            source_inbound_event_id=receipt.id,
+                            source_interaction_id=interaction.id,
+                            source_channel=OWNER_CONTROL_SOURCE_CHANNEL,
+                            conversation_key_hash=conversation_key_hash,
+                            semantic_registry_version=str(
+                                candidate_set["semantic_registry_version"]
+                            ),
+                            ambiguity_reason=reason_code,
+                            candidates=list(candidate_set["candidates"]),
+                            expires_at=now_utc()
+                            + timedelta(
+                                seconds=settings.owner_control_clarification_ttl_seconds
+                            ),
+                            provenance={
+                                "normalization_source": normalization_source,
+                                "candidate_builder": "owner_control_v1b",
+                            },
+                        )
+                        prompt = render_owner_control_clarification(
+                            pending.candidate_set
+                        )
+                        outbox = _enqueue_owner_control_confirmation(
+                            session,
+                            receipt=receipt,
+                            interaction=interaction,
+                            binding=binding,
+                            text=prompt,
+                        )
+                        attach_clarification_outbox(
+                            session,
+                            pending_intent_id=pending.id,
+                            outbox_id=outbox.id,
+                        )
+                except (PendingIntentError, OwnerControlClarificationError):
+                    candidate_set = None
+                else:
+                    audit(
+                        session,
+                        interaction.id,
+                        "owner_control.clarification_requested",
+                        {
+                            "pending_intent_id": pending.id,
+                            "candidate_count": len(
+                                pending.candidate_set["candidates"]
+                            ),
+                        },
+                        receipt.correlation_id,
+                        receipt.id,
+                        origin="owner_control",
+                    )
+                    session.flush()
+                    result = interaction_to_dict(session, interaction)
+                    result["inbound_event_id"] = receipt.id
+                    return result
+
         audit(
             session,
             interaction.id,
@@ -370,71 +770,18 @@ def _handle_owner_control_command(
             text=render_owner_control_error(reason_code),
         )
     else:
-        if parsed.action is None or parsed.parameters is None or binding is None:
+        if binding is None:
             raise OwnerControlError("OWNER_CONTROL_NORMALIZATION_INVALID")
-        signal = build_owner_control_signal(
+        confirmation = _dispatch_owner_control_parse(
+            session,
             receipt=receipt,
             binding=binding,
-            action=parsed.action,
-            parameters=parsed.parameters,
-            authority_evidence=evidence,
+            interaction=interaction,
+            parsed=parsed,
+            authority=authority,
+            evidence=evidence,
+            normalization_source=normalization_source,
         )
-        audit(
-            session,
-            interaction.id,
-            "owner_control.command_normalized",
-            {
-                "signal_kind": signal.signal_kind.value,
-                "action": signal.action.value,
-                "normalization_source": normalization_source,
-            },
-            receipt.correlation_id,
-            receipt.id,
-            origin="owner_control",
-        )
-        try:
-            dispatched = dispatch_owner_control_signal(
-                session,
-                signal=signal,
-                authority=authority,
-            )
-        except (
-            OperationalControlConflict,
-            OperationalControlError,
-            OperationalControlUnauthorized,
-            OwnerCommandUnauthorized,
-            OwnerControlError,
-        ) as exc:
-            reason_code = str(exc)
-            audit(
-                session,
-                interaction.id,
-                "owner_control.command_rejected",
-                {"action": signal.action.value, "reason_code": reason_code},
-                receipt.correlation_id,
-                receipt.id,
-                origin="owner_control",
-            )
-            confirmation = render_owner_control_error(reason_code)
-        else:
-            audit(
-                session,
-                interaction.id,
-                "owner_control.command_dispatched",
-                {
-                    "action": signal.action.value,
-                    "policy_id": dispatched.policy_id,
-                    "changed": dispatched.mutation.changed,
-                    "duplicate": dispatched.mutation.duplicate,
-                },
-                receipt.correlation_id,
-                receipt.id,
-                origin="owner_control",
-            )
-            confirmation = render_owner_control_confirmation(
-                dispatched,
-                action=signal.action,
-            )
         _enqueue_owner_control_confirmation(
             session,
             receipt=receipt,
@@ -1758,6 +2105,17 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                     row.causation_id,
                     origin="owner_control",
                 )
+                pending_intent_id = session.scalar(
+                    select(PendingIntentRow.id).where(
+                        PendingIntentRow.clarification_outbox_id == row.id
+                    )
+                )
+                if pending_intent_id is not None:
+                    mark_clarification_delivered(
+                        session,
+                        pending_intent_id=pending_intent_id,
+                        outbox_id=row.id,
+                    )
             else:
                 actions.dispatch(row.destination, row.interaction_id)
             row.status = "DONE"
