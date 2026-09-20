@@ -524,3 +524,41 @@ def test_forged_capability_or_confidence_is_rejected(session):
             MemoryClaimRow.predicate == RECOMMENDATION_CLAIM_PREDICATE
         )
     ) == 0
+
+
+def test_proposed_recommendation_cannot_advance_after_source_invalidation(session):
+    actor = _install_owner(session)
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    source = _source_claim(session, actor=actor, stamp=stamp)
+    recommendation = _recommendation(source_claim=source, stamp=stamp)
+    proposed, _ = persist_context_recommendation(
+        session,
+        recommendation=recommendation,
+    )
+    source.status = "SUPERSEDED"
+    source.updated_at = now_utc()
+    session.flush()
+    event = _decision_event(
+        session,
+        stamp=stamp + timedelta(minutes=1),
+        event_id="decision-source-invalidated",
+    )
+
+    with pytest.raises(
+        RecommendationLifecycleError,
+        match="RECOMMENDATION_SOURCE_HYPOTHESIS_INVALIDATED",
+    ):
+        resolve_context_recommendation(
+            session,
+            recommendation_id=recommendation.recommendation_id,
+            tenant_id=DEFAULT_TENANT_ID,
+            actor_key=ACTOR,
+            decision=RecommendationDecision.ACCEPT,
+            resolution_event=event,
+        )
+
+    session.refresh(proposed)
+    assert proposed.status == "ACTIVE"
+    assert proposed.object_json["lifecycle_state"] == "PROPOSED"
+    assert proposed.object_json["execution_requested"] is False
+    assert proposed.object_json["grants_authority"] is False
