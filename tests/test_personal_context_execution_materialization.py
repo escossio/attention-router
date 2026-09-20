@@ -259,6 +259,8 @@ def _prepared(session, stamp: datetime):
         grantee_type="ACTOR",
         grantee_id=ACTOR,
         capability_name="reminder.create",
+        valid_from=stamp - timedelta(seconds=1),
+        valid_until=stamp + timedelta(days=1),
         provenance="test",
     )
     assessment = evaluate_accepted_recommendation_authority(
