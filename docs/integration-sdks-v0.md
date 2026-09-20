@@ -48,8 +48,10 @@ references grant no access.
 The repository now implements the bounded provider-neutral inbound HTTP
 receiver at `POST /api/v1/ingress/integrations/events`, backed by the existing
 authenticated tenant binding and durable PostgreSQL admission boundary. It is
-disabled by default and admits recoverable inbox work only; no consumer
-dispatcher or provider client is activated by that receiver. Thin network
-clients, OAuth/discovery, artifact upload operations and live provider
-connectors remain future work. No runtime
-redesign or production/provider activation is included.
+disabled by default and admits recoverable inbox work only. A separately gated
+dispatcher can project admitted events into Canonical Event + Timeline. The
+repository also contains a bounded Gmail connector client that depends on a
+narrow provider-reader protocol and still requires explicit deployment/provider
+wiring. OAuth/discovery, Artifact Plane upload operations and always-on live
+provider polling remain future work. No production/provider activation is
+included.
