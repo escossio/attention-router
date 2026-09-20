@@ -20,6 +20,10 @@ from attention_router.infrastructure.models import (
     MemoryActorRow,
     MemoryClaimRow,
 )
+from attention_router.application.personal_context_controls import (
+    CONTEXT_CONTROL_PREDICATE,
+    claim_is_owner_private,
+)
 
 
 class PersonalContextUnavailable(RuntimeError):
@@ -152,6 +156,10 @@ def build_personal_context(
         )
         for row in rows:
             if not _active_at(row.valid_from, row.valid_until, stamp):
+                continue
+            if row.predicate == CONTEXT_CONTROL_PREDICATE:
+                continue
+            if claim_is_owner_private(session, claim=row):
                 continue
             claims.append(
                 PersonalContextClaim(
