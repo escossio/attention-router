@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     ingress_http_port: int = 18101
     integration_ingress_enabled: bool = False
     integration_ingress_audience: str = "andy-integration-ingress"
+    integration_dispatch_enabled: bool = False
+    integration_dispatch_batch_size: int = 20
     internal_ingress_http_host: str = "0.0.0.0"
     internal_ingress_http_port: int = 18102
     internal_ingress_hmac_secret: str | None = None
@@ -200,6 +202,10 @@ class Settings(BaseSettings):
         if not 1 <= len(self.integration_ingress_audience) <= 120:
             raise ValueError(
                 "INTEGRATION_INGRESS_AUDIENCE must be between 1 and 120 characters"
+            )
+        if not 1 <= self.integration_dispatch_batch_size <= 200:
+            raise ValueError(
+                "INTEGRATION_DISPATCH_BATCH_SIZE must be between 1 and 200"
             )
         if self.internal_ingress_http_port <= 0:
             raise ValueError("INTERNAL_INGRESS_HTTP_PORT must be positive")
