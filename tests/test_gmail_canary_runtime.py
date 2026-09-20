@@ -94,6 +94,13 @@ def test_gmail_canary_env_defaults_fail_closed():
     assert env["ADMIN_AUTH_ENABLED"] == "false"
     assert env["INTEGRATION_INGRESS_AUDIENCE"] == "andy-gmail-canary"
     assert env["INTEGRATION_DISPATCH_BATCH_SIZE"] == "5"
+    assert env["GMAIL_CONNECTOR_TENANT_ID"] == (
+        "00000000-0000-4000-8000-000000000001"
+    )
+    assert env["GMAIL_CONNECTOR_INSTANCE_ID"] == "gmail-canary"
+    assert env["ATTENTION_ROUTER_INTEGRATION_INGRESS_URL"] == (
+        "http://ingress:18101/api/v1/ingress/integrations/events"
+    )
     assert env["LOCAL_TRANSPORT_OUTBOUND_URL"] == (
         "http://127.0.0.1:1/internal/send"
     )
