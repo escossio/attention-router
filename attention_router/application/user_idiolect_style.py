@@ -108,11 +108,15 @@ def _active_explicit_preferences(
     actor_key: str,
     stamp: datetime,
 ) -> list[_StyleEvidence]:
-    superseded_ids = select(FactRow.supersedes_fact_id).where(
-        FactRow.tenant_id == tenant_id,
-        FactRow.subject_type == "ACTOR",
-        FactRow.subject_id == actor_key,
-        FactRow.supersedes_fact_id.is_not(None),
+    superseded_ids = (
+        select(FactRow.supersedes_fact_id)
+        .where(
+            FactRow.tenant_id == tenant_id,
+            FactRow.subject_type == "ACTOR",
+            FactRow.subject_id == actor_key,
+            FactRow.supersedes_fact_id.is_not(None),
+        )
+        .correlate(None)
     )
     rows = session.scalars(
         select(FactRow)
