@@ -337,6 +337,7 @@ def test_policy_denial_wins_even_when_grant_exists(session):
         grantee_type="ACTOR",
         grantee_id=ACTOR,
         capability_name="reminder.create",
+        valid_from=stamp - timedelta(minutes=1),
         provenance="test",
     )
 
@@ -368,6 +369,7 @@ def test_known_capability_without_provider_prepares_no_intent(session):
         grantee_type="ACTOR",
         grantee_id=ACTOR,
         capability_name="reminder.create",
+        valid_from=stamp - timedelta(minutes=1),
         provenance="test",
     )
 
@@ -400,6 +402,7 @@ def test_requires_approval_prepares_no_execution_intent(session):
         grantee_type="ACTOR",
         grantee_id=ACTOR,
         capability_name="reminder.create",
+        valid_from=stamp - timedelta(minutes=1),
         provenance="test",
     )
     _definition, version = capability_and_version(
@@ -439,6 +442,7 @@ def test_full_current_authority_prepares_one_inert_execution_intent(session):
         grantee_type="ACTOR",
         grantee_id=ACTOR,
         capability_name="reminder.create",
+        valid_from=stamp - timedelta(minutes=1),
         provenance="test",
     )
 
@@ -496,6 +500,7 @@ def test_authorized_assessment_is_idempotent_for_same_authority_snapshot(session
         grantee_type="ACTOR",
         grantee_id=ACTOR,
         capability_name="reminder.create",
+        valid_from=stamp - timedelta(minutes=1),
         provenance="test",
     )
 
@@ -531,6 +536,7 @@ def test_assessment_is_audited_with_policy_and_grant_evidence(session):
         grantee_type="ACTOR",
         grantee_id=ACTOR,
         capability_name="reminder.create",
+        valid_from=stamp - timedelta(minutes=1),
         provenance="test",
     )
 
