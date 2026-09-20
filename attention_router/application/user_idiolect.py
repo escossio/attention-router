@@ -133,9 +133,50 @@ def retrieve_idiolect_interpretation_evidence(
     return tuple(evidence)
 
 
+
+def select_unique_confirmed_candidate(
+    evidence: tuple[IdiolectInterpretationEvidence, ...],
+    candidate_set: dict[str, object],
+) -> dict[str, object] | None:
+    candidates = candidate_set.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return None
+
+    evidence_meanings: dict[tuple[str, tuple[tuple[str, object], ...]], IdiolectInterpretationEvidence] = {}
+    for item in evidence:
+        if item.evidence_confidence < 1.0:
+            continue
+        signature = (
+            item.semantic_intent_key,
+            tuple(sorted(item.parameters.items())),
+        )
+        evidence_meanings[signature] = item
+
+    if len(evidence_meanings) != 1:
+        return None
+    meaning = next(iter(evidence_meanings))
+
+    matches: list[dict[str, object]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        semantic_key = candidate.get("semantic_intent_key")
+        parameters = candidate.get("parameters")
+        if not isinstance(semantic_key, str) or not isinstance(parameters, dict):
+            continue
+        signature = (semantic_key, tuple(sorted(parameters.items())))
+        if signature == meaning:
+            matches.append(candidate)
+
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
 __all__ = [
     "IdiolectInterpretationEvidence",
     "PREDICATE",
     "normalize_user_expression",
     "retrieve_idiolect_interpretation_evidence",
+    "select_unique_confirmed_candidate",
 ]
