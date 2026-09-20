@@ -49,11 +49,11 @@ _PATTERNS: tuple[tuple[re.Pattern[str], ExplicitStylePreference], ...] = tuple(
             ExplicitStylePreference("response_length", "long"),
         ),
         (
-            r"(?:responda|responde|fale|fala)(?: comigo)? mais tecnic[oa]",
+            r"(?:responda|responde|fale|fala)(?: mais tecnic[oa])(?: comigo)?",
             ExplicitStylePreference("technical_depth", "high"),
         ),
         (
-            r"(?:responda|responde|fale|fala)(?: comigo)? menos tecnic[oa]",
+            r"(?:responda|responde|fale|fala)(?: menos tecnic[oa])(?: comigo)?",
             ExplicitStylePreference("technical_depth", "low"),
         ),
         (
