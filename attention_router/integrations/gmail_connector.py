@@ -145,14 +145,6 @@ class GmailPollResult:
     duplicates: int = 0
 
 
-def _mailbox(value: str) -> str:
-    _display, address = parseaddr(value)
-    address = address.strip()
-    if not address:
-        raise GmailConnectorError("GMAIL_SENDER_INVALID")
-    return address
-
-
 def _utc_timestamp(value: str) -> datetime:
     if not isinstance(value, str) or not value.strip():
         raise GmailConnectorError("GMAIL_TIMESTAMP_REQUIRED")
