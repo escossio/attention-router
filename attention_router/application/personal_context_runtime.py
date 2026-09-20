@@ -197,12 +197,15 @@ def _ensure_recommendation_interaction(
     interaction_id, correlation_id = _interaction_identity(
         recommendation.recommendation_id
     )
+    contact_id = (
+        "personal_context:"
+        + stable_hash(recommendation.actor_id)[:48]
+    )
     existing = session.get(InteractionRow, interaction_id)
     if existing is not None:
         if (
             existing.tenant_id != recommendation.tenant_id
-            or existing.contact_id
-            != f"personal_context:{recommendation.actor_id}"
+            or existing.contact_id != contact_id
             or existing.causation_id != recommendation_claim.id
         ):
             raise RecommendationLifecycleError(
@@ -214,7 +217,7 @@ def _ensure_recommendation_interaction(
         id=interaction_id,
         tenant_id=recommendation.tenant_id,
         event_type="PERSONAL_CONTEXT_RECOMMENDATION",
-        contact_id=f"personal_context:{recommendation.actor_id}",
+        contact_id=contact_id,
         contact_name=binding.display_name or "Owner",
         relationship_category="owner",
         active_context="personal_context",
