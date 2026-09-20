@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -17,7 +16,9 @@ from typing import Protocol
 
 
 INBOUND_SCOPE = "integration:inbound_event:write"
-_NAME = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+")
+_NAME_FIRST_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz")
+_NAME_BODY_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+_HEX_LOWER_CHARS = frozenset("0123456789abcdef")
 _BEARER_BODY_CHARS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~+/-"
 )
@@ -25,6 +26,20 @@ _BEARER_BODY_CHARS = frozenset(
 
 def _identifier(value: object, maximum: int) -> bool:
     return type(value) is str and 0 < len(value) <= maximum and bool(value.strip())
+
+
+def _integration_name(value: object) -> bool:
+    if type(value) is not str or not 0 < len(value) <= 120:
+        return False
+    parts = value.split(".")
+    if len(parts) < 2:
+        return False
+    return all(
+        part
+        and part[0] in _NAME_FIRST_CHARS
+        and all(character in _NAME_BODY_CHARS for character in part[1:])
+        for part in parts
+    )
 
 
 def _aware(value: object) -> bool:
@@ -76,7 +91,7 @@ class IntegrationBinding:
             and _identifier(self.audience, 120)
             and _identifier(self.tenant_id, 64)
             and type(self.kind) is str and self.kind in {"CHANNEL", "CAPABILITY"}
-            and _identifier(self.name, 120) and _NAME.fullmatch(self.name)
+            and _integration_name(self.name)
             and _identifier(self.instance_id, 120)
             and (self.account_id is None or _identifier(self.account_id, 180))
             and type(self.active) is bool and _scopes(self.scopes)
@@ -97,7 +112,9 @@ class CredentialRecord:
     def __post_init__(self) -> None:
         if not (
             _identifier(self.credential_id, 64)
-            and type(self.digest) is str and re.fullmatch(r"[0-9a-f]{64}", self.digest)
+            and type(self.digest) is str
+            and len(self.digest) == 64
+            and all(character in _HEX_LOWER_CHARS for character in self.digest)
             and _identifier(self.binding_id, 64)
             and _aware(self.not_before) and _aware(self.expires_at)
             and self.expires_at > self.not_before
@@ -180,7 +197,7 @@ def _matches_claims(event: object, binding: IntegrationBinding) -> BindingCode:
         {"kind", "name", "instance_id"} <= source.keys()
         and source.keys() <= {"kind", "name", "instance_id", "account_id"}
         and type(source["kind"]) is str and source["kind"] in {"CHANNEL", "CAPABILITY"}
-        and _identifier(source["name"], 120) and _NAME.fullmatch(source["name"])
+        and _integration_name(source["name"])
         and _identifier(source["instance_id"], 120)
         and (source.get("account_id") is None or _identifier(source["account_id"], 180))
     ):
