@@ -342,7 +342,7 @@ def materialize_prepared_recommendation_execution(
             reason_code="IDEMPOTENT_REPLAY",
             reminder_id=reminder.id,
             authority_assessment_status=None,
-            materialized_at=intent.frozen_at,
+            materialized_at=_utc(reminder.created_at),
         )
     if intent.state == "RETIRED":
         return RecommendationMaterializationOutcome(
@@ -448,11 +448,33 @@ def materialize_prepared_recommendation_execution(
             materialized_at=None,
         )
 
-    runtime = _runtime_registry(
-        session,
-        tenant_id=tenant_id,
-        provider_instance_id=assessment.provider_instance_id or "",
-    )
+    try:
+        runtime = _runtime_registry(
+            session,
+            tenant_id=tenant_id,
+            provider_instance_id=assessment.provider_instance_id or "",
+        )
+    except RecommendationMaterializationError as exc:
+        reason_code = str(exc)
+        _retire_intent(
+            session,
+            intent,
+            timestamp=stamp,
+            reason_code=reason_code,
+            tenant_id=tenant_id,
+            recommendation_id=recommendation_id,
+        )
+        return RecommendationMaterializationOutcome(
+            tenant_id=tenant_id,
+            actor_id=actor_key,
+            recommendation_id=recommendation_id,
+            execution_intent_id=intent.id,
+            status="EXECUTION_BLOCKED",
+            reason_code=reason_code,
+            reminder_id=None,
+            authority_assessment_status=assessment.assessment_status,
+            materialized_at=None,
+        )
 
     if intent.state == "PREPARED":
         intent.state = "FROZEN"
