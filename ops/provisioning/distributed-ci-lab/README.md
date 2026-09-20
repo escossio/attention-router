@@ -69,9 +69,9 @@ andy-ci-reprofile <40-char-sha>
 andy-ci-distributed <40-char-sha> postgres
 ```
 
-`andy-ci-reprofile` executes one full duration-instrumented run on the primary compute worker and atomically replaces the planner profile only after a successful run.
+`andy-ci-reprofile` executes one full duration-instrumented run on the primary compute worker only when the exact PostgreSQL test-file set has no cached profile. Profiles are keyed by a deterministic SHA-256 of the C-locale-sorted file list, so switching between branches with different test sets does not thrash one global profile.
 
-`andy-ci-distributed` verifies worker readiness and profile compatibility, copies generated shard manifests, starts all workers concurrently, waits for every result and writes a structured JSON summary.
+`andy-ci-distributed` resolves the exact-SHA test-file set, selects its cached profile, verifies worker readiness, copies generated shard manifests, starts all workers concurrently, waits for every result and writes a structured JSON summary.
 
 ## Package contents
 
@@ -89,4 +89,4 @@ This is deliberately **not** a persistent GitHub-hosted-to-LAN self-hosted runne
 
 The public repository contains no LAN addresses, SSH private keys, production environment files, GitHub App private keys, provider credentials or production database access. Host addressing and authorization remain local to the control plane. Workspaces are disposable, test databases contain synthetic data, and the virtualized worker provides an additional KVM isolation boundary.
 
-For public pull requests, GitHub-hosted CI remains the authoritative external boundary. A future GitHub App dispatch path should continue to resolve an approved exact SHA before handing work to this scheduler.
+For public pull requests, the `andy-github-control-plane` App binds execution to the current exact PR head SHA and publishes the aggregated result as the required `distributed-postgres` GitHub check. The PostgreSQL suite is therefore not rerun on a GitHub-hosted runner. GitHub Actions and CodeQL remain authoritative for the other repository-native gates.
