@@ -19,7 +19,7 @@ from attention_router.application.personal_context_recommendations import (
     build_context_recommendations,
 )
 from attention_router.domain.models import ContactIdentity, new_id, now_utc
-from attention_router.domain.states import InteractionState
+from attention_router.domain.enums import InteractionState
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     MemoryActorRow,
