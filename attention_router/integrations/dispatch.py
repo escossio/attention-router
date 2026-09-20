@@ -13,6 +13,7 @@ from attention_router.application.platform.events import record_timeline_event
 from attention_router.core.events import EventOrigin
 from attention_router.domain.models import now_utc
 from attention_router.infrastructure.hashing import stable_hash
+from attention_router.integrations.tenant_binding import INBOUND_SCOPE
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     CanonicalEventRow,
@@ -162,6 +163,11 @@ def _process_row(
         or not binding.active
     ):
         raise IntegrationDispatchBlocked("INTEGRATION_BINDING_INACTIVE")
+    if (
+        type(binding.scopes) is not list
+        or INBOUND_SCOPE not in binding.scopes
+    ):
+        raise IntegrationDispatchBlocked("INTEGRATION_BINDING_SCOPE_INACTIVE")
 
     payload = _validated_payload(row, binding)
     actor_id = _resolve_actor(session, row=row, payload=payload)
@@ -192,6 +198,20 @@ def _process_row(
         if not isinstance(artifacts, list):
             raise IntegrationDispatchBlocked("INTEGRATION_ARTIFACT_IDS_INVALID")
 
+        event_type = payload.get("event_type")
+        payload_type = payload.get("payload_type")
+        if (
+            not isinstance(event_type, str)
+            or not event_type
+            or len(event_type) > 120
+            or not isinstance(payload_type, str)
+            or not payload_type
+            or len(payload_type) > 80
+        ):
+            raise IntegrationDispatchBlocked(
+                "INTEGRATION_CANONICAL_FIELDS_INVALID"
+            )
+
         source_name = binding.name
         canonical = CanonicalEventRow(
             id=event_id,
@@ -201,11 +221,11 @@ def _process_row(
                 if binding.kind == "CHANNEL"
                 else EventOrigin.PROVIDER_EVENT.value
             ),
-            event_type=str(payload.get("event_type")),
+            event_type=event_type,
             actor_id=actor_id,
             resource_id=None,
             channel=source_name if len(source_name) <= 80 else "integration",
-            payload_type=str(payload.get("payload_type")),
+            payload_type=payload_type,
             payload_ref={"integration_inbox_id": row.id},
             occurred_at=occurred_at,
             received_at=received_at,
