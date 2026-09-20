@@ -866,6 +866,47 @@ def test_dispatch_blocks_work_if_binding_scope_is_removed_after_admission(
         ) == 0
 
 
+def test_dispatch_serializes_against_binding_disable_that_commits_first(
+    Session,
+    world,
+):
+    admitted = send(Session, world, _payload_with_actor(world))
+    assert admitted.code == "ACCEPTED"
+
+    def run_dispatch():
+        with Session.begin() as session:
+            return process_integration_inbox(session)
+
+    with ThreadPoolExecutor(1) as pool:
+        with Session.begin() as blocker:
+            blocker.execute(
+                select(TenantRow)
+                .where(TenantRow.id == A)
+                .with_for_update()
+            )
+            binding = blocker.scalar(
+                select(BindingRow)
+                .where(BindingRow.id == world[0].binding_id)
+                .with_for_update()
+            )
+            binding.active = False
+            pid = blocker.scalar(text("SELECT pg_backend_pid()"))
+            future = pool.submit(run_dispatch)
+            wait_for_waiter(Session, pid)
+
+        result = future.result(timeout=5)
+
+    assert result.processed == 0
+    assert result.blocked == 1
+    with Session() as session:
+        inbox = session.get(InboxRow, admitted.receipt_id)
+        assert inbox.state == "BLOCKED"
+        assert inbox.dispatch_reason == "INTEGRATION_BINDING_INACTIVE"
+        assert session.scalar(
+            select(func.count()).select_from(CanonicalEventRow)
+        ) == 0
+
+
 def test_dispatch_blocks_work_if_tenant_is_disabled_after_admission(
     Session,
     world,
