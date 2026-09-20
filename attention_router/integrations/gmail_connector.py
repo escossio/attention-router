@@ -165,7 +165,13 @@ def _utc_timestamp(value: str) -> datetime:
 def gmail_message_to_normalized_input(message: GmailMessage) -> dict[str, Any]:
     sender_name, sender_address = parseaddr(message.sender)
     sender_address = sender_address.strip()
-    if not sender_address:
+    if (
+        not sender_address
+        or "@" not in sender_address
+        or sender_address.startswith("@")
+        or sender_address.endswith("@")
+        or any(character.isspace() for character in sender_address)
+    ):
         raise GmailConnectorError("GMAIL_SENDER_INVALID")
     occurred_at = _utc_timestamp(message.email_ts)
 
