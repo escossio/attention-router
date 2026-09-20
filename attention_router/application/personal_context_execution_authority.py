@@ -402,6 +402,31 @@ def evaluate_accepted_recommendation_authority(
         tenant_id,
         REMINDER_CAPABILITY,
     )
+    if definition is not None and version is None:
+        assessment = RecommendationAuthorityAssessment(
+            tenant_id=tenant_id,
+            actor_id=actor_key,
+            recommendation_id=recommendation_id,
+            recommendation_claim_id=recommendation_claim.id,
+            capability_name=REMINDER_CAPABILITY,
+            policy_id=policy_id,
+            policy_version_id=policy_version_id,
+            policy_allows=policy_allows,
+            active_grant_ids=(),
+            capability_status="KNOWN_BUT_UNAVAILABLE",
+            authority_result="UNAVAILABLE",
+            reason_code="CAPABILITY_VERSION_MISSING",
+            execution_allowed=False,
+            approval_required=False,
+            provider_instance_id=None,
+            assessment_status="CAPABILITY_UNAVAILABLE",
+            execution_intent_id=None,
+            evaluated_at=stamp,
+        )
+        _audit_assessment(session, assessment)
+        session.flush()
+        return assessment
+
     grant_ids = (
         _active_grants(
             session,
