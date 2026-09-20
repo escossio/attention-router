@@ -152,11 +152,19 @@ def _process_row(
     row: IntegrationInboxRow,
     stamp: datetime,
 ) -> CanonicalEventRow:
-    tenant = session.get(TenantRow, row.tenant_id)
+    tenant = session.scalar(
+        select(TenantRow)
+        .where(TenantRow.id == row.tenant_id)
+        .with_for_update()
+    )
     if tenant is None or tenant.status != "ACTIVE":
         raise IntegrationDispatchBlocked("INTEGRATION_TENANT_INACTIVE")
 
-    binding = session.get(IntegrationBindingRow, row.binding_id)
+    binding = session.scalar(
+        select(IntegrationBindingRow)
+        .where(IntegrationBindingRow.id == row.binding_id)
+        .with_for_update()
+    )
     if (
         binding is None
         or binding.tenant_id != row.tenant_id
