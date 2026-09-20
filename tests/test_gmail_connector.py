@@ -118,7 +118,7 @@ def test_config_reads_integration_credential_from_private_file(
     monkeypatch,
 ):
     secret = tmp_path / "integration-bearer"
-    secret.write_text("integration-secret-from-file\\n", encoding="utf-8")
+    secret.write_text("integration-secret-from-file\n", encoding="utf-8")
     secret.chmod(0o600)
 
     values = {
@@ -142,6 +142,37 @@ def test_config_reads_integration_credential_from_private_file(
 
     assert config.integration_credential == "integration-secret-from-file"
     assert config.cursor_path == tmp_path / "cursor.json"
+
+
+def test_config_rejects_group_readable_integration_credential_file(
+    tmp_path,
+    monkeypatch,
+):
+    credential_file = tmp_path / "integration-bearer"
+    credential_file.write_text("integration-secret", encoding="utf-8")
+    credential_file.chmod(0o644)
+    values = {
+        "GMAIL_TENANT_ID": "tenant-1",
+        "GMAIL_INTEGRATION_INSTANCE_ID": "gmail-primary",
+        "GMAIL_INTEGRATION_ACCOUNT_ID": "gmail-account-opaque",
+        "GMAIL_CONNECTOR_STATE_PATH": str(tmp_path / "cursor.json"),
+        "ATTENTION_ROUTER_INTEGRATION_ENDPOINT": (
+            "https://router.example/api/v1/ingress/integrations/events"
+        ),
+        "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_FILE": str(credential_file),
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv(
+        "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL",
+        raising=False,
+    )
+
+    with pytest.raises(
+        GmailConnectorError,
+        match="ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_FILE_PERMISSIONS_UNSAFE",
+    ):
+        GmailConnectorConfig.from_env()
 
 
 def test_first_poll_bootstraps_current_history_without_ingesting_old_mail():
