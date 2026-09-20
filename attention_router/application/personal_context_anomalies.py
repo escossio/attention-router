@@ -287,7 +287,7 @@ def detect_missing_step_anomalies(
             if stamp <= window_closed_at:
                 continue
 
-            matching_second = session.scalar(
+            candidates = session.scalars(
                 select(TimelineEventRow)
                 .where(
                     TimelineEventRow.tenant_id == tenant_id,
@@ -300,32 +300,17 @@ def detect_missing_step_anomalies(
                     TimelineEventRow.occurred_at,
                     TimelineEventRow.id,
                 )
-            )
-            if matching_second is not None:
-                candidates = session.scalars(
-                    select(TimelineEventRow)
-                    .where(
-                        TimelineEventRow.tenant_id == tenant_id,
-                        TimelineEventRow.actor_id == actor_key,
-                        TimelineEventRow.occurred_at > first.occurred_at,
-                        TimelineEventRow.occurred_at <= window_closed_at,
-                        TimelineEventRow.visibility != "SECRET",
-                    )
-                    .order_by(
-                        TimelineEventRow.occurred_at,
-                        TimelineEventRow.id,
-                    )
-                ).all()
-                if any(
-                    _step_matches(
-                        row,
-                        event_type=second_event_type,
-                        signature_kind=second_kind,
-                        signature_value=second_value,
-                    )
-                    for row in candidates
-                ):
-                    continue
+            ).all()
+            if any(
+                _step_matches(
+                    row,
+                    event_type=second_event_type,
+                    signature_kind=second_kind,
+                    signature_value=second_value,
+                )
+                for row in candidates
+            ):
+                continue
 
             anomaly_id = "anomaly-" + stable_hash(
                 {
