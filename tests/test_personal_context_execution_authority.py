@@ -346,6 +346,38 @@ def test_policy_denial_wins_even_when_grant_exists(session):
     assert assessment.execution_intent_id is None
 
 
+def test_known_capability_without_provider_prepares_no_intent(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    binding, _accepted = _accepted_recommendation(session, stamp)
+    sync_platform_registry(session)
+    _install_policy(session, binding.id, allow_reminder=True)
+    create_capability_grant(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        grantor_type="OPERATOR",
+        grantor_id="test",
+        grantee_type="ACTOR",
+        grantee_id=ACTOR,
+        capability_name="reminder.create",
+        provenance="test",
+    )
+
+    assessment = evaluate_accepted_recommendation_authority(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+        recommendation_id="recommendation-v1e",
+        now=stamp + timedelta(minutes=2),
+    )
+
+    assert assessment.assessment_status == "CAPABILITY_UNAVAILABLE"
+    assert assessment.capability_status == "KNOWN_BUT_UNAVAILABLE"
+    assert assessment.authority_result == "UNAVAILABLE"
+    assert assessment.execution_allowed is False
+    assert assessment.execution_intent_id is None
+    assert session.scalar(select(func.count()).select_from(ExecutionIntentRow)) == 0
+
+
 def test_requires_approval_prepares_no_execution_intent(session):
     stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
     binding, _accepted = _accepted_recommendation(session, stamp)
