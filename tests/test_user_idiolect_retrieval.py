@@ -37,6 +37,7 @@ def _fact(
     conversation_key_hash: str = CONVERSATION,
     channel: str = "wwebjs-owner-control",
     valid_until=None,
+    supersedes_fact_id: str | None = None,
 ) -> FactRow:
     stamp = now_utc()
     row = FactRow(
@@ -70,7 +71,7 @@ def _fact(
         observed_at=stamp,
         valid_from=stamp - timedelta(seconds=1),
         valid_until=valid_until,
-        supersedes_fact_id=None,
+        supersedes_fact_id=supersedes_fact_id,
         metadata_json={"sensitivity": "PRIVATE"},
         created_at=stamp,
     )
@@ -171,3 +172,31 @@ def test_conflicting_confirmed_mappings_are_returned_without_forced_choice(sessi
         ("ONE_SHOT_REPLY_DELAY", (("seconds", 30),)),
         ("CONFIGURE_OWNER_REPLY_GRACE", (("seconds", 30),)),
     }
+
+
+def test_superseded_confirmed_mapping_is_excluded_from_retrieval(session):
+    _install_actor(session, ACTOR_A, "owner-a-ext")
+    old = _fact(
+        session,
+        semantic_intent_key="ONE_SHOT_REPLY_DELAY",
+        parameters={"seconds": 30},
+    )
+    new = _fact(
+        session,
+        semantic_intent_key="CONFIGURE_OWNER_REPLY_GRACE",
+        parameters={"seconds": 30},
+        supersedes_fact_id=old.id,
+    )
+
+    items = retrieve_idiolect_interpretation_evidence(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR_A,
+        utterance="retorne em 30 segundos",
+        source_channel="wwebjs-owner-control",
+        conversation_key_hash=CONVERSATION,
+    )
+
+    assert len(items) == 1
+    assert items[0].fact_id == new.id
+    assert items[0].semantic_intent_key == "CONFIGURE_OWNER_REPLY_GRACE"
