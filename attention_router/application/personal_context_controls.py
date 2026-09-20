@@ -154,7 +154,7 @@ def _reviewed_suggestions(
         )
         .order_by(MemoryClaimRow.updated_at.desc(), MemoryClaimRow.id.desc())
     ).all()
-    return tuple(
+    candidates = [
         row
         for row in rows
         if (row.object_json or {}).get("lifecycle_state") == "REVIEWED"
@@ -162,8 +162,15 @@ def _reviewed_suggestions(
         and (row.object_json or {}).get("execution_requested") is False
         and (row.object_json or {}).get("grants_authority") is False
         and row.sensitivity_class != "SECRET"
-        and (row.valid_until is None or _utc(row.valid_until) > now)
-    )
+    ]
+    if not candidates:
+        return ()
+    if (
+        len(candidates) > 1
+        and candidates[0].updated_at == candidates[1].updated_at
+    ):
+        return tuple(candidates[:2])
+    return (candidates[0],)
 
 
 def _target_hypothesis_id(
