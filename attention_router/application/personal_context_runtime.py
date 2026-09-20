@@ -26,7 +26,7 @@ from attention_router.application.personal_context_recommendations import (
     build_context_recommendations,
 )
 from attention_router.domain.enums import InteractionState
-from attention_router.domain.models import new_id, now_utc
+from attention_router.domain.models import new_id
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import (
     ActorBindingRow,
@@ -47,6 +47,7 @@ PRIMARY_OWNER_CHANNEL_ROLE: Final = "PRIMARY_OWNER_WHATSAPP"
 @dataclass(frozen=True, slots=True)
 class PersonalContextRuntimeCycleResult:
     owners_scanned: int = 0
+    owners_failed: int = 0
     hypotheses_detected: int = 0
     hypotheses_persisted: int = 0
     recommendations_built: int = 0
@@ -360,6 +361,7 @@ def run_personal_context_runtime_cycle(
     )
     counters = {
         "owners_scanned": 0,
+        "owners_failed": 0,
         "hypotheses_detected": 0,
         "hypotheses_persisted": 0,
         "recommendations_built": 0,
@@ -372,94 +374,115 @@ def run_personal_context_runtime_cycle(
 
     for tenant_id, actor_key in _owner_actor_scopes(session)[:owner_limit]:
         counters["owners_scanned"] += 1
-
-        hypotheses = detect_temporal_recurrence_hypotheses(
-            session,
-            tenant_id=tenant_id,
-            actor_id=actor_key,
-            now=stamp,
-        )
-        counters["hypotheses_detected"] += len(hypotheses)
-
-        for hypothesis in hypotheses:
-            try:
-                _claim, changed = persist_context_pattern_hypothesis(
+        try:
+            with session.begin_nested():
+                hypotheses = detect_temporal_recurrence_hypotheses(
                     session,
-                    hypothesis=hypothesis,
+                    tenant_id=tenant_id,
+                    actor_id=actor_key,
                     now=stamp,
                 )
-            except ContextHypothesisPersistenceError:
-                continue
-            if changed:
-                counters["hypotheses_persisted"] += 1
+                counters["hypotheses_detected"] += len(hypotheses)
 
-        recommendations = build_context_recommendations(
-            session,
-            tenant_id=tenant_id,
-            actor_key=actor_key,
-            now=stamp,
-            limit=1,
-        )
-        counters["recommendations_built"] += len(recommendations)
+                for hypothesis in hypotheses:
+                    try:
+                        _claim, changed = persist_context_pattern_hypothesis(
+                            session,
+                            hypothesis=hypothesis,
+                            now=stamp,
+                        )
+                    except ContextHypothesisPersistenceError:
+                        continue
+                    if changed:
+                        counters["hypotheses_persisted"] += 1
 
-        for recommendation in recommendations:
-            current = _active_recommendation_claim(
-                session,
-                tenant_id=tenant_id,
-                actor_key=actor_key,
-                recommendation_id=recommendation.recommendation_id,
-            )
-            if current is None:
-                recommendation_claim, changed = (
-                    persist_context_recommendation(
+                recommendations = build_context_recommendations(
+                    session,
+                    tenant_id=tenant_id,
+                    actor_key=actor_key,
+                    now=stamp,
+                    limit=1,
+                )
+                counters["recommendations_built"] += len(recommendations)
+
+                for recommendation in recommendations:
+                    current = _active_recommendation_claim(
+                        session,
+                        tenant_id=tenant_id,
+                        actor_key=actor_key,
+                        recommendation_id=recommendation.recommendation_id,
+                    )
+                    if current is None:
+                        recommendation_claim, changed = (
+                            persist_context_recommendation(
+                                session,
+                                recommendation=recommendation,
+                            )
+                        )
+                        if changed:
+                            counters["recommendations_persisted"] += 1
+                    else:
+                        state = (current.object_json or {}).get(
+                            "lifecycle_state"
+                        )
+                        if state != "PROPOSED":
+                            counters[
+                                "recommendations_skipped_terminal"
+                            ] += 1
+                            continue
+                        recommendation_claim = current
+
+                    if not delivery_enabled:
+                        continue
+
+                    binding = _owner_delivery_binding(
+                        session,
+                        tenant_id=tenant_id,
+                        actor_key=actor_key,
+                    )
+                    if binding is None:
+                        counters["recommendations_blocked_channel"] += 1
+                        audit(
+                            session,
+                            None,
+                            "personal_context.recommendation_delivery_blocked",
+                            {
+                                "recommendation_id": (
+                                    recommendation.recommendation_id
+                                ),
+                                "reason_code": (
+                                    "OWNER_DELIVERY_BINDING_AMBIGUOUS"
+                                ),
+                            },
+                            origin="personal_context",
+                            tenant_id=tenant_id,
+                            created_at=stamp,
+                        )
+                        continue
+
+                    _outbox, enqueued = _enqueue_recommendation(
                         session,
                         recommendation=recommendation,
+                        recommendation_claim=recommendation_claim,
+                        binding=binding,
+                        now=stamp,
                     )
-                )
-                if changed:
-                    counters["recommendations_persisted"] += 1
-            else:
-                state = (current.object_json or {}).get("lifecycle_state")
-                if state != "PROPOSED":
-                    counters["recommendations_skipped_terminal"] += 1
-                    continue
-                recommendation_claim = current
-
-            if not delivery_enabled:
-                continue
-
-            binding = _owner_delivery_binding(
+                    if enqueued:
+                        counters["recommendations_enqueued"] += 1
+        except Exception as exc:
+            counters["owners_failed"] += 1
+            audit(
                 session,
+                None,
+                "personal_context.owner_cycle_failed",
+                {
+                    "actor_key_hash": stable_hash(actor_key)[:16],
+                    "error_class": type(exc).__name__,
+                },
+                origin="personal_context",
                 tenant_id=tenant_id,
-                actor_key=actor_key,
+                created_at=stamp,
             )
-            if binding is None:
-                counters["recommendations_blocked_channel"] += 1
-                audit(
-                    session,
-                    None,
-                    "personal_context.recommendation_delivery_blocked",
-                    {
-                        "recommendation_id": (
-                            recommendation.recommendation_id
-                        ),
-                        "reason_code": "OWNER_DELIVERY_BINDING_AMBIGUOUS",
-                    },
-                    origin="personal_context",
-                    tenant_id=tenant_id,
-                    created_at=stamp,
-                )
-                continue
-
-            _outbox, enqueued = _enqueue_recommendation(
-                session,
-                recommendation=recommendation,
-                recommendation_claim=recommendation_claim,
-                binding=binding,
-                now=stamp,
-            )
-            if enqueued:
-                counters["recommendations_enqueued"] += 1
 
     return PersonalContextRuntimeCycleResult(**counters)
 
