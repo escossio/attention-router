@@ -2257,7 +2257,10 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                     audit(session, row.interaction_id, "execution.dispatch_succeeded", {"intent_id": intent.id, "outbox_id": row.id, "message_reference_present": bool((result.response or {}).get("message_reference"))})
                     if row.action_type == "agent_execution_voice":
                         _mark_voice_outbox_artifact_terminal(session, row)
-            elif row.action_type == OWNER_CONTROL_OUTBOX_ACTION and row.destination == "local_transport":
+            elif row.action_type in {
+                OWNER_CONTROL_OUTBOX_ACTION,
+                "personal_context_recommendation",
+            } and row.destination == "local_transport":
                 external_attempted = True
                 with start_span("transport.send") as transport_span:
                     result = local_transport_outbound.dispatch_outbox(row)
@@ -2272,7 +2275,11 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                 audit(
                     session,
                     row.interaction_id,
-                    "owner_control.confirmation_delivered",
+                    (
+                        "personal_context.recommendation_delivered"
+                        if row.action_type == "personal_context_recommendation"
+                        else "owner_control.confirmation_delivered"
+                    ),
                     {
                         "outbox_id": row.id,
                         "transport_status": result.status,
