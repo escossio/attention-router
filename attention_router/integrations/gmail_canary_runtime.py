@@ -82,6 +82,56 @@ def render_gmail_canary_env(
     return "".join(f"{key}={value}\n" for key, value in values.items())
 
 
+def set_gmail_canary_integration_enabled(
+    path: Path,
+    *,
+    enabled: bool,
+) -> None:
+    if not path.is_absolute():
+        raise ValueError("GMAIL_CANARY_ENV_PATH_MUST_BE_ABSOLUTE")
+    if not path.exists() or not path.is_file():
+        raise ValueError("GMAIL_CANARY_ENV_NOT_FOUND")
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    keys = {
+        "INTEGRATION_INGRESS_ENABLED": 0,
+        "INTEGRATION_DISPATCH_ENABLED": 0,
+    }
+    target = "true" if enabled else "false"
+    rendered: list[str] = []
+    for line in lines:
+        replaced = False
+        for key in keys:
+            prefix = key + "="
+            if line.startswith(prefix):
+                keys[key] += 1
+                rendered.append(prefix + target)
+                replaced = True
+                break
+        if not replaced:
+            rendered.append(line)
+
+    if any(count != 1 for count in keys.values()):
+        raise ValueError("GMAIL_CANARY_ENV_INTEGRATION_FLAGS_INVALID")
+
+    temporary = path.with_name(
+        path.name + ".tmp-" + secrets.token_hex(8)
+    )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(temporary, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(rendered) + "\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        os.chmod(path, 0o600)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def write_gmail_canary_env(
     path: Path,
     *,
@@ -114,5 +164,6 @@ __all__ = [
     "GmailCanaryRuntimeSecrets",
     "generate_runtime_secrets",
     "render_gmail_canary_env",
+    "set_gmail_canary_integration_enabled",
     "write_gmail_canary_env",
 ]
