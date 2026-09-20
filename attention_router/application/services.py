@@ -69,6 +69,11 @@ from attention_router.application.user_idiolect_projection import (
     IdiolectProjectionError,
     project_resolved_pending_intent_language_fact,
 )
+from attention_router.application.user_idiolect_style_preference import (
+    parse_explicit_style_preference,
+    record_explicit_style_preference,
+    render_style_preference_confirmation,
+)
 from attention_router.application.owner_operational_control import (
     OperationalControlConflict,
     OperationalControlError,
@@ -427,6 +432,69 @@ def _handle_owner_control_command(
 
     owner_actor_key = binding.actor_key if binding is not None else fallback_actor_key
     conversation_key_hash = _owner_control_conversation_hash(receipt)
+
+    style_preference = parse_explicit_style_preference(persisted_text)
+    if style_preference is not None:
+        if binding is None:
+            raise OwnerControlError("OWNER_AUTHORITY_UNAVAILABLE")
+        try:
+            authority, _evidence = build_owner_operator_authority(
+                session,
+                receipt=receipt,
+                binding=binding,
+            )
+        except OwnerControlError:
+            raise
+        if not authority.authenticated:
+            raise OwnerControlError("OWNER_AUTHORITY_UNAVAILABLE")
+
+        interaction = _create_owner_control_interaction(
+            session,
+            receipt=receipt,
+            owner_actor_key=owner_actor_key,
+            canonical_text=(
+                "SET_COMMUNICATION_PREFERENCE "
+                f"dimension={style_preference.dimension} "
+                f"value={style_preference.value}"
+            ),
+        )
+        fact, changed = record_explicit_style_preference(
+            session,
+            tenant_id=receipt.tenant_id,
+            actor_key=owner_actor_key,
+            source_event=receipt,
+            preference=style_preference,
+        )
+        audit(
+            session,
+            interaction.id,
+            "idiolect.style_preference_declared",
+            {
+                "dimension": style_preference.dimension,
+                "value": style_preference.value,
+                "fact_id": fact.id,
+                "changed": changed,
+            },
+            receipt.correlation_id,
+            receipt.id,
+            origin="user_idiolect",
+            tenant_id=receipt.tenant_id,
+        )
+        _enqueue_owner_control_confirmation(
+            session,
+            receipt=receipt,
+            interaction=interaction,
+            binding=binding,
+            text=render_style_preference_confirmation(
+                style_preference,
+                changed=changed,
+            ),
+        )
+        session.flush()
+        result = interaction_to_dict(session, interaction)
+        result["inbound_event_id"] = receipt.id
+        return result
+
     parsed: OwnerControlParseResult | None = None
     normalization_source = "DETERMINISTIC"
 
