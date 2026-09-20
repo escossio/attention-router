@@ -6,10 +6,6 @@ from typing import Final
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from attention_router.application.personal_context_corrections import (
-    ContextPatternCorrectionError,
-    active_pattern_correction,
-)
 from attention_router.application.personal_context_patterns import (
     ContextPatternHypothesis,
 )
@@ -254,16 +250,28 @@ def persist_context_pattern_hypothesis(
         tenant_id=hypothesis.tenant_id,
         actor_key=hypothesis.actor_id,
     )
-    try:
-        correction = active_pattern_correction(
-            session,
-            actor_id=actor.id,
-            hypothesis_id=hypothesis.hypothesis_id,
-            now=stamp,
+    corrections = session.scalars(
+        select(MemoryClaimRow)
+        .where(
+            MemoryClaimRow.subject_actor_id == actor.id,
+            MemoryClaimRow.predicate == "context.pattern.owner_correction",
+            MemoryClaimRow.source_quality == "USER_DECLARED",
+            MemoryClaimRow.status == "ACTIVE",
         )
-    except ContextPatternCorrectionError as exc:
-        raise ContextHypothesisPersistenceError(str(exc)) from exc
-    if correction is not None:
+        .order_by(MemoryClaimRow.updated_at.desc(), MemoryClaimRow.id.desc())
+    ).all()
+    active_corrections = [
+        row
+        for row in corrections
+        if (row.context or {}).get("hypothesis_id") == hypothesis.hypothesis_id
+        and row.valid_until is not None
+        and _utc(row.valid_until) > stamp
+    ]
+    if len(active_corrections) > 1:
+        raise ContextHypothesisPersistenceError(
+            "PATTERN_CORRECTION_ACTIVE_CONFLICT"
+        )
+    if active_corrections:
         raise ContextHypothesisPersistenceError(
             "PATTERN_HYPOTHESIS_SUPPRESSED_BY_OWNER_CORRECTION"
         )
