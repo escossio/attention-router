@@ -1,0 +1,25 @@
+[Unit]
+Description=Attention Router Gmail metadata connector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=example
+WorkingDirectory=/var/lib/attention-router/gmail-connector
+EnvironmentFile=/etc/attention-router/gmail-connector.env
+ExecStart=/usr/local/bin/andy-gmail-connector
+Restart=on-failure
+RestartSec=10s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/attention-router/gmail-connector
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
