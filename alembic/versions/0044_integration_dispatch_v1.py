@@ -89,59 +89,67 @@ def _replace_guard_function(*, dispatch_enabled: bool) -> None:
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "ck_integration_inbox_state",
-        "integration_inbox",
-        type_="check",
-    )
-    op.add_column(
-        "integration_inbox",
-        sa.Column(
-            "canonical_event_id",
-            sa.String(64),
-            sa.ForeignKey("canonical_events.id"),
-            nullable=True,
-        ),
-    )
-    op.add_column(
-        "integration_inbox",
-        sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.add_column(
-        "integration_inbox",
-        sa.Column("dispatch_reason", sa.String(120), nullable=True),
-    )
-    op.create_unique_constraint(
-        "uq_integration_inbox_canonical_event",
-        "integration_inbox",
-        ["canonical_event_id"],
-    )
-    op.create_check_constraint(
-        "ck_integration_inbox_dispatch_state",
-        "integration_inbox",
-        """
-        (
-          state = 'PENDING'
-          AND canonical_event_id IS NULL
-          AND processed_at IS NULL
-          AND dispatch_reason IS NULL
+    with op.batch_alter_table("integration_inbox") as batch:
+        batch.drop_constraint(
+            "ck_integration_inbox_state",
+            type_="check",
         )
-        OR
-        (
-          state = 'PROCESSED'
-          AND canonical_event_id IS NOT NULL
-          AND processed_at IS NOT NULL
-          AND dispatch_reason IS NULL
+        batch.add_column(
+            sa.Column(
+                "canonical_event_id",
+                sa.String(64),
+                nullable=True,
+            )
         )
-        OR
-        (
-          state = 'BLOCKED'
-          AND canonical_event_id IS NULL
-          AND processed_at IS NOT NULL
-          AND dispatch_reason IS NOT NULL
+        batch.add_column(
+            sa.Column(
+                "processed_at",
+                sa.DateTime(timezone=True),
+                nullable=True,
+            )
         )
-        """,
-    )
+        batch.add_column(
+            sa.Column(
+                "dispatch_reason",
+                sa.String(120),
+                nullable=True,
+            )
+        )
+        batch.create_foreign_key(
+            "fk_integration_inbox_canonical_event",
+            "canonical_events",
+            ["canonical_event_id"],
+            ["id"],
+        )
+        batch.create_unique_constraint(
+            "uq_integration_inbox_canonical_event",
+            ["canonical_event_id"],
+        )
+        batch.create_check_constraint(
+            "ck_integration_inbox_dispatch_state",
+            """
+            (
+              state = 'PENDING'
+              AND canonical_event_id IS NULL
+              AND processed_at IS NULL
+              AND dispatch_reason IS NULL
+            )
+            OR
+            (
+              state = 'PROCESSED'
+              AND canonical_event_id IS NOT NULL
+              AND processed_at IS NOT NULL
+              AND dispatch_reason IS NULL
+            )
+            OR
+            (
+              state = 'BLOCKED'
+              AND canonical_event_id IS NULL
+              AND processed_at IS NOT NULL
+              AND dispatch_reason IS NOT NULL
+            )
+            """,
+        )
     _replace_guard_function(dispatch_enabled=True)
 
 
@@ -166,21 +174,23 @@ def downgrade() -> None:
         )
 
     _replace_guard_function(dispatch_enabled=False)
-    op.drop_constraint(
-        "ck_integration_inbox_dispatch_state",
-        "integration_inbox",
-        type_="check",
-    )
-    op.drop_constraint(
-        "uq_integration_inbox_canonical_event",
-        "integration_inbox",
-        type_="unique",
-    )
-    op.drop_column("integration_inbox", "dispatch_reason")
-    op.drop_column("integration_inbox", "processed_at")
-    op.drop_column("integration_inbox", "canonical_event_id")
-    op.create_check_constraint(
-        "ck_integration_inbox_state",
-        "integration_inbox",
-        "state = 'PENDING'",
-    )
+    with op.batch_alter_table("integration_inbox") as batch:
+        batch.drop_constraint(
+            "ck_integration_inbox_dispatch_state",
+            type_="check",
+        )
+        batch.drop_constraint(
+            "uq_integration_inbox_canonical_event",
+            type_="unique",
+        )
+        batch.drop_constraint(
+            "fk_integration_inbox_canonical_event",
+            type_="foreignkey",
+        )
+        batch.drop_column("dispatch_reason")
+        batch.drop_column("processed_at")
+        batch.drop_column("canonical_event_id")
+        batch.create_check_constraint(
+            "ck_integration_inbox_state",
+            "state = 'PENDING'",
+        )
