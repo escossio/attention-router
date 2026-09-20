@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     memory_ingestion_enabled: bool = False
     memory_context_enabled: bool = False
     persistent_memory_canary_binding_id: str | None = None
+    personal_context_runtime_enabled: bool = False
+    personal_context_runtime_interval_seconds: int = 300
+    personal_context_recommendation_delivery_enabled: bool = False
+    personal_context_runtime_owner_limit: int = 50
     conversation_repetition_window_seconds: int = 24 * 60 * 60
     agent_response_review_enabled: bool = True
     agent_execution_enabled: bool = True
@@ -274,6 +278,14 @@ class Settings(BaseSettings):
             raise ValueError("AUTONOMOUS_DECISION_MAX_AGE_SECONDS must be positive")
         if self.conversation_repetition_window_seconds <= 0:
             raise ValueError("CONVERSATION_REPETITION_WINDOW_SECONDS must be positive")
+        if self.personal_context_runtime_interval_seconds <= 0:
+            raise ValueError(
+                "PERSONAL_CONTEXT_RUNTIME_INTERVAL_SECONDS must be positive"
+            )
+        if not 1 <= self.personal_context_runtime_owner_limit <= 500:
+            raise ValueError(
+                "PERSONAL_CONTEXT_RUNTIME_OWNER_LIMIT must be between 1 and 500"
+            )
         positive_platform_limits = {
             "HEALTH_POLL_INTERVAL": self.health_poll_interval,
             "COMPONENT_HEALTH_STALE_AFTER": self.component_health_stale_after,

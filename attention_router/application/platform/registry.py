@@ -295,6 +295,7 @@ def resolve_capability_request(
     policy_allows: bool,
     resource_id: str | None = None,
     owner_authorized: bool = False,
+    now: datetime | None = None,
 ) -> CapabilityResolution:
     with start_span("capability.resolve") as span:
         safe_set_attribute(span, "attention.tenant_id", tenant_id)
@@ -340,6 +341,7 @@ def resolve_capability_request(
             grantee_type=grantee_type,
             grantee_id=grantee_id,
             resource_id=resource_id,
+            now=now,
         )
         # Authenticated owner authority is an ingress property, never text supplied by Andy.
         effective_grant = grant or owner_authorized

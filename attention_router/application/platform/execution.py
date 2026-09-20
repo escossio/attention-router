@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -47,6 +48,7 @@ def execute_capability(
     resource_id: str | None = None,
     approval_granted: bool = False,
     owner_authorized: bool = False,
+    now: datetime | None = None,
 ) -> CapabilityExecutionOutcome:
     """Generic provider invocation; Andy never calls this function directly."""
     resolution = resolve_capability_request(
@@ -58,6 +60,7 @@ def execute_capability(
         policy_allows=policy_allows,
         resource_id=resource_id,
         owner_authorized=owner_authorized,
+        now=now,
     )
     if resolution.status in {
         CapabilityResolutionStatus.UNKNOWN,

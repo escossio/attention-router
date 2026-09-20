@@ -499,6 +499,7 @@ def materialize_prepared_recommendation_execution(
         runtime_registry=runtime,
         approval_granted=False,
         owner_authorized=False,
+        now=stamp,
     )
 
     if execution.status != "EXECUTED":
