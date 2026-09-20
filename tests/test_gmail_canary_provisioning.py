@@ -40,6 +40,7 @@ def test_build_gmail_canary_installation_is_bounded_and_digest_only():
         installation.raw_secret
     )
     assert installation.raw_secret not in repr(installation.credential)
+    assert installation.raw_secret not in repr(installation)
     assert installation.credential.expires_at > stamp
     assert len(installation.raw_secret) >= 43
 
