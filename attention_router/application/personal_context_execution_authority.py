@@ -454,6 +454,7 @@ def evaluate_accepted_recommendation_authority(
         grantee_id=actor_key,
         policy_allows=policy_allows,
         owner_authorized=False,
+        now=stamp,
     )
 
     intent_id: str | None = None
