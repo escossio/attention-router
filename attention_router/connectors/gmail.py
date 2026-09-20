@@ -66,6 +66,23 @@ class GmailCursorStore(Protocol):
     def save(self, state: GmailCursorState) -> None: ...
 
 
+def _read_private_secret_file(path_value: str, *, error_prefix: str) -> str:
+    path = Path(path_value)
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError as exc:
+        raise GmailConnectorError(f"{error_prefix}_UNAVAILABLE") from exc
+    if mode & 0o077:
+        raise GmailConnectorError(f"{error_prefix}_PERMISSIONS_UNSAFE")
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise GmailConnectorError(f"{error_prefix}_UNAVAILABLE") from exc
+    if not value:
+        raise GmailConnectorError(f"{error_prefix}_REQUIRED")
+    return value
+
+
 class FileGmailCursorStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -177,18 +194,10 @@ class GmailConnectorConfig:
             "",
         ).strip()
         if integration_credential_file:
-            try:
-                integration_credential = Path(
-                    integration_credential_file
-                ).read_text(encoding="utf-8").strip()
-            except OSError as exc:
-                raise GmailConnectorError(
-                    "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_FILE_UNAVAILABLE"
-                ) from exc
-            if not integration_credential:
-                raise GmailConnectorError(
-                    "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_REQUIRED"
-                )
+            integration_credential = _read_private_secret_file(
+                integration_credential_file,
+                error_prefix="ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_FILE",
+            )
         else:
             integration_credential = required(
                 "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL"
@@ -545,11 +554,12 @@ def _access_token_from_env() -> str:
     token_file = os.environ.get("GMAIL_ACCESS_TOKEN_FILE", "").strip()
     if token_file:
         try:
-            return Path(token_file).read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            raise GmailAuthenticationError(
-                "GMAIL_ACCESS_TOKEN_FILE_UNAVAILABLE"
-            ) from exc
+            return _read_private_secret_file(
+                token_file,
+                error_prefix="GMAIL_ACCESS_TOKEN_FILE",
+            )
+        except GmailConnectorError as exc:
+            raise GmailAuthenticationError(str(exc)) from exc
     return os.environ.get("GMAIL_ACCESS_TOKEN", "").strip()
 
 
