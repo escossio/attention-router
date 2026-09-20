@@ -171,6 +171,28 @@ class GmailConnectorConfig:
         if timeout <= 0 or timeout > 120:
             raise GmailConnectorError("GMAIL_REQUEST_TIMEOUT_OUT_OF_RANGE")
 
+        integration_credential_file = os.environ.get(
+            "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_FILE",
+            "",
+        ).strip()
+        if integration_credential_file:
+            try:
+                integration_credential = Path(
+                    integration_credential_file
+                ).read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise GmailConnectorError(
+                    "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_FILE_UNAVAILABLE"
+                ) from exc
+            if not integration_credential:
+                raise GmailConnectorError(
+                    "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL_REQUIRED"
+                )
+        else:
+            integration_credential = required(
+                "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL"
+            )
+
         return cls(
             tenant_id=required("GMAIL_TENANT_ID"),
             instance_id=required("GMAIL_INTEGRATION_INSTANCE_ID"),
@@ -178,9 +200,7 @@ class GmailConnectorConfig:
             integration_endpoint=required(
                 "ATTENTION_ROUTER_INTEGRATION_ENDPOINT"
             ),
-            integration_credential=required(
-                "ATTENTION_ROUTER_INTEGRATION_CREDENTIAL"
-            ),
+            integration_credential=integration_credential,
             cursor_path=Path(required("GMAIL_CONNECTOR_STATE_PATH")),
             poll_interval_seconds=poll_interval,
             message_limit_per_poll=message_limit,
