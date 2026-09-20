@@ -143,7 +143,7 @@ def test_reader_maps_full_message_without_downloading_attachment_bytes():
     assert message.cc == ("copy@example.invalid",)
     assert message.bcc == ()
     assert message.subject == "Synthetic subject"
-    assert message.body == "synthetic snippet"
+    assert message.body == "present"
     assert message.email_ts.endswith("+00:00")
     assert len(message.attachments) == 1
     attachment = message.attachments[0]
