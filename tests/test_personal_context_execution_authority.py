@@ -567,3 +567,44 @@ def test_assessment_is_audited_with_policy_and_grant_evidence(session):
     assert audit_row.payload["active_grant_ids"] == [grant.id]
     assert audit_row.payload["assessment_status"] == "INTENT_PREPARED"
     assert audit_row.payload["execution_intent_id"] == assessment.execution_intent_id
+
+
+def test_invalidated_source_hypothesis_blocks_intent_preparation(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    binding, accepted = _accepted_recommendation(session, stamp)
+    provision_internal_providers(session, DEFAULT_TENANT_ID)
+    _install_policy(session, binding.id, allow_reminder=True)
+    create_capability_grant(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        grantor_type="OPERATOR",
+        grantor_id="test",
+        grantee_type="ACTOR",
+        grantee_id=ACTOR,
+        capability_name="reminder.create",
+        valid_from=stamp - timedelta(seconds=1),
+        valid_until=stamp + timedelta(days=1),
+        provenance="test",
+    )
+
+    source = session.get(
+        MemoryClaimRow,
+        accepted.context["source_claim_id"],
+    )
+    assert source is not None
+    source.status = "SUPERSEDED"
+    source.valid_until = stamp + timedelta(minutes=1)
+    session.flush()
+
+    assessment = evaluate_accepted_recommendation_authority(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+        recommendation_id="recommendation-v1e",
+        now=stamp + timedelta(minutes=2),
+    )
+
+    assert assessment.assessment_status == "SOURCE_INVALIDATED"
+    assert assessment.reason_code == "RECOMMENDATION_SOURCE_HYPOTHESIS_INVALIDATED"
+    assert assessment.execution_intent_id is None
+    assert session.scalar(select(func.count()).select_from(ExecutionIntentRow)) == 0
