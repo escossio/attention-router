@@ -48,6 +48,11 @@ def render_gmail_canary_env(
         "INTEGRATION_DISPATCH_ENABLED": "false",
         "INTEGRATION_DISPATCH_BATCH_SIZE": "5",
         "WORKER_POLL_INTERVAL_SECONDS": "1",
+        "LOCAL_TRANSPORT_OUTBOUND_URL": (
+            "http://127.0.0.1:1/internal/send"
+        ),
+        "LOCAL_TRANSPORT_OUTBOUND_TIMEOUT_SECONDS": "0.2",
+        "WWEBJS_OUTBOUND_URL": "http://127.0.0.1:1/internal/send",
         "HUMAN_IDENTITY_ENABLED": "false",
         "DEVICE_BOOTSTRAP_ENABLED": "false",
         "CLIENT_SESSION_ENABLED": "false",
