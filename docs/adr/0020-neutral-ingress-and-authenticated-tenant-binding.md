@@ -2,11 +2,14 @@
 
 ## Status
 
-Proposed HTTP design, 2026-09-11. An
-[isolated offline binding proof](../integration-tenant-binding-proof-v0.md) now
+Accepted and partially implemented, updated 2026-09-20. An
+[isolated offline binding proof](../integration-tenant-binding-proof-v0.md)
 implements the credential/tenant decision. The
-[persistent admission proof](../integration-admission-proof-v0.md) adds an internal
-PostgreSQL registry, migration and transactional inbox. No endpoint, production
+[persistent admission proof](../integration-admission-proof-v0.md) provides the
+PostgreSQL registry and transactional inbox, and the bounded neutral HTTP
+receiver now exposes `POST /api/v1/ingress/integrations/events` on the ingress
+surface. The receiver is disabled by default and does not dispatch admitted
+work. No production
 enrollment, dispatcher or HTTP client is activated.
 
 ## Context

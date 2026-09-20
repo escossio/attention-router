@@ -9,6 +9,7 @@ import threading
 import time
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError, DBAPIError
 
@@ -21,6 +22,12 @@ from attention_router.integrations.admission import (
 )
 from attention_router.integrations.tenant_binding import (
     INBOUND_SCOPE, IntegrationBinding, CredentialRecord, credential_digest,
+)
+from attention_router.config import settings
+from attention_router.web.ingress_app import create_ingress_app
+from attention_router.web.integration_ingress import (
+    INTEGRATION_INGRESS_PATH,
+    get_integration_session_factory,
 )
 
 pytestmark = pytest.mark.postgres
@@ -326,4 +333,315 @@ def test_malformed_stored_scopes_fail_closed(Session, world, model, identity, sc
     with Session.begin() as session:
         session.get(model, identity).scopes = scopes
     assert send(Session, world).code == "INGRESS_UNAVAILABLE"
+    assert count(Session) == 0
+
+
+
+@pytest.fixture
+def integration_http_client(Session, monkeypatch):
+    monkeypatch.setattr(settings, "integration_ingress_enabled", True)
+    monkeypatch.setattr(settings, "integration_ingress_audience", "test-ingress")
+    app = create_ingress_app()
+    app.dependency_overrides[get_integration_session_factory] = lambda: Session
+    with TestClient(app) as client:
+        yield client
+
+
+def _http_headers(token):
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+
+
+def _http_raw(world, payload=None):
+    return json.dumps(
+        payload or world[3],
+        separators=(",", ":"),
+    ).encode()
+
+
+def test_neutral_http_receiver_commits_before_202_and_replays_as_200(
+    Session,
+    world,
+    integration_http_client,
+):
+    raw = _http_raw(world)
+    first = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=raw,
+        headers=_http_headers(world[2]),
+    )
+
+    assert first.status_code == 202
+    assert first.headers["cache-control"] == "no-store"
+    assert set(first.json()) == {
+        "transport_version",
+        "status",
+        "receipt_id",
+        "admitted_at",
+        "correlation_id",
+    }
+    assert first.json()["transport_version"] == "1"
+    assert first.json()["status"] == "accepted"
+    assert first.json()["correlation_id"] == world[3]["correlation_id"]
+
+    with Session() as session:
+        row = session.get(InboxRow, first.json()["receipt_id"])
+        assert row is not None
+        assert row.state == "PENDING"
+        assert row.raw_body == raw
+        assert row.tenant_id == A
+        assert row.binding_id == world[0].binding_id
+
+    duplicate = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=raw,
+        headers=_http_headers(world[2]),
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.headers["cache-control"] == "no-store"
+    assert duplicate.json()["status"] == "duplicate"
+    assert duplicate.json()["receipt_id"] == first.json()["receipt_id"]
+    assert duplicate.json()["admitted_at"] == first.json()["admitted_at"]
+    assert count(Session) == 1
+
+
+def test_neutral_http_receiver_preserves_binding_and_idempotency_fail_closed(
+    Session,
+    world,
+    integration_http_client,
+):
+    wrong_tenant = copy.deepcopy(world[3])
+    wrong_tenant["tenant_id"] = B
+    denied = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=_http_raw(world, wrong_tenant),
+        headers=_http_headers(world[2]),
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error_code"] == "BINDING_FORBIDDEN"
+    assert set(denied.json()) == {
+        "transport_version",
+        "error_code",
+        "request_id",
+    }
+    assert count(Session) == 0
+
+    raw = _http_raw(world)
+    accepted = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=raw,
+        headers=_http_headers(world[2]),
+    )
+    assert accepted.status_code == 202
+
+    changed_bytes = json.dumps(world[3], indent=2).encode()
+    conflict = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=changed_bytes,
+        headers=_http_headers(world[2]),
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["error_code"] == "IDEMPOTENCY_CONFLICT"
+    assert count(Session) == 1
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "Basic synthetic",
+        "Bearer short",
+        "Bearer " + ("A" * 42 + "=A"),
+        "Bearer " + ("A" * 513),
+    ],
+)
+def test_neutral_http_receiver_rejects_malformed_bearer_representation(
+    Session,
+    world,
+    integration_http_client,
+    authorization,
+):
+    response = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=_http_raw(world),
+        headers={
+            "Authorization": authorization,
+            "Content-Type": "application/json",
+        },
+    )
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "UNAUTHENTICATED"
+    assert response.headers["www-authenticate"] == (
+        'Bearer realm="andy-integration-ingress", error="invalid_token"'
+    )
+    assert count(Session) == 0
+
+
+def test_neutral_http_receiver_auth_precedes_private_payload_diagnostics(
+    Session,
+    world,
+    integration_http_client,
+):
+    invalid_token = secrets.token_urlsafe(32)
+    response = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=b'{"broken"',
+        headers=_http_headers(invalid_token),
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "UNAUTHENTICATED"
+    assert response.headers["www-authenticate"] == (
+        'Bearer realm="andy-integration-ingress", error="invalid_token"'
+    )
+    assert response.headers["cache-control"] == "no-store"
+    assert count(Session) == 0
+
+    missing = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=b'{"broken"',
+        headers={"Content-Type": "application/json"},
+    )
+    assert missing.status_code == 401
+    assert missing.headers["www-authenticate"] == (
+        'Bearer realm="andy-integration-ingress"'
+    )
+    assert missing.json()["error_code"] == "UNAUTHENTICATED"
+
+
+@pytest.mark.parametrize(
+    "headers,path,status_code,error_code",
+    [
+        (
+            {"Idempotency-Key": "alternate"},
+            INTEGRATION_INGRESS_PATH,
+            400,
+            "INVALID_REQUEST",
+        ),
+        (
+            {"X-Tenant-ID": A},
+            INTEGRATION_INGRESS_PATH,
+            400,
+            "INVALID_REQUEST",
+        ),
+        (
+            {},
+            INTEGRATION_INGRESS_PATH + "?tenant=" + A,
+            400,
+            "INVALID_REQUEST",
+        ),
+        (
+            {"Content-Encoding": "gzip"},
+            INTEGRATION_INGRESS_PATH,
+            415,
+            "UNSUPPORTED_MEDIA_TYPE",
+        ),
+    ],
+)
+def test_neutral_http_receiver_rejects_alternate_authority_and_encoding(
+    Session,
+    world,
+    integration_http_client,
+    headers,
+    path,
+    status_code,
+    error_code,
+):
+    merged = {**_http_headers(world[2]), **headers}
+    response = integration_http_client.post(
+        path,
+        content=_http_raw(world),
+        headers=merged,
+    )
+    assert response.status_code == status_code
+    assert response.json()["error_code"] == error_code
+    assert response.headers["cache-control"] == "no-store"
+    assert count(Session) == 0
+
+
+def test_neutral_http_receiver_rejects_mixed_and_duplicate_auth(
+    Session,
+    world,
+    integration_http_client,
+):
+    mixed = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=_http_raw(world),
+        headers={
+            **_http_headers(world[2]),
+            "X-Attention-Signature": "legacy",
+        },
+    )
+    assert mixed.status_code == 400
+    assert mixed.json()["error_code"] == "INVALID_REQUEST"
+
+    duplicate = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=_http_raw(world),
+        headers=[
+            ("Authorization", f"Bearer {world[2]}"),
+            ("Authorization", f"Bearer {world[2]}"),
+            ("Content-Type", "application/json"),
+        ],
+    )
+    assert duplicate.status_code == 400
+    assert duplicate.json()["error_code"] == "INVALID_REQUEST"
+    assert count(Session) == 0
+
+
+def test_neutral_http_receiver_enforces_media_body_and_contract_profiles(
+    Session,
+    world,
+    integration_http_client,
+):
+    media = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=_http_raw(world),
+        headers={
+            "Authorization": f"Bearer {world[2]}",
+            "Content-Type": "text/plain",
+        },
+    )
+    assert media.status_code == 415
+    assert media.json()["error_code"] == "UNSUPPORTED_MEDIA_TYPE"
+
+    oversized = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=b" " * 65_537,
+        headers=_http_headers(world[2]),
+    )
+    assert oversized.status_code == 413
+    assert oversized.json()["error_code"] == "BODY_TOO_LARGE"
+
+    invalid_contract = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=b"{}",
+        headers=_http_headers(world[2]),
+    )
+    assert invalid_contract.status_code == 422
+    assert invalid_contract.json()["error_code"] == "INVALID_CONTRACT"
+    assert count(Session) == 0
+
+
+def test_neutral_http_receiver_method_and_default_disabled_behavior(
+    Session,
+    world,
+    monkeypatch,
+    integration_http_client,
+):
+    method = integration_http_client.get(INTEGRATION_INGRESS_PATH)
+    assert method.status_code == 405
+    assert method.headers["allow"] == "POST"
+    assert method.headers["cache-control"] == "no-store"
+    assert method.json()["error_code"] == "METHOD_NOT_ALLOWED"
+
+    monkeypatch.setattr(settings, "integration_ingress_enabled", False)
+    disabled = integration_http_client.post(
+        INTEGRATION_INGRESS_PATH,
+        content=_http_raw(world),
+        headers=_http_headers(world[2]),
+    )
+    assert disabled.status_code == 503
+    assert disabled.json()["error_code"] == "INGRESS_UNAVAILABLE"
     assert count(Session) == 0
