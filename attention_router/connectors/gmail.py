@@ -12,6 +12,7 @@ from pathlib import Path
 import stat
 import time
 from typing import Callable, Protocol
+from urllib.parse import quote
 
 import httpx
 
@@ -312,9 +313,12 @@ class GmailApiClient:
         )
 
     def get_message_metadata(self, message_id: str) -> dict:
+        if not message_id:
+            raise GmailPayloadError("GMAIL_MESSAGE_ID_INVALID")
+        encoded_message_id = quote(message_id, safe="")
         return self._request(
             "GET",
-            f"{GMAIL_API_BASE}/messages/{message_id}",
+            f"{GMAIL_API_BASE}/messages/{encoded_message_id}",
             params=[
                 ("format", "metadata"),
                 ("metadataHeaders", "From"),
