@@ -267,17 +267,61 @@ def test_duplicate_semantic_candidate_is_rejected():
 
 def test_interpret_candidate_builder_uses_structured_output_without_execution(monkeypatch):
     synthetic = output(
-        raw_candidate("CONFIGURE_OWNER_REPLY_GRACE", seconds=30),
-        raw_candidate("ONE_SHOT_REPLY_DELAY", seconds=30),
+        raw_candidate("SET_AUTOMATIC_RESPONSES", enabled=False),
     )
+    text = "talvez desligue as respostas automaticas"
     monkeypatch.setattr(
         owner_control_semantic_candidates,
         "_run_model",
-        lambda text: synthetic if text == "retorne em 30 segundos" else pytest.fail(text),
+        lambda received: synthetic if received == text else pytest.fail(received),
     )
-    candidate_set = interpret_owner_control_candidates("retorne em 30 segundos")
+    candidate_set = interpret_owner_control_candidates(text)
     assert candidate_set is not None
-    assert len(candidate_set["candidates"]) == 2
+    assert len(candidate_set["candidates"]) == 1
+    assert (
+        candidate_set["candidates"][0]["semantic_intent_key"]
+        == "SET_AUTOMATIC_RESPONSES"
+    )
+
+
+def test_timed_reply_ambiguity_uses_deterministic_candidates_without_model(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        owner_control_semantic_candidates,
+        "_run_model",
+        lambda _text: pytest.fail("timed reply must not invoke candidate model"),
+    )
+    candidate_set = interpret_owner_control_candidates(
+        "Retorne em 30 segundos!"
+    )
+    assert candidate_set is not None
+    candidates = candidate_set["candidates"]
+    assert {
+        candidate["semantic_intent_key"] for candidate in candidates
+    } == {
+        "CONFIGURE_OWNER_REPLY_GRACE",
+        "ONE_SHOT_REPLY_DELAY",
+    }
+    assert {
+        candidate["parameters"]["seconds"] for candidate in candidates
+    } == {30}
+
+
+def test_timed_reply_minutes_are_normalized_deterministically(monkeypatch):
+    monkeypatch.setattr(
+        owner_control_semantic_candidates,
+        "_run_model",
+        lambda _text: pytest.fail("timed reply must not invoke candidate model"),
+    )
+    candidate_set = interpret_owner_control_candidates(
+        "responda em 2 minutos"
+    )
+    assert candidate_set is not None
+    assert {
+        candidate["parameters"]["seconds"]
+        for candidate in candidate_set["candidates"]
+    } == {120}
 
 
 def test_blank_text_never_calls_candidate_model(monkeypatch):
