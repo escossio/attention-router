@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import MemoryActorRow, MemoryClaimRow
+from attention_router.application.personal_context_controls import (
+    claim_is_owner_non_actionable,
+    claim_is_owner_private,
+)
 
 
 ANOMALY_CLAIM_PREDICATE: Final = "context.pattern.sequence_anomaly"
@@ -126,6 +130,11 @@ def _suggestion_from_anomaly(
         or source.source_quality != "DERIVED_PATTERN"
         or source.sensitivity_class == "SECRET"
     ):
+        return None
+
+    if claim_is_owner_private(session, claim=source):
+        return None
+    if claim_is_owner_non_actionable(session, claim=source):
         return None
 
     source_value = source.object_json or {}

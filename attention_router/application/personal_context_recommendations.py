@@ -11,6 +11,10 @@ from attention_router.application.platform.registry import capability_and_versio
 from attention_router.core.capabilities import CapabilityAvailability
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import MemoryActorRow, MemoryClaimRow
+from attention_router.application.personal_context_controls import (
+    claim_is_owner_non_actionable,
+    claim_is_owner_private,
+)
 
 
 PATTERN_CLAIM_SOURCE_QUALITY: Final = "DERIVED_PATTERN"
@@ -149,6 +153,10 @@ def _recommendation_from_claim(
     value = claim.object_json or {}
     context = claim.context or {}
 
+    if claim_is_owner_private(session, claim=claim):
+        return None
+    if claim_is_owner_non_actionable(session, claim=claim):
+        return None
     if value.get("pattern_type") != "TEMPORAL_RECURRENCE":
         return None
     if value.get("event_type") != "LOCATION_ARRIVAL":

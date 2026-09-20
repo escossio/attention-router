@@ -16,6 +16,9 @@ from attention_router.application.personal_context_runtime import (
     PERSONAL_CONTEXT_SUGGESTION_OUTBOX_ACTION,
 )
 from attention_router.domain.models import new_id, now_utc
+from attention_router.application.personal_context_controls import (
+    claim_is_owner_private,
+)
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     InboundEventRow,
@@ -198,6 +201,7 @@ def _source_chain_current(
         and sequence.status == "ACTIVE"
         and sequence.predicate == "context.pattern.event_sequence"
         and sequence.source_quality == "DERIVED_PATTERN"
+        and not claim_is_owner_private(session, claim=sequence)
         and (
             sequence.valid_until is None
             or _utc(sequence.valid_until) > now

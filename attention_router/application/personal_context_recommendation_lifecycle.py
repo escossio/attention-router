@@ -11,6 +11,10 @@ from attention_router.application.personal_context_recommendations import (
     ContextRecommendation,
 )
 from attention_router.domain.models import new_id, now_utc
+from attention_router.application.personal_context_controls import (
+    claim_is_owner_non_actionable,
+    claim_is_owner_private,
+)
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import (
     ActorBindingRow,
@@ -86,6 +90,10 @@ def _source_claim_for(
         raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_NOT_ACTIVE")
     if claim.source_quality != "DERIVED_PATTERN":
         raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_QUALITY_INVALID")
+    if claim_is_owner_private(session, claim=claim):
+        raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_OWNER_PRIVATE")
+    if claim_is_owner_non_actionable(session, claim=claim):
+        raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_NON_ACTIONABLE")
     value = claim.object_json or {}
     if value.get("evidence_class") != "INFERRED":
         raise RecommendationLifecycleError("RECOMMENDATION_SOURCE_NOT_INFERRED")
@@ -366,6 +374,8 @@ def _assert_current_source_hypothesis(
         and source.predicate == "context.pattern.temporal_recurrence"
         and source.source_quality == "DERIVED_PATTERN"
         and source.status == "ACTIVE"
+        and not claim_is_owner_private(session, claim=source)
+        and not claim_is_owner_non_actionable(session, claim=source)
         and (value or {}).get("evidence_class") == "INFERRED"
         and (value or {}).get("hypothesis_status") == "HYPOTHESIS"
         and (value or {}).get("grants_authority") is False
