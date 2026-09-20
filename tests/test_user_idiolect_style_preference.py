@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
-
 from sqlalchemy import func, select
 
 from attention_router.application import services
