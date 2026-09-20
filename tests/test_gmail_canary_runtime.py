@@ -31,7 +31,7 @@ def test_gmail_canary_compose_is_isolated_and_minimal():
     )
     services = data["services"]
 
-    assert set(services) == {"db", "migrate", "ingress", "worker"}
+    assert set(services) == {"db", "migrate", "ingress", "worker", "tools"}
     assert "api" not in services
     assert "internal-ingress" not in services
 
@@ -41,6 +41,11 @@ def test_gmail_canary_compose_is_isolated_and_minimal():
     assert "ports" not in services["db"]
     assert "ports" not in services["migrate"]
     assert "ports" not in services["worker"]
+    assert "ports" not in services["tools"]
+    assert services["tools"]["profiles"] == ["tools"]
+    assert services["tools"]["volumes"] == [
+        "./secrets/gmail-canary:/run/secrets/gmail-canary"
+    ]
 
     assert services["migrate"]["depends_on"]["db"]["condition"] == (
         "service_healthy"
@@ -57,7 +62,7 @@ def test_gmail_canary_compose_is_isolated_and_minimal():
         "gmail_canary_database:/var/lib/postgresql/data"
     ]
 
-    for service in ("db", "migrate", "ingress", "worker"):
+    for service in ("db", "migrate", "ingress", "worker", "tools"):
         assert services[service]["env_file"] == [
             ".env.gmail-canary"
         ]
@@ -88,6 +93,13 @@ def test_gmail_canary_env_defaults_fail_closed():
     assert env["ADMIN_AUTH_ENABLED"] == "false"
     assert env["INTEGRATION_INGRESS_AUDIENCE"] == "andy-gmail-canary"
     assert env["INTEGRATION_DISPATCH_BATCH_SIZE"] == "5"
+    assert env["LOCAL_TRANSPORT_OUTBOUND_URL"] == (
+        "http://127.0.0.1:1/internal/send"
+    )
+    assert env["LOCAL_TRANSPORT_OUTBOUND_TIMEOUT_SECONDS"] == "0.2"
+    assert env["WWEBJS_OUTBOUND_URL"] == (
+        "http://127.0.0.1:1/internal/send"
+    )
 
     assert env["POSTGRES_PASSWORD"] == "P" * 43
     assert "P" * 43 in env["DATABASE_URL"]
