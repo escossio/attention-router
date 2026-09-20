@@ -418,6 +418,11 @@ def test_worker_runtime_schedule_respects_feature_flag_and_interval(
     )
     monkeypatch.setattr(
         worker.settings,
+        "personal_context_suggestion_delivery_enabled",
+        True,
+    )
+    monkeypatch.setattr(
+        worker.settings,
         "personal_context_runtime_owner_limit",
         25,
     )
@@ -430,6 +435,7 @@ def test_worker_runtime_schedule_respects_feature_flag_and_interval(
     assert result is not None
     assert last == 100.0
     assert calls[-1]["delivery_enabled"] is True
+    assert calls[-1]["suggestion_delivery_enabled"] is True
     assert calls[-1]["owner_limit"] == 25
 
     result, last2 = worker.process_personal_context_runtime_if_due(
