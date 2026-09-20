@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     personal_context_runtime_enabled: bool = False
     personal_context_runtime_interval_seconds: int = 300
     personal_context_recommendation_delivery_enabled: bool = False
+    personal_context_authority_runtime_enabled: bool = False
     personal_context_runtime_owner_limit: int = 50
     conversation_repetition_window_seconds: int = 24 * 60 * 60
     agent_response_review_enabled: bool = True
