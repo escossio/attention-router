@@ -102,16 +102,16 @@ def _normalize_timed_reply_text(text: str) -> str:
     ascii_text = "".join(
         ch for ch in decomposed if not unicodedata.combining(ch)
     )
-    return " ".join(re.sub(r"[^a-z0-9\\s]", " ", ascii_text).split())
+    return " ".join(re.sub(r"[^a-z0-9\s]", " ", ascii_text).split())
 
 
 _TIMED_REPLY_PATTERNS = (
     re.compile(
-        r"^(?:retorne|responda) em (?P<value>\\d+) "
+        r"^(?:retorne|responda) em (?P<value>\d+) "
         r"(?P<unit>segundos?|minutos?)$"
     ),
     re.compile(
-        r"^volta a responder daqui a (?P<value>\\d+) "
+        r"^volta a responder daqui a (?P<value>\d+) "
         r"(?P<unit>segundos?|minutos?)$"
     ),
 )
