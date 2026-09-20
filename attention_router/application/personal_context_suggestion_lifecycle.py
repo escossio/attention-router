@@ -12,6 +12,10 @@ from attention_router.application.personal_context_anomaly_suggestions import (
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import MemoryActorRow, MemoryClaimRow
+from attention_router.application.personal_context_controls import (
+    claim_is_owner_non_actionable,
+    claim_is_owner_private,
+)
 
 
 class ContextSuggestionPersistenceError(RuntimeError):
@@ -296,6 +300,10 @@ def reconcile_anomaly_suggestions(
             reason = "SOURCE_ANOMALY_INACTIVE"
         elif sequence is None or sequence.status != "ACTIVE":
             reason = "SOURCE_SEQUENCE_INACTIVE"
+        elif claim_is_owner_private(session, claim=sequence):
+            reason = "SOURCE_CONTEXT_OWNER_PRIVATE"
+        elif claim_is_owner_non_actionable(session, claim=sequence):
+            reason = "SOURCE_CONTEXT_NON_ACTIONABLE"
 
         if reason is None:
             continue
