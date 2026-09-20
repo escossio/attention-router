@@ -1,10 +1,12 @@
 # Neutral Integration Transport and Tenant Binding V0
 
-**Status: proposed HTTP design; binding and internal admission proofs implemented.**
-The [offline binding proof](integration-tenant-binding-proof-v0.md) and
-[PostgreSQL admission proof](integration-admission-proof-v0.md) cover parts of the
-acceptance matrix. No HTTP receiver, dispatcher or network client is activated.
-This specifies the next boundary
+**Status: bounded HTTP receiver + binding + durable admission implemented; dispatcher and provider clients remain gated.**
+The [offline binding proof](integration-tenant-binding-proof-v0.md),
+[PostgreSQL admission proof](integration-admission-proof-v0.md) and the neutral
+`POST /api/v1/ingress/integrations/events` receiver cover the authenticated
+admission boundary. The receiver is disabled by default and creates recoverable
+`integration_inbox` work only; no dispatcher or provider network client is
+activated. This specifies the boundary
 after the [contract SDK extraction](integration-sdks-v0.md), under
 [ADR 0020](adr/0020-neutral-ingress-and-authenticated-tenant-binding.md).
 V0 names this design increment; the proposed HTTP profile uses version `1`.
@@ -320,11 +322,11 @@ are their independently provisioned email/WhatsApp integration bindings.
 1. The [offline credential-to-binding proof](integration-tenant-binding-proof-v0.md)
    implements synthetic A/B tenant, integration/account, lifecycle, scope and
    mismatch cases. It does not establish registry freshness or durable admission.
-2. Implement the bounded receiver and durable admission with PostgreSQL unique
-   constraints, concurrency, rollback/crash and revocation tests. Freeze a
-   machine-readable HTTP request/response contract against those tests. Pass the
-   existing seven required CI gates for that implementation.
-3. Only then add thin Python/TypeScript HTTP clients with synthetic server tests
+2. **Implemented:** bounded receiver and durable admission with PostgreSQL unique
+   constraints, concurrency, rollback/crash and revocation tests. The receiver
+   preserves exact request bytes, returns the frozen transport envelope, and is
+   disabled by default.
+3. Next, add thin Python/TypeScript HTTP clients with synthetic server tests
    for auth isolation, byte-preserving retries, timeout ambiguity and redirects.
 
 Runtime dispatch remains an explicit gate before production intake is enabled.
