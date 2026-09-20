@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
@@ -20,7 +20,7 @@ from attention_router.integrations.tenant_binding import (
 class GmailCanaryInstallation:
     binding: IntegrationBinding
     credential: CredentialRecord
-    raw_secret: str
+    raw_secret: str = field(repr=False)
 
 
 def build_gmail_canary_installation(
