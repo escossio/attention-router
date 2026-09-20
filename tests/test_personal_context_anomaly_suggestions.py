@@ -28,6 +28,7 @@ from attention_router.infrastructure.models import (
     MemoryClaimRow,
     OutboxMessageRow,
     ReminderRow,
+    TimelineEventRow,
 )
 from tests.test_personal_context_anomalies import (
     _persist_sequence,
@@ -141,13 +142,7 @@ def test_late_expected_step_supersedes_anomaly_and_derived_suggestion(session):
     )
 
     first_event_id = anomaly.context["first_event_id"]
-    first = session.get(
-        __import__(
-            "attention_router.infrastructure.models",
-            fromlist=["TimelineEventRow"],
-        ).TimelineEventRow,
-        first_event_id,
-    )
+    first = session.get(TimelineEventRow, first_event_id)
     assert first is not None
     from tests.test_personal_context_anomalies import _expected_second_event
 
