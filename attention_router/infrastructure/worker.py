@@ -30,6 +30,7 @@ from attention_router.application.voice_transcription import (
     process_voice_transcriptions,
     voice_decision_readiness,
 )
+from attention_router.integrations.dispatch import process_integration_inbox
 from attention_router.application.voice_tts import process_tts_derivations
 from attention_router.application.voice_media import cleanup_expired_media
 from attention_router.application.platform.capability_pack import process_due_scheduled_events
@@ -272,6 +273,22 @@ def run_forever() -> None:
             timer_count = process_due_timers(session, identity)
             scheduled_event_count = process_scheduled_events_if_available(session)
             media_cleanup_count = cleanup_expired_media(session)
+            integration_dispatch_result = None
+            if settings.integration_dispatch_enabled:
+                try:
+                    integration_dispatch_result = process_integration_inbox(
+                        session,
+                        limit=settings.integration_dispatch_batch_size,
+                    )
+                    session.commit()
+                except Exception as exc:
+                    session.rollback()
+                    logger.exception(
+                        "integration inbox dispatch failed worker_id=%s error=%s",
+                        identity,
+                        exc,
+                    )
+
             if settings.memory_ingestion_enabled:
                 with start_span("memory.extract") as memory_span:
                     memory_count = process_memory_ingestion_jobs(session)
@@ -381,6 +398,13 @@ def run_forever() -> None:
             or memory_count
             or media_cleanup_count
             or (
+                integration_dispatch_result is not None
+                and (
+                    integration_dispatch_result.processed
+                    or integration_dispatch_result.blocked
+                )
+            )
+            or (
                 personal_context_result is not None
                 and (
                     personal_context_result.hypotheses_persisted
@@ -415,6 +439,8 @@ def run_forever() -> None:
             logger.info(
                 "processed worker_id=%s grace_count=%s decision_count=%s outbox_count=%s "
                 "timer_count=%s scheduled_event_count=%s "
+                "integration_dispatch_processed=%s "
+                "integration_dispatch_blocked=%s "
                 "personal_context_hypotheses=%s "
                 "personal_context_recommendations=%s "
                 "personal_context_enqueued=%s "
@@ -430,6 +456,16 @@ def run_forever() -> None:
                 outbox_count,
                 timer_count,
                 scheduled_event_count,
+                (
+                    integration_dispatch_result.processed
+                    if integration_dispatch_result is not None
+                    else 0
+                ),
+                (
+                    integration_dispatch_result.blocked
+                    if integration_dispatch_result is not None
+                    else 0
+                ),
                 (
                     personal_context_result.hypotheses_persisted
                     if personal_context_result is not None
