@@ -1,0 +1,25 @@
+[Unit]
+Description=Andy distributed PostgreSQL GitHub check publisher
+After=network-online.target andy-github-webhook.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/lib/andy-github-app
+ExecStart=/usr/bin/python3 /usr/local/lib/andy-github-app/distributed_postgres_check.py daemon
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/andy-github-app /var/log/andy-ci /usr/local/lib/andy-ci
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
