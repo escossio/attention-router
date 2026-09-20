@@ -23,6 +23,7 @@ from attention_router.domain.states import InteractionState
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     MemoryActorRow,
+    MemoryClaimRow,
     OutboxMessageRow,
 )
 from attention_router.infrastructure.repository import (
@@ -212,6 +213,20 @@ def process_personal_context_recommendations(
             now=stamp,
         )
         for recommendation in recommendations:
+            active_recommendations = session.scalars(
+                select(MemoryClaimRow).where(
+                    MemoryClaimRow.subject_actor_id == actor.id,
+                    MemoryClaimRow.predicate
+                    == "context.recommendation.proactive",
+                    MemoryClaimRow.status == "ACTIVE",
+                )
+            ).all()
+            if any(
+                (row.context or {}).get("recommendation_id")
+                == recommendation.recommendation_id
+                for row in active_recommendations
+            ):
+                continue
             _row, changed = persist_context_recommendation(
                 session,
                 recommendation=recommendation,
