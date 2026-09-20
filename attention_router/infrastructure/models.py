@@ -2926,6 +2926,11 @@ class IntegrationInboxRow(Base):
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     admitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    canonical_event_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("canonical_events.id")
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dispatch_reason: Mapped[str | None] = mapped_column(String(120))
     __table_args__ = (
         ForeignKeyConstraint(["tenant_id", "binding_id"],
                              ["integration_bindings.tenant_id", "integration_bindings.id"]),
@@ -2936,6 +2941,22 @@ class IntegrationInboxRow(Base):
         UniqueConstraint("tenant_id", "binding_id", "contract_type", "idempotency_key",
                          name="uq_integration_inbox_key"),
         CheckConstraint("contract_type = 'inbound_event'", name="ck_integration_inbox_type"),
-        CheckConstraint("state = 'PENDING'", name="ck_integration_inbox_state"),
+        UniqueConstraint(
+            "canonical_event_id",
+            name="uq_integration_inbox_canonical_event",
+        ),
+        CheckConstraint(
+            "("
+            "state = 'PENDING' and canonical_event_id is null "
+            "and processed_at is null and dispatch_reason is null"
+            ") or ("
+            "state = 'PROCESSED' and canonical_event_id is not null "
+            "and processed_at is not null and dispatch_reason is null"
+            ") or ("
+            "state = 'BLOCKED' and canonical_event_id is null "
+            "and processed_at is not null and dispatch_reason is not null"
+            ")",
+            name="ck_integration_inbox_dispatch_state",
+        ),
         CheckConstraint("length(raw_body) <= 65536", name="ck_integration_inbox_size"),
     )
