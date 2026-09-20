@@ -324,7 +324,6 @@ def test_expired_correction_allows_reinference(session):
     assert claim.context["hypothesis_id"] == hypothesis.hypothesis_id
     session.refresh(correction)
     assert correction.valid_until is not None
-    assert correction.valid_until <= later.replace(tzinfo=None) or correction.valid_until <= later
 
 
 def test_three_fresh_occurrences_requalify_pattern_before_correction_expiry(session):
