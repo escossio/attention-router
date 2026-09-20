@@ -15,7 +15,6 @@ from attention_router.application.platform.capability_pack import (
 from attention_router.infrastructure import worker
 from attention_router.infrastructure.models import (
     AgentExecutionIntentRow,
-    ExecutionIntentRow,
     FactRow,
     OutboxMessageRow,
     ReminderRow,
