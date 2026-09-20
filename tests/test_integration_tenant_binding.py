@@ -199,6 +199,22 @@ def test_accountless_is_not_a_wildcard(world):
     assert decide(world, event).code == BindingCode.BINDING_FORBIDDEN
 
 
+def test_credential_representation_validation_is_linear_and_padding_bounded():
+    valid = "A" * 43
+    assert len(credential_digest(valid)) == 64
+    assert len(credential_digest(valid + "==")) == 64
+
+    for invalid in (
+        "A" * 42,
+        "A" * 513,
+        "A" * 42 + "=A",
+        "=" * 43,
+        "A" * 42 + "!",
+    ):
+        with pytest.raises(ValueError, match="Invalid credential representation"):
+            credential_digest(invalid)
+
+
 @pytest.mark.parametrize("secret", [None, "", " ", "short", "x" * 513, "é" * 43])
 def test_bad_credential_never_reads_registry_or_event(world, secret):
     registry, _ = world
