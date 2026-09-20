@@ -45,11 +45,11 @@ a valid wire shape. Trusted tenant binding, tenant-scoped identity resolution,
 policy/approval and execution authorization remain separate. Artifact storage
 references grant no access.
 
-The repository does not yet implement a provider-neutral integration HTTP
-endpoint. [ADR 0020](adr/0020-neutral-ingress-and-authenticated-tenant-binding.md)
-and the [neutral transport V0 proposal](integration-transport-v0.md) define the
-next ingress/egress authority boundary, authenticated tenant binding and admission
-semantics before a network client. They are design documents, not shipped HTTP
-functionality. Receiver/binding proofs precede client extraction; signing, OAuth,
-discovery, artifact upload and live adapters remain future work. No runtime
+The repository now implements the bounded provider-neutral inbound HTTP
+receiver at `POST /api/v1/ingress/integrations/events`, backed by the existing
+authenticated tenant binding and durable PostgreSQL admission boundary. It is
+disabled by default and admits recoverable inbox work only; no consumer
+dispatcher or provider client is activated by that receiver. Thin network
+clients, OAuth/discovery, artifact upload operations and live provider
+connectors remain future work. No runtime
 redesign or production/provider activation is included.
