@@ -39,6 +39,7 @@ class AllowedAgentContext:
     effective_authority: list[dict] = field(default_factory=list)
     effective_standing_directives: list[dict] = field(default_factory=list)
     communication_intent: dict[str, object] | None = None
+    response_style: dict[str, object] = field(default_factory=dict)
     response_locale: str = ""
     response_locale_source: str = ""
 
