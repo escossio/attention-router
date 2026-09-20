@@ -21,6 +21,9 @@ from attention_router.application.voice_transcription import (
 from attention_router.application.voice_tts import process_tts_derivations
 from attention_router.application.voice_media import cleanup_expired_media
 from attention_router.application.platform.capability_pack import process_due_scheduled_events
+from attention_router.application.personal_context_runtime import (
+    process_personal_context_recommendations,
+)
 from attention_router.config import settings
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.db import SessionLocal
@@ -184,6 +187,7 @@ def run_forever() -> None:
             outbox_count = process_outbox(session, identity)
             timer_count = process_due_timers(session, identity)
             scheduled_event_count = process_scheduled_events_if_available(session)
+            personal_context_count = process_personal_context_recommendations(session)
             media_cleanup_count = cleanup_expired_media(session)
             if settings.memory_ingestion_enabled:
                 with start_span("memory.extract") as memory_span:
@@ -218,6 +222,7 @@ def run_forever() -> None:
             or outbox_count
             or timer_count
             or scheduled_event_count
+            or personal_context_count
             or memory_count
             or media_cleanup_count
             or meta_reconciliation.selected
@@ -225,7 +230,7 @@ def run_forever() -> None:
         ):
             logger.info(
                 "processed worker_id=%s grace_count=%s decision_count=%s outbox_count=%s "
-                "timer_count=%s scheduled_event_count=%s "
+                "timer_count=%s scheduled_event_count=%s personal_context_count=%s "
                 "meta_reconciliation_processed=%s "
                 "meta_reconciliation_failed=%s meta_inbox_correlated=%s",
                 identity,
@@ -234,6 +239,7 @@ def run_forever() -> None:
                 outbox_count,
                 timer_count,
                 scheduled_event_count,
+                personal_context_count,
                 meta_reconciliation.processed,
                 meta_reconciliation.failed,
                 meta_inbox.correlated,
