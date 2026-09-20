@@ -2,15 +2,28 @@
 set -Eeuo pipefail
 
 BASE=/usr/local/lib/andy-ci
+PROFILE_ROOT="$BASE/profiles"
 LOG_ROOT=/var/log/andy-ci
 SHA="${1:-}"
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'usage: andy-ci-reprofile <40-char-sha>' >&2; exit 64; }
 
 RUN_ID="$(date +%Y%m%dT%H%M%S)-${SHA:0:12}-postgres-profile"
 RUN_DIR="$LOG_ROOT/$RUN_ID"
-mkdir -p "$RUN_DIR"
+mkdir -p "$RUN_DIR" "$PROFILE_ROOT"
 
+ssh -o BatchMode=yes ci03 "git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e '$SHA^{commit}'; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only '$SHA' -- tests/integration" \
+  | grep '^tests/integration/test_postgres.*\.py$' | LC_ALL=C sort > "$RUN_DIR/postgres-files.txt"
+PROFILE_KEY="$(sha256sum "$RUN_DIR/postgres-files.txt" | awk '{print $1}')"
+PROFILE="$PROFILE_ROOT/$PROFILE_KEY"
 echo "CI_REPROFILE_SHA=$SHA"
+echo "CI_REPROFILE_PROFILE_KEY=$PROFILE_KEY"
+
+if [[ -d "$PROFILE" && -f "$PROFILE/postgres-files.txt" ]] \
+  && cmp -s "$PROFILE/postgres-files.txt" "$RUN_DIR/postgres-files.txt"; then
+  echo 'CI_REPROFILE_STATUS=CACHED'
+  echo "CI_REPROFILE_MANIFEST=$PROFILE/manifest.json"
+  exit 0
+fi
 set +e
 ssh -o BatchMode=yes ci03 "ANDY_CI_PROFILE_DURATIONS=1 /srv/andy-ci/bin/andy-ci-run '$SHA' postgres" | tee "$RUN_DIR/ci03-profile.stdout.log"
 RC=${PIPESTATUS[0]}
@@ -23,7 +36,7 @@ REMOTE_LOG="$(ssh -o BatchMode=yes ci03 "python3 -c \"import json; print(json.lo
 [[ -n "$REMOTE_LOG" ]] || { echo 'missing remote log path' >&2; exit 70; }
 scp -q -o BatchMode=yes "ci03:$REMOTE_LOG" "$RUN_DIR/profile.log"
 
-NEW_PROFILE="$BASE/profile.new"
+NEW_PROFILE="$PROFILE_ROOT/.${PROFILE_KEY}.new-$RUN_ID"
 rm -rf "$NEW_PROFILE"
 mkdir -p "$NEW_PROFILE"
 "$BASE/bin/plan-postgres.py" \
@@ -31,10 +44,14 @@ mkdir -p "$NEW_PROFILE"
   --capacity "$BASE/worker-capacity.json" \
   --output-dir "$NEW_PROFILE" \
   --source-sha "$SHA"
-
-rm -rf "$BASE/profile.prev"
-[[ -d "$BASE/profile" ]] && mv "$BASE/profile" "$BASE/profile.prev"
-mv "$NEW_PROFILE" "$BASE/profile"
+cmp -s "$NEW_PROFILE/postgres-files.txt" "$RUN_DIR/postgres-files.txt" || {
+  echo 'profile file-set mismatch' >&2
+  rm -rf "$NEW_PROFILE"
+  exit 70
+}
+rm -rf "$PROFILE"
+mv "$NEW_PROFILE" "$PROFILE"
 
 echo 'CI_REPROFILE_STATUS=PASS'
-echo "CI_REPROFILE_MANIFEST=$BASE/profile/manifest.json"
+echo "CI_REPROFILE_PROFILE_KEY=$PROFILE_KEY"
+echo "CI_REPROFILE_MANIFEST=$PROFILE/manifest.json"
