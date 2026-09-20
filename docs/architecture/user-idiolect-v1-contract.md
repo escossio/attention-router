@@ -1,12 +1,26 @@
 # User Idiolect V1 — Storage & Retrieval Contract
 
-Status: frozen design candidate / no runtime implementation
+Status: active runtime implementation — V1D through V1M merged; V1N isolation/directionality proof
 
 Related:
 - #84 Personal Context V1
 - #89 Intent Clarification V1
 - #90 User Idiolect V1
 - docs/architecture/pending-intent-v1-contract.md
+
+
+Implementation checkpoint (2026-09-20):
+- V1D: resolved clarification -> bounded confirmed language FactRow;
+- V1E: tenant/person/conversation-scoped deterministic retrieval;
+- V1F: confirmed meaning may resolve only an already-ambiguous closed candidate set;
+- V1G: explicit correction supersedes prior confirmed meaning;
+- V1H: one passive observation remains low-confidence and non-promoted;
+- V1I: repeated observations may promote to a bounded, expiring MemoryClaim;
+- V1J: ranked idiolect context retrieves explicit evidence above observed patterns;
+- V1K: controlled outbound style accommodation over abstract dimensions only;
+- V1L: authenticated owner self-chat can declare explicit style preferences;
+- V1M: directness/humor coverage plus idempotent repeated declarations;
+- V1N: verifies tenant/person isolation and direction/reuse-policy separation.
 
 ## 1. Goal
 
