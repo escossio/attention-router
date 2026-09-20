@@ -14,8 +14,13 @@ from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError, DBAPIError
 
 from attention_router.infrastructure.models import (
-    IntegrationBindingRow as BindingRow, IntegrationCredentialRow as CredentialRow,
-    IntegrationInboxRow as InboxRow, TenantRow,
+    ActorBindingRow,
+    CanonicalEventRow,
+    IntegrationBindingRow as BindingRow,
+    IntegrationCredentialRow as CredentialRow,
+    IntegrationInboxRow as InboxRow,
+    TenantRow,
+    TimelineEventRow,
 )
 from attention_router.integrations.admission import (
     admit_inbound, disable_binding, provision_binding, provision_credential, revoke_credential,
@@ -23,6 +28,11 @@ from attention_router.integrations.admission import (
 from attention_router.integrations.tenant_binding import (
     INBOUND_SCOPE, IntegrationBinding, CredentialRecord, credential_digest,
 )
+from attention_router.integrations.dispatch import (
+    integration_actor_binding_source,
+    process_integration_inbox,
+)
+from attention_router.domain.models import new_id
 from attention_router.config import settings
 from attention_router.web.ingress_app import create_ingress_app
 from attention_router.web.integration_ingress import (
@@ -322,7 +332,7 @@ def test_populated_downgrade_refuses_to_drop_receipts(Session, world, pg_url):
     assert count(Session) == 1
     with Session() as session:
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0043_pending_intents_v1"
+            "0044_integration_dispatch_v1"
         )
 
 
@@ -645,3 +655,273 @@ def test_neutral_http_receiver_method_and_default_disabled_behavior(
     assert disabled.status_code == 503
     assert disabled.json()["error_code"] == "INGRESS_UNAVAILABLE"
     assert count(Session) == 0
+
+
+
+def _payload_with_actor(world, *, external_actor_id="sender@example.invalid"):
+    payload = copy.deepcopy(world[3])
+    payload["actor"] = {
+        "external_actor_id": external_actor_id,
+        "display_name": "Synthetic Sender",
+    }
+    payload["thread"] = {
+        "external_thread_id": "thread-1",
+        "kind": "THREAD",
+        "title": None,
+    }
+    payload["payload_type"] = "EMAIL_MESSAGE_REFERENCE"
+    payload["payload_ref"] = {
+        "message_ref": "provider-private-message-ref"
+    }
+    return payload
+
+
+def _install_integration_actor_binding(
+    Session,
+    world,
+    *,
+    source_binding_id=None,
+    external_actor_id="sender@example.invalid",
+    actor_key="contact-email",
+):
+    stamp = datetime.now(timezone.utc)
+    with Session.begin() as session:
+        session.add(
+            ActorBindingRow(
+                id=new_id(),
+                tenant_id=A,
+                source=integration_actor_binding_source(
+                    source_binding_id or world[0].binding_id
+                ),
+                external_actor_id=external_actor_id,
+                actor_key=actor_key,
+                display_name="Synthetic Sender",
+                actor_category="contact",
+                active_context=None,
+                is_active=True,
+                binding_metadata={
+                    "integration_binding_id": (
+                        source_binding_id or world[0].binding_id
+                    )
+                },
+                created_at=stamp,
+                updated_at=stamp,
+            )
+        )
+
+
+def test_dispatch_bridges_email_contract_losslessly_by_durable_reference(
+    Session,
+    world,
+):
+    payload = _payload_with_actor(world)
+    admitted = send(Session, world, payload)
+    assert admitted.code == "ACCEPTED"
+    _install_integration_actor_binding(Session, world)
+
+    with Session.begin() as session:
+        result = process_integration_inbox(session, limit=10)
+
+    assert result.selected == 1
+    assert result.processed == 1
+    assert result.blocked == 0
+
+    with Session() as session:
+        inbox = session.get(InboxRow, admitted.receipt_id)
+        assert inbox.state == "PROCESSED"
+        assert inbox.processed_at is not None
+        assert inbox.dispatch_reason is None
+        assert inbox.canonical_event_id is not None
+
+        canonical = session.get(CanonicalEventRow, inbox.canonical_event_id)
+        assert canonical is not None
+        assert canonical.tenant_id == A
+        assert canonical.origin == "EXTERNAL_INBOUND"
+        assert canonical.event_type == "message"
+        assert canonical.actor_id == "contact-email"
+        assert canonical.channel == "channel.email"
+        assert canonical.payload_type == "EMAIL_MESSAGE_REFERENCE"
+        assert canonical.payload_ref == {
+            "integration_inbox_id": inbox.id
+        }
+        assert canonical.correlation_id == payload["correlation_id"]
+        assert canonical.occurred_at == datetime.fromisoformat(
+            payload["occurred_at"]
+        )
+        assert canonical.received_at == datetime.fromisoformat(
+            payload["received_at"]
+        )
+        assert canonical.metadata_sanitized["integration_binding_id"] == (
+            world[0].binding_id
+        )
+        assert canonical.metadata_sanitized["actor_resolved"] is True
+        assert canonical.metadata_sanitized["thread_present"] is True
+
+        # Provider-private identifiers remain recoverable only through the
+        # authenticated durable inbox reference, not copied into canonical data.
+        rendered = json.dumps(
+            {
+                "payload_ref": canonical.payload_ref,
+                "metadata": canonical.metadata_sanitized,
+            },
+            sort_keys=True,
+        )
+        assert "sender@example.invalid" not in rendered
+        assert "provider-private-message-ref" not in rendered
+        assert "thread-1" not in rendered
+
+        timeline = session.scalar(
+            select(TimelineEventRow).where(
+                TimelineEventRow.canonical_event_id == canonical.id
+            )
+        )
+        assert timeline is not None
+        assert timeline.actor_id == "contact-email"
+        assert timeline.event_type == "MESSAGE_RECEIVED"
+        assert timeline.provenance == "integration_dispatch"
+        assert timeline.event_ref["integration_inbox_id"] == inbox.id
+
+    with Session.begin() as session:
+        replay = process_integration_inbox(session, limit=10)
+    assert replay.selected == 0
+    with Session() as session:
+        assert session.scalar(
+            select(func.count()).select_from(CanonicalEventRow)
+        ) == 1
+        assert session.scalar(
+            select(func.count()).select_from(TimelineEventRow)
+        ) == 1
+
+
+def test_dispatch_never_cross_resolves_actor_from_another_integration_namespace(
+    Session,
+    world,
+):
+    payload = _payload_with_actor(world)
+    admitted = send(Session, world, payload)
+    assert admitted.code == "ACCEPTED"
+    _install_integration_actor_binding(
+        Session,
+        world,
+        source_binding_id="different-binding",
+        actor_key="wrong-contact",
+    )
+
+    with Session.begin() as session:
+        result = process_integration_inbox(session)
+
+    assert result.processed == 1
+    with Session() as session:
+        inbox = session.get(InboxRow, admitted.receipt_id)
+        canonical = session.get(CanonicalEventRow, inbox.canonical_event_id)
+        assert canonical.actor_id is None
+        assert canonical.metadata_sanitized["external_actor_present"] is True
+        assert canonical.metadata_sanitized["actor_resolved"] is False
+
+
+def test_dispatch_blocks_work_if_binding_is_disabled_after_admission(
+    Session,
+    world,
+):
+    admitted = send(Session, world, _payload_with_actor(world))
+    assert admitted.code == "ACCEPTED"
+    disable_binding(Session, world[0].binding_id)
+
+    with Session.begin() as session:
+        result = process_integration_inbox(session)
+
+    assert result.selected == 1
+    assert result.processed == 0
+    assert result.blocked == 1
+    with Session() as session:
+        inbox = session.get(InboxRow, admitted.receipt_id)
+        assert inbox.state == "BLOCKED"
+        assert inbox.canonical_event_id is None
+        assert inbox.processed_at is not None
+        assert inbox.dispatch_reason == "INTEGRATION_BINDING_INACTIVE"
+        assert session.scalar(
+            select(func.count()).select_from(CanonicalEventRow)
+        ) == 0
+
+
+def test_dispatch_blocks_work_if_tenant_is_disabled_after_admission(
+    Session,
+    world,
+):
+    admitted = send(Session, world, _payload_with_actor(world))
+    assert admitted.code == "ACCEPTED"
+    with Session.begin() as session:
+        session.get(TenantRow, A).status = "INACTIVE"
+
+    with Session.begin() as session:
+        result = process_integration_inbox(session)
+
+    assert result.blocked == 1
+    with Session() as session:
+        inbox = session.get(InboxRow, admitted.receipt_id)
+        assert inbox.state == "BLOCKED"
+        assert inbox.dispatch_reason == "INTEGRATION_TENANT_INACTIVE"
+        assert session.scalar(
+            select(func.count()).select_from(CanonicalEventRow)
+        ) == 0
+
+
+def test_database_rejects_invalid_or_destructive_dispatch_mutations(
+    Session,
+    world,
+):
+    admitted = send(Session, world)
+    assert admitted.code == "ACCEPTED"
+
+    with pytest.raises(DBAPIError), Session.begin() as session:
+        row = session.get(InboxRow, admitted.receipt_id)
+        row.state = "PROCESSED"
+        row.processed_at = datetime.now(timezone.utc)
+
+    with pytest.raises(DBAPIError), Session.begin() as session:
+        row = session.get(InboxRow, admitted.receipt_id)
+        row.raw_body = b"changed"
+
+    with Session() as session:
+        row = session.get(InboxRow, admitted.receipt_id)
+        assert row.state == "PENDING"
+        assert row.raw_body != b"changed"
+
+
+def test_processed_dispatch_state_blocks_downgrade_without_export(
+    Session,
+    world,
+    pg_url,
+):
+    import os
+    import subprocess
+    import sys
+
+    admitted = send(Session, world, _payload_with_actor(world))
+    assert admitted.code == "ACCEPTED"
+    with Session.begin() as session:
+        result = process_integration_inbox(session)
+        assert result.processed == 1
+
+    downgrade = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "downgrade",
+            "0043_pending_intents_v1",
+        ],
+        env={**os.environ, "DATABASE_URL": pg_url},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert downgrade.returncode != 0
+    assert (
+        "INTEGRATION_DISPATCH_DOWNGRADE_REQUIRES_DATA_EXPORT"
+        in downgrade.stderr
+    )
+    with Session() as session:
+        assert session.scalar(
+            text("SELECT version_num FROM alembic_version")
+        ) == "0044_integration_dispatch_v1"
