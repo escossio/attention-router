@@ -1,0 +1,75 @@
+services:
+  db:
+    image: postgres:16-alpine
+    env_file:
+      - .env.gmail-canary
+    volumes:
+      - gmail_canary_database:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    env_file:
+      - .env.gmail-canary
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - alembic upgrade head
+    restart: "no"
+
+  ingress:
+    build: .
+    env_file:
+      - .env.gmail-canary
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - uvicorn
+      - attention_router.web.ingress_app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "18101"
+    ports:
+      - "127.0.0.1:18201:18101"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:18101/health/live
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build: .
+    env_file:
+      - .env.gmail-canary
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - python
+      - -m
+      - attention_router.infrastructure.worker
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "from sqlalchemy import text; from attention_router.infrastructure.db import SessionLocal; s=SessionLocal(); s.execute(text('select 1')); s.close()"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  gmail_canary_database:
