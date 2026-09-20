@@ -21,6 +21,7 @@ from attention_router.application.personal_context_sequence_hypotheses import (
 from attention_router.application.personal_context_sequences import (
     detect_event_sequence_hypotheses,
 )
+from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.infrastructure.models import (
     AgentExecutionIntentRow,
     ExecutionIntentRow,
@@ -117,12 +118,6 @@ def test_owner_private_control_hides_context_without_deleting_history(
     hypothesis_id = sequence.context["hypothesis_id"]
     before_effects = _effect_counts(session)
 
-    before_snapshot = build_personal_context(
-        session,
-        reviewed.subject_actor_id and reviewed.context.get("tenant_id", None)
-        or "default",
-    ) if False else None
-
     services.receive_normalized_inbound_event(
         session,
         _reply(
@@ -149,10 +144,6 @@ def test_owner_private_control_hides_context_without_deleting_history(
     assert policy.non_actionable is False
     assert claim_is_owner_private(session, claim=sequence) is True
 
-    snapshot = build_personal_context(session, sequence.tenant_id if hasattr(sequence, "tenant_id") else "default") if False else None
-    # Build through the tenant owner boundary using the known default tenant.
-    from attention_router.core.tenancy import DEFAULT_TENANT_ID
-
     snapshot = build_personal_context(session, DEFAULT_TENANT_ID)
     predicates = {item.predicate for item in snapshot.claims}
     assert "context.pattern.event_sequence" not in predicates
@@ -177,8 +168,6 @@ def test_private_control_survives_new_snapshot_of_same_hypothesis(
     session,
     monkeypatch,
 ):
-    from attention_router.core.tenancy import DEFAULT_TENANT_ID
-
     stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
     reviewed, reviewed_at, _ = _make_reviewed(session, monkeypatch, stamp)
     original = _source_sequence(session, reviewed)
@@ -238,8 +227,6 @@ def test_clear_private_restores_read_eligibility_without_disclosure_authority(
     session,
     monkeypatch,
 ):
-    from attention_router.core.tenancy import DEFAULT_TENANT_ID
-
     stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
     reviewed, reviewed_at, _ = _make_reviewed(session, monkeypatch, stamp)
     sequence = _source_sequence(session, reviewed)
@@ -282,8 +269,6 @@ def test_non_actionable_control_blocks_new_suggestions_but_keeps_knowledge_visib
     session,
     monkeypatch,
 ):
-    from attention_router.core.tenancy import DEFAULT_TENANT_ID
-
     stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
     reviewed, reviewed_at, _ = _make_reviewed(session, monkeypatch, stamp)
     sequence = _source_sequence(session, reviewed)
