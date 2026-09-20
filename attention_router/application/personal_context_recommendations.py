@@ -153,6 +153,8 @@ def _recommendation_from_claim(
         return None
     if value.get("event_type") != "LOCATION_ARRIVAL":
         return None
+    if value.get("signature_kind") not in {"RESOURCE", "PATTERN_KEY"}:
+        return None
     if value.get("evidence_class") != "INFERRED":
         return None
     if value.get("hypothesis_status") != "HYPOTHESIS":

@@ -21,6 +21,7 @@ from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.models import (
     FactRow,
     MemoryClaimRow,
+    RelationshipRow,
     TenantRow,
     TimelineEventRow,
 )
@@ -65,6 +66,7 @@ def _event(
     *,
     occurred_at: datetime,
     provenance: str = "android-location",
+    relationship_id: str | None = None,
 ) -> TimelineEventRow:
     _ensure_tenant(session)
     row = TimelineEventRow(
@@ -72,7 +74,7 @@ def _event(
         tenant_id=DEFAULT_TENANT_ID,
         canonical_event_id=None,
         actor_id=ACTOR,
-        relationship_id=None,
+        relationship_id=relationship_id,
         resource_id=None,
         event_type="LOCATION_ARRIVAL",
         event_ref={"pattern_key": "gym-arrival"},
@@ -80,6 +82,29 @@ def _event(
         visibility="PRIVATE",
         provenance=provenance,
         metadata_json={},
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def _relationship(session) -> RelationshipRow:
+    _ensure_tenant(session)
+    stamp = now_utc()
+    row = RelationshipRow(
+        id=new_id(),
+        tenant_id=DEFAULT_TENANT_ID,
+        source_entity_type="ACTOR",
+        source_entity_id=ACTOR,
+        target_entity_type="ACTOR",
+        target_entity_id="contact-pattern-persistence",
+        relationship_type="FREQUENT_CONTACT",
+        status="ACTIVE",
+        valid_from=stamp - timedelta(days=30),
+        valid_until=None,
+        metadata_json={},
+        created_at=stamp,
+        updated_at=stamp,
     )
     session.add(row)
     session.flush()
@@ -346,3 +371,52 @@ def test_cross_actor_evidence_is_rejected(session):
             hypothesis=forged,
             now=stamp,
         )
+
+
+def test_relationship_scoped_hypothesis_persists_with_exact_provenance(session):
+    _install_owner(session)
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    relationship = _relationship(session)
+
+    events = []
+    for days, provenance in (
+        (2, "whatsapp"),
+        (1, "calendar"),
+        (0, "sms"),
+    ):
+        events.append(
+            _event(
+                session,
+                occurred_at=stamp - timedelta(days=days),
+                provenance=provenance,
+                relationship_id=relationship.id,
+            )
+        )
+
+    hypothesis = detect_temporal_recurrence_hypotheses(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_id=ACTOR,
+        now=stamp,
+    )[0]
+    claim, changed = persist_context_pattern_hypothesis(
+        session,
+        hypothesis=hypothesis,
+        now=stamp,
+    )
+
+    assert changed is True
+    assert hypothesis.signature_kind == "RELATIONSHIP"
+    assert hypothesis.signature_value == relationship.id
+    assert claim.object_json["signature_kind"] == "RELATIONSHIP"
+    assert claim.object_json["signature_value"] == relationship.id
+    assert claim.context["evidence_timeline_event_ids"] == [
+        row.id for row in events
+    ]
+    assert claim.context["source_provenance"] == [
+        "calendar",
+        "sms",
+        "whatsapp",
+    ]
+    assert claim.object_json["evidence_class"] == "INFERRED"
+    assert claim.object_json["grants_authority"] is False
