@@ -150,7 +150,6 @@ def _reviewed_suggestions(
             MemoryClaimRow.subject_actor_id == actor_id,
             MemoryClaimRow.predicate == "context.suggestion.proactive",
             MemoryClaimRow.source_quality == "DERIVED_SUGGESTION",
-            MemoryClaimRow.status == "ACTIVE",
         )
         .order_by(MemoryClaimRow.updated_at.desc(), MemoryClaimRow.id.desc())
     ).all()
