@@ -23,14 +23,15 @@ from attention_router.domain.policies import resolve_policy
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import (
+    ActorBindingRow,
     CapabilityGrantRow,
     ExecutionIntentRow,
+    InboundEventRow,
     MemoryActorRow,
     MemoryClaimRow,
 )
 from attention_router.infrastructure.repository import (
     audit,
-    find_active_actor_binding_by_key,
     get_active_policy_version,
     list_policies,
 )
@@ -150,19 +151,58 @@ def _accepted_recommendation(
     return actor, row
 
 
+def _acceptance_binding(
+    session: Session,
+    *,
+    tenant_id: str,
+    actor_key: str,
+    recommendation_claim: MemoryClaimRow,
+) -> ActorBindingRow | None:
+    event_id = (recommendation_claim.context or {}).get(
+        "resolution_inbound_event_id"
+    )
+    if not isinstance(event_id, str):
+        return None
+    event = session.get(InboundEventRow, event_id)
+    if event is None or event.tenant_id != tenant_id:
+        return None
+    payload = event.payload or {}
+    metadata = payload.get("metadata") or {}
+    external_actor_id = payload.get("actor_id")
+    if (
+        payload.get("event_origin") != "OWNER_COMMAND"
+        or payload.get("owner_authenticated") is not True
+        or metadata.get("from_me") is not True
+        or metadata.get("owner_self_chat") is not True
+        or not isinstance(external_actor_id, str)
+    ):
+        return None
+    return session.scalar(
+        select(ActorBindingRow).where(
+            ActorBindingRow.tenant_id == tenant_id,
+            ActorBindingRow.actor_key == actor_key,
+            ActorBindingRow.source == event.source,
+            ActorBindingRow.external_actor_id == external_actor_id,
+            ActorBindingRow.is_active.is_(True),
+        )
+    )
+
+
 def _resolved_policy(
     session: Session,
     *,
     tenant_id: str,
     actor_key: str,
+    recommendation_claim: MemoryClaimRow,
 ) -> tuple[str | None, str | None, bool, str]:
-    binding = find_active_actor_binding_by_key(
+    binding = _acceptance_binding(
         session,
-        actor_key,
-        tenant_id,
+        tenant_id=tenant_id,
+        actor_key=actor_key,
+        recommendation_claim=recommendation_claim,
     )
     if binding is None:
-        return None, None, False, "ACTOR_BINDING_MISSING"
+        return None, None, False, "ACCEPTANCE_BINDING_UNRESOLVED"
 
     audience = (binding.binding_metadata or {}).get("audience")
     audience = audience if isinstance(audience, str) else None
@@ -235,6 +275,8 @@ def _intent_scope(
     capability_status: str,
     authority_result: str,
     provider_instance_id: str | None,
+    capability_version_id: str,
+    approval_required: bool,
 ) -> dict[str, object]:
     value = recommendation_claim.object_json or {}
     context = recommendation_claim.context or {}
@@ -246,6 +288,7 @@ def _intent_scope(
         "recommendation_claim_id": recommendation_claim.id,
         "acceptance_event_id": context["resolution_inbound_event_id"],
         "capability": REMINDER_CAPABILITY,
+        "capability_version_id": capability_version_id,
         "parameters": dict(value["suggested_parameters"]),
         "policy": {
             "policy_id": policy_id,
@@ -256,6 +299,7 @@ def _intent_scope(
             "capability_status": capability_status,
             "authority_result": authority_result,
             "provider_instance_id": provider_instance_id,
+            "approval_required": approval_required,
         },
     }
 
@@ -326,6 +370,7 @@ def evaluate_accepted_recommendation_authority(
         session,
         tenant_id=tenant_id,
         actor_key=actor_key,
+        recommendation_claim=recommendation_claim,
     )
     if policy_id is None or policy_version_id is None:
         assessment = RecommendationAuthorityAssessment(
@@ -352,7 +397,7 @@ def evaluate_accepted_recommendation_authority(
         session.flush()
         return assessment
 
-    definition, _version = capability_and_version(
+    definition, version = capability_and_version(
         session,
         tenant_id,
         REMINDER_CAPABILITY,
@@ -411,6 +456,8 @@ def evaluate_accepted_recommendation_authority(
             capability_status=resolution.status.value,
             authority_result=resolution.authority_result,
             provider_instance_id=resolution.provider_instance_id,
+            capability_version_id=version.id,
+            approval_required=resolution.approval_required,
         )
         scope_fingerprint = stable_hash(scope)
         idempotency_key = _intent_idempotency_key(scope=scope)
@@ -444,6 +491,8 @@ def evaluate_accepted_recommendation_authority(
                     "policy_version_id": policy_version_id,
                     "grant_ids": list(grant_ids),
                     "capability_reason_code": resolution.reason_code,
+                    "capability_version_id": version.id,
+                    "authority_evaluated_at": stamp.isoformat(),
                 },
                 state="PREPARED",
                 created_at=stamp,
