@@ -64,6 +64,13 @@ def retrieve_idiolect_interpretation_evidence(
 
     stamp = _utc(now or datetime.now(UTC))
     normalized = normalize_user_expression(utterance)
+    superseded_ids = select(FactRow.supersedes_fact_id).where(
+        FactRow.tenant_id == tenant_id,
+        FactRow.subject_type == "ACTOR",
+        FactRow.subject_id == actor_key,
+        FactRow.predicate == PREDICATE,
+        FactRow.supersedes_fact_id.is_not(None),
+    )
     rows = session.scalars(
         select(FactRow)
         .where(
@@ -72,6 +79,7 @@ def retrieve_idiolect_interpretation_evidence(
             FactRow.subject_id == actor_key,
             FactRow.predicate == PREDICATE,
             FactRow.fact_class == FactClass.USER_CONFIRMED_LANGUAGE.value,
+            FactRow.id.not_in(superseded_ids),
             or_(FactRow.valid_from.is_(None), FactRow.valid_from <= stamp),
             or_(FactRow.valid_until.is_(None), FactRow.valid_until > stamp),
         )
