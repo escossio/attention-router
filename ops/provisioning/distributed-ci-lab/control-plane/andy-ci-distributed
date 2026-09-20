@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 BASE=/usr/local/lib/andy-ci
-PROFILE="$BASE/profile"
+PROFILE_ROOT="$BASE/profiles"
+LEGACY_PROFILE="$BASE/profile"
 LOG_ROOT=/var/log/andy-ci
 WORKERS=(ci03 ci01 ci02)
 
@@ -13,26 +14,39 @@ SUITE="${2:-postgres}"
 
 RUN_ID="$(date +%Y%m%dT%H%M%S)-${SHA:0:12}-postgres-distributed"
 RUN_DIR="$LOG_ROOT/$RUN_ID"
-mkdir -p "$RUN_DIR"
+mkdir -p "$RUN_DIR" "$PROFILE_ROOT"
 
 echo "CI_DISTRIBUTED_RUN_ID=$RUN_ID"
 echo "CI_DISTRIBUTED_SHA=$SHA"
 
 for worker in "${WORKERS[@]}"; do
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "$worker" 'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null' 
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$worker" 'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null'
 done
-
 ssh -o BatchMode=yes ci03 "git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e '$SHA^{commit}'; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only '$SHA' -- tests/integration" \
-  | grep '^tests/integration/test_postgres.*\.py$' | sort > "$RUN_DIR/current-postgres-files.txt"
+  | grep '^tests/integration/test_postgres.*\.py$' | LC_ALL=C sort > "$RUN_DIR/current-postgres-files.txt"
 
-if ! diff -u "$PROFILE/postgres-files.txt" "$RUN_DIR/current-postgres-files.txt" > "$RUN_DIR/profile-diff.txt"; then
+PROFILE_KEY="$(sha256sum "$RUN_DIR/current-postgres-files.txt" | awk '{print $1}')"
+PROFILE="$PROFILE_ROOT/$PROFILE_KEY"
+echo "CI_DISTRIBUTED_PROFILE_KEY=$PROFILE_KEY"
+
+if [[ ! -d "$PROFILE" && -d "$LEGACY_PROFILE" && -f "$LEGACY_PROFILE/postgres-files.txt" ]] \
+  && cmp -s "$LEGACY_PROFILE/postgres-files.txt" "$RUN_DIR/current-postgres-files.txt"; then
+  cp -a "$LEGACY_PROFILE" "$PROFILE"
+fi
+
+if [[ ! -d "$PROFILE" ]]; then
   echo 'CI_DISTRIBUTED_STATUS=REPROFILE_REQUIRED'
-  cat "$RUN_DIR/profile-diff.txt"
+  echo "CI_DISTRIBUTED_PROFILE_KEY=$PROFILE_KEY"
   exit 66
 fi
 
+if ! cmp -s "$PROFILE/postgres-files.txt" "$RUN_DIR/current-postgres-files.txt"; then
+  echo 'CI_DISTRIBUTED_STATUS=PROFILE_CORRUPT'
+  exit 70
+fi
 for worker in "${WORKERS[@]}"; do
   shard="$PROFILE/postgres-${worker}.txt"
+  [[ -s "$shard" ]] || { echo "missing profile shard: $shard" >&2; exit 70; }
   remote="/srv/andy-ci/shards/${RUN_ID}.txt"
   scp -q -o BatchMode=yes "$shard" "$worker:$remote"
 done
@@ -59,12 +73,12 @@ for worker in "${WORKERS[@]}"; do
 done
 END_EPOCH=$(date +%s)
 WALL_SECONDS=$((END_EPOCH - START_EPOCH))
-
-python3 - "$RUN_DIR" "$SHA" "$WALL_SECONDS" <<'PY'
+python3 - "$RUN_DIR" "$SHA" "$WALL_SECONDS" "$PROFILE_KEY" <<'PY'
 import json, pathlib, re, sys
 run_dir=pathlib.Path(sys.argv[1])
 sha=sys.argv[2]
 wall=int(sys.argv[3])
+profile_key=sys.argv[4]
 workers={}
 for worker in ('ci03','ci01','ci02'):
     text=(run_dir/f'{worker}.log').read_text(errors='replace') if (run_dir/f'{worker}.log').exists() else ''
@@ -80,9 +94,10 @@ for worker in ('ci03','ci01','ci02'):
         'target_files':int(last(r'^CI_POSTGRES_TARGET_COUNT=(\d+)$','0')),
     }
 summary={
-    'schema_version':1,
+    'schema_version':2,
     'sha':sha,
     'suite':'postgres',
+    'profile_key':profile_key,
     'wall_seconds':wall,
     'status':'PASS' if all(v['rc']==0 and v['status']=='PASS' for v in workers.values()) else 'FAIL',
     'workers':workers,
@@ -104,5 +119,6 @@ if (( FAILED != 0 )); then
 fi
 
 echo "CI_DISTRIBUTED_STATUS=PASS"
+echo "CI_DISTRIBUTED_PROFILE_KEY=$PROFILE_KEY"
 echo "CI_DISTRIBUTED_WALL_SECONDS=$WALL_SECONDS"
 echo "CI_DISTRIBUTED_SUMMARY=$RUN_DIR/summary.json"

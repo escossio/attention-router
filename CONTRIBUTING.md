@@ -36,7 +36,7 @@ The existing integration suite is under certification. Failures involving old ex
 
 The optional self-managed distributed CI lab can shard the PostgreSQL-marked suite across heterogeneous workers for faster local/pre-merge feedback. It operates on explicit commit SHAs, disposable worktrees and synthetic PostgreSQL databases.
 
-A distributed local PASS does **not** replace GitHub Actions, CodeQL, secret scanning or other repository-native gates. When the PostgreSQL test-file set changes, the scheduler requires a fresh duration profile before running another distributed shard set. See [distributed CI lab](ops/provisioning/distributed-ci-lab/README.md).
+For pull requests, the exact-SHA distributed PostgreSQL result is published as the required `distributed-postgres` check and replaces the duplicate GitHub-hosted PostgreSQL job only. GitHub Actions, CodeQL, secret scanning, Docker and transport/Python gates remain repository-native. When the PostgreSQL test-file set changes, the check publisher performs the bounded reprofile before retrying the distributed shard set. See [distributed CI lab](ops/provisioning/distributed-ci-lab/README.md).
 
 ## Pull requests
 
