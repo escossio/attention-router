@@ -241,6 +241,11 @@ def test_clear_private_restores_read_eligibility_without_disclosure_authority(
     )
     first_control = _active_control(session)
 
+    # The policy target must remain reversible even if the reviewed suggestion
+    # later becomes historical/superseded for an unrelated lifecycle reason.
+    reviewed.status = "SUPERSEDED"
+    session.flush()
+
     services.receive_normalized_inbound_event(
         session,
         _reply(
