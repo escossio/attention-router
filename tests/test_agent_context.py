@@ -67,3 +67,39 @@ def test_presence_state_and_disclosure_permission_reach_agent_payload():
         "audience_scope": "everyone",
     }
     assert payload["communication_intent"]["disclose_current_availability_when_relevant"] is True
+
+
+
+def test_response_style_payload_is_structured_and_contains_no_identity_fields():
+    context = AllowedAgentContext(
+        actor_id="sha256:actor",
+        binding_id="sha256:binding",
+        audience="known",
+        policy_summary="policy=test",
+        current_message="oi",
+        response_style={
+            "dimensions": {
+                "directness": "high",
+                "formality": "neutral",
+                "technical_depth": "high",
+                "response_length": "short",
+                "humor": "occasional",
+            },
+            "sources": {
+                "directness": "EXPLICIT_USER_PREFERENCE",
+                "formality": "DEFAULT",
+                "technical_depth": "EXPLICIT_USER_PREFERENCE",
+                "response_length": "EXPLICIT_USER_PREFERENCE",
+                "humor": "REPEATED_OBSERVED_STYLE_SIGNAL",
+            },
+            "adaptation_applied": True,
+            "constraints": ["abstract_dimensions_only", "no_phrase_mimicry"],
+        },
+    )
+
+    payload = context.prompt_payload()
+
+    assert payload["response_style"]["adaptation_applied"] is True
+    assert payload["response_style"]["dimensions"]["response_length"] == "short"
+    assert "actor_id" not in payload
+    assert "binding_id" not in payload

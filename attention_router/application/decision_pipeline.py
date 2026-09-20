@@ -44,6 +44,10 @@ from attention_router.domain.models import new_id, now_utc
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.policies import resolve_policy
 from attention_router.application.memory import memory_context
+from attention_router.application.user_idiolect_style import (
+    ResponseStyleProfile,
+    build_response_style_profile,
+)
 from attention_router.infrastructure.models import (
     AgentBlueprintRow,
     AgentBlueprintVersionRow,
@@ -498,7 +502,25 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             operational_state=platform_context.current_operational_state,
         )
         disclose_presence = disclosure_authority.allowed
-        private_state = project_private_state_for_agent(disclosure_authority, platform_context.current_operational_state)
+        private_state = project_private_state_for_agent(
+            disclosure_authority,
+            platform_context.current_operational_state,
+        )
+        response_style_profile = ResponseStyleProfile()
+        if binding is not None:
+            try:
+                response_style_profile = build_response_style_profile(
+                    session,
+                    tenant_id=interaction.tenant_id,
+                    actor_key=binding.actor_key,
+                )
+            except Exception as exc:
+                _audit(
+                    session,
+                    interaction.id,
+                    "agent_context.response_style_unavailable",
+                    {"reason_code": type(exc).__name__},
+                )
         _audit(session, interaction.id, "agent_context.private_state_exposed", {
             "private_state_exposed": bool(private_state),
             "disclosure_reason_code": disclosure_authority.reason_code,
@@ -550,6 +572,7 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             communication_intent={
                 "disclose_current_availability_when_relevant": disclose_presence,
             },
+            response_style=response_style_profile.prompt_payload(),
         )
         with start_span("andy.agent.context_build") as span:
             safe_set_attribute(span, "attention.agent.context_turn_count", len(agent_context.recent_turns))
@@ -557,6 +580,21 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             safe_set_attribute(span, "attention.agent.missing_information_count", 0)
             safe_set_attribute(span, "attention.agent.available_action_count", sum(item.available for item in agent_context.action_capabilities))
             safe_set_attribute(span, "attention.agent.requested_action_count", 0)
+            safe_set_attribute(
+                span,
+                "attention.agent.response_style_adaptation_applied",
+                response_style_profile.adaptation_applied,
+            )
+            safe_set_attribute(
+                span,
+                "attention.agent.response_style_explicit_count",
+                response_style_profile.explicit_preference_count,
+            )
+            safe_set_attribute(
+                span,
+                "attention.agent.response_style_observed_count",
+                response_style_profile.observed_style_signal_count,
+            )
             safe_set_attribute(span, "attention.context.interaction_actor_resolved", True)
             safe_set_attribute(span, "attention.context.represented_subject_resolved", represented_subject is not None)
             safe_set_attribute(span, "attention.context.represented_state_count", len(private_state))
@@ -578,6 +616,12 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                     item.get("namespace") == "presence" for item in private_state
                 ),
                 "context_builder_version": "platform_context_snapshot:represented_subject:v1",
+                "response_style_adaptation_applied": response_style_profile.adaptation_applied,
+                "response_style_explicit_count": response_style_profile.explicit_preference_count,
+                "response_style_observed_count": response_style_profile.observed_style_signal_count,
+                "response_style_conflict_dimensions": list(
+                    response_style_profile.conflict_dimensions
+                ),
             },
         )
         try:
