@@ -16,6 +16,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attention_router.domain.models import new_id, now_utc
+from attention_router.application.user_idiolect_observation import (
+    detect_passive_idiolect_observations,
+)
 from attention_router.core.tenancy import DEFAULT_TENANT_ID, TenantScopeError
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import (
@@ -339,6 +342,8 @@ def extract_candidates(session: Session, message: ConversationMessageRow, run: M
         candidates.append(("relationship.sister_of", {"unresolved_name": match.group(1), "actor": sender}, .72, "DIRECT_MESSAGE_STATEMENT"))
     if not candidates and re.search(r"(?i)\b(?:maria|ana|joão|joao)\s+(?:trabalha|é|e)\b", text):
         candidates.append(("professional.works_at", {"third_party_text": text}, .58, "THIRD_PARTY_STATEMENT"))
+    if not message.from_me and message.direction == "INBOUND":
+        candidates.extend(detect_passive_idiolect_observations(text))
     rows = []
     for predicate, obj, confidence, quality in candidates:
         eligibility, reason = evaluate_eligibility(text, message.sensitivity_class, confidence)
