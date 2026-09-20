@@ -149,8 +149,8 @@ def provision_installation(
                 )
             )
             session.flush()
-    except IntegrityError as exc:
-        raise ValueError("Integration installation conflict") from exc
+    except IntegrityError:
+        raise ValueError("Integration installation conflict") from None
 
 
 def provision_binding(session_factory, binding: IntegrationBinding):
