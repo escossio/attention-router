@@ -69,6 +69,11 @@ from attention_router.application.user_idiolect_projection import (
     IdiolectProjectionError,
     project_resolved_pending_intent_language_fact,
 )
+from attention_router.application.user_idiolect_preference import (
+    UserStylePreferenceError,
+    parse_user_style_preference,
+    persist_user_style_preference,
+)
 from attention_router.application.owner_operational_control import (
     OperationalControlConflict,
     OperationalControlError,
@@ -440,6 +445,79 @@ def _handle_owner_control_command(
             source_channel=OWNER_CONTROL_SOURCE_CHANNEL,
             conversation_key_hash=conversation_key_hash,
         )
+
+    style_preference = parse_user_style_preference(persisted_text)
+    if style_preference is not None:
+        if binding is None:
+            raise OwnerControlError("OWNER_AUTHORITY_UNAVAILABLE")
+        if active_pending is not None:
+            supersede_pending_intent(
+                session,
+                pending_intent_id=active_pending.id,
+                superseding_source_inbound_event_id=receipt.id,
+                reason="NEWER_EXPLICIT_OWNER_PREFERENCE",
+            )
+        interaction = _create_owner_control_interaction(
+            session,
+            receipt=receipt,
+            owner_actor_key=owner_actor_key,
+            canonical_text=(
+                "USER_STYLE_PREFERENCE "
+                f"dimension={style_preference.dimension} "
+                f"value={style_preference.value}"
+            ),
+        )
+        try:
+            fact = persist_user_style_preference(
+                session,
+                tenant_id=receipt.tenant_id,
+                actor_key=owner_actor_key,
+                command=style_preference,
+                source_ref=receipt.id,
+            )
+        except UserStylePreferenceError as exc:
+            audit(
+                session,
+                interaction.id,
+                "idiolect.preference_rejected",
+                {
+                    "dimension": style_preference.dimension,
+                    "reason_code": str(exc),
+                },
+                receipt.correlation_id,
+                receipt.id,
+                origin="user_idiolect",
+                tenant_id=receipt.tenant_id,
+            )
+            confirmation = "Não consegui atualizar essa preferência com segurança."
+        else:
+            audit(
+                session,
+                interaction.id,
+                "idiolect.preference_declared",
+                {
+                    "dimension": style_preference.dimension,
+                    "value": style_preference.value,
+                    "fact_id": fact.id,
+                    "supersedes_fact_id": fact.supersedes_fact_id,
+                },
+                receipt.correlation_id,
+                receipt.id,
+                origin="user_idiolect",
+                tenant_id=receipt.tenant_id,
+            )
+            confirmation = style_preference.confirmation
+        _enqueue_owner_control_confirmation(
+            session,
+            receipt=receipt,
+            interaction=interaction,
+            binding=binding,
+            text=confirmation,
+        )
+        session.flush()
+        result = interaction_to_dict(session, interaction)
+        result["inbound_event_id"] = receipt.id
+        return result
 
     if active_pending is not None:
         try:
