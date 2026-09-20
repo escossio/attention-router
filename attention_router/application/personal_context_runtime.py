@@ -64,6 +64,9 @@ from attention_router.infrastructure.repository import audit
 PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION: Final = (
     "personal_context_recommendation_text"
 )
+PERSONAL_CONTEXT_SUGGESTION_OUTBOX_ACTION: Final = (
+    "personal_context_suggestion_text"
+)
 PRIMARY_OWNER_CHANNEL_ROLE: Final = "PRIMARY_OWNER_WHATSAPP"
 
 
@@ -81,6 +84,8 @@ class PersonalContextRuntimeCycleResult:
     suggestions_built: int = 0
     suggestions_persisted: int = 0
     suggestions_reconciled: int = 0
+    suggestions_enqueued: int = 0
+    suggestions_blocked_channel: int = 0
     recommendations_built: int = 0
     recommendations_persisted: int = 0
     recommendations_enqueued: int = 0
@@ -153,6 +158,226 @@ def _owner_delivery_binding(
     if len(rows) == 1:
         return rows[0]
     return None
+
+
+def _active_suggestion_claim(
+    session: Session,
+    *,
+    tenant_id: str,
+    actor_key: str,
+    suggestion_id: str,
+) -> MemoryClaimRow | None:
+    actor_ids = session.scalars(
+        select(MemoryActorRow.id).where(
+            MemoryActorRow.tenant_id == tenant_id,
+            MemoryActorRow.actor_key == actor_key,
+        )
+    ).all()
+    if not actor_ids:
+        return None
+    rows = session.scalars(
+        select(MemoryClaimRow)
+        .where(
+            MemoryClaimRow.subject_actor_id.in_(actor_ids),
+            MemoryClaimRow.predicate == "context.suggestion.proactive",
+            MemoryClaimRow.source_quality == "DERIVED_SUGGESTION",
+            MemoryClaimRow.status == "ACTIVE",
+        )
+        .order_by(MemoryClaimRow.updated_at.desc(), MemoryClaimRow.id.desc())
+    ).all()
+    matching = [
+        row
+        for row in rows
+        if (row.context or {}).get("suggestion_id") == suggestion_id
+    ]
+    if len(matching) > 1:
+        raise ContextSuggestionPersistenceError(
+            "SUGGESTION_ACTIVE_CONFLICT"
+        )
+    return matching[0] if matching else None
+
+
+def _suggestion_delivery_text(claim: MemoryClaimRow) -> str:
+    value = claim.object_json or {}
+    context = claim.context or {}
+    if value.get("suggestion_type") != "REVIEW_MISSING_ROUTINE_STEP":
+        raise ContextSuggestionPersistenceError(
+            "SUGGESTION_TYPE_UNSUPPORTED"
+        )
+    explanation = context.get("explanation") or claim.object_text
+    if not isinstance(explanation, str) or not explanation.strip():
+        raise ContextSuggestionPersistenceError(
+            "SUGGESTION_EXPLANATION_MISSING"
+        )
+    return (
+        f"{explanation.strip()} "
+        "Responda 'quero revisar' para registrar interesse ou "
+        "'não quero revisar' para descartar. Isso não executa nenhuma ação."
+    )
+
+
+def _suggestion_interaction_identity(
+    suggestion_id: str,
+) -> tuple[str, str]:
+    digest = stable_hash(
+        {
+            "kind": "PERSONAL_CONTEXT_SUGGESTION",
+            "suggestion_id": suggestion_id,
+        }
+    )
+    return (
+        f"pc-sug-{digest[:48]}",
+        f"pc-sug-{digest[:40]}",
+    )
+
+
+def _ensure_suggestion_interaction(
+    session: Session,
+    *,
+    tenant_id: str,
+    actor_key: str,
+    suggestion_claim: MemoryClaimRow,
+    binding: ActorBindingRow,
+    now: datetime,
+) -> InteractionRow:
+    suggestion_id = (suggestion_claim.context or {}).get("suggestion_id")
+    if not isinstance(suggestion_id, str):
+        raise ContextSuggestionPersistenceError("SUGGESTION_ID_MISSING")
+    interaction_id, correlation_id = _suggestion_interaction_identity(
+        suggestion_id
+    )
+    contact_id = "personal_context:" + stable_hash(actor_key)[:48]
+    existing = session.get(InteractionRow, interaction_id)
+    if existing is not None:
+        if (
+            existing.tenant_id != tenant_id
+            or existing.contact_id != contact_id
+            or existing.causation_id != suggestion_claim.id
+        ):
+            raise ContextSuggestionPersistenceError(
+                "SUGGESTION_INTERACTION_IDEMPOTENCY_CONFLICT"
+            )
+        return existing
+
+    row = InteractionRow(
+        id=interaction_id,
+        tenant_id=tenant_id,
+        event_type="PERSONAL_CONTEXT_SUGGESTION",
+        contact_id=contact_id,
+        contact_name=binding.display_name or "Owner",
+        relationship_category="owner",
+        active_context="personal_context",
+        inbound_text="",
+        state=InteractionState.COMPLETED.value,
+        policy_id=None,
+        policy_version_id=None,
+        correlation_id=correlation_id,
+        causation_id=suggestion_claim.id,
+        lia_speech=None,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(row)
+    audit(
+        session,
+        row.id,
+        "personal_context.suggestion_interaction_created",
+        {
+            "suggestion_id": suggestion_id,
+            "suggestion_claim_id": suggestion_claim.id,
+        },
+        correlation_id=correlation_id,
+        causation_id=suggestion_claim.id,
+        next_state=InteractionState.COMPLETED.value,
+        origin="personal_context",
+        tenant_id=tenant_id,
+        created_at=now,
+    )
+    session.flush()
+    return row
+
+
+def _enqueue_suggestion(
+    session: Session,
+    *,
+    tenant_id: str,
+    actor_key: str,
+    suggestion_claim: MemoryClaimRow,
+    binding: ActorBindingRow,
+    now: datetime,
+) -> tuple[OutboxMessageRow, bool]:
+    suggestion_id = (suggestion_claim.context or {}).get("suggestion_id")
+    if not isinstance(suggestion_id, str):
+        raise ContextSuggestionPersistenceError("SUGGESTION_ID_MISSING")
+    key = f"personal-context:suggestion:{suggestion_id}"
+    existing = session.scalar(
+        select(OutboxMessageRow).where(
+            OutboxMessageRow.idempotency_key == key
+        )
+    )
+    if existing is not None:
+        if (
+            existing.action_type != PERSONAL_CONTEXT_SUGGESTION_OUTBOX_ACTION
+            or existing.payload.get("suggestion_id") != suggestion_id
+            or existing.payload.get("external_actor_id")
+            != binding.external_actor_id
+        ):
+            raise ContextSuggestionPersistenceError(
+                "SUGGESTION_OUTBOX_IDEMPOTENCY_CONFLICT"
+            )
+        return existing, False
+
+    interaction = _ensure_suggestion_interaction(
+        session,
+        tenant_id=tenant_id,
+        actor_key=actor_key,
+        suggestion_claim=suggestion_claim,
+        binding=binding,
+        now=now,
+    )
+    row = OutboxMessageRow(
+        id=new_id(),
+        interaction_id=interaction.id,
+        action_type=PERSONAL_CONTEXT_SUGGESTION_OUTBOX_ACTION,
+        destination="local_transport",
+        payload={
+            "external_actor_id": binding.external_actor_id,
+            "message_type": "text",
+            "text": _suggestion_delivery_text(suggestion_claim),
+            "suggestion_id": suggestion_id,
+            "suggestion_claim_id": suggestion_claim.id,
+        },
+        status="PENDING",
+        created_at=now,
+        available_at=now,
+        claimed_at=None,
+        claimed_by=None,
+        attempt_count=0,
+        last_error=None,
+        completed_at=None,
+        idempotency_key=key,
+        correlation_id=interaction.correlation_id,
+        causation_id=suggestion_claim.id,
+        execution_intent_id=None,
+    )
+    session.add(row)
+    audit(
+        session,
+        interaction.id,
+        "personal_context.suggestion_enqueued",
+        {
+            "suggestion_id": suggestion_id,
+            "suggestion_claim_id": suggestion_claim.id,
+            "outbox_id": row.id,
+        },
+        correlation_id=interaction.correlation_id,
+        causation_id=suggestion_claim.id,
+        origin="personal_context",
+        tenant_id=tenant_id,
+        created_at=now,
+    )
+    session.flush()
+    return row, True
 
 
 def _active_recommendation_claim(
@@ -373,6 +598,7 @@ def run_personal_context_runtime_cycle(
     *,
     now: datetime | None = None,
     delivery_enabled: bool = False,
+    suggestion_delivery_enabled: bool = False,
     owner_limit: int = 50,
 ) -> PersonalContextRuntimeCycleResult:
     """Run bounded Personal Context detection/persistence/recommendation work.
@@ -403,6 +629,8 @@ def run_personal_context_runtime_cycle(
         "suggestions_built": 0,
         "suggestions_persisted": 0,
         "suggestions_reconciled": 0,
+        "suggestions_enqueued": 0,
+        "suggestions_blocked_channel": 0,
         "recommendations_built": 0,
         "recommendations_persisted": 0,
         "recommendations_enqueued": 0,
@@ -509,7 +737,7 @@ def run_personal_context_runtime_cycle(
                 counters["suggestions_built"] += len(suggestions)
                 for suggestion in suggestions:
                     try:
-                        _suggestion_claim, changed = persist_anomaly_suggestion(
+                        suggestion_claim, changed = persist_anomaly_suggestion(
                             session,
                             suggestion=suggestion,
                             now=stamp,
@@ -518,6 +746,55 @@ def run_personal_context_runtime_cycle(
                         continue
                     if changed:
                         counters["suggestions_persisted"] += 1
+
+                    current_suggestion = _active_suggestion_claim(
+                        session,
+                        tenant_id=tenant_id,
+                        actor_key=actor_key,
+                        suggestion_id=suggestion.suggestion_id,
+                    )
+                    if current_suggestion is None:
+                        continue
+                    if (
+                        current_suggestion.object_json or {}
+                    ).get("lifecycle_state") != "PROPOSED":
+                        continue
+                    if not suggestion_delivery_enabled:
+                        continue
+
+                    binding = _owner_delivery_binding(
+                        session,
+                        tenant_id=tenant_id,
+                        actor_key=actor_key,
+                    )
+                    if binding is None:
+                        counters["suggestions_blocked_channel"] += 1
+                        audit(
+                            session,
+                            None,
+                            "personal_context.suggestion_delivery_blocked",
+                            {
+                                "suggestion_id": suggestion.suggestion_id,
+                                "reason_code": (
+                                    "OWNER_DELIVERY_BINDING_AMBIGUOUS"
+                                ),
+                            },
+                            origin="personal_context",
+                            tenant_id=tenant_id,
+                            created_at=stamp,
+                        )
+                        continue
+
+                    _outbox, enqueued = _enqueue_suggestion(
+                        session,
+                        tenant_id=tenant_id,
+                        actor_key=actor_key,
+                        suggestion_claim=current_suggestion,
+                        binding=binding,
+                        now=stamp,
+                    )
+                    if enqueued:
+                        counters["suggestions_enqueued"] += 1
 
                 recommendations = build_context_recommendations(
                     session,
@@ -612,6 +889,7 @@ def run_personal_context_runtime_cycle(
 
 __all__ = [
     "PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION",
+    "PERSONAL_CONTEXT_SUGGESTION_OUTBOX_ACTION",
     "PersonalContextRuntimeCycleResult",
     "run_personal_context_runtime_cycle",
 ]
