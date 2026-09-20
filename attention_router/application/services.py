@@ -69,6 +69,10 @@ from attention_router.application.user_idiolect_projection import (
     IdiolectProjectionError,
     project_resolved_pending_intent_language_fact,
 )
+from attention_router.application.personal_context_recommendation_reply import (
+    RecommendationReplyError,
+    resolve_explicit_recommendation_reply,
+)
 from attention_router.application.user_idiolect_preference import (
     UserStylePreferenceError,
     parse_user_style_preference,
@@ -448,6 +452,78 @@ def _handle_owner_control_command(
             source_channel=OWNER_CONTROL_SOURCE_CHANNEL,
             conversation_key_hash=conversation_key_hash,
         )
+
+    if active_pending is None and binding is not None:
+        try:
+            recommendation_reply = resolve_explicit_recommendation_reply(
+                session,
+                receipt=receipt,
+                actor_key=owner_actor_key,
+                text=persisted_text,
+            )
+        except RecommendationReplyError as exc:
+            audit(
+                session,
+                None,
+                "personal_context.recommendation_reply_rejected",
+                {"reason_code": str(exc)},
+                receipt.correlation_id,
+                receipt.id,
+                origin="personal_context",
+                tenant_id=receipt.tenant_id,
+            )
+            recommendation_reply = None
+        if recommendation_reply is not None:
+            interaction = _create_owner_control_interaction(
+                session,
+                receipt=receipt,
+                owner_actor_key=owner_actor_key,
+                canonical_text=(
+                    "PERSONAL_CONTEXT_RECOMMENDATION_REPLY "
+                    f"status={recommendation_reply.status} "
+                    f"decision={recommendation_reply.decision.value} "
+                    f"recommendation_id={recommendation_reply.recommendation_id}"
+                ),
+            )
+            if recommendation_reply.status == "SOURCE_INVALIDATED":
+                confirmation = (
+                    "Essa sugestão não é mais válida porque o contexto que a "
+                    "originou mudou. Não vou executar nada a partir dela."
+                )
+            elif recommendation_reply.decision.value == "ACCEPT":
+                confirmation = (
+                    "Perfeito. Aceitei essa sugestão. Ainda vou revalidar "
+                    "as permissões antes de criar qualquer lembrete."
+                )
+            else:
+                confirmation = "Certo. Descartei essa sugestão."
+            _enqueue_owner_control_confirmation(
+                session,
+                receipt=receipt,
+                interaction=interaction,
+                binding=binding,
+                text=confirmation,
+            )
+            audit(
+                session,
+                interaction.id,
+                "personal_context.recommendation_reply_resolved",
+                {
+                    "recommendation_id": recommendation_reply.recommendation_id,
+                    "decision": recommendation_reply.decision.value,
+                    "status": recommendation_reply.status,
+                    "reason_code": recommendation_reply.reason_code,
+                    "lifecycle_claim_id": recommendation_reply.lifecycle_claim_id,
+                },
+                receipt.correlation_id,
+                receipt.id,
+                origin="personal_context",
+                tenant_id=receipt.tenant_id,
+            )
+            session.flush()
+            result = interaction_to_dict(session, interaction)
+            result["inbound_event_id"] = receipt.id
+            return result
 
     style_preference = parse_user_style_preference(persisted_text)
     if style_preference is not None:
