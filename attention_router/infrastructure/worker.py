@@ -21,6 +21,10 @@ from attention_router.application.personal_context_authority_runtime import (
     PersonalContextAuthorityRuntimeResult,
     run_personal_context_authority_cycle,
 )
+from attention_router.application.personal_context_materialization_runtime import (
+    PersonalContextMaterializationRuntimeResult,
+    run_personal_context_materialization_cycle,
+)
 from attention_router.application.voice_transcription import (
     is_voice_input_event,
     process_voice_transcriptions,
@@ -219,10 +223,33 @@ def process_personal_context_authority_runtime_if_due(
     return result, now_monotonic
 
 
+def process_personal_context_materialization_runtime_if_due(
+    session,
+    *,
+    now_monotonic: float,
+    last_run_monotonic: float | None,
+) -> tuple[PersonalContextMaterializationRuntimeResult | None, float | None]:
+    if not settings.personal_context_materialization_runtime_enabled:
+        return None, last_run_monotonic
+    if (
+        last_run_monotonic is not None
+        and now_monotonic - last_run_monotonic
+        < settings.personal_context_runtime_interval_seconds
+    ):
+        return None, last_run_monotonic
+
+    result = run_personal_context_materialization_cycle(
+        session,
+        intent_limit=settings.personal_context_materialization_intent_limit,
+    )
+    return result, now_monotonic
+
+
 def run_forever() -> None:
     identity = f"{socket.gethostname()}:{new_id()}"
     last_personal_context_run_monotonic: float | None = None
     last_personal_context_authority_run_monotonic: float | None = None
+    last_personal_context_materialization_run_monotonic: float | None = None
     logger.info("worker started worker_id=%s", identity)
     while True:
         transport_ready = probe_transport_ready()
@@ -299,6 +326,30 @@ def run_forever() -> None:
                     exc,
                 )
 
+            personal_context_materialization_result = None
+            personal_context_materialization_now = time.monotonic()
+            try:
+                (
+                    personal_context_materialization_result,
+                    last_personal_context_materialization_run_monotonic,
+                ) = process_personal_context_materialization_runtime_if_due(
+                    session,
+                    now_monotonic=personal_context_materialization_now,
+                    last_run_monotonic=(
+                        last_personal_context_materialization_run_monotonic
+                    ),
+                )
+                if personal_context_materialization_result is not None:
+                    session.commit()
+            except Exception as exc:
+                session.rollback()
+                logger.exception(
+                    "personal context materialization runtime cycle failed "
+                    "worker_id=%s error=%s",
+                    identity,
+                    exc,
+                )
+
         meta_inbox = reconcile_pending_meta_callback_inbox(
             SessionLocal,
             worker_id=identity,
@@ -342,6 +393,19 @@ def run_forever() -> None:
                     or personal_context_authority_result.assessments_failed
                 )
             )
+            or (
+                personal_context_materialization_result is not None
+                and (
+                    personal_context_materialization_result.materialized
+                    or personal_context_materialization_result.retired
+                    or personal_context_materialization_result.expired
+                    or personal_context_materialization_result.approval_required
+                    or personal_context_materialization_result.authority_blocked
+                    or personal_context_materialization_result.execution_blocked
+                    or personal_context_materialization_result.malformed
+                    or personal_context_materialization_result.failed
+                )
+            )
             or meta_reconciliation.selected
             or meta_inbox.selected
         ):
@@ -353,6 +417,8 @@ def run_forever() -> None:
                 "personal_context_enqueued=%s "
                 "personal_context_authority_assessments=%s "
                 "personal_context_intents_prepared=%s "
+                "personal_context_materialized=%s "
+                "personal_context_materialization_blocked=%s "
                 "meta_reconciliation_processed=%s "
                 "meta_reconciliation_failed=%s meta_inbox_correlated=%s",
                 identity,
@@ -384,6 +450,20 @@ def run_forever() -> None:
                 (
                     personal_context_authority_result.intents_prepared
                     if personal_context_authority_result is not None
+                    else 0
+                ),
+                (
+                    personal_context_materialization_result.materialized
+                    if personal_context_materialization_result is not None
+                    else 0
+                ),
+                (
+                    (
+                        personal_context_materialization_result.approval_required
+                        + personal_context_materialization_result.authority_blocked
+                        + personal_context_materialization_result.execution_blocked
+                    )
+                    if personal_context_materialization_result is not None
                     else 0
                 ),
                 meta_reconciliation.processed,
