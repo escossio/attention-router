@@ -21,6 +21,14 @@ from attention_router.application.personal_context_sequence_hypotheses import (
     ContextSequencePersistenceError,
     persist_context_event_sequence_hypothesis,
 )
+from attention_router.application.personal_context_anomalies import (
+    detect_missing_step_anomalies,
+)
+from attention_router.application.personal_context_anomaly_hypotheses import (
+    ContextAnomalyPersistenceError,
+    persist_missing_step_anomaly,
+    reconcile_missing_step_anomalies,
+)
 from attention_router.application.personal_context_recommendation_lifecycle import (
     RECOMMENDATION_CLAIM_PREDICATE,
     RECOMMENDATION_SOURCE_QUALITY,
@@ -59,6 +67,9 @@ class PersonalContextRuntimeCycleResult:
     hypotheses_persisted: int = 0
     sequence_hypotheses_detected: int = 0
     sequence_hypotheses_persisted: int = 0
+    anomaly_hypotheses_detected: int = 0
+    anomaly_hypotheses_persisted: int = 0
+    anomaly_hypotheses_reconciled: int = 0
     recommendations_built: int = 0
     recommendations_persisted: int = 0
     recommendations_enqueued: int = 0
@@ -375,6 +386,9 @@ def run_personal_context_runtime_cycle(
         "hypotheses_persisted": 0,
         "sequence_hypotheses_detected": 0,
         "sequence_hypotheses_persisted": 0,
+        "anomaly_hypotheses_detected": 0,
+        "anomaly_hypotheses_persisted": 0,
+        "anomaly_hypotheses_reconciled": 0,
         "recommendations_built": 0,
         "recommendations_persisted": 0,
         "recommendations_enqueued": 0,
@@ -431,6 +445,37 @@ def run_personal_context_runtime_cycle(
                     if changed:
                         counters["hypotheses_persisted"] += 1
                         counters["sequence_hypotheses_persisted"] += 1
+
+                reconciled_anomalies = reconcile_missing_step_anomalies(
+                    session,
+                    tenant_id=tenant_id,
+                    actor_key=actor_key,
+                    now=stamp,
+                )
+                counters["anomaly_hypotheses_reconciled"] += (
+                    reconciled_anomalies
+                )
+
+                anomalies = detect_missing_step_anomalies(
+                    session,
+                    tenant_id=tenant_id,
+                    actor_key=actor_key,
+                    now=stamp,
+                )
+                counters["hypotheses_detected"] += len(anomalies)
+                counters["anomaly_hypotheses_detected"] += len(anomalies)
+                for anomaly in anomalies:
+                    try:
+                        _claim, changed = persist_missing_step_anomaly(
+                            session,
+                            anomaly=anomaly,
+                            now=stamp,
+                        )
+                    except ContextAnomalyPersistenceError:
+                        continue
+                    if changed:
+                        counters["hypotheses_persisted"] += 1
+                        counters["anomaly_hypotheses_persisted"] += 1
 
                 recommendations = build_context_recommendations(
                     session,
