@@ -747,14 +747,7 @@ def run_personal_context_runtime_cycle(
                     if changed:
                         counters["suggestions_persisted"] += 1
 
-                    current_suggestion = _active_suggestion_claim(
-                        session,
-                        tenant_id=tenant_id,
-                        actor_key=actor_key,
-                        suggestion_id=suggestion.suggestion_id,
-                    )
-                    if current_suggestion is None:
-                        continue
+                    current_suggestion = suggestion_claim
                     if (
                         current_suggestion.object_json or {}
                     ).get("lifecycle_state") != "PROPOSED":
