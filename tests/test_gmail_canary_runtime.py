@@ -5,6 +5,7 @@ import stat
 
 import yaml
 
+from attention_router.config import Settings
 from attention_router.integrations.gmail_canary_runtime import (
     GmailCanaryRuntimeSecrets,
     render_gmail_canary_env,
@@ -190,3 +191,29 @@ def test_canary_integration_toggle_fails_closed_on_missing_flags(tmp_path):
         raise AssertionError("missing integration flags must fail closed")
 
     assert target.read_text() == "APP_ENV=private\n"
+
+
+
+def test_generated_canary_env_loads_real_settings_fail_closed(tmp_path):
+    target = (tmp_path / ".env.gmail-canary").resolve()
+    write_gmail_canary_env(
+        target,
+        secrets_bundle=GmailCanaryRuntimeSecrets(
+            postgres_password="P" * 43,
+            internal_ingress_hmac_secret="H" * 43,
+        ),
+    )
+
+    settings = Settings(_env_file=target)
+
+    assert settings.app_env == "private"
+    assert settings.integration_ingress_enabled is False
+    assert settings.integration_dispatch_enabled is False
+    assert settings.integration_dispatch_batch_size == 5
+    assert settings.agent_decision_pipeline_enabled is False
+    assert settings.agent_execution_enabled is False
+    assert settings.external_delivery_enabled is False
+    assert settings.local_transport_outbound_url == (
+        "http://127.0.0.1:1/internal/send"
+    )
+    assert settings.local_transport_outbound_timeout_seconds == 0.2
