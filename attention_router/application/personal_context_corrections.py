@@ -16,7 +16,11 @@ if TYPE_CHECKING:
 PATTERN_CORRECTION_PREDICATE: Final = "context.pattern.owner_correction"
 PATTERN_CORRECTION_SOURCE_QUALITY: Final = "USER_DECLARED"
 PATTERN_CLAIM_PREDICATE: Final = "context.pattern.temporal_recurrence"
+SEQUENCE_CLAIM_PREDICATE: Final = "context.pattern.event_sequence"
 PATTERN_CLAIM_SOURCE_QUALITY: Final = "DERIVED_PATTERN"
+SUPPORTED_PATTERN_CLAIM_PREDICATES: Final = frozenset(
+    {PATTERN_CLAIM_PREDICATE, SEQUENCE_CLAIM_PREDICATE}
+)
 DEFAULT_PATTERN_CORRECTION_TTL: Final = timedelta(days=30)
 
 
@@ -98,7 +102,7 @@ def _active_hypothesis(
         select(MemoryClaimRow)
         .where(
             MemoryClaimRow.subject_actor_id == actor_id,
-            MemoryClaimRow.predicate == PATTERN_CLAIM_PREDICATE,
+            MemoryClaimRow.predicate.in_(SUPPORTED_PATTERN_CLAIM_PREDICATES),
             MemoryClaimRow.source_quality == PATTERN_CLAIM_SOURCE_QUALITY,
             MemoryClaimRow.status == "ACTIVE",
         )
@@ -221,6 +225,9 @@ def invalidate_context_pattern_hypothesis(
         object_entity_id=None,
         object_json={
             "correction_kind": "INVALIDATE_INFERRED_PATTERN",
+            "corrected_pattern_type": (source.object_json or {}).get(
+                "pattern_type"
+            ),
             "evidence_class": "USER_DECLARED",
             "grants_authority": False,
             "recommendation_ready": False,
@@ -228,6 +235,7 @@ def invalidate_context_pattern_hypothesis(
         context={
             "hypothesis_id": hypothesis_id,
             "corrected_claim_id": source.id,
+            "corrected_predicate": source.predicate,
             "correction_event_id": correction_event.id,
         },
         confidence=1.0,
@@ -254,6 +262,7 @@ __all__ = [
     "DEFAULT_PATTERN_CORRECTION_TTL",
     "PATTERN_CORRECTION_PREDICATE",
     "PATTERN_CORRECTION_SOURCE_QUALITY",
+    "SUPPORTED_PATTERN_CLAIM_PREDICATES",
     "active_pattern_correction",
     "invalidate_context_pattern_hypothesis",
 ]
