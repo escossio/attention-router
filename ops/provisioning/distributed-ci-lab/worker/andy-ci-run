@@ -120,12 +120,11 @@ run_python() {
 
 run_postgres() {
   ensure_python
+  docker ps -aq --filter "name=andy-ci-pg-" | xargs -r docker rm -f >/dev/null 2>&1 || true
   PG_PASSWORD=$(python -c 'import secrets; print(secrets.token_urlsafe(24))')
   export ADMIN_AUTH_ENABLED=true
   export ADMIN_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
   export INTERNAL_INGRESS_HMAC_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
-  export DATABASE_URL="postgresql+psycopg://ar_test:${PG_PASSWORD}@127.0.0.1:55432/attention_router_test"
-  export PUBLIC_POSTGRES_TEST_URL="$DATABASE_URL"
   MEM_MB=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 ))
   PG_TMPFS_MB=$(( MEM_MB * 40 / 100 ))
   (( PG_TMPFS_MB > 6144 )) && PG_TMPFS_MB=6144
@@ -137,9 +136,14 @@ run_postgres() {
     -e POSTGRES_PASSWORD="$PG_PASSWORD" \
     -e POSTGRES_DB=attention_router_test \
     --tmpfs "/var/lib/postgresql/data:rw,size=${PG_TMPFS_MB}m" \
-    -p 127.0.0.1:55432:5432 \
+    -p 127.0.0.1::5432 \
     postgres:16-alpine \
     -c fsync=off -c synchronous_commit=off -c full_page_writes=off >/dev/null
+  PG_PORT=$(docker port "$PG_NAME" 5432/tcp | awk -F: 'END {print $NF}')
+  [[ "$PG_PORT" =~ ^[0-9]+$ ]] || { echo "invalid dynamic postgres port" >&2; return 70; }
+  export DATABASE_URL="postgresql+psycopg://ar_test:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/attention_router_test"
+  export PUBLIC_POSTGRES_TEST_URL="$DATABASE_URL"
+  echo "CI_POSTGRES_PORT=$PG_PORT"
   echo "CI_POSTGRES_STAGE=wait_ready"
   for _ in $(seq 1 60); do
     docker exec "$PG_NAME" pg_isready -U ar_test -d attention_router_test >/dev/null 2>&1 && break
