@@ -14,6 +14,13 @@ from attention_router.application.personal_context_hypotheses import (
 from attention_router.application.personal_context_patterns import (
     detect_temporal_recurrence_hypotheses,
 )
+from attention_router.application.personal_context_sequences import (
+    detect_event_sequence_hypotheses,
+)
+from attention_router.application.personal_context_sequence_hypotheses import (
+    ContextSequencePersistenceError,
+    persist_context_event_sequence_hypothesis,
+)
 from attention_router.application.personal_context_recommendation_lifecycle import (
     RECOMMENDATION_CLAIM_PREDICATE,
     RECOMMENDATION_SOURCE_QUALITY,
@@ -50,6 +57,8 @@ class PersonalContextRuntimeCycleResult:
     owners_failed: int = 0
     hypotheses_detected: int = 0
     hypotheses_persisted: int = 0
+    sequence_hypotheses_detected: int = 0
+    sequence_hypotheses_persisted: int = 0
     recommendations_built: int = 0
     recommendations_persisted: int = 0
     recommendations_enqueued: int = 0
@@ -364,6 +373,8 @@ def run_personal_context_runtime_cycle(
         "owners_failed": 0,
         "hypotheses_detected": 0,
         "hypotheses_persisted": 0,
+        "sequence_hypotheses_detected": 0,
+        "sequence_hypotheses_persisted": 0,
         "recommendations_built": 0,
         "recommendations_persisted": 0,
         "recommendations_enqueued": 0,
@@ -395,6 +406,31 @@ def run_personal_context_runtime_cycle(
                         continue
                     if changed:
                         counters["hypotheses_persisted"] += 1
+
+                sequence_hypotheses = detect_event_sequence_hypotheses(
+                    session,
+                    tenant_id=tenant_id,
+                    actor_id=actor_key,
+                    now=stamp,
+                )
+                counters["hypotheses_detected"] += len(sequence_hypotheses)
+                counters["sequence_hypotheses_detected"] += len(
+                    sequence_hypotheses
+                )
+                for sequence_hypothesis in sequence_hypotheses:
+                    try:
+                        _claim, changed = (
+                            persist_context_event_sequence_hypothesis(
+                                session,
+                                hypothesis=sequence_hypothesis,
+                                now=stamp,
+                            )
+                        )
+                    except ContextSequencePersistenceError:
+                        continue
+                    if changed:
+                        counters["hypotheses_persisted"] += 1
+                        counters["sequence_hypotheses_persisted"] += 1
 
                 recommendations = build_context_recommendations(
                     session,
