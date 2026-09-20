@@ -92,6 +92,50 @@ _PATTERNS: tuple[tuple[re.Pattern[str], UserStylePreferenceCommand], ...] = (
             confirmation="Entendido. Vou ser mais formal.",
         ),
     ),
+    (
+        re.compile(
+            r"^(?:seja|responda|responde|fale|fala)(?: comigo)? mais direto(?: comigo)?$"
+            r"|^(?:pode ser) mais direto$"
+        ),
+        UserStylePreferenceCommand(
+            dimension="directness",
+            value="high",
+            confirmation="Entendido. Vou ser mais direto.",
+        ),
+    ),
+    (
+        re.compile(
+            r"^(?:seja|responda|responde|fale|fala)(?: comigo)? menos direto(?: comigo)?$"
+            r"|^(?:pode ser) menos direto$"
+        ),
+        UserStylePreferenceCommand(
+            dimension="directness",
+            value="low",
+            confirmation="Entendido. Vou ser menos direto.",
+        ),
+    ),
+    (
+        re.compile(
+            r"^(?:pode usar|use)(?: comigo)?(?: um pouco de)? humor$"
+            r"|^(?:pode ser) mais bem humorado$"
+        ),
+        UserStylePreferenceCommand(
+            dimension="humor",
+            value="occasional",
+            confirmation="Entendido. Vou usar humor ocasionalmente.",
+        ),
+    ),
+    (
+        re.compile(
+            r"^sem humor$"
+            r"|^(?:nao use|evite) humor$"
+        ),
+        UserStylePreferenceCommand(
+            dimension="humor",
+            value="none",
+            confirmation="Entendido. Vou evitar humor.",
+        ),
+    ),
 )
 
 
@@ -163,8 +207,11 @@ def persist_user_style_preference(
             "USER_STYLE_PREFERENCE_ACTIVE_CONFLICT"
         )
 
-    stamp = now_utc()
     previous = active[0] if active else None
+    if previous is not None and (previous.value_json or {}).get("value") == command.value:
+        return previous
+
+    stamp = now_utc()
     return record_fact(
         session,
         tenant_id=tenant_id,
