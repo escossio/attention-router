@@ -346,6 +346,40 @@ def _explicit_owner_decision_event(
         )
 
 
+def _assert_current_source_hypothesis(
+    session: Session,
+    *,
+    recommendation_claim: MemoryClaimRow,
+    actor: MemoryActorRow,
+    now: datetime,
+) -> None:
+    source_claim_id = (recommendation_claim.context or {}).get("source_claim_id")
+    source = (
+        session.get(MemoryClaimRow, source_claim_id)
+        if isinstance(source_claim_id, str)
+        else None
+    )
+    value = source.object_json if source is not None else {}
+    current = (
+        source is not None
+        and source.subject_actor_id == actor.id
+        and source.predicate == "context.pattern.temporal_recurrence"
+        and source.source_quality == "DERIVED_PATTERN"
+        and source.status == "ACTIVE"
+        and (value or {}).get("evidence_class") == "INFERRED"
+        and (value or {}).get("hypothesis_status") == "HYPOTHESIS"
+        and (value or {}).get("grants_authority") is False
+        and (
+            source.valid_until is None
+            or _utc(source.valid_until) > now
+        )
+    )
+    if not current:
+        raise RecommendationLifecycleError(
+            "RECOMMENDATION_SOURCE_HYPOTHESIS_INVALIDATED"
+        )
+
+
 def _event_already_consumed(
     session: Session,
     *,
@@ -428,6 +462,13 @@ def resolve_context_recommendation(
         raise RecommendationLifecycleError("RECOMMENDATION_STATE_INVALID")
     if current.valid_until is None or _utc(current.valid_until) <= stamp:
         raise RecommendationLifecycleError("RECOMMENDATION_EXPIRED")
+
+    _assert_current_source_hypothesis(
+        session,
+        recommendation_claim=current,
+        actor=actor,
+        now=stamp,
+    )
 
     _explicit_owner_decision_event(
         session,
