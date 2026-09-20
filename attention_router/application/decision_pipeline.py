@@ -506,15 +506,21 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             disclosure_authority,
             platform_context.current_operational_state,
         )
-        response_style_profile = (
-            build_response_style_profile(
-                session,
-                tenant_id=interaction.tenant_id,
-                actor_key=binding.actor_key,
-            )
-            if binding is not None
-            else ResponseStyleProfile()
-        )
+        response_style_profile = ResponseStyleProfile()
+        if binding is not None:
+            try:
+                response_style_profile = build_response_style_profile(
+                    session,
+                    tenant_id=interaction.tenant_id,
+                    actor_key=binding.actor_key,
+                )
+            except Exception as exc:
+                _audit(
+                    session,
+                    interaction.id,
+                    "agent_context.response_style_unavailable",
+                    {"reason_code": type(exc).__name__},
+                )
         _audit(session, interaction.id, "agent_context.private_state_exposed", {
             "private_state_exposed": bool(private_state),
             "disclosure_reason_code": disclosure_authority.reason_code,
