@@ -29,9 +29,11 @@ The connector depends on a narrow `GmailReader` protocol:
 - search message IDs using a Gmail query;
 - read one message into a bounded `GmailMessage`.
 
-OAuth, refresh tokens and provider credentials belong to the concrete Gmail
-reader/plugin process. They are not Attention Router tenant or execution
-authority.
+OAuth, refresh tokens and provider credentials are not tenant or execution
+authority. In the subscriber product path, refresh tokens remain inside the
+encrypted ProviderAuthorization envelope. A trusted server-side runner may
+decrypt them in memory to obtain a transient access token for GmailApiReader.
+The reader itself never persists provider credentials.
 
 The connector itself receives only:
 
@@ -41,20 +43,21 @@ The connector itself receives only:
 - neutral ingress URL;
 - opaque neutral-ingress bearer.
 
-## Gmail data observed in the connected provider surface
+## Gmail data observed in the product metadata profile
 
-The connected Gmail surface used to validate this design returns the fields
-needed by the connector contract:
+The subscriber product requests only
+`https://www.googleapis.com/auth/gmail.metadata`. The product reader therefore
+uses the Gmail metadata surface and observes only the fields needed by the
+reference event:
 
 - Gmail message ID;
 - thread ID;
-- From/To/Cc/Bcc;
-- subject/snippet/body;
-- message timestamp;
-- labels;
-- attachment summaries including provider attachment ID, filename, MIME type
-  and size when available.
+- selected message headers (From/To/Cc/Bcc/Subject/Date);
+- internal message timestamp;
+- mailbox label membership used for bounded INBOX selection.
 
+It does not request message bodies or attachment bytes. The product reader
+marks body and attachment observation as false rather than inventing absence.
 The connector intentionally does not depend on Gmail labels for identity or
 authority.
 
@@ -74,9 +77,9 @@ This rule is connector-local and covered by tests.
 
 The provider-neutral EmailNormalizedAdapter currently emits a reference event.
 
-The connector may inspect body/subject only to derive bounded presence metadata.
-
-It does not serialize e-mail body or subject into the neutral V1 event.
+The product metadata reader does not observe message body content. Subject is
+used only to derive bounded presence metadata and is never serialized into the
+neutral V1 event.
 
 The V1 event carries:
 
@@ -92,23 +95,18 @@ The neutral dispatcher subsequently keeps only the durable
 
 ## Attachments
 
-Attachment-bearing messages fail closed in V1 with:
+The generic connector still fails closed with
+`GMAIL_ATTACHMENTS_REQUIRE_ARTIFACT_PLANE` when a reader actually supplies
+attachment summaries without staged Artifact Plane receipts.
 
-`GMAIL_ATTACHMENTS_REQUIRE_ARTIFACT_PLANE`
+The subscriber product reader uses `gmail.metadata`, which does not observe
+attachment content and must not claim that a message has zero attachments. It
+therefore emits `attachments_observed=false` and omits `attachment_count`.
+No attachment bytes, provider attachment IDs, invented SHA-256 values or
+invented storage references cross this boundary.
 
-Reason: `EmailNormalizedAdapter` requires staged attachment receipts with
-content SHA-256 and storage references. The Gmail read surface exposes provider
-attachment IDs but that is not an Artifact Plane receipt.
-
-V1 therefore does not:
-
-- download attachment bytes;
-- invent SHA-256 values;
-- invent storage references;
-- silently drop attachment identity.
-
-The next attachment-capable increment must stage bytes through the Artifact
-Plane first.
+The next attachment-capable increment must explicitly request an appropriate
+scope and stage bytes through the Artifact Plane first.
 
 ## Neutral ingress client
 
@@ -136,14 +134,18 @@ or query parameters.
 
 `GmailInboundConnector.poll()` is intentionally simple and bounded:
 
-- caller supplies the Gmail query;
+- the product metadata profile selects the INBOX label without using Gmail `q`;
+- `GmailApiReader` rejects a non-empty `q` locally because `gmail.metadata`
+  does not permit that list parameter;
 - maximum 1..100 messages per cycle;
-- each provider message is read then submitted independently;
+- each provider message is read as `format=metadata` and submitted independently;
 - 200 duplicate counts as successful replay;
 - the neutral ingress remains the idempotency authority.
 
 The connector does not mutate Gmail state, archive messages, apply labels or
-mark them read.
+mark them read. A durable history cursor is a later always-on polling increment;
+the first product canary remains bounded and replay-safe through neutral-ingress
+idempotency.
 
 ## Hard boundary
 
@@ -177,15 +179,20 @@ No production Gmail mailbox is modified by these tests.
 
 ## Next safe step
 
-After merge, create a concrete Gmail reader process around the available
-provider/plugin API, provision one `channel.email` integration binding and
-neutral-ingress credential, then run a controlled read-only canary with:
+After merge, create a product-governed polling runner around the existing ACTIVE
+ProviderAuthorization created by Connect Gmail. The runner must reuse its
+existing `channel.email` binding and encrypted neutral-ingress bearer; no manual
+provisioning or copied token is part of subscriber UX.
 
+Run one controlled read-only canary with:
+
+- refresh-token exchange performed server-side in memory;
 - ingress enabled;
-- dispatcher enabled;
-- one bounded Gmail query;
-- no attachment-bearing message;
+- dispatcher enabled only for the neutral canonical path under test;
+- one bounded INBOX metadata poll;
 - no Gmail mutation;
+- no body/attachment read;
 - no Decision Engine dispatch.
 
-That canary should prove the full live chain before any always-on polling.
+That canary should prove the full live chain before any always-on polling or
+durable Gmail history cursor.

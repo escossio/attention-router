@@ -35,6 +35,8 @@ class GmailMessage:
     body: str
     email_ts: str
     attachments: tuple[GmailAttachmentSummary, ...] = ()
+    body_observed: bool = True
+    attachments_observed: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +191,8 @@ def gmail_message_to_normalized_input(message: GmailMessage) -> dict[str, Any]:
         # The body is intentionally used only to derive body_present in the
         # provider-neutral adapter. It is not serialized into the V1 event.
         "body_text": message.body,
+        "body_observed": message.body_observed,
+        "attachments_observed": message.attachments_observed,
         "message_ref": f"gmail:{message.message_id}",
         "sent_at": occurred_at,
         "attachments": [
@@ -239,7 +243,7 @@ class GmailInboundConnector:
     def poll(
         self,
         *,
-        query: str = "in:inbox -in:spam -in:trash",
+        query: str = "",
         max_results: int = 20,
     ) -> GmailPollResult:
         if not 1 <= max_results <= 100:

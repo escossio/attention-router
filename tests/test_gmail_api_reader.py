@@ -8,6 +8,7 @@ import pytest
 
 from attention_router.integrations.gmail_api_reader import (
     GMAIL_API_BASE,
+    GMAIL_METADATA_HEADERS,
     GmailApiReader,
     StaticGmailAccessTokenProvider,
 )
@@ -102,7 +103,7 @@ def test_reader_lists_ids_with_read_only_query_shape():
     )
 
     ids = reader.search_message_ids(
-        query="in:inbox newer_than:1d -in:spam -in:trash",
+        query="",
         max_results=2,
     )
 
@@ -111,15 +112,26 @@ def test_reader_lists_ids_with_read_only_query_shape():
     request, timeout = calls[0]
     assert request.get_method() == "GET"
     assert request.full_url.startswith(GMAIL_API_BASE + "/messages?")
+    assert "labelIds=INBOX" in request.full_url
     assert "maxResults=2" in request.full_url
     assert "includeSpamTrash=false" in request.full_url
-    assert "q=in%3Ainbox" in request.full_url
+    assert "q=" not in request.full_url
     assert request.headers["Authorization"] == "Bearer token-123"
     assert request.headers["Accept"] == "application/json"
     assert timeout == 10.0
 
 
-def test_reader_maps_full_message_without_downloading_attachment_bytes():
+def test_reader_rejects_search_query_under_metadata_scope():
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token-123"),
+        opener=lambda *_args, **_kwargs: pytest.fail("HTTP must not be called"),
+    )
+
+    with pytest.raises(GmailConnectorError, match="GMAIL_METADATA_QUERY_FORBIDDEN"):
+        reader.search_message_ids(query="newer_than:1d", max_results=1)
+
+
+def test_reader_reads_metadata_without_body_or_attachment_observation():
     calls = []
 
     def opener(request, timeout):
@@ -143,21 +155,18 @@ def test_reader_maps_full_message_without_downloading_attachment_bytes():
     assert message.cc == ("copy@example.invalid",)
     assert message.bcc == ()
     assert message.subject == "Synthetic subject"
-    assert message.body == "present"
+    assert message.body == ""
     assert message.email_ts.endswith("+00:00")
-    assert len(message.attachments) == 1
-    attachment = message.attachments[0]
-    assert attachment.attachment_id == "provider-attachment-1"
-    assert attachment.filename == "synthetic.png"
-    assert attachment.mime_type == "image/png"
-    assert attachment.size_bytes == 1234
+    assert message.attachments == ()
+    assert message.body_observed is False
+    assert message.attachments_observed is False
 
-    assert calls == [
-        (
-            GMAIL_API_BASE
-            + "/messages/gmail-message-1?format=full"
-        )
-    ]
+    assert len(calls) == 1
+    assert calls[0].startswith(
+        GMAIL_API_BASE + "/messages/gmail-message-1?format=metadata"
+    )
+    for header in GMAIL_METADATA_HEADERS:
+        assert f"metadataHeaders={header}" in calls[0]
     assert "/attachments/" not in calls[0]
 
 
