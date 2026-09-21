@@ -432,3 +432,44 @@ def test_reader_rejects_invalid_attachment_payload(payload):
             expected_size=5,
             max_bytes=64,
         )
+
+
+def test_reader_rejects_ambiguous_externalized_body_part():
+    def opener(request, timeout):
+        if "format=metadata" in request.full_url:
+            return FakeResponse(200, _full_message())
+        return FakeResponse(
+            200,
+            {
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "filename": "",
+                    "body": {"size": 0},
+                    "parts": [
+                        {
+                            "mimeType": "text/plain",
+                            "filename": "",
+                            "body": {
+                                "attachmentId": "externalized-body",
+                                "size": 4096,
+                            },
+                        },
+                    ],
+                }
+            },
+        )
+
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=opener,
+    )
+
+    with pytest.raises(
+        GmailConnectorError,
+        match="GMAIL_ATTACHMENT_AMBIGUOUS_PART",
+    ):
+        reader.read_message_with_attachments(
+            "gmail-message-1",
+            max_attachments=4,
+            max_mime_depth=4,
+        )

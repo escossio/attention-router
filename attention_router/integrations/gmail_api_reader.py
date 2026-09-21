@@ -324,6 +324,11 @@ def _attachment_summaries(
                 or attachment_id in seen_attachment_ids
             ):
                 raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_INVALID")
+            if not filename:
+                # Gmail may externalize a large MIME body behind attachmentId.
+                # Without a filename V1 cannot prove this is user attachment
+                # content rather than message-body content, so fail closed.
+                raise GmailConnectorError("GMAIL_ATTACHMENT_AMBIGUOUS_PART")
             seen_attachment_ids.add(attachment_id)
             attachments.append(
                 GmailAttachmentSummary(
