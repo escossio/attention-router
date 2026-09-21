@@ -75,6 +75,13 @@ O V1 foi validado com:
 
 O pacote público em `ops/provisioning/andy-ops-panel/` é sanitizado: endereços LAN e valores específicos do host ficam fora do Git e entram por environment file.
 
+Publicação do painel:
+
+- branch: `ops/andy-ops-live-supervisor-v1`;
+- commit inicial: `1f7821240093913a333cd21f7e5aaebe94d04c32`;
+- PR #150: `ops: add Andy Ops live supervisor V1`;
+- PR aberta no momento deste checkpoint; não mergeada.
+
 ## Estado real do Gmail
 
 O problema original de conexão do Gmail foi resolvido.

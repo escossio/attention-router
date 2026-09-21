@@ -10,6 +10,7 @@ Updated: 2026-09-21
 - V1 is read-only, has no production database access, and public files contain no private LAN address or credentials.
 - Runtime proof completed on the control plane: systemd active, health PASS, live four-node CPU sampling, real hwmon data where available and headless browser render PASS.
 - Combined resume state is recorded in `docs/checkpoints/ANDY_OPS_GMAIL_CHECKPOINT_20260921.md`.
+- Published review: PR #150 (`ops: add Andy Ops live supervisor V1`); merge remains a separate decision.
 
 ## Distributed validation control-plane rule
 
