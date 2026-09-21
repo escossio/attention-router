@@ -5,3 +5,7 @@
 # Reviewed synthetic idempotency identifier in the neutral ingress JSON example.
 # It selects a replay identity; it is not a credential or an authentication token.
 fec9cc427001933abcea7eeedeadcf4e81785068:docs/integration-transport-v0.md:generic-api-key:91
+
+# Reviewed provider-secret envelope assignment. The matched value is generated
+# nonce/ciphertext metadata, not an API key or credential.
+c65d763a2fcb36ad95dfaff3340ea85750ccf4ea:attention_router/application/gmail_connection.py:generic-api-key:443
