@@ -108,7 +108,13 @@ def _delivered_suggestion(session, monkeypatch, stamp: datetime):
         "local_transport_outbound",
         recorder,
     )
-    assert services.process_outbox(session, "v1p-worker") == 1
+    with monkeypatch.context() as clock:
+        clock.setattr(
+            services,
+            "now_utc",
+            lambda: detected_at + timedelta(minutes=1),
+        )
+        assert services.process_outbox(session, "v1p-worker") == 1
     session.refresh(outbox)
     assert outbox.status == "DONE"
     assert recorder.calls == [outbox.id]
