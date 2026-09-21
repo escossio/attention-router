@@ -1,0 +1,19 @@
+[Unit]
+Description=Andy Ops Live Supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/etc/default/andy-ops-panel
+WorkingDirectory=/srv/andy-ops-panel
+ExecStart=/usr/bin/python3 /srv/andy-ops-panel/server.py
+Restart=on-failure
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

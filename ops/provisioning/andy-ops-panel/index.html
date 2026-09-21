@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Andy Ops — Live Supervisor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">ANDY OPS</p>
+      <h1>Live Supervisor</h1>
+    </div>
+    <div class="live-state">
+      <span class="pulse"></span>
+      <span id="live-label">CONECTANDO</span>
+      <small id="last-update">—</small>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Painéis">
+    <button class="tab is-active" data-tab="compute" type="button">COMPUTE</button>
+    <button class="tab" data-tab="chat" type="button">CHAT / CONSOLE</button>
+  </nav>
+
+  <main>
+    <section id="compute-view" class="view is-active">
+      <section class="dispatch-strip">
+        <div>
+          <span class="section-label">EXECUÇÃO ATUAL</span>
+          <strong id="dispatch-title">Nenhum trabalho distribuído em execução</strong>
+          <span id="dispatch-meta" class="muted">AGT aguardando demanda</span>
+        </div>
+        <div class="dispatch-flow" aria-label="Fluxo AGT para workers">
+          <span class="flow-node master">AGT</span><span class="arrow">→</span>
+          <span class="flow-node" id="flow-ci01">CI01</span>
+          <span class="flow-node" id="flow-ci02">CI02</span>
+          <span class="flow-node" id="flow-ci03">CI03</span>
+        </div>
+      </section>
+
+      <section id="node-grid" class="node-grid" aria-live="polite"></section>
+
+      <section class="history-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">ÚLTIMOS DESPACHOS</span>
+            <h2>AGT → CI pool</h2>
+          </div>
+        </div>
+        <div id="dispatch-history" class="dispatch-history"></div>
+      </section>
+    </section>
+
+    <section id="chat-view" class="view">
+      <section class="chat-hero">
+        <div>
+          <span class="section-label">CANAL OBSERVÁVEL</span>
+          <h2>Chat → Remote Desktop Commander → AGT</h2>
+          <p>A interface gráfica do ChatGPT não é observável diretamente. Aqui aparece o canal real de ferramentas e console que continua trabalhando mesmo quando a tela do chat parece travada.</p>
+        </div>
+        <div id="plugin-state" class="plugin-state">—</div>
+      </section>
+
+      <section class="chat-grid">
+        <article class="chat-card">
+          <span class="section-label">ÚLTIMA AÇÃO</span>
+          <strong id="chat-last-tool">—</strong>
+          <p id="chat-last-summary" class="chat-summary">—</p>
+          <dl>
+            <div><dt>Há</dt><dd id="chat-last-age">—</dd></div>
+            <div><dt>Duração</dt><dd id="chat-last-duration">—</dd></div>
+            <div><dt>Resultado</dt><dd id="chat-last-result">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="chat-card">
+          <span class="section-label">CONSOLE AGORA</span>
+          <strong id="session-count">0 sessões ativas</strong>
+          <div id="active-sessions" class="session-list"></div>
+        </article>
+      </section>
+
+      <section class="history-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">CAIXA-PRETA DO PLUGIN</span>
+            <h2>Chamadas recentes</h2>
+          </div>
+          <span class="muted">argumentos sensíveis são resumidos</span>
+        </div>
+        <div id="tool-history" class="tool-history"></div>
+      </section>
+    </section>
+
+    <section id="error-panel" class="error-panel" hidden></section>
+  </main>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

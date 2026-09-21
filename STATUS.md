@@ -2,6 +2,15 @@
 
 Updated: 2026-09-21
 
+## Andy Ops Live Supervisor V1
+
+- Added a sanitized, reproducible LAN-only operational panel package under `ops/provisioning/andy-ops-panel/`.
+- Compute view shows AGT/CI01/CI02/CI03 CPU total + per-core btop-like meters, CPU temperature when exposed, current CI task, elapsed time and recent distributed dispatches.
+- Chat/Console view observes the concrete Chat -> Remote Desktop Commander -> AGT channel using the plugin's persistent JSONL tool history and active console descendants; it does not claim to observe ChatGPT UI internals.
+- V1 is read-only, has no production database access, and public files contain no private LAN address or credentials.
+- Runtime proof completed on the control plane: systemd active, health PASS, live four-node CPU sampling, real hwmon data where available and headless browser render PASS.
+- Combined resume state is recorded in `docs/checkpoints/ANDY_OPS_GMAIL_CHECKPOINT_20260921.md`.
+
 ## Distributed validation control-plane rule
 
 - Heavy validation is now explicitly assigned to the distributed CI worker pool when the orchestrator is present.
