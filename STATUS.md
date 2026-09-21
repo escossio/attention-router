@@ -2,6 +2,26 @@
 
 Updated: 2026-09-21
 
+## Gmail Product Runner — governed execution hardening
+
+- Main already includes the runner from PR #146; this increment completes its
+  fail-closed validation and synthetic contract coverage without a second runner.
+- Subscriber-created ProviderAuthorization remains the only source of the refresh
+  token, integration bearer and channel.email binding. Canonical installation
+  identity, credential lifetime/scopes and envelope AAD are validated before I/O.
+- Each run reloads persisted authorization, binding and credential state, so
+  committed revocation cannot be bypassed by an older ORM identity-map entry.
+- Stable runner errors discard external exception chains; token-bearing value
+  objects hide secrets from repr. Authenticated HTTP refuses redirects and the
+  connector enforces the actual polling bound even on oversized ID lists.
+- Targeted validation: 147 runner/transport tests and 73 Gmail/OAuth/provider-secret
+  regressions passed; Ruff, compileall, generated SDK checks and diff-check passed.
+  The full default suite passed: 2099 tests, with 432 PostgreSQL tests excluded
+  for the separate distributed gate. Tests used a disposable Python 3.12 image
+  with matching dependency pins, network disabled and a read-only source mount.
+- No schema, runtime flags, live Gmail, deployment or merge is part of this work.
+- See [Gmail Product Runner](docs/architecture/gmail-product-runner-v1.md).
+
 ## Gmail Product Connection — physical E2E complete
 
 - The real Android subscriber flow is proven through Google consent, server

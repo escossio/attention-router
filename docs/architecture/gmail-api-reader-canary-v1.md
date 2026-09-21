@@ -2,6 +2,11 @@
 
 Status: implementation candidate
 
+Historical canary design: the reader contract below predates PR #144. Current
+code uses `gmail.metadata`, INBOX labels and `format=metadata`, without body or
+attachment observation. For the subscriber path and current contract, see
+[Gmail Product Runner V1](gmail-product-runner-v1.md).
+
 Related:
 - #83 Multi-channel expansion
 - Gmail Connector V1
