@@ -2,6 +2,13 @@
 
 Updated: 2026-09-21
 
+## Distributed validation control-plane rule
+
+- Heavy validation is now explicitly assigned to the distributed CI worker pool when the orchestrator is present.
+- The repository agent instructions prohibit silent local fallback for full PostgreSQL, migration-heavy and full-suite validation on the control plane.
+- `scripts/postgres_test_harness.sh` fails closed on a control-plane host unless an operator explicitly sets the break-glass override.
+- Quick targeted diagnostics, lint and diff checks remain appropriate locally.
+
 ## Gmail Product Runner — governed execution hardening
 
 - Main already includes the runner from PR #146; this increment completes its
