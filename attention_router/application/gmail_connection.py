@@ -476,14 +476,21 @@ class GmailConnectionService:
         if row is None or row.status != "ACTIVE":
             return GmailConnectionView("DISCONNECTED", None, ())
 
-        refresh_token, _integration_bearer = self._cipher().decrypt(
-            ProviderSecretEnvelope(
-                row.secret_nonce_b64url,
-                row.secret_ciphertext_b64url,
-                row.secret_key_version,
-            ),
-            aad=self._aad(row.id, row.tenant_id, row.human_identity_id),
-        )
+        try:
+            refresh_token, _integration_bearer = self._cipher().decrypt(
+                ProviderSecretEnvelope(
+                    row.secret_nonce_b64url,
+                    row.secret_ciphertext_b64url,
+                    row.secret_key_version,
+                ),
+                aad=self._aad(
+                    row.id,
+                    row.tenant_id,
+                    row.human_identity_id,
+                ),
+            )
+        except Exception as exc:
+            raise GmailConnectionConflict() from exc
         self.oauth.revoke(refresh_token)
 
         binding = session.get(
