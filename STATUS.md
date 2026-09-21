@@ -1,6 +1,29 @@
 # Project status
 
-Updated: 2026-09-17
+Updated: 2026-09-21
+
+## Gmail Product Connection — physical E2E complete
+
+- The real Android subscriber flow is proven through Google consent, server
+  authorization-code exchange, Gmail profile lookup, encrypted provider
+  authorization persistence and canonical `channel.email` binding creation.
+- Safe diagnostics proved the prior provider failure as HTTP 403
+  `PERMISSION_DENIED` with reasons `SERVICE_DISABLED,accessNotConfigured`: the
+  Gmail API provider service was not enabled/configured for the Google Cloud
+  project. After provider configuration was corrected, connect returned HTTP
+  200 and the Android UI reached `Gmail connected.`.
+- Cold reopen passed: authenticated bootstrap returned HTTP 200 and Gmail status
+  returned HTTP 200 `CONNECTED` without a new Google authorization ceremony.
+- Database proof found one active ProviderAuthorization, one active
+  `channel.email` binding, one active digest-only IntegrationCredential and one
+  encrypted provider-secret envelope row.
+- Profile HTTP failures expose only bounded allowlisted provider reason/status
+  enums; OAuth material and application data are not logged.
+- All required PR #142 checks passed, including distributed PostgreSQL (432
+  tests across CI01/CI02/CI03), Python/transport tests, Docker build, secret
+  scan and CodeQL.
+- No OAuth scope, Android contract or database schema change was required.
+- See [`docs/checkpoints/GMAIL_PRODUCT_CONNECTION_E2E_20260921.md`](docs/checkpoints/GMAIL_PRODUCT_CONNECTION_E2E_20260921.md).
 
 ## Human Auth Continuation Grant V0.3A — live proof complete
 
