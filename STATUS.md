@@ -10,7 +10,7 @@ Updated: 2026-09-21
 - V1 is read-only, has no production database access, and public files contain no private LAN address or credentials.
 - Runtime proof completed on the control plane: systemd active, health PASS, live four-node CPU sampling, real hwmon data where available and headless browser render PASS.
 - Combined resume state is recorded in `docs/checkpoints/ANDY_OPS_GMAIL_CHECKPOINT_20260921.md`.
-- Published review: PR #150 (`ops: add Andy Ops live supervisor V1`); merge remains a separate decision.
+- PR #150 (`ops: add Andy Ops live supervisor V1`) is merged into main.
 
 ## Distributed validation control-plane rule
 
@@ -19,11 +19,30 @@ Updated: 2026-09-21
 - `scripts/postgres_test_harness.sh` fails closed on a control-plane host unless an operator explicitly sets the break-glass override.
 - Quick targeted diagnostics, lint and diff checks remain appropriate locally.
 
-## Gmail History Cursor — candidate with concurrency hardening
+## Gmail automatic polling scheduler V1 — candidate
 
-- Added installation-owned nullable Gmail history cursor and bounded incremental
-  metadata ingestion. First execution seeds the current mailbox baseline without
-  backfill; stale history fails closed. Scheduler/automatic polling remain future work.
+- Issue #151 implements automatic invocation of the durable Gmail history primitive
+  without adding provider I/O to the core worker loop.
+- A dedicated scheduler discovers active GOOGLE/GMAIL installations in fair,
+  bounded rotating batches, then gives each installation its own clean session
+  and transaction.
+- Successful incremental runs commit; BUSY, STALE, authorization races and other
+  failures roll back independently. STALE installations are quarantined for the
+  scheduler process lifetime and are never silently reseeded.
+- Scheduler, runner and connect boundaries remain separately gated. New scheduler
+  settings default disabled; this candidate does not enable flags, deploy runtime
+  or call real Gmail.
+- Local targeted validation on the AGT used the existing Gmail review test image:
+  62 Gmail scheduler/history/runner tests passed, then 172 scheduler/config/runner
+  contract tests passed. Ruff passed. PostgreSQL-heavy certification remains
+  delegated to CI01/CI02/CI03 after publication.
+- See issue #151 and [Gmail Product Runner](docs/architecture/gmail-product-runner-v1.md).
+
+## Gmail History Cursor — merged with concurrency hardening
+
+- PR #149 is merged. It adds an installation-owned nullable Gmail history cursor
+  and bounded incremental metadata ingestion. First execution seeds the current
+  mailbox baseline without backfill; stale history fails closed.
 - Account replacement clears the cursor; same-account reconnect preserves it.
 - A concurrency review confirmed a real application-level reconnect deadlock in
   the first candidate: runner held ProviderAuthorization while ingress waited for
