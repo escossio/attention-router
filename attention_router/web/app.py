@@ -17,6 +17,7 @@ from attention_router.application.human_identity import HumanIdentityService
 from attention_router.application.client_bootstrap import DeviceBootstrapService
 from attention_router.application.client_session import ClientSessionService
 from attention_router.application.client_location import ClientLocationService
+from attention_router.application.gmail_connection import GmailConnectionService
 from attention_router.application.decision_pipeline import decision_to_dict
 from attention_router.application import response_review
 from attention_router.application import execution
@@ -29,6 +30,7 @@ from attention_router.api.v1.human_identity import build_human_identity_router
 from attention_router.api.v1.client_bootstrap import build_client_bootstrap_router
 from attention_router.api.v1.client_session import build_client_session_router
 from attention_router.api.v1.client_location import build_client_location_router
+from attention_router.api.v1.gmail_connection import build_gmail_connection_router
 from attention_router.core.human_identity import HumanAuthProviderUnavailable, VerifiedProviderIdentity
 from attention_router.core.devices import (
     DeviceCapabilityAnnouncement,
@@ -85,6 +87,10 @@ client_session_service = ClientSessionService(settings=settings)
 client_location_service = ClientLocationService(
     settings=settings,
     session_service=client_session_service,
+)
+gmail_connection_service = GmailConnectionService(
+    settings=settings,
+    client_sessions=client_session_service,
 )
 
 
@@ -194,6 +200,10 @@ app.include_router(build_client_session_router(
 app.include_router(build_client_location_router(
     get_session=get_session,
     service=client_location_service,
+))
+app.include_router(build_gmail_connection_router(
+    get_session=get_session,
+    service=gmail_connection_service,
 ))
 
 
