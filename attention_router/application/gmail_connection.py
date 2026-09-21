@@ -364,6 +364,8 @@ class GmailConnectionService:
 
         authority = self._authority(session, session_token)
         grant = self.oauth.exchange_authorization_code(authorization_code)
+        if set(grant.granted_scopes) != {GMAIL_METADATA_SCOPE}:
+            raise GmailAuthorizationRejected()
         profile = self.oauth.gmail_profile(grant.access_token)
         current = now or datetime.now(UTC)
         account_hash = hashlib.sha256(

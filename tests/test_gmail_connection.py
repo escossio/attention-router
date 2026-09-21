@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from attention_router.application.gmail_connection import (
     GMAIL_METADATA_SCOPE,
+    GmailAuthorizationRejected,
     GmailConnectionService,
     GoogleGmailProfile,
     GoogleTokenGrant,
@@ -45,17 +46,18 @@ class FakeClientSessions:
 
 
 class FakeOAuth:
-    def __init__(self):
+    def __init__(self, granted_scopes=(GMAIL_METADATA_SCOPE,)):
         self.refresh_token = "google-refresh-secret"
         self.email = "Owner@Example.Invalid"
         self.revoked = []
+        self.granted_scopes = granted_scopes
 
     def exchange_authorization_code(self, code):
         assert code == "server-auth-code"
         return GoogleTokenGrant(
             access_token="google-access-secret",
             refresh_token=self.refresh_token,
-            granted_scopes=(GMAIL_METADATA_SCOPE,),
+            granted_scopes=self.granted_scopes,
         )
 
     def gmail_profile(self, access_token):
@@ -164,6 +166,31 @@ def test_connect_persists_only_encrypted_provider_secrets(
     status = service.status(session, session_token=token)
     assert status.status == "CONNECTED"
     assert status.installation_id == auth.id
+
+
+def test_connect_rejects_provider_grant_with_scope_above_metadata(
+    session,
+    monkeypatch,
+):
+    oauth = FakeOAuth(
+        granted_scopes=(
+            GMAIL_METADATA_SCOPE,
+            "https://www.googleapis.com/auth/gmail.modify",
+        )
+    )
+    service = _service(monkeypatch, oauth)
+
+    try:
+        service.connect(
+            session,
+            session_token="cst_" + "t" * 43,
+            authorization_code="server-auth-code",
+        )
+    except GmailAuthorizationRejected:
+        pass
+    else:
+        raise AssertionError("broader Gmail grant must be rejected")
+
 
 
 def test_reconnect_without_new_refresh_token_preserves_existing_secret(
