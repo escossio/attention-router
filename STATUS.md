@@ -27,8 +27,11 @@ Updated: 2026-09-21
 - Concurrency hardening review evidence: 72 targeted Gmail tests passed; four real
   PostgreSQL contention tests passed (reconnect, account replacement, disconnect,
   first-connect/rollback), plus two history PostgreSQL tests and one schema test.
-- Full post-hardening distributed PostgreSQL certification is pending and must run
-  on CI01/CI02/CI03, not on the AGT control plane.
+- Final post-hardening distributed PostgreSQL certification passed on the worker
+  pool: 438 tests total in 113 s wall time (CI01 102, CI02 145, CI03 191). The
+  first shard run exposed a pre-existing timing flake in platform findings; the
+  exact test passed three consecutive CI02 retries and the complete distributed
+  rerun then passed. No heavy fallback was executed on the AGT control plane.
 - Ruff/diff checks passed in the concurrency review. No provider/live runtime was
   touched. Migration `0046_gmail_history_cursor` adds one nullable installation
   column and refuses downgrade when populated cursor data would be discarded.
