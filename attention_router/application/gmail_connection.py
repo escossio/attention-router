@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+import logging
 import secrets
 from typing import Protocol
 from urllib import error as urllib_error
@@ -37,6 +38,25 @@ from attention_router.security.provider_secrets import (
 
 
 GMAIL_METADATA_SCOPE = "https://www.googleapis.com/auth/gmail.metadata"
+logger = logging.getLogger("uvicorn.error")
+
+# Provider text is untrusted: only these exact, public error identifiers may
+# enter diagnostics. Never log messages, ErrorInfo metadata or response bodies.
+_GMAIL_ERROR_REASONS = frozenset({
+    "accessNotConfigured", "SERVICE_DISABLED", "SERVICE_BLOCKED",
+    "insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+    "authError", "CREDENTIALS_MISSING", "ACCESS_TOKEN_EXPIRED",
+    "ACCESS_TOKEN_INVALID", "domainPolicy", "DOMAIN_POLICY",
+    "rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded",
+    "quotaExceeded", "RATE_LIMIT_EXCEEDED", "QUOTA_EXCEEDED",
+    "backendError", "forbidden", "BILLING_DISABLED", "CONSUMER_INVALID",
+})
+_GMAIL_ERROR_STATUSES = frozenset({
+    "CANCELLED", "UNKNOWN", "INVALID_ARGUMENT", "DEADLINE_EXCEEDED",
+    "NOT_FOUND", "ALREADY_EXISTS", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED",
+    "FAILED_PRECONDITION", "ABORTED", "OUT_OF_RANGE", "UNIMPLEMENTED",
+    "INTERNAL", "UNAVAILABLE", "DATA_LOSS", "UNAUTHENTICATED",
+})
 
 
 class GmailConnectionError(RuntimeError):
@@ -104,6 +124,44 @@ class GoogleWorkspaceOAuthClient:
             raise GmailProviderUnavailable()
         return value
 
+    @staticmethod
+    def _profile_error_metadata(response) -> tuple[str, str]:
+        unknown = ("UNKNOWN", "UNKNOWN")
+        try:
+            # A failed diagnostic read must not replace the original HTTP error.
+            body = response.read(16 * 1024)
+            if len(body) >= 16 * 1024:
+                return unknown
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            return unknown
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if not isinstance(error, dict):
+            return unknown
+        raw_status = error.get("status")
+        google_status = (
+            raw_status
+            if isinstance(raw_status, str) and raw_status in _GMAIL_ERROR_STATUSES
+            else "UNKNOWN"
+        )
+        raw_reasons = []
+        errors = error.get("errors")
+        if isinstance(errors, list):
+            raw_reasons.extend(item.get("reason") for item in errors if isinstance(item, dict))
+        details = error.get("details")
+        if isinstance(details, list):
+            raw_reasons.extend(
+                item.get("reason")
+                for item in details
+                if isinstance(item, dict)
+                and item.get("@type") == "type.googleapis.com/google.rpc.ErrorInfo"
+            )
+        reasons = {
+            value if isinstance(value, str) and value in _GMAIL_ERROR_REASONS else "UNKNOWN"
+            for value in raw_reasons
+        }
+        return ",".join(sorted(reasons)) or "UNKNOWN", google_status
+
     def exchange_authorization_code(self, code: str) -> GoogleTokenGrant:
         body = urllib_parse.urlencode(
             {
@@ -163,6 +221,20 @@ class GoogleWorkspaceOAuthClient:
             with urllib_request.urlopen(request, timeout=self.timeout) as response:
                 payload = self._json_response(response)
         except urllib_error.HTTPError as exc:
+            reason, google_status = self._profile_error_metadata(exc)
+            http_status = exc.code if type(exc.code) is int and 100 <= exc.code <= 599 else 0
+            logger.warning(
+                "GMAIL_PROFILE_FAILED http_status=%d google_status=%s reason=%s",
+                http_status,
+                google_status,
+                reason,
+                extra={
+                    "event": "GMAIL_PROFILE_FAILED",
+                    "http_status": http_status,
+                    "google_status": google_status,
+                    "reason": reason,
+                },
+            )
             if exc.code in {401, 403}:
                 raise GmailAuthorizationRejected() from None
             raise GmailProviderUnavailable() from None

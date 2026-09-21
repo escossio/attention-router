@@ -1,6 +1,19 @@
 # Project status
 
-Updated: 2026-09-17
+Updated: 2026-09-21
+
+## Gmail Product Connection — profile rejection investigation
+
+- The merged Android and backend product implementations remain the baseline.
+- A physical Android attempt reached the Gmail profile request after successful
+  authorization-code exchange and metadata-scope validation. Google returned
+  HTTP 403, which the API currently reports as `GMAIL_AUTHORIZATION_REJECTED`.
+- The precise provider reason is still under investigation. Diagnostic work is
+  limited to allowlisted, non-secret metadata; OAuth material is never logged.
+- Profile HTTP failures now expose only canonical provider reason/status enums.
+  The focused offline Gmail, API, encryption and architecture checks passed
+  (68 tests), along with Ruff and Python compilation.
+- No OAuth scope, client contract, application data or schema change is proposed.
 
 ## Human Auth Continuation Grant V0.3A — live proof complete
 
