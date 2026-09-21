@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     google_workspace_oauth_client_id: str | None = None
     google_workspace_oauth_client_secret: str | None = Field(default=None, repr=False)
     provider_authorization_key_b64url: str | None = Field(default=None, repr=False)
+    artifact_store_enabled: bool = False
+    artifact_store_root: str = "/var/lib/attention-router/artifacts"
+    artifact_store_max_bytes: int = 32 * 1024 * 1024
     internal_ingress_http_host: str = "0.0.0.0"
     internal_ingress_http_port: int = 18102
     internal_ingress_hmac_secret: str | None = None
@@ -249,6 +252,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 "GMAIL_PRODUCT_SCHEDULER_ENABLED requires GMAIL_PRODUCT_RUNNER_ENABLED=true"
             )
+        if not 1 <= self.artifact_store_max_bytes <= 1024 * 1024 * 1024:
+            raise ValueError(
+                "ARTIFACT_STORE_MAX_BYTES must be between 1 and 1073741824"
+            )
+        if self.artifact_store_enabled:
+            if (
+                not self.artifact_store_root
+                or not self.artifact_store_root.startswith("/")
+            ):
+                raise ValueError(
+                    "ARTIFACT_STORE_ROOT must be an absolute path when enabled"
+                )
         if self.gmail_connect_enabled:
             if not self.client_session_enabled:
                 raise ValueError(
