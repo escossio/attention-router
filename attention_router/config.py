@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     integration_dispatch_enabled: bool = False
     integration_dispatch_batch_size: int = 20
     gmail_connect_enabled: bool = False
+    gmail_product_runner_enabled: bool = False
+    gmail_product_runner_ingress_url: str = (
+        "http://127.0.0.1:18101/api/v1/ingress/integrations/events"
+    )
+    gmail_product_runner_max_results: int = 5
     google_workspace_oauth_client_id: str | None = None
     google_workspace_oauth_client_secret: str | None = None
     provider_authorization_key_b64url: str | None = None
@@ -210,6 +215,16 @@ class Settings(BaseSettings):
         if not 1 <= self.integration_dispatch_batch_size <= 200:
             raise ValueError(
                 "INTEGRATION_DISPATCH_BATCH_SIZE must be between 1 and 200"
+            )
+        if not 1 <= self.gmail_product_runner_max_results <= 100:
+            raise ValueError(
+                "GMAIL_PRODUCT_RUNNER_MAX_RESULTS must be between 1 and 100"
+            )
+        if not self.gmail_product_runner_ingress_url.startswith(("http://", "https://")):
+            raise ValueError("GMAIL_PRODUCT_RUNNER_INGRESS_URL must be http(s)")
+        if self.gmail_product_runner_enabled and not self.gmail_connect_enabled:
+            raise ValueError(
+                "GMAIL_PRODUCT_RUNNER_ENABLED requires GMAIL_CONNECT_ENABLED=true"
             )
         if self.gmail_connect_enabled:
             if not self.client_session_enabled:

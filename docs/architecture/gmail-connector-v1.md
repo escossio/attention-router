@@ -147,14 +147,34 @@ mark them read. A durable history cursor is a later always-on polling increment;
 the first product canary remains bounded and replay-safe through neutral-ingress
 idempotency.
 
+## Product-governed runner
+
+GmailProductRunner is the server-side bridge from the subscriber connection
+record to the existing connector. A one-shot run is addressed by the
+ProviderAuthorization installation ID and fails closed unless:
+
+- the authorization is ACTIVE, GOOGLE/GMAIL and exactly gmail.metadata;
+- its channel.email binding is active and inbound-only;
+- its referenced neutral-ingress credential is active, unrevoked and in time;
+- the encrypted provider envelope can be opened with the configured key.
+
+The runner decrypts the Google refresh token and neutral-ingress bearer only in
+process memory, exchanges the refresh token for a transient access token, and
+constructs GmailApiReader plus GmailInboundConnector. It does not persist the
+access token and does not accept a manually copied provider token.
+
+The one-shot entry point is scripts/run_gmail_product_once.py. It is still
+feature-gated by GMAIL_PRODUCT_RUNNER_ENABLED=false by default and requires an
+explicit installation ID. This increment does not add an always-on scheduler.
+
 ## Hard boundary
 
 V1 does not:
 
-- provision Google OAuth;
-- persist Google tokens in Attention Router;
+- manually provision the subscriber Gmail connection;
+- persist Google access tokens;
 - enable integration ingress/dispatch flags;
-- deploy a daemon;
+- deploy an always-on Gmail polling daemon;
 - send or reply to e-mail;
 - read/download attachment bytes;
 - grant owner authority from Gmail identity;
@@ -179,16 +199,16 @@ No production Gmail mailbox is modified by these tests.
 
 ## Next safe step
 
-After merge, create a product-governed polling runner around the existing ACTIVE
-ProviderAuthorization created by Connect Gmail. The runner must reuse its
-existing `channel.email` binding and encrypted neutral-ingress bearer; no manual
-provisioning or copied token is part of subscriber UX.
+After merge, run one controlled read-only product canary using the ACTIVE
+ProviderAuthorization already created by Connect Gmail. No manual provisioning
+or copied provider token is part of that path.
 
-Run one controlled read-only canary with:
+The canary should use:
 
-- refresh-token exchange performed server-side in memory;
-- ingress enabled;
+- GMAIL_PRODUCT_RUNNER_ENABLED=true only for the controlled runtime;
+- integration ingress enabled;
 - dispatcher enabled only for the neutral canonical path under test;
+- one explicit installation ID;
 - one bounded INBOX metadata poll;
 - no Gmail mutation;
 - no body/attachment read;
