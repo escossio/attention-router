@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
@@ -85,8 +85,8 @@ class GmailConnectionConflict(GmailConnectionError):
 
 @dataclass(frozen=True, slots=True)
 class GoogleTokenGrant:
-    access_token: str
-    refresh_token: str | None
+    access_token: str = field(repr=False)
+    refresh_token: str | None = field(repr=False)
     granted_scopes: tuple[str, ...]
 
 
