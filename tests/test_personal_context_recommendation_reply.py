@@ -56,12 +56,13 @@ def _delivered_proposal(session, monkeypatch, stamp: datetime):
         "local_transport_outbound",
         _TransportRecorder(),
     )
-    monkeypatch.setattr(
-        services,
-        "now_utc",
-        lambda: stamp + timedelta(minutes=1),
-    )
-    assert services.process_outbox(session, "v1i-worker") == 1
+    with monkeypatch.context() as clock:
+        clock.setattr(
+            services,
+            "now_utc",
+            lambda: stamp + timedelta(minutes=1),
+        )
+        assert services.process_outbox(session, "v1i-worker") == 1
     session.refresh(recommendation_outbox)
     assert recommendation_outbox.status == "DONE"
     return binding, recommendation_outbox
