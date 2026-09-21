@@ -1106,29 +1106,8 @@ def test_processed_dispatch_state_blocks_downgrade_without_export(
         "INTEGRATION_DISPATCH_DOWNGRADE_REQUIRES_DATA_EXPORT"
         in downgrade.stderr
     )
-    with Session() as session:
-        assert session.scalar(
-            text("SELECT version_num FROM alembic_version")
-        ) == "0044_integration_dispatch_v1"
-
-    # 0045 has no dispatch data of its own, so Alembic legitimately removes it
-    # before the 0044 export guard stops the downgrade. Restore the shared
-    # disposable test database to current head so later PostgreSQL tests do not
-    # inherit a deliberately partial downgrade.
-    restore = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "upgrade",
-            "head",
-        ],
-        env={**os.environ, "DATABASE_URL": pg_url},
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert restore.returncode == 0, restore.stderr
+    # The downgrade runs in one PostgreSQL transaction. When the 0044
+    # export guard aborts, the attempted 0045 downgrade rolls back as well.
     with Session() as session:
         assert session.scalar(
             text("SELECT version_num FROM alembic_version")
