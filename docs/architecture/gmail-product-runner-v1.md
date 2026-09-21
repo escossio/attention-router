@@ -25,8 +25,9 @@ canonical slot/instance identity, account fingerprint, and the referenced
 unrevoked inbound credential. Credential validity is inclusive at `not_before`
 and exclusive at `expires_at`; naive database timestamps are interpreted as UTC.
 Each run reloads all three persisted rows without autoflush; an older entry in
-the caller session's identity-map cache cannot authorize a run. This is an admission-time validation;
-neutral ingress separately revalidates its credential when receiving each event.
+the caller session's identity-map cache cannot authorize a run. This is an
+admission-time validation; neutral ingress separately revalidates its credential
+when receiving each event.
 
 `ProviderSecretCipher` is the only decryption boundary. The runner reuses
 `GmailConnectionService`'s AAD calculation, decrypts the refresh token and ingress

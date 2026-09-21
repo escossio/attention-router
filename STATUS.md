@@ -19,6 +19,9 @@ Updated: 2026-09-21
   The full default suite passed: 2099 tests, with 432 PostgreSQL tests excluded
   for the separate distributed gate. Tests used a disposable Python 3.12 image
   with matching dependency pins, network disabled and a read-only source mount.
+- Repository secret scan passed. Published review:
+  [PR #147](https://github.com/escossio/attention-router/pull/147); its current-head
+  checks track Public CI, distributed PostgreSQL and CodeQL certification.
 - No schema, runtime flags, live Gmail, deployment or merge is part of this work.
 - See [Gmail Product Runner](docs/architecture/gmail-product-runner-v1.md).
 
