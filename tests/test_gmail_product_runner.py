@@ -113,11 +113,11 @@ class FakeIngress:
             },
         )
 
-def _seed_connected(session, monkeypatch):
+def _seed_connected(session, monkeypatch, *, now=None):
     monkeypatch.setattr(settings, "gmail_connect_enabled", True)
     monkeypatch.setattr(settings, "provider_authorization_key_b64url", _key())
     monkeypatch.setattr(settings, "integration_ingress_audience", "andy-product")
-    stamp = datetime(2026, 9, 21, 16, 0, tzinfo=UTC)
+    stamp = now or datetime(2026, 9, 21, 16, 0, tzinfo=UTC)
     session.add(
         TenantRow(
             id=TENANT,

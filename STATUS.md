@@ -4,10 +4,41 @@ Updated: 2026-09-21
 
 ## Distributed validation control-plane rule
 
-- Heavy validation is now explicitly assigned to the distributed CI worker pool when the orchestrator is present.
-- The repository agent instructions prohibit silent local fallback for full PostgreSQL, migration-heavy and full-suite validation on the control plane.
+- Heavy validation is explicitly assigned to the distributed CI worker pool when the orchestrator is present.
+- Repository agent instructions prohibit silent local fallback for full PostgreSQL, migration-heavy and full-suite validation on the control plane.
 - `scripts/postgres_test_harness.sh` fails closed on a control-plane host unless an operator explicitly sets the break-glass override.
 - Quick targeted diagnostics, lint and diff checks remain appropriate locally.
+
+## Gmail History Cursor — candidate with concurrency hardening
+
+- Added installation-owned nullable Gmail history cursor and bounded incremental
+  metadata ingestion. First execution seeds the current mailbox baseline without
+  backfill; stale history fails closed. Scheduler/automatic polling remain future work.
+- Account replacement clears the cursor; same-account reconnect preserves it.
+- A concurrency review confirmed a real application-level reconnect deadlock in
+  the first candidate: runner held ProviderAuthorization while ingress waited for
+  Tenant, while reconnect held Tenant waiting for ProviderAuthorization.
+- The candidate now uses one transaction-scoped, immutable Gmail slot advisory
+  gate before authority row locks. Runner acquisition remains fail-fast BUSY;
+  connect/reconnect/replacement/disconnect use the same ordering. Neutral ingress
+  still independently revalidates tenant/binding/credential authority.
+- Pre-hardening regression evidence: 2139 default tests passed with 434 PostgreSQL
+  deselected, and the existing 432-test PostgreSQL suite passed.
+- Concurrency hardening review evidence: 72 targeted Gmail tests passed; four real
+  PostgreSQL contention tests passed (reconnect, account replacement, disconnect,
+  first-connect/rollback), plus two history PostgreSQL tests and one schema test.
+- Final post-hardening distributed PostgreSQL certification passed on the worker
+  pool: 438 tests total in 113 s wall time (CI01 102, CI02 145, CI03 191). The
+  first shard run exposed a pre-existing timing flake in platform findings; the
+  exact test passed three consecutive CI02 retries and the complete distributed
+  rerun then passed. No heavy fallback was executed on the AGT control plane.
+- Ruff/diff checks passed in the concurrency review. No provider/live runtime was
+  touched. Migration `0046_gmail_history_cursor` adds one nullable installation
+  column and refuses downgrade when populated cursor data would be discarded.
+- See [Gmail Product Runner](docs/architecture/gmail-product-runner-v1.md) for
+  transaction ownership, advisory serialization, replay timestamps and manual/
+  incremental overlap limits.
+
 
 ## Gmail Product Runner — governed execution hardening
 
