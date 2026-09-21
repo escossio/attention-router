@@ -21,6 +21,14 @@ flowchart LR
 
 The workers are deliberately heterogeneous. The scheduler does not split by test count. A profiling run captures pytest setup/call/teardown durations, aggregates them by test file, normalizes each worker by measured throughput, and assigns the heaviest files to the worker that minimizes predicted completion time.
 
+## Control-plane workload policy
+
+The control plane coordinates work; it is not a fourth heavy worker. When the distributed tooling is installed, full PostgreSQL, migration-heavy and other long regression gates must be sent to the worker pool instead of being executed locally on the control plane. Local execution is reserved for quick inspection, lint/diff checks and narrowly targeted diagnostics.
+
+Heavy validation requires an exact published commit SHA. If a candidate is still uncommitted, run only the minimum local checks needed to make a safe feature-branch commit, publish that branch, then dispatch the exact SHA with `andy-ci-distributed <40-char-sha> postgres`. Do not silently fall back to a heavy local run when workers are unavailable; report the distributed gate as blocked. An operator may explicitly override this only for break-glass diagnostics.
+
+This policy keeps CI01, CI02 and CI03 doing the work they were provisioned for and prevents the control plane from becoming the bottleneck.
+
 ## Execution model
 
 The control plane accepts only an explicit 40-character Git commit SHA. Every worker independently fetches and verifies that exact commit before creating a disposable detached worktree.

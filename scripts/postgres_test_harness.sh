@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
+# The distributed CI control plane must coordinate heavy PostgreSQL work, not
+# execute it locally. Presence of the orchestrator marks this host as a control
+# plane. Break-glass local execution requires an explicit operator override.
+if command -v andy-ci-distributed >/dev/null 2>&1 \
+   && [ "${ATTENTION_ROUTER_ALLOW_LOCAL_HEAVY_TESTS:-0}" != "1" ]; then
+  cat >&2 <<EOF
+LOCAL_HEAVY_POSTGRES_BLOCKED
+This host has the distributed CI control plane installed.
+Publish the candidate feature-branch SHA and run:
+  andy-ci-distributed <40-char-sha> postgres
+Set ATTENTION_ROUTER_ALLOW_LOCAL_HEAVY_TESTS=1 only for an explicitly authorized break-glass local run.
+EOF
+  exit 78
+fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PG_IMAGE="${POSTGRES_TEST_IMAGE:-postgres:16-alpine}"
 RUNNER_IMAGE="${POSTGRES_TEST_RUNNER_IMAGE:-attention-router-test-runner:public-local}"
