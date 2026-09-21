@@ -9,7 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
-    Json,
+    JSON,
     PrimaryKeyConstraint,
     String,
     UniqueConstraint,
@@ -33,7 +33,7 @@ class ProviderAuthorizationRow(Base):
     provider: Mapped[str] = mapped_column(String(24), nullable=False)
     product: Mapped[str] = mapped_column(String(24), nullable=False)
     provider_account_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    granted_scopes: Mapped[list] = mapped_column(Json, nullable=False)
+    granted_scopes: Mapped[list] = mapped_column(JSON, nullable=False)
     secret_nonce_b64url: Mapped[str] = mapped_column(String(64), nullable=False)
     secret_ciphertext_b64url: Mapped[str] = mapped_column(String(8192), nullable=False)
     secret_key_version: Mapped[str] = mapped_column(String(16), nullable=False)
