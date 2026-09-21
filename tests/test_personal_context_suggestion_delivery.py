@@ -111,7 +111,7 @@ def _delivered_suggestion(session, monkeypatch, stamp: datetime):
     monkeypatch.setattr(
         services,
         "now_utc",
-        lambda: stamp + timedelta(minutes=1),
+        lambda: detected_at + timedelta(minutes=1),
     )
     assert services.process_outbox(session, "v1p-worker") == 1
     session.refresh(outbox)
