@@ -190,3 +190,55 @@ Successful results expose only installation ID, initialization status, record
 count, selected/accepted/duplicate counts and whether the cursor advanced.
 Provider IDs, page tokens and all secrets stay out of result/repr and sanitized
 error chains. No body, snippet, MIME body or attachment bytes are fetched.
+
+
+## Automatic polling scheduler V1
+
+Issue #151 adds a dedicated automatic polling runtime around
+`GmailProductRunner.run_incremental()`. Provider I/O is deliberately kept out of
+the core Attention Router worker loop so a slow Gmail request cannot delay
+decision, outbox, timer or personal-context work.
+
+The runtime entry point is:
+
+```text
+python -m attention_router.infrastructure.gmail_scheduler
+```
+
+It remains inert unless `GMAIL_PRODUCT_SCHEDULER_ENABLED=true`. Enabling the
+scheduler also requires the governed product runner to be enabled; the existing
+runner requirement in turn requires the normal Gmail Connect boundary.
+
+Each cycle first opens a short discovery session, selects a bounded rotating page
+of ACTIVE GOOGLE/GMAIL installation IDs and closes that session before provider
+I/O. Every selected installation then receives its own clean SQLAlchemy session
+and transaction. A successful incremental call is committed immediately.
+BUSY, STALE, authorization races, provider/ingress failures and unexpected
+exceptions roll back only that installation.
+
+Discovery uses the stable installation ID as a rotating cursor and wraps at the
+end of the eligible set. This prevents a fixed first page from starving later
+installations when the account count exceeds the configured batch size.
+
+`GMAIL_PRODUCT_HISTORY_BUSY` is ordinary contention and does not fail the cycle.
+`GMAIL_PRODUCT_HISTORY_STALE` is fail-closed: the scheduler never reseeds a
+cursor. The installation is quarantined for the lifetime of that scheduler
+process so repeated cycles do not hammer the provider with a known stale cursor.
+A process restart may retry the stale installation once; durable stale-history
+recovery remains a separate explicit operational workflow.
+
+The scheduler logs only installation IDs, stable runner error codes and unexpected
+exception type names. It does not log provider exception text, response bodies,
+tokens, decrypted secrets or integration bearers.
+
+| Setting | Default | Contract |
+| --- | ---: | --- |
+| `GMAIL_PRODUCT_SCHEDULER_ENABLED` | `false` | Automatic invocation remains opt-in. |
+| `GMAIL_PRODUCT_SCHEDULER_POLL_INTERVAL_SECONDS` | `30` | Cycle interval, bounded to 1..3600 seconds. |
+| `GMAIL_PRODUCT_SCHEDULER_BATCH_SIZE` | `20` | Active installations selected per cycle, bounded to 1..500. |
+| `GMAIL_PRODUCT_SCHEDULER_MAX_PAGES` | `10` | Gmail history pages per installation/cycle, bounded to 1..10. |
+| `GMAIL_PRODUCT_RUNNER_MAX_RESULTS` | `5` | Existing selected-message bound reused by incremental runs. |
+
+This increment does not add a Compose service, enable runtime flags, deploy the
+scheduler or make a live Gmail call. Deployment topology remains an explicit
+operator decision after repository certification.
