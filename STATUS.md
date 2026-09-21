@@ -12,6 +12,19 @@ Updated: 2026-09-21
 - Combined resume state is recorded in `docs/checkpoints/ANDY_OPS_GMAIL_CHECKPOINT_20260921.md`.
 - PR #150 (`ops: add Andy Ops live supervisor V1`) is merged into main.
 
+## Artifact Store V1 — candidate
+
+- Issue #153 fills the byte-storage boundary intentionally left open by Artifact Plane V0.
+- Added a provider-neutral ArtifactObjectStore protocol and a local immutable content-addressed backend.
+- Physical object paths are tenant scoped through a hashed tenant namespace; source filenames and provider metadata never control paths.
+- Writes are atomic/fsync-backed and existing objects are revalidated before reuse. Reads fail closed on wrong reference, size/hash mismatch, symlink/non-regular object or tenant mismatch.
+- Added stage_artifact_receipt() to persist bytes first and then register the existing canonical Artifact/Receipt identity. PostgreSQL still stores metadata only.
+- Added internal tenant-scoped read by artifact_id; no public download/share route, parsing, OCR, archive extraction or content execution is introduced.
+- Configuration is default-off with a 32 MiB per-object default and a bounded 1 GiB hard configuration ceiling.
+- Local focused validation: Ruff PASS and 74 Artifact Plane/store/integration/config tests PASS.
+- No Gmail provider call, runtime flag enablement, deployment or live filesystem migration is part of this candidate.
+- Next consumer after certification: Gmail attachment download -> Artifact Store staging -> canonical artifact_ids.
+
 ## Distributed validation control-plane rule
 
 - Heavy validation is explicitly assigned to the distributed CI worker pool when the orchestrator is present.
@@ -19,9 +32,9 @@ Updated: 2026-09-21
 - `scripts/postgres_test_harness.sh` fails closed on a control-plane host unless an operator explicitly sets the break-glass override.
 - Quick targeted diagnostics, lint and diff checks remain appropriate locally.
 
-## Gmail automatic polling scheduler V1 — candidate
+## Gmail automatic polling scheduler V1 — merged
 
-- Issue #151 implements automatic invocation of the durable Gmail history primitive
+- PR #152 / issue #151 implement automatic invocation of the durable Gmail history primitive
   without adding provider I/O to the core worker loop.
 - A dedicated scheduler discovers active GOOGLE/GMAIL installations in fair,
   bounded rotating batches, then gives each installation its own clean session

@@ -103,3 +103,73 @@ The intended sequence after this registry is proven is:
 6. user-facing presentation only after the underlying contracts are stable.
 
 This order keeps the project focused on structural primitives before presentation concerns.
+
+## Artifact Store V1
+
+Issue #153 implements the byte-storage boundary that V0 deliberately left open.
+The registry schema is unchanged. Binary payloads still never live in PostgreSQL.
+
+The first backend is a local immutable content-addressed store behind the
+provider-neutral ArtifactObjectStore protocol. Its canonical storage metadata is:
+
+- storage_provider=local-fs-v1;
+- storage_reference=sha256:<content-sha256>.
+
+The storage reference alone is not a global locator. Resolution always also
+requires the artifact's explicit tenant scope. The local backend derives an
+opaque SHA-256 namespace from tenant_id, so identical content in two tenants
+has the same content reference but different physical paths.
+
+Source filenames, MIME types, sender values and provider identifiers never become
+filesystem path components. A local object path is derived only from the trusted
+store root, the hashed tenant namespace and the validated content digest.
+
+Writes are immutable and atomic: data is written to a temporary file in the
+target shard, flushed with fsync, moved into place with os.replace, and the
+directory is then flushed. Existing objects are not trusted merely because a
+path exists; size and SHA-256 are revalidated before reuse.
+
+Reads use the persisted ArtifactRow identity and require an explicit tenant.
+Only AVAILABLE artifacts may be read. The selected backend must match the
+artifact's storage_provider, and every read revalidates storage reference,
+expected size and content SHA-256. Symlinks and non-regular final objects fail
+closed.
+
+### Staging seam
+
+stage_artifact_receipt() is the application boundary for source adapters:
+
+untrusted bytes
+  -> ArtifactObjectStore.put_bytes()
+  -> canonical SHA-256 / size / storage reference
+  -> register_artifact_receipt()
+  -> ArtifactRow + ArtifactReceiptRow
+
+The caller still owns the database transaction. Storage is intentionally written
+before registry persistence so a committed Artifact never points at bytes that
+were never durably stored. If the database transaction later rolls back, an
+unreferenced immutable blob may remain. The staging path must not delete it
+inline because another concurrent receipt may already reference the same
+content. Garbage collection is a separate future reconciliation concern.
+
+### Configuration and safety
+
+The store is default-off:
+
+| Setting | Default | Contract |
+| --- | --- | --- |
+| ARTIFACT_STORE_ENABLED | false | No runtime source uses the store until explicitly enabled. |
+| ARTIFACT_STORE_ROOT | /var/lib/attention-router/artifacts | Must be absolute when enabled. |
+| ARTIFACT_STORE_MAX_BYTES | 33554432 | Per-object bound; configurable from 1 byte to 1 GiB. |
+
+Storage treats content as opaque bytes. MIME type is classification metadata, not
+execution authority. V1 does not parse PDFs, images, spreadsheets, archives or
+documents; it does not run OCR, macros, decompression or embedded content.
+
+V1 also does not expose public download/share URLs. The read seam is internal and
+tenant-scoped. Public/user presentation and grants remain later layers over the
+existing Artifact ResourceRow authority model.
+
+The next source consumer is Gmail attachment ingestion: Gmail may download a
+provider attachment and stage its bytes here, after which the normalized email
+event can reference canonical artifact_ids.
