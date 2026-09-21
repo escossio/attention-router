@@ -249,6 +249,25 @@ class EmailNormalizedAdapter:
                 )
             )
 
+        body_observed = raw_event.get("body_observed", True)
+        attachments_observed = raw_event.get("attachments_observed", True)
+        if type(body_observed) is not bool:
+            raise AdapterNormalizationError("EMAIL_BODY_OBSERVATION_INVALID")
+        if type(attachments_observed) is not bool:
+            raise AdapterNormalizationError("EMAIL_ATTACHMENT_OBSERVATION_INVALID")
+        metadata_sanitized: dict[str, Any] = {
+            "subject_present": bool(raw_event.get("subject")),
+            "body_observed": body_observed,
+            "attachments_observed": attachments_observed,
+            "recipient_count": len(raw_event.get("to") or []),
+        }
+        if body_observed:
+            metadata_sanitized["body_present"] = bool(
+                raw_event.get("body_text") or raw_event.get("body_ref")
+            )
+        if attachments_observed:
+            metadata_sanitized["attachment_count"] = len(receipts)
+
         event = InboundIntegrationEvent(
             tenant_id=tenant_id,
             source=source,
@@ -269,12 +288,7 @@ class EmailNormalizedAdapter:
                 or f"{source.instance_id}:{message_id}"
             ),
             correlation_id=correlation_id,
-            metadata_sanitized={
-                "subject_present": bool(raw_event.get("subject")),
-                "body_present": bool(raw_event.get("body_text") or raw_event.get("body_ref")),
-                "attachment_count": len(receipts),
-                "recipient_count": len(raw_event.get("to") or []),
-            },
+            metadata_sanitized=metadata_sanitized,
         )
         return ChannelAdapterOutput(event=event, artifact_receipts=tuple(receipts))
 

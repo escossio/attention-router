@@ -48,6 +48,9 @@ def _message(
     sender="Synthetic Sender <sender@example.invalid>",
     email_ts="2026-09-20T19:00:00-03:00",
     attachments=(),
+    body="provider private body",
+    body_observed=True,
+    attachments_observed=True,
 ):
     return GmailMessage(
         message_id=message_id,
@@ -57,9 +60,11 @@ def _message(
         cc=(),
         bcc=(),
         subject="Synthetic subject",
-        body="provider private body",
+        body=body,
         email_ts=email_ts,
         attachments=attachments,
+        body_observed=body_observed,
+        attachments_observed=attachments_observed,
     )
 
 
@@ -197,18 +202,54 @@ def test_gmail_connector_poll_treats_200_duplicate_as_success():
         config=_config(),
     )
 
-    result = connector.poll(
-        query="newer_than:1d -in:spam -in:trash",
-        max_results=2,
-    )
+    result = connector.poll(max_results=2)
 
     assert result.selected == 2
     assert result.accepted == 1
     assert result.duplicates == 1
-    assert reader.queries == [
-        ("newer_than:1d -in:spam -in:trash", 2)
-    ]
+    assert reader.queries == [("", 2)]
     assert reader.reads == ["gmail-1", "gmail-2"]
+
+
+def test_gmail_connector_metadata_only_event_does_not_invent_content_observation():
+    sent = []
+
+    def opener(request, timeout):
+        sent.append(json.loads(request.data))
+        return FakeHTTPResponse(
+            202,
+            {
+                "transport_version": "1",
+                "status": "accepted",
+                "receipt_id": "receipt-metadata",
+                "admitted_at": "2026-09-20T22:00:01Z",
+                "correlation_id": "corr-metadata",
+            },
+        )
+
+    message = _message(
+        body="",
+        body_observed=False,
+        attachments_observed=False,
+    )
+    connector = GmailInboundConnector(
+        reader=FakeReader([message]),
+        ingress=IntegrationIngressClient(
+            url=_config().ingress_url,
+            bearer=_config().ingress_bearer,
+            opener=opener,
+        ),
+        config=_config(),
+    )
+
+    response = connector.ingest_message(message)
+
+    assert response.status_code == 202
+    metadata = sent[0]["metadata_sanitized"]
+    assert metadata["body_observed"] is False
+    assert metadata["attachments_observed"] is False
+    assert "body_present" not in metadata
+    assert "attachment_count" not in metadata
 
 
 def test_gmail_connector_fails_closed_on_attachments_until_artifact_plane():

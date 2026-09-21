@@ -10,7 +10,6 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from attention_router.integrations.gmail_connector import (
-    GmailAttachmentSummary,
     GmailConnectorError,
     GmailMessage,
     GmailReader,
@@ -18,6 +17,7 @@ from attention_router.integrations.gmail_connector import (
 
 
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
+GMAIL_METADATA_HEADERS = ("From", "To", "Cc", "Bcc", "Subject", "Date")
 
 
 class GmailAccessTokenProvider(Protocol):
@@ -26,7 +26,7 @@ class GmailAccessTokenProvider(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class StaticGmailAccessTokenProvider:
-    """Canary-oriented token source. The token lifecycle remains external."""
+    """Opaque token source. The token lifecycle remains external."""
 
     token: str
 
@@ -54,11 +54,11 @@ class GmailApiReader(GmailReader):
         self,
         path: str,
         *,
-        query: dict[str, str | int] | None = None,
+        query: dict[str, str | int | tuple[str, ...]] | None = None,
     ) -> dict[str, Any]:
         url = GMAIL_API_BASE + path
         if query:
-            url += "?" + urllib_parse.urlencode(query)
+            url += "?" + urllib_parse.urlencode(query, doseq=True)
         token = self._token_provider.access_token()
         request = urllib_request.Request(
             url,
@@ -105,12 +105,14 @@ class GmailApiReader(GmailReader):
     ) -> tuple[str, ...]:
         if not isinstance(query, str):
             raise TypeError("query must be str")
+        if query.strip():
+            raise GmailConnectorError("GMAIL_METADATA_QUERY_FORBIDDEN")
         if not 1 <= max_results <= 100:
             raise ValueError("GMAIL_POLL_LIMIT_OUT_OF_RANGE")
         payload = self._get_json(
             "/messages",
             query={
-                "q": query,
+                "labelIds": "INBOX",
                 "maxResults": max_results,
                 "includeSpamTrash": "false",
             },
@@ -136,7 +138,10 @@ class GmailApiReader(GmailReader):
             raise ValueError("GMAIL_MESSAGE_ID_REQUIRED")
         payload = self._get_json(
             f"/messages/{urllib_parse.quote(message_id, safe='')}",
-            query={"format": "full"},
+            query={
+                "format": "metadata",
+                "metadataHeaders": GMAIL_METADATA_HEADERS,
+            },
         )
         return _gmail_api_payload_to_message(payload)
 
@@ -199,97 +204,6 @@ def _message_timestamp(
     raise GmailConnectorError("GMAIL_API_MESSAGE_TIMESTAMP_INVALID")
 
 
-def _mime_body_present(root: dict[str, Any]) -> bool:
-    found = False
-
-    def visit(part: Any) -> None:
-        nonlocal found
-        if found or not isinstance(part, dict):
-            return
-        mime_type = part.get("mimeType")
-        body = part.get("body")
-        if (
-            isinstance(mime_type, str)
-            and mime_type.casefold() in {"text/plain", "text/html"}
-            and isinstance(body, dict)
-        ):
-            size = body.get("size")
-            data = body.get("data")
-            if (
-                isinstance(size, int)
-                and size > 0
-            ) or (
-                isinstance(data, str)
-                and bool(data)
-            ):
-                found = True
-                return
-        children = part.get("parts")
-        if isinstance(children, list):
-            for child in children:
-                visit(child)
-
-    visit(root)
-    return found
-
-
-def _attachment_summaries(
-    root: dict[str, Any],
-) -> tuple[GmailAttachmentSummary, ...]:
-    found: list[GmailAttachmentSummary] = []
-
-    def visit(part: Any) -> None:
-        if not isinstance(part, dict):
-            return
-        body = part.get("body")
-        filename = part.get("filename")
-        mime_type = part.get("mimeType")
-        if isinstance(body, dict):
-            attachment_id = body.get("attachmentId")
-            size = body.get("size")
-            if (
-                isinstance(attachment_id, str)
-                and attachment_id
-            ) or (
-                isinstance(filename, str)
-                and filename.strip()
-            ):
-                found.append(
-                    GmailAttachmentSummary(
-                        attachment_id=(
-                            attachment_id
-                            if isinstance(attachment_id, str)
-                            and attachment_id
-                            else None
-                        ),
-                        filename=(
-                            filename.strip()
-                            if isinstance(filename, str)
-                            and filename.strip()
-                            else "unnamed-attachment"
-                        ),
-                        mime_type=(
-                            mime_type
-                            if isinstance(mime_type, str)
-                            and mime_type
-                            else "application/octet-stream"
-                        ),
-                        size_bytes=(
-                            int(size)
-                            if isinstance(size, int) and size >= 0
-                            else None
-                        ),
-                    )
-                )
-        children = part.get("parts")
-        if isinstance(children, list):
-            for child in children:
-                visit(child)
-
-    visit(root)
-    return tuple(found)
-
-
 def _gmail_api_payload_to_message(
     payload: dict[str, Any],
 ) -> GmailMessage:
@@ -306,7 +220,6 @@ def _gmail_api_payload_to_message(
     if not sender:
         raise GmailConnectorError("GMAIL_API_SENDER_MISSING")
 
-    root = payload["payload"]
     return GmailMessage(
         message_id=message_id,
         thread_id=thread_id,
@@ -315,15 +228,17 @@ def _gmail_api_payload_to_message(
         cc=_recipient_values(headers.get("cc")),
         bcc=_recipient_values(headers.get("bcc")),
         subject=headers.get("subject", ""),
-        # Structural marker only; no body/snippet text crosses this boundary.
-        body="present" if _mime_body_present(root) else "",
+        body="",
         email_ts=_message_timestamp(payload, headers),
-        attachments=_attachment_summaries(root),
+        attachments=(),
+        body_observed=False,
+        attachments_observed=False,
     )
 
 
 __all__ = [
     "GMAIL_API_BASE",
+    "GMAIL_METADATA_HEADERS",
     "GmailAccessTokenProvider",
     "GmailApiReader",
     "StaticGmailAccessTokenProvider",
