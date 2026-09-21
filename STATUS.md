@@ -33,8 +33,9 @@ Updated: 2026-09-21
 - Artifact bytes and receipts commit in an independent transaction before Neutral Ingress. Cursor rollback therefore cannot erase already-admitted artifact identity; retries resolve to the same canonical `artifact_id`.
 - Canonical e-mail events carry deduplicated `artifact_ids` only. Provider attachment ids, storage providers/references, filenames and bytes do not enter the event payload.
 - All new runtime controls remain default-off. No live OAuth re-consent, Gmail call, Artifact Store enablement or deployment is part of this candidate.
-- Synthetic validation includes metadata-regression coverage, exact readonly authority, bounded provider parsing/download, stable replay, runner E2E, and incremental cursor rollback with durable artifact proof.
-- Local final gate: Ruff PASS, compileall PASS and 333 focused Gmail/Artifact/Integration/config tests PASS. PostgreSQL-heavy certification remains delegated to CI01/CI02/CI03.
+- Synthetic validation includes metadata-regression coverage, exact readonly authority, bounded provider parsing/download, ambiguous externalized-body rejection, stable replay, runner E2E, and incremental cursor rollback with durable artifact proof.
+- Pre-hardening focused gate: Ruff PASS, compileall PASS and 333 Gmail/Artifact/Integration/config tests PASS.
+- Post-hardening gate after ambiguous externalized-body rejection: Ruff PASS, compileall PASS and 289 affected-surface tests PASS. PostgreSQL-heavy/full certification remains delegated to CI01/CI02/CI03.
 
 ## Distributed validation control-plane rule
 

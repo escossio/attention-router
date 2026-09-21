@@ -16,8 +16,8 @@ Android Connect Gmail -> GmailConnectionService -> ProviderAuthorization
 caller supplies an SQLAlchemy session; the runner does not commit, provision an
 installation or accept manually copied provider/integration tokens. The existing
 one-shot script is an operator entry point, not a prerequisite for subscribers.
-Scheduling and automatic invocation remain future work; the durable incremental
-history primitive is described below.
+Automatic invocation is provided by the governed Gmail scheduler merged in
+PR #152; the durable incremental history primitive is described below.
 
 ## Authority and secrets
 
@@ -99,6 +99,14 @@ must select the address reachable from the runner's network. Canary
 by the product runner. No subscriber configuration or second provisioning flow
 is introduced.
 
+Attachment ingestion is separately default-off. `GMAIL_ATTACHMENT_INGESTION_ENABLED`
+requires the product runner and Artifact Store. Count, decoded bytes per attachment,
+decoded bytes per message and MIME depth are independently bounded by
+`GMAIL_ATTACHMENT_MAX_COUNT`, `GMAIL_ATTACHMENT_MAX_BYTES`,
+`GMAIL_ATTACHMENT_MAX_TOTAL_BYTES` and `GMAIL_ATTACHMENT_MAX_MIME_DEPTH`.
+The per-attachment bound cannot exceed the Artifact Store object bound when the
+feature is enabled.
+
 ## Stable failures
 
 | Code | Meaning |
@@ -123,9 +131,10 @@ No real Gmail, live runtime, deployment or merge is required for these tests.
 ## Durable incremental history (0046)
 
 `GmailProductRunner.run_incremental(session, installation_id=..., max_results=...,
-max_pages=10)` adds one bounded execution primitive. `run_once` retains its manual
-INBOX listing behavior. No scheduler, daemon or automatic polling is implemented.
-Android Connect Gmail remains the sole subscriber installation flow.
+max_pages=10)` is the bounded execution primitive used by the automatic scheduler.
+`run_once` retains its manual INBOX listing behavior. Android Connect Gmail remains
+the sole subscriber installation flow. The scheduler is documented later in this
+file and remains runtime-gated/default-off.
 
 The nullable `provider_authorizations.gmail_history_id` belongs to the exact
 installation row, with its tenant, human and account identity. Existing rows
