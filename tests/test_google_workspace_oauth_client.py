@@ -70,19 +70,38 @@ def _assert_safe_record(caplog, *, reason, google_status, http_status=403):
 
 
 @pytest.mark.parametrize(
-    ("error_fields", "expected_reason"),
+    ("error_fields", "expected_reason", "expected_error"),
     [
-        ({"errors": [{"reason": "accessNotConfigured"}]}, "accessNotConfigured"),
-        ({"errors": [{"reason": "insufficientPermissions"}]}, "insufficientPermissions"),
-        ({"errors": [{"reason": "domainPolicy"}]}, "domainPolicy"),
-        ({"errors": [{"reason": "rateLimitExceeded"}]}, "rateLimitExceeded"),
+        (
+            {"errors": [{"reason": "accessNotConfigured"}]},
+            "accessNotConfigured", GmailAuthorizationRejected,
+        ),
+        (
+            {"errors": [{"reason": "insufficientPermissions"}]},
+            "insufficientPermissions", GmailAuthorizationRejected,
+        ),
+        (
+            {"errors": [{"reason": "domainPolicy"}]},
+            "domainPolicy", GmailAuthorizationRejected,
+        ),
+        (
+            {"errors": [{"reason": "rateLimitExceeded"}]},
+            "rateLimitExceeded", GmailAuthorizationRejected,
+        ),
         (
             {"details": [{
                 "@type": "type.googleapis.com/google.rpc.ErrorInfo",
                 "reason": "SERVICE_DISABLED",
                 "metadata": {"consumer": SECRET_MARKER + "-project-id"},
             }]},
-            "SERVICE_DISABLED",
+            "SERVICE_DISABLED", GmailProviderUnavailable,
+        ),
+        (
+            {"errors": [{"reason": "accessNotConfigured"}], "details": [{
+                "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                "reason": "SERVICE_DISABLED",
+            }]},
+            "SERVICE_DISABLED,accessNotConfigured", GmailProviderUnavailable,
         ),
         (
             {"errors": [{"reason": "insufficientPermissions"}], "details": [{
@@ -90,11 +109,12 @@ def _assert_safe_record(caplog, *, reason, google_status, http_status=403):
                 "reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
             }]},
             "ACCESS_TOKEN_SCOPE_INSUFFICIENT,insufficientPermissions",
+            GmailAuthorizationRejected,
         ),
     ],
 )
 def test_profile_logs_only_canonical_error_metadata(
-    oauth_client, monkeypatch, caplog, error_fields, expected_reason,
+    oauth_client, monkeypatch, caplog, error_fields, expected_reason, expected_error,
 ):
     _reject_profile(monkeypatch, body=json.dumps({"error": {
         "status": "PERMISSION_DENIED",
@@ -102,13 +122,32 @@ def test_profile_logs_only_canonical_error_metadata(
         **error_fields,
     }}).encode())
 
-    with pytest.raises(GmailAuthorizationRejected) as caught:
+    with pytest.raises(expected_error) as caught:
         oauth_client.gmail_profile(SECRET_MARKER + "-access-token")
 
-    assert caught.value.code == "GMAIL_AUTHORIZATION_REJECTED"
+    assert caught.value.code == expected_error.code
     assert caught.value.__cause__ is None
     _assert_safe_record(
         caplog, reason=expected_reason, google_status="PERMISSION_DENIED",
+    )
+
+
+def test_profile_service_disabled_does_not_reclassify_http_401(
+    oauth_client, monkeypatch, caplog,
+):
+    _reject_profile(monkeypatch, http_status=401, body=json.dumps({"error": {
+        "status": "UNAUTHENTICATED",
+        "details": [{
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            "reason": "SERVICE_DISABLED",
+        }],
+    }}).encode())
+
+    with pytest.raises(GmailAuthorizationRejected):
+        oauth_client.gmail_profile(SECRET_MARKER + "-access-token")
+
+    _assert_safe_record(
+        caplog, reason="SERVICE_DISABLED", google_status="UNAUTHENTICATED", http_status=401,
     )
 
 
@@ -173,7 +212,7 @@ def test_profile_never_logs_unknown_provider_text(oauth_client, monkeypatch, cap
         "errors": [{"reason": "accessNotConfigured\n" + SECRET_MARKER}],
         "details": [{
             "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-            "reason": SECRET_MARKER + "-refresh-token",
+            "reason": "SERVICE_DISABLED " + SECRET_MARKER + "-refresh-token",
             "metadata": {"authorization_code": SECRET_MARKER + "-code"},
         }, {
             "@type": "untrusted-type",

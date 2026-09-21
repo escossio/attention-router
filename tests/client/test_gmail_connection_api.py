@@ -9,6 +9,7 @@ from attention_router.api.v1.gmail_connection import (
 from attention_router.application.gmail_connection import (
     GMAIL_METADATA_SCOPE,
     GmailConnectionView,
+    GmailProviderUnavailable,
 )
 
 
@@ -125,3 +126,22 @@ def test_gmail_product_api_never_echoes_authorization_code(session):
 
     assert response.status_code == 200
     assert secret not in response.text
+
+
+def test_gmail_provider_unavailable_uses_existing_503_contract(session, monkeypatch):
+    client, service = _client(session)
+
+    def unavailable(session, *, session_token, authorization_code):
+        raise GmailProviderUnavailable()
+
+    monkeypatch.setattr(service, "connect", unavailable)
+    response = client.post(
+        "/api/v1/integrations/gmail",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        json={"authorization_code": "synthetic-sensitive-authorization-code"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"code": "GMAIL_PROVIDER_UNAVAILABLE"}
+    assert "synthetic-sensitive-authorization-code" not in response.text
+    assert TOKEN not in response.text

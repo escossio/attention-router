@@ -235,6 +235,8 @@ class GoogleWorkspaceOAuthClient:
                     "reason": reason,
                 },
             )
+            if exc.code == 403 and "SERVICE_DISABLED" in reason.split(","):
+                raise GmailProviderUnavailable() from None
             if exc.code in {401, 403}:
                 raise GmailAuthorizationRejected() from None
             raise GmailProviderUnavailable() from None
