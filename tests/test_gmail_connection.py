@@ -3,10 +3,13 @@ from __future__ import annotations
 import base64
 from datetime import UTC, datetime
 
+import pytest
+
 from sqlalchemy import select
 
 from attention_router.application.gmail_connection import (
     GMAIL_METADATA_SCOPE,
+    GMAIL_READONLY_SCOPE,
     GmailAuthorizationRejected,
     GmailConnectionService,
     GoogleGmailProfile,
@@ -294,3 +297,72 @@ def test_account_change_disables_old_binding_and_disconnect_revokes_provider(
         IntegrationCredentialRow,
         current.integration_credential_id,
     ).revoked is True
+
+
+def test_connect_accepts_exact_readonly_scope(
+    session,
+    monkeypatch,
+):
+    _seed(session)
+    oauth = FakeOAuth(granted_scopes=(GMAIL_READONLY_SCOPE,))
+    service = _service(monkeypatch, oauth)
+
+    result = service.connect(
+        session,
+        session_token="cst_" + "t" * 43,
+        authorization_code="server-auth-code",
+    )
+    session.commit()
+
+    assert result.status == "CONNECTED"
+    assert result.granted_scopes == (GMAIL_READONLY_SCOPE,)
+    row = session.get(ProviderAuthorizationRow, result.installation_id)
+    assert row.granted_scopes == [GMAIL_READONLY_SCOPE]
+
+
+def test_reconnect_can_upgrade_metadata_to_readonly_without_new_refresh(
+    session,
+    monkeypatch,
+):
+    _seed(session)
+    oauth = FakeOAuth(granted_scopes=(GMAIL_METADATA_SCOPE,))
+    service = _service(monkeypatch, oauth)
+    token = "cst_" + "t" * 43
+
+    first = service.connect(
+        session,
+        session_token=token,
+        authorization_code="server-auth-code",
+    )
+    session.commit()
+
+    oauth.granted_scopes = (GMAIL_READONLY_SCOPE,)
+    oauth.refresh_token = None
+    upgraded = service.connect(
+        session,
+        session_token=token,
+        authorization_code="server-auth-code",
+    )
+    session.commit()
+
+    assert upgraded.installation_id == first.installation_id
+    assert upgraded.granted_scopes == (GMAIL_READONLY_SCOPE,)
+    row = session.get(ProviderAuthorizationRow, upgraded.installation_id)
+    assert row.granted_scopes == [GMAIL_READONLY_SCOPE]
+
+
+def test_connect_rejects_combined_metadata_and_readonly_scope(
+    session,
+    monkeypatch,
+):
+    oauth = FakeOAuth(
+        granted_scopes=(GMAIL_METADATA_SCOPE, GMAIL_READONLY_SCOPE)
+    )
+    service = _service(monkeypatch, oauth)
+
+    with pytest.raises(GmailAuthorizationRejected):
+        service.connect(
+            session,
+            session_token="cst_" + "t" * 43,
+            authorization_code="server-auth-code",
+        )

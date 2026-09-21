@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 import json
 from urllib import error as urllib_error
+from urllib import parse as urllib_parse
 
 import pytest
 
@@ -12,7 +13,10 @@ from attention_router.integrations.gmail_api_reader import (
     GmailApiReader,
     StaticGmailAccessTokenProvider,
 )
-from attention_router.integrations.gmail_connector import GmailConnectorError
+from attention_router.integrations.gmail_connector import (
+    GmailAttachmentSummary,
+    GmailConnectorError,
+)
 
 
 class FakeResponse:
@@ -282,3 +286,149 @@ def test_static_token_provider_never_accepts_blank_token():
         match="GMAIL_ACCESS_TOKEN_UNAVAILABLE",
     ):
         StaticGmailAccessTokenProvider(" ").access_token()
+
+
+def _attachment_structure(*, include_forbidden_data=False):
+    attachment_body = {
+        "attachmentId": "provider-attachment-1",
+        "size": 5,
+    }
+    if include_forbidden_data:
+        attachment_body["data"] = "aGVsbG8"
+    return {
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "filename": "",
+            "body": {"size": 0},
+            "parts": [
+                {
+                    "mimeType": "text/plain",
+                    "filename": "",
+                    "body": {"size": 12},
+                },
+                {
+                    "mimeType": "image/png",
+                    "filename": "synthetic.png",
+                    "body": attachment_body,
+                },
+            ],
+        }
+    }
+
+
+def test_reader_discovers_attachment_structure_without_body_data():
+    calls = []
+
+    def opener(request, timeout):
+        calls.append(request.full_url)
+        if "format=metadata" in request.full_url:
+            return FakeResponse(200, _full_message(attachment=True))
+        return FakeResponse(200, _attachment_structure())
+
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token-123"),
+        opener=opener,
+    )
+    message = reader.read_message_with_attachments(
+        "gmail-message-1",
+        max_attachments=4,
+        max_mime_depth=4,
+    )
+
+    assert message.body == ""
+    assert message.body_observed is False
+    assert message.attachments_observed is True
+    assert message.attachments == (
+        GmailAttachmentSummary(
+            attachment_id="provider-attachment-1",
+            filename="synthetic.png",
+            mime_type="image/png",
+            size_bytes=5,
+        ),
+    )
+    assert len(calls) == 2
+    structure_url = calls[1]
+    assert "format=full" in structure_url
+    decoded_url = urllib_parse.unquote(structure_url)
+    assert "snippet" not in decoded_url
+    assert "body(data" not in decoded_url
+    assert "body(attachmentId,size)" in decoded_url
+
+def test_reader_downloads_bounded_base64url_attachment():
+    calls = []
+
+    def opener(request, timeout):
+        calls.append(request.full_url)
+        return FakeResponse(
+            200,
+            {"size": 5, "data": "aGVsbG8"},
+        )
+
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token-123"),
+        opener=opener,
+    )
+    data = reader.read_attachment(
+        "gmail-message-1",
+        "provider-attachment-1",
+        expected_size=5,
+        max_bytes=64,
+    )
+
+    assert data == b"hello"
+    assert len(calls) == 1
+    assert (
+        "/messages/gmail-message-1/attachments/provider-attachment-1"
+        in calls[0]
+    )
+    assert "fields=size%2Cdata" in calls[0]
+
+
+def test_reader_rejects_provider_body_data_during_attachment_discovery():
+    def opener(request, timeout):
+        if "format=metadata" in request.full_url:
+            return FakeResponse(200, _full_message(attachment=True))
+        return FakeResponse(
+            200,
+            _attachment_structure(include_forbidden_data=True),
+        )
+
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=opener,
+    )
+
+    with pytest.raises(
+        GmailConnectorError,
+        match="GMAIL_MESSAGE_BODY_DATA_FORBIDDEN",
+    ):
+        reader.read_message_with_attachments(
+            "gmail-message-1",
+            max_attachments=4,
+            max_mime_depth=4,
+        )
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"size": 4, "data": "aGVsbG8"},
+        {"size": 5, "data": "***not-base64url***"},
+        {"size": "5", "data": "aGVsbG8"},
+    ],
+)
+def test_reader_rejects_invalid_attachment_payload(payload):
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=lambda _request, timeout: FakeResponse(200, payload),
+    )
+
+    with pytest.raises(
+        GmailConnectorError,
+        match="GMAIL_ATTACHMENT_",
+    ):
+        reader.read_attachment(
+            "gmail-message-1",
+            "provider-attachment-1",
+            expected_size=5,
+            max_bytes=64,
+        )

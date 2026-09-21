@@ -25,6 +25,19 @@ class GmailAttachmentSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class GmailStagedAttachment:
+    attachment_id: str
+    artifact_id: str
+    external_receipt_id: str
+    content_sha256: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+    storage_provider: str
+    storage_reference: str
+
+
+@dataclass(frozen=True, slots=True)
 class GmailMessage:
     message_id: str
     thread_id: str | None
@@ -70,6 +83,12 @@ class GmailReader(Protocol):
     ) -> tuple[str, ...]: ...
 
     def read_message(self, message_id: str) -> GmailMessage: ...
+
+
+GmailMessagePreparer = Callable[
+    [str],
+    tuple[GmailMessage, tuple[GmailStagedAttachment, ...]],
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +184,11 @@ def _utc_timestamp(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def gmail_message_to_normalized_input(message: GmailMessage) -> dict[str, Any]:
+def gmail_message_to_normalized_input(
+    message: GmailMessage,
+    *,
+    staged_attachments: tuple[GmailStagedAttachment, ...] = (),
+) -> dict[str, Any]:
     sender_name, sender_address = parseaddr(message.sender)
     sender_address = sender_address.strip()
     if (
@@ -178,6 +201,42 @@ def gmail_message_to_normalized_input(message: GmailMessage) -> dict[str, Any]:
         raise GmailConnectorError("GMAIL_SENDER_INVALID")
     occurred_at = _utc_timestamp(message.email_ts)
 
+    if staged_attachments:
+        if len(staged_attachments) != len(message.attachments):
+            raise GmailConnectorError("GMAIL_STAGED_ATTACHMENT_MISMATCH")
+        normalized_attachments = []
+        for summary, staged in zip(message.attachments, staged_attachments, strict=True):
+            if (
+                summary.attachment_id != staged.attachment_id
+                or summary.mime_type != staged.mime_type
+                or summary.size_bytes != staged.size_bytes
+            ):
+                raise GmailConnectorError("GMAIL_STAGED_ATTACHMENT_MISMATCH")
+            normalized_attachments.append(
+                {
+                    "attachment_id": staged.attachment_id,
+                    "artifact_id": staged.artifact_id,
+                    "external_receipt_id": staged.external_receipt_id,
+                    "content_sha256": staged.content_sha256,
+                    "original_filename": staged.filename,
+                    "artifact_kind": _artifact_kind(staged.mime_type),
+                    "mime_type": staged.mime_type,
+                    "size_bytes": staged.size_bytes,
+                    "storage_provider": staged.storage_provider,
+                    "storage_reference": staged.storage_reference,
+                }
+            )
+    else:
+        normalized_attachments = [
+            {
+                "attachment_id": attachment.attachment_id,
+                "original_filename": attachment.filename,
+                "mime_type": attachment.mime_type,
+                "size_bytes": attachment.size_bytes,
+            }
+            for attachment in message.attachments
+        ]
+
     return {
         "message_id": message.message_id,
         "thread_id": message.thread_id or message.message_id,
@@ -189,23 +248,25 @@ def gmail_message_to_normalized_input(message: GmailMessage) -> dict[str, Any]:
         "cc": list(message.cc),
         "bcc": list(message.bcc),
         "subject": message.subject,
-        # The body is intentionally used only to derive body_present in the
-        # provider-neutral adapter. It is not serialized into the V1 event.
         "body_text": message.body,
         "body_observed": message.body_observed,
         "attachments_observed": message.attachments_observed,
         "message_ref": f"gmail:{message.message_id}",
         "sent_at": occurred_at,
-        "attachments": [
-            {
-                "attachment_id": attachment.attachment_id,
-                "original_filename": attachment.filename,
-                "mime_type": attachment.mime_type,
-                "size_bytes": attachment.size_bytes,
-            }
-            for attachment in message.attachments
-        ],
+        "attachments": normalized_attachments,
     }
+
+
+def _artifact_kind(mime_type: str) -> str:
+    normalized = mime_type.casefold()
+    if normalized.startswith("image/"):
+        return "IMAGE"
+    if normalized.startswith("audio/"):
+        return "AUDIO"
+    if normalized.startswith("video/"):
+        return "VIDEO"
+    return "DOCUMENT"
+
 
 
 class GmailInboundConnector:
@@ -217,20 +278,41 @@ class GmailInboundConnector:
         reader: GmailReader,
         ingress: IntegrationIngressClient,
         config: GmailConnectorConfig,
+        message_preparer: GmailMessagePreparer | None = None,
     ):
         self._reader = reader
         self._ingress = ingress
         self._config = config
+        self._message_preparer = message_preparer
         self._adapter = EmailNormalizedAdapter()
 
+    @property
+    def attachment_mode(self) -> bool:
+        return self._message_preparer is not None
+
+    def prepare_message(
+        self,
+        message_id: str,
+    ) -> tuple[GmailMessage, tuple[GmailStagedAttachment, ...]]:
+        if self._message_preparer is not None:
+            return self._message_preparer(message_id)
+        return self._reader.read_message(message_id), ()
+
     def ingest_message(
-        self, message: GmailMessage, *, received_at: datetime | None = None
+        self,
+        message: GmailMessage,
+        *,
+        staged_attachments: tuple[GmailStagedAttachment, ...] = (),
+        received_at: datetime | None = None,
     ) -> IntegrationIngressResponse:
-        normalized = gmail_message_to_normalized_input(message)
-        # Attachment bytes/receipts require the Artifact Plane upload boundary.
-        # Until that exists, fail closed rather than dropping attachment identity.
-        if normalized["attachments"]:
+        normalized = gmail_message_to_normalized_input(
+            message,
+            staged_attachments=staged_attachments,
+        )
+        if message.attachments and not staged_attachments:
             raise GmailConnectorError("GMAIL_ATTACHMENTS_REQUIRE_ARTIFACT_PLANE")
+        if staged_attachments and not message.attachments:
+            raise GmailConnectorError("GMAIL_STAGED_ATTACHMENT_MISMATCH")
 
         output = self._adapter.normalize(
             normalized,
@@ -258,8 +340,10 @@ class GmailInboundConnector:
         accepted = 0
         duplicates = 0
         for message_id in message_ids:
+            message, staged = self.prepare_message(message_id)
             response = self.ingest_message(
-                self._reader.read_message(message_id)
+                message,
+                staged_attachments=staged,
             )
             if response.body["status"] == "accepted":
                 accepted += 1
@@ -274,6 +358,7 @@ class GmailInboundConnector:
 
 __all__ = [
     "GmailAttachmentSummary",
+    "GmailStagedAttachment",
     "GmailConnectorConfig",
     "GmailConnectorError",
     "GmailInboundConnector",

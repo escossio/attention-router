@@ -9,6 +9,7 @@ import pytest
 
 from attention_router.application.gmail_connection import (
     GMAIL_METADATA_SCOPE,
+    GMAIL_READONLY_SCOPE,
     GmailAuthorizationRejected,
     GmailProviderUnavailable,
     GoogleGmailProfile,
@@ -259,3 +260,63 @@ def test_token_exchange_and_profile_success_preserve_contract(
     assert requests[1].get_header("Authorization") == f"Bearer {access_token}"
     assert not responses
     assert not caplog.records
+
+
+def test_token_exchange_accepts_exact_readonly_scope(
+    oauth_client,
+    monkeypatch,
+):
+    access_token = SECRET_MARKER + "-readonly-access-token"
+    refresh_token = SECRET_MARKER + "-readonly-refresh-token"
+    authorization_code = SECRET_MARKER + "-readonly-code"
+
+    def urlopen(request, *, timeout):
+        assert request.full_url == oauth_client.TOKEN_URL
+        return BytesIO(
+            json.dumps(
+                {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "scope": GMAIL_READONLY_SCOPE,
+                }
+            ).encode()
+        )
+
+    monkeypatch.setattr(
+        "attention_router.application.gmail_connection.urllib_request.urlopen",
+        urlopen,
+    )
+    grant = oauth_client.exchange_authorization_code(authorization_code)
+
+    assert grant == GoogleTokenGrant(
+        access_token,
+        refresh_token,
+        (GMAIL_READONLY_SCOPE,),
+    )
+
+
+def test_token_exchange_rejects_combined_allowed_scopes(
+    oauth_client,
+    monkeypatch,
+):
+    def urlopen(request, *, timeout):
+        return BytesIO(
+            json.dumps(
+                {
+                    "access_token": "access-token",
+                    "refresh_token": "refresh-token",
+                    "scope": (
+                        GMAIL_METADATA_SCOPE + " " + GMAIL_READONLY_SCOPE
+                    ),
+                }
+            ).encode()
+        )
+
+    monkeypatch.setattr(
+        "attention_router.application.gmail_connection.urllib_request.urlopen",
+        urlopen,
+    )
+    with pytest.raises(GmailAuthorizationRejected):
+        oauth_client.exchange_authorization_code(
+            SECRET_MARKER + "-authorization-code"
+        )

@@ -5,8 +5,14 @@ import traceback
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
 
-from attention_router.application.gmail_connection import GmailConnectionService, GoogleGmailProfile
+from attention_router.application.gmail_connection import (
+    GMAIL_READONLY_SCOPE,
+    GmailConnectionService,
+    GoogleGmailProfile,
+)
 from attention_router.application.gmail_history import (
     GmailProductHistoryRecordTooLarge, GmailProductHistoryStale,
 )
@@ -14,9 +20,15 @@ from attention_router.application.gmail_product_runner import (
     GmailProductRunner, GmailProductRunnerError,
 )
 from attention_router.config import settings
+from attention_router.infrastructure.artifact_models import ArtifactReceiptRow, ArtifactRow
 from attention_router.infrastructure.provider_authorization_models import ProviderAuthorizationRow
 from attention_router.integrations.gmail_api_reader import GmailApiReader, StaticGmailAccessTokenProvider
-from attention_router.integrations.gmail_connector import GmailConnectorError, IntegrationIngressResponse
+from attention_router.integrations.gmail_connector import (
+    GmailAttachmentSummary,
+    GmailConnectorError,
+    GmailMessage,
+    IntegrationIngressResponse,
+)
 from test_gmail_product_runner import (
     _enabled, _seed_connected, FakeClientSessions, FakeIngress, FakeOAuth,
     FakeReader, FakeRefresher, SESSION_TOKEN,
@@ -356,3 +368,120 @@ def test_incremental_authority_checks(harness, session, monkeypatch, mutation):
     with pytest.raises(GmailProductRunnerError):
         run()
     assert not reader.calls and not reader.seeds and not ingress.payloads
+
+
+class ReadonlyHistoryReader(Reader):
+    def __init__(self):
+        super().__init__()
+        self.payload = b"history attachment"
+
+    def read_message_with_attachments(
+        self,
+        message_id,
+        *,
+        max_attachments,
+        max_mime_depth,
+    ):
+        assert max_attachments >= 1
+        assert max_mime_depth >= 1
+        return GmailMessage(
+            message_id=message_id,
+            thread_id="gmail-thread-1",
+            sender="Sender <sender@example.invalid>",
+            to=("owner@example.invalid",),
+            cc=(),
+            bcc=(),
+            subject="History attachment",
+            body="",
+            email_ts=NOW.isoformat(),
+            attachments=(
+                GmailAttachmentSummary(
+                    attachment_id="history-att-1",
+                    filename="history.pdf",
+                    mime_type="application/pdf",
+                    size_bytes=len(self.payload),
+                ),
+            ),
+            body_observed=False,
+            attachments_observed=True,
+        )
+
+    def read_attachment(
+        self,
+        message_id,
+        attachment_id,
+        *,
+        expected_size,
+        max_bytes,
+    ):
+        assert message_id
+        assert attachment_id == "history-att-1"
+        assert expected_size == len(self.payload)
+        assert max_bytes >= expected_size
+        return self.payload
+
+
+def test_incremental_readonly_artifact_survives_cursor_rollback(
+    session,
+    monkeypatch,
+    tmp_path,
+):
+    installation = _seed_connected(session, monkeypatch)
+    _enabled(monkeypatch)
+    monkeypatch.setattr(settings, "artifact_store_enabled", True)
+    monkeypatch.setattr(settings, "artifact_store_root", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(settings, "artifact_store_max_bytes", 4096)
+    monkeypatch.setattr(settings, "gmail_attachment_ingestion_enabled", True)
+    monkeypatch.setattr(settings, "gmail_attachment_max_count", 4)
+    monkeypatch.setattr(settings, "gmail_attachment_max_bytes", 1024)
+    monkeypatch.setattr(settings, "gmail_attachment_max_total_bytes", 2048)
+    monkeypatch.setattr(settings, "gmail_attachment_max_mime_depth", 4)
+
+    row = session.get(ProviderAuthorizationRow, installation)
+    row.granted_scopes = [GMAIL_READONLY_SCOPE]
+    session.commit()
+
+    reader = ReadonlyHistoryReader()
+    ingress = FakeIngress("synthetic-bearer")
+    artifact_sessions = sessionmaker(
+        bind=session.get_bind(),
+        expire_on_commit=False,
+        future=True,
+    )
+    runner = GmailProductRunner(
+        settings=settings,
+        token_refresher=FakeRefresher(),
+        reader_factory=lambda token: reader,
+        ingress_factory=lambda bearer: ingress,
+        artifact_session_factory=artifact_sessions,
+    )
+
+    initialized = runner.run_incremental(
+        session,
+        installation_id=installation,
+        now=NOW,
+    )
+    assert initialized.initialized
+    session.commit()
+    assert row.gmail_history_id == "10"
+
+    result = runner.run_incremental(
+        session,
+        installation_id=installation,
+        now=NOW,
+    )
+    assert result.accepted == 1
+    assert row.gmail_history_id == "20"
+    artifact_id = ingress.payloads[0]["artifact_ids"][0]
+
+    session.rollback()
+    session.refresh(row)
+    assert row.gmail_history_id == "10"
+    artifact = session.get(ArtifactRow, artifact_id)
+    receipt = session.scalar(
+        select(ArtifactReceiptRow).where(
+            ArtifactReceiptRow.artifact_id == artifact_id
+        )
+    )
+    assert artifact is not None
+    assert receipt is not None

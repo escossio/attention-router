@@ -6,9 +6,12 @@ import json
 from urllib import parse as urllib_parse
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
 
 from attention_router.application.gmail_connection import (
     GMAIL_METADATA_SCOPE,
+    GMAIL_READONLY_SCOPE,
     GmailConnectionService,
     GoogleGmailProfile,
     GoogleTokenGrant,
@@ -20,10 +23,15 @@ from attention_router.application.gmail_product_runner import (
     GoogleRefreshAccessTokenClient,
 )
 from attention_router.config import settings
+from attention_router.infrastructure.artifact_models import ArtifactReceiptRow, ArtifactRow
 from attention_router.infrastructure.human_identity_models import HumanIdentityRow
 from attention_router.infrastructure.models import IntegrationCredentialRow, TenantRow
 from attention_router.infrastructure.provider_authorization_models import ProviderAuthorizationRow
-from attention_router.integrations.gmail_connector import GmailMessage, IntegrationIngressResponse
+from attention_router.integrations.gmail_connector import (
+    GmailAttachmentSummary,
+    GmailMessage,
+    IntegrationIngressResponse,
+)
 
 TENANT = "gmail-runner-tenant"
 HUMAN = "hid_gmailrunnersynthetic000001"
@@ -319,3 +327,217 @@ def test_product_runner_rejects_bearer_digest_mismatch_before_refresh(
         runner.run_once(session, installation_id=installation_id)
 
     assert refresher.seen == []
+
+
+def test_refresh_client_accepts_exact_readonly_scope():
+    def opener(_request, timeout):
+        assert timeout == 10.0
+        return FakeTokenHTTPResponse(
+            {
+                "access_token": "new-readonly-access-token",
+                "scope": GMAIL_READONLY_SCOPE,
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            }
+        )
+
+    client = GoogleRefreshAccessTokenClient(
+        client_id="client-id",
+        client_secret="client-secret",
+        opener=opener,
+    )
+
+    access = client.refresh_access_token(
+        "refresh-secret",
+        expected_scope=GMAIL_READONLY_SCOPE,
+    )
+    assert access == "new-readonly-access-token"
+
+
+def test_product_runner_accepts_exact_readonly_persisted_scope(
+    session,
+    monkeypatch,
+):
+    installation_id = _seed_connected(session, monkeypatch)
+    _enabled(monkeypatch)
+    row = session.get(ProviderAuthorizationRow, installation_id)
+    row.granted_scopes = [GMAIL_READONLY_SCOPE]
+    session.commit()
+
+    reader = FakeReader("transient-access-token")
+    ingress = FakeIngress("internal-bearer")
+    runner = GmailProductRunner(
+        settings=settings,
+        token_refresher=FakeRefresher(),
+        reader_factory=lambda token: reader,
+        ingress_factory=lambda bearer: ingress,
+    )
+
+    result = runner.run_once(
+        session,
+        installation_id=installation_id,
+        now=datetime(2026, 9, 21, 17, 0, tzinfo=UTC),
+    )
+
+    assert result.poll.accepted == 1
+    assert ingress.payloads[0]["metadata_sanitized"][
+        "attachments_observed"
+    ] is False
+
+
+class FakeReadonlyAttachmentReader(FakeReader):
+    def __init__(self, token, payload=b"hello attachment"):
+        super().__init__(token)
+        self.payload = payload
+        self.attachment_reads = []
+
+    def read_message_with_attachments(
+        self,
+        message_id,
+        *,
+        max_attachments,
+        max_mime_depth,
+    ):
+        assert max_attachments >= 1
+        assert max_mime_depth >= 1
+        return GmailMessage(
+            message_id=message_id,
+            thread_id="gmail-thread-1",
+            sender="Sender <sender@example.invalid>",
+            to=("owner@example.invalid",),
+            cc=(),
+            bcc=(),
+            subject="Attachment",
+            body="",
+            email_ts="2026-09-21T17:00:00+00:00",
+            attachments=(
+                GmailAttachmentSummary(
+                    attachment_id="provider-att-1",
+                    filename="report.pdf",
+                    mime_type="application/pdf",
+                    size_bytes=len(self.payload),
+                ),
+            ),
+            body_observed=False,
+            attachments_observed=True,
+        )
+
+    def read_attachment(
+        self,
+        message_id,
+        attachment_id,
+        *,
+        expected_size,
+        max_bytes,
+    ):
+        self.attachment_reads.append(
+            (message_id, attachment_id, expected_size, max_bytes)
+        )
+        assert expected_size == len(self.payload)
+        assert max_bytes >= expected_size
+        return self.payload
+
+
+def test_product_runner_readonly_stages_attachment_before_ingress(
+    session,
+    monkeypatch,
+    tmp_path,
+):
+    installation_id = _seed_connected(session, monkeypatch)
+    _enabled(monkeypatch)
+    monkeypatch.setattr(settings, "artifact_store_enabled", True)
+    monkeypatch.setattr(settings, "artifact_store_root", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(settings, "artifact_store_max_bytes", 4096)
+    monkeypatch.setattr(settings, "gmail_attachment_ingestion_enabled", True)
+    monkeypatch.setattr(settings, "gmail_attachment_max_count", 4)
+    monkeypatch.setattr(settings, "gmail_attachment_max_bytes", 1024)
+    monkeypatch.setattr(settings, "gmail_attachment_max_total_bytes", 2048)
+    monkeypatch.setattr(settings, "gmail_attachment_max_mime_depth", 4)
+
+    row = session.get(ProviderAuthorizationRow, installation_id)
+    row.granted_scopes = [GMAIL_READONLY_SCOPE]
+    session.commit()
+
+    reader = FakeReadonlyAttachmentReader("transient-access-token")
+    ingress = FakeIngress("internal-bearer")
+    artifact_sessions = sessionmaker(
+        bind=session.get_bind(),
+        expire_on_commit=False,
+        future=True,
+    )
+    runner = GmailProductRunner(
+        settings=settings,
+        token_refresher=FakeRefresher(),
+        reader_factory=lambda token: reader,
+        ingress_factory=lambda bearer: ingress,
+        artifact_session_factory=artifact_sessions,
+    )
+
+    result = runner.run_once(
+        session,
+        installation_id=installation_id,
+        now=datetime(2026, 9, 21, 17, 0, tzinfo=UTC),
+    )
+
+    assert result.poll.accepted == 1
+    assert reader.attachment_reads
+    event = ingress.payloads[0]
+    assert len(event["artifact_ids"]) == 1
+    assert event["metadata_sanitized"]["attachments_observed"] is True
+    assert event["metadata_sanitized"]["attachment_count"] == 1
+    assert "provider-att-1" not in json.dumps(event)
+
+    session.expire_all()
+    artifact = session.scalar(select(ArtifactRow))
+    receipt = session.scalar(select(ArtifactReceiptRow))
+    assert artifact is not None
+    assert receipt is not None
+    assert event["artifact_ids"] == [artifact.id]
+    assert receipt.artifact_id == artifact.id
+
+
+def test_product_runner_readonly_replay_keeps_same_artifact_id(
+    session,
+    monkeypatch,
+    tmp_path,
+):
+    installation_id = _seed_connected(session, monkeypatch)
+    _enabled(monkeypatch)
+    monkeypatch.setattr(settings, "artifact_store_enabled", True)
+    monkeypatch.setattr(settings, "artifact_store_root", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(settings, "artifact_store_max_bytes", 4096)
+    monkeypatch.setattr(settings, "gmail_attachment_ingestion_enabled", True)
+    monkeypatch.setattr(settings, "gmail_attachment_max_count", 4)
+    monkeypatch.setattr(settings, "gmail_attachment_max_bytes", 1024)
+    monkeypatch.setattr(settings, "gmail_attachment_max_total_bytes", 2048)
+    monkeypatch.setattr(settings, "gmail_attachment_max_mime_depth", 4)
+
+    row = session.get(ProviderAuthorizationRow, installation_id)
+    row.granted_scopes = [GMAIL_READONLY_SCOPE]
+    session.commit()
+
+    artifact_sessions = sessionmaker(
+        bind=session.get_bind(),
+        expire_on_commit=False,
+        future=True,
+    )
+    ingress = FakeIngress("internal-bearer")
+    runner = GmailProductRunner(
+        settings=settings,
+        token_refresher=FakeRefresher(),
+        reader_factory=lambda token: FakeReadonlyAttachmentReader(token),
+        ingress_factory=lambda bearer: ingress,
+        artifact_session_factory=artifact_sessions,
+    )
+
+    first = runner.run_once(session, installation_id=installation_id)
+    second = runner.run_once(session, installation_id=installation_id)
+
+    assert first.poll.accepted == 1
+    assert second.poll.accepted == 1
+    first_id = ingress.payloads[0]["artifact_ids"][0]
+    second_id = ingress.payloads[1]["artifact_ids"][0]
+    assert first_id == second_id
+    session.expire_all()
+    assert len(session.scalars(select(ArtifactRow)).all()) == 1
+    assert len(session.scalars(select(ArtifactReceiptRow)).all()) == 1

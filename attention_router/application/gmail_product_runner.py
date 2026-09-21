@@ -9,8 +9,19 @@ from urllib import request as urllib_request
 
 from sqlalchemy.orm import Session
 
-from attention_router.application.gmail_connection import GMAIL_METADATA_SCOPE, GmailConnectionService
+from attention_router.application.gmail_attachments import GmailAttachmentIngestor
+from attention_router.application.gmail_connection import (
+    GMAIL_METADATA_SCOPE,
+    GMAIL_READONLY_SCOPE,
+    GmailConnectionService,
+    gmail_authorization_scope,
+)
 from attention_router.config import Settings
+from attention_router.infrastructure.artifact_store import (
+    ArtifactObjectStore,
+    LocalArtifactStore,
+)
+from attention_router.infrastructure.db import SessionLocal
 from attention_router.infrastructure.models import (
     IntegrationBindingRow,
     IntegrationCredentialRow,
@@ -128,7 +139,12 @@ class GoogleRefreshAccessTokenClient:
         self._timeout_seconds = timeout_seconds
         self._opener = opener or urlopen_without_redirects
 
-    def refresh_access_token(self, refresh_token: str) -> str:
+    def refresh_access_token(
+        self,
+        refresh_token: str,
+        *,
+        expected_scope: str = GMAIL_METADATA_SCOPE,
+    ) -> str:
         if any(
             not isinstance(value, str) or not value.strip()
             for value in (refresh_token, self._client_id, self._client_secret)
@@ -139,7 +155,11 @@ class GoogleRefreshAccessTokenClient:
         )
         if "scope" in payload:
             raw_scope = payload["scope"]
-            if not isinstance(raw_scope, str) or set(raw_scope.split()) != {GMAIL_METADATA_SCOPE}:
+            if (
+                expected_scope not in {GMAIL_METADATA_SCOPE, GMAIL_READONLY_SCOPE}
+                or not isinstance(raw_scope, str)
+                or set(raw_scope.split()) != {expected_scope}
+            ):
                 raise GmailProductAuthorizationInvalid()
         token = payload.get("access_token")
         token_type = payload.get("token_type")
@@ -216,6 +236,8 @@ class GmailProductRunner:
         token_refresher: GoogleAccessTokenRefresher | None = None,
         reader_factory: ReaderFactory | None = None,
         ingress_factory: IngressFactory | None = None,
+        artifact_session_factory=None,
+        artifact_store: ArtifactObjectStore | None = None,
     ):
         self.settings = settings
         self._token_refresher = token_refresher or GoogleRefreshAccessTokenClient(
@@ -232,6 +254,11 @@ class GmailProductRunner:
                 url=settings.gmail_product_runner_ingress_url,
                 bearer=bearer,
             )
+        )
+        self._artifact_session_factory = artifact_session_factory or SessionLocal
+        self._artifact_store = artifact_store or LocalArtifactStore(
+            settings.artifact_store_root,
+            max_bytes=settings.artifact_store_max_bytes,
         )
 
     @staticmethod
@@ -260,7 +287,7 @@ class GmailProductRunner:
             if (
                 row.provider != "GOOGLE"
                 or row.product != "GMAIL"
-                or not _exact_scope(row.granted_scopes, GMAIL_METADATA_SCOPE)
+                or gmail_authorization_scope(row.granted_scopes) is None
             ):
                 raise GmailProductAuthorizationInvalid()
 
@@ -314,6 +341,72 @@ class GmailProductRunner:
             raise GmailProductBindingInvalid()
         return row, binding, refresh_token, ingress_bearer
 
+    def _refresh_access_token(
+        self,
+        refresh_token: str,
+        expected_scope: str,
+    ) -> str:
+        if isinstance(self._token_refresher, GoogleRefreshAccessTokenClient):
+            return self._token_refresher.refresh_access_token(
+                refresh_token,
+                expected_scope=expected_scope,
+            )
+        return self._token_refresher.refresh_access_token(refresh_token)
+
+    def _attachment_preparer(
+        self,
+        *,
+        row: ProviderAuthorizationRow,
+        binding: IntegrationBindingRow,
+        reader: GmailReader,
+    ):
+        scope = gmail_authorization_scope(row.granted_scopes)
+        if (
+            not self.settings.gmail_attachment_ingestion_enabled
+            or scope != GMAIL_READONLY_SCOPE
+        ):
+            return None
+        ingestor = GmailAttachmentIngestor(
+            settings=self.settings,
+            session_factory=self._artifact_session_factory,
+            store=self._artifact_store,
+        )
+        return lambda message_id: ingestor.prepare_message(
+            reader,
+            tenant_id=row.tenant_id,
+            source_account=binding.account_key or "default",
+            message_id=message_id,
+        )
+
+    def _build_connector(
+        self,
+        *,
+        row: ProviderAuthorizationRow,
+        binding: IntegrationBindingRow,
+        reader: GmailReader,
+        ingress_bearer: str,
+    ) -> GmailInboundConnector:
+        ingress = _RunnerIngress(_sanitized(
+            GmailProductIngressFailed,
+            lambda: self._ingress_factory(ingress_bearer),
+        ))
+        return GmailInboundConnector(
+            reader=reader,
+            ingress=ingress,
+            config=GmailConnectorConfig(
+                tenant_id=row.tenant_id,
+                instance_id=binding.instance_id,
+                account_id=binding.account_key or None,
+                ingress_url=self.settings.gmail_product_runner_ingress_url,
+                ingress_bearer=ingress_bearer,
+            ),
+            message_preparer=self._attachment_preparer(
+                row=row,
+                binding=binding,
+                reader=reader,
+            ),
+        )
+
     def run_incremental(
         self, session: Session, *, installation_id: str,
         max_results: int | None = None, max_pages: int = 10, now: datetime | None = None,
@@ -352,9 +445,12 @@ class GmailProductRunner:
             installation_id,
             now=current,
         )
+        scope = gmail_authorization_scope(row.granted_scopes)
+        if scope is None:
+            raise GmailProductAuthorizationInvalid()
         access_token = _sanitized(
             GmailProductRefreshFailed,
-            lambda: self._token_refresher.refresh_access_token(refresh_token),
+            lambda: self._refresh_access_token(refresh_token, scope),
         )
         if not _bearer_token(access_token):
             raise GmailProductRefreshFailed()
@@ -362,19 +458,11 @@ class GmailProductRunner:
         reader = _sanitized(
             GmailProductProviderUnavailable, lambda: self._reader_factory(access_token)
         )
-        ingress = _RunnerIngress(_sanitized(
-            GmailProductIngressFailed, lambda: self._ingress_factory(ingress_bearer)
-        ))
-        connector = GmailInboundConnector(
+        connector = self._build_connector(
+            row=row,
+            binding=binding,
             reader=reader,
-            ingress=ingress,
-            config=GmailConnectorConfig(
-                tenant_id=row.tenant_id,
-                instance_id=binding.instance_id,
-                account_id=binding.account_key or None,
-                ingress_url=self.settings.gmail_product_runner_ingress_url,
-                ingress_bearer=ingress_bearer,
-            ),
+            ingress_bearer=ingress_bearer,
         )
         failure = GmailProductProviderUnavailable
         try:

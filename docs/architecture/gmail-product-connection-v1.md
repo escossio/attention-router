@@ -34,17 +34,21 @@ The Gmail API request accepts only a one-time Google authorization code.
 The Android client cannot select tenant, Human Identity, integration binding,
 provider account identity or internal credential.
 
-## Initial Gmail scope
+## Gmail authorization profiles
 
-V1 requests only:
+The product accepts exactly one of two read-only authorization profiles:
 
-`https://www.googleapis.com/auth/gmail.metadata`
+- `https://www.googleapis.com/auth/gmail.metadata` — legacy/minimum metadata-only mode;
+- `https://www.googleapis.com/auth/gmail.readonly` — attachment-capable read-only mode.
 
-This is enough for the current metadata-only integration boundary and avoids
-requesting message-body access before the product has a governed body-ingestion
-feature.
+A grant containing both scopes, `gmail.modify`, send authority, or any other
+unexpected Gmail scope fails closed. Existing metadata-only installations remain
+valid and continue to ingest metadata without observing attachment structure or
+bytes.
 
-Future features may request additional scopes incrementally.
+Attachment capability is an explicit authority upgrade. Android must request
+`gmail.readonly` and complete Google consent before the backend can download
+attachments. The backend never silently upgrades a persisted authorization.
 
 ## Offline provider access
 
@@ -153,9 +157,11 @@ This backend slice does not:
 
 ## Android contract
 
-The Android implementation should use Google Identity Services
-`AuthorizationClient`, request offline access using the server client ID, and
-request `gmail.metadata`.
+The Android implementation uses Google Identity Services
+`AuthorizationClient` and requests offline access using the server client ID.
+New attachment-capable connections request `gmail.readonly`. Existing
+`gmail.metadata` connections remain readable by the product but require an
+explicit Google consent upgrade before attachment ingestion can occur.
 
 If Google returns a PendingIntent resolution, the UI completes that consent
 flow. The resulting server authorization code is POSTed over the existing
