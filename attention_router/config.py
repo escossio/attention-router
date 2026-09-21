@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     integration_ingress_audience: str = "andy-integration-ingress"
     integration_dispatch_enabled: bool = False
     integration_dispatch_batch_size: int = 20
+    gmail_connect_enabled: bool = False
+    google_workspace_oauth_client_id: str | None = None
+    google_workspace_oauth_client_secret: str | None = None
+    provider_authorization_key_b64url: str | None = None
     internal_ingress_http_host: str = "0.0.0.0"
     internal_ingress_http_port: int = 18102
     internal_ingress_hmac_secret: str | None = None
@@ -207,6 +211,34 @@ class Settings(BaseSettings):
             raise ValueError(
                 "INTEGRATION_DISPATCH_BATCH_SIZE must be between 1 and 200"
             )
+        if self.gmail_connect_enabled:
+            if not self.client_session_enabled:
+                raise ValueError(
+                    "GMAIL_CONNECT_ENABLED requires CLIENT_SESSION_ENABLED=true"
+                )
+            if not self.google_workspace_oauth_client_id:
+                raise ValueError(
+                    "GOOGLE_WORKSPACE_OAUTH_CLIENT_ID is required when GMAIL_CONNECT_ENABLED=true"
+                )
+            if not self.google_workspace_oauth_client_secret:
+                raise ValueError(
+                    "GOOGLE_WORKSPACE_OAUTH_CLIENT_SECRET is required when GMAIL_CONNECT_ENABLED=true"
+                )
+            key = self.provider_authorization_key_b64url or ""
+            if (
+                len(key) != 43
+                or any(
+                    character not in (
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                        "abcdefghijklmnopqrstuvwxyz"
+                        "0123456789-_"
+                    )
+                    for character in key
+                )
+            ):
+                raise ValueError(
+                    "PROVIDER_AUTHORIZATION_KEY_B64URL must be 32-byte unpadded base64url when Gmail connect is enabled"
+                )
         if self.internal_ingress_http_port <= 0:
             raise ValueError("INTERNAL_INGRESS_HTTP_PORT must be positive")
         if self.internal_ingress_max_skew_seconds <= 0:

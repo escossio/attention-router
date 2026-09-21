@@ -9,6 +9,7 @@ from attention_router.infrastructure import artifact_models  # noqa: F401
 from attention_router.infrastructure import human_identity_models  # noqa: F401
 from attention_router.infrastructure import client_location_models  # noqa: F401
 from attention_router.infrastructure import models  # noqa: F401
+from attention_router.infrastructure import provider_authorization_models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", os.environ.get("DATABASE_URL", settings.database_url))
