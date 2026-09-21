@@ -39,6 +39,20 @@ from attention_router.security.provider_secrets import (
 
 
 GMAIL_METADATA_SCOPE = "https://www.googleapis.com/auth/gmail.metadata"
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_ALLOWED_SCOPE_PROFILES = frozenset(
+    {GMAIL_METADATA_SCOPE, GMAIL_READONLY_SCOPE}
+)
+
+
+def gmail_authorization_scope(value: object) -> str | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 1:
+        return None
+    scope = value[0]
+    if not isinstance(scope, str) or scope not in GMAIL_ALLOWED_SCOPE_PROFILES:
+        return None
+    return scope
+
 logger = logging.getLogger("uvicorn.error")
 
 # Provider text is untrusted: only these exact, public error identifiers may
@@ -201,7 +215,7 @@ class GoogleWorkspaceOAuthClient:
                 if item
             )
         )
-        if GMAIL_METADATA_SCOPE not in scopes:
+        if gmail_authorization_scope(scopes) is None:
             raise GmailAuthorizationRejected()
         if refresh_token is not None and (
             not isinstance(refresh_token, str) or not refresh_token
@@ -376,7 +390,7 @@ class GmailConnectionService:
 
         authority = self._authority(session, session_token)
         grant = self.oauth.exchange_authorization_code(authorization_code)
-        if set(grant.granted_scopes) != {GMAIL_METADATA_SCOPE}:
+        if gmail_authorization_scope(grant.granted_scopes) is None:
             raise GmailAuthorizationRejected()
         profile = self.oauth.gmail_profile(grant.access_token)
         current = now or datetime.now(UTC)

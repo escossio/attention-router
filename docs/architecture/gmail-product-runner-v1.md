@@ -22,9 +22,10 @@ history primitive is described below.
 ## Authority and secrets
 
 Before provider I/O the runner checks ACTIVE GOOGLE/GMAIL authorization with
-exactly `gmail.metadata`, its active `channel.email` binding, tenant, audience,
-canonical slot/instance identity, account fingerprint, and the referenced
-unrevoked inbound credential. Credential validity is inclusive at `not_before`
+exactly one allowed profile: `gmail.metadata` or `gmail.readonly`. Any mixed
+or broader scope set fails closed. It also validates the active `channel.email`
+binding, tenant, audience, canonical slot/instance identity, account fingerprint,
+and the referenced unrevoked inbound credential. Credential validity is inclusive at `not_before`
 and exclusive at `expires_at`; naive database timestamps are interpreted as UTC.
 Each run reloads all three persisted rows without autoflush; an older entry in
 the caller session's identity-map cache cannot authorize a run. This is an
@@ -37,8 +38,10 @@ bearer only in memory, and checks the bearer against the credential digest.
 The refresh POST contains only `grant_type=refresh_token`, `refresh_token`,
 `client_id` and `client_secret`. Its timeout defaults to 10 seconds and cannot
 exceed 30 seconds; the response is limited to 64 KiB and must be a JSON object
-with a nonempty bearer access token. If scope or lifetime is supplied, it must
-remain metadata-only and positive respectively.
+with a nonempty bearer access token. If scope is supplied, it must exactly match
+the persisted authorization profile used for that run; lifetime must remain
+positive. A readonly installation cannot silently refresh into metadata-only or
+a broader scope.
 
 The access token exists only for the current reader. Secrets are excluded from
 token-bearing value-object repr, public results and runner errors. Error
@@ -48,11 +51,20 @@ refused so credentials cannot follow a redirect to another endpoint.
 
 ## Poll and ingress
 
-The existing reader lists `labelIds=INBOX`, never Gmail `q`, and reads each
-selected message with `format=metadata` and only From/To/Cc/Bcc/Subject/Date
-headers. It does not inspect body, snippet, MIME parts or attachment bytes.
-Events preserve `body_observed=false` and `attachments_observed=false`.
-There are no send, modify, mark-as-read or label mutation requests.
+The reader lists `labelIds=INBOX` and never Gmail `q`. Metadata-only
+installations keep the original path: `format=metadata` with only
+From/To/Cc/Bcc/Subject/Date headers, no body, snippet, MIME parts or attachment
+bytes, and events preserve `body_observed=false` plus
+`attachments_observed=false`.
+
+When attachment ingestion is explicitly enabled and the persisted authorization
+is exactly `gmail.readonly`, the reader performs a second message request using
+a server-side fields projection limited to MIME type, filename,
+`body(attachmentId,size)`, and recursively bounded child parts. It never asks
+for snippet or `body.data`; receiving body data anyway fails closed. Attachment
+bytes are then fetched only through `users.messages.attachments.get`.
+
+There are still no send, modify, mark-as-read or label mutation requests.
 
 `max_results` is an integer in 1..100 (default from configuration: 5). The
 connector caps actual message reads and ingress submissions even if a reader
@@ -73,6 +85,11 @@ Reuse the product settings already introduced by PR #146:
 | `GMAIL_PRODUCT_RUNNER_INGRESS_URL` | Explicit server destination for neutral ingress. |
 | `GOOGLE_WORKSPACE_OAUTH_CLIENT_ID`, `GOOGLE_WORKSPACE_OAUTH_CLIENT_SECRET` | Existing server OAuth client used by Connect Gmail. |
 | `PROVIDER_AUTHORIZATION_KEY_B64URL` | Existing server AES-GCM key. |
+| `GMAIL_ATTACHMENT_INGESTION_ENABLED` | Defaults false; requires runner + Artifact Store and exact persisted `gmail.readonly`. |
+| `GMAIL_ATTACHMENT_MAX_COUNT` | Default 10; hard limit 1..64 attachments per message. |
+| `GMAIL_ATTACHMENT_MAX_BYTES` | Default 25 MiB decoded bytes per attachment; hard ceiling 256 MiB and cannot exceed Artifact Store max when enabled. |
+| `GMAIL_ATTACHMENT_MAX_TOTAL_BYTES` | Default 32 MiB decoded bytes per message; bounded by per-attachment limit and 256 MiB ceiling. |
+| `GMAIL_ATTACHMENT_MAX_MIME_DEPTH` | Default 12; hard limit 1..32. |
 
 The ingress route is `/api/v1/ingress/integrations/events` on the ingress
 application. `.env.example` names `http://ingress:18101` for the Compose network;
@@ -120,14 +137,15 @@ same-account reconnect preserves the cursor, while account replacement clears it
 under the installation lock, including A -> B -> A replacement.
 
 Subsequent calls use `users.history.list` with `historyTypes=messageAdded`,
-`labelId=INBOX`, `maxResults=100` and a fields projection. The exact
-`https://www.googleapis.com/auth/gmail.metadata` scope is unchanged. See the
+`labelId=INBOX`, `maxResults=100` and a fields projection. Both exact
+authorization profiles can drive the same durable cursor: `gmail.metadata`
+keeps metadata-only ingestion, while `gmail.readonly` may additionally stage
+attachments when the attachment feature is explicitly enabled. See the
 [official history contract](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/history/list).
 Only `messagesAdded` entries explicitly carrying INBOX are selected. Other
 changes can advance the cursor without ingestion. History IDs must increase;
 malformed or out-of-order responses fail closed. Message IDs are deduplicated
-within the cycle. Selected messages use the existing metadata-only reader and
-neutral connector; no legacy event DTO or dispatcher change is introduced.
+within the cycle. No legacy event DTO or dispatcher change is introduced.
 
 Each cycle permits 1..100 selected messages, 1..10 pages, at most 100 history
 records per page and at most 1 MiB per provider response. Each record is processed
@@ -189,7 +207,10 @@ No new timestamp or duplicate semantics are imposed on neutral ingress.
 Successful results expose only installation ID, initialization status, record
 count, selected/accepted/duplicate counts and whether the cursor advanced.
 Provider IDs, page tokens and all secrets stay out of result/repr and sanitized
-error chains. No body, snippet, MIME body or attachment bytes are fetched.
+error chains. Message bodies and snippets are never fetched. Attachment bytes
+are fetched only for exact `gmail.readonly` installations when attachment
+ingestion is explicitly enabled; those bytes are staged into Artifact Plane and
+never serialized into the canonical e-mail event.
 
 
 ## Automatic polling scheduler V1

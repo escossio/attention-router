@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     gmail_product_scheduler_poll_interval_seconds: int = 30
     gmail_product_scheduler_batch_size: int = 20
     gmail_product_scheduler_max_pages: int = 10
+    gmail_attachment_ingestion_enabled: bool = False
+    gmail_attachment_max_count: int = 10
+    gmail_attachment_max_bytes: int = 25 * 1024 * 1024
+    gmail_attachment_max_total_bytes: int = 32 * 1024 * 1024
+    gmail_attachment_max_mime_depth: int = 12
     google_workspace_oauth_client_id: str | None = None
     google_workspace_oauth_client_secret: str | None = Field(default=None, repr=False)
     provider_authorization_key_b64url: str | None = Field(default=None, repr=False)
@@ -239,6 +244,27 @@ class Settings(BaseSettings):
             raise ValueError(
                 "GMAIL_PRODUCT_SCHEDULER_MAX_PAGES must be between 1 and 10"
             )
+        if not 1 <= self.gmail_attachment_max_count <= 64:
+            raise ValueError(
+                "GMAIL_ATTACHMENT_MAX_COUNT must be between 1 and 64"
+            )
+        if not 1 <= self.gmail_attachment_max_bytes <= 256 * 1024 * 1024:
+            raise ValueError(
+                "GMAIL_ATTACHMENT_MAX_BYTES must be between 1 and 268435456"
+            )
+        if not (
+            self.gmail_attachment_max_bytes
+            <= self.gmail_attachment_max_total_bytes
+            <= 256 * 1024 * 1024
+        ):
+            raise ValueError(
+                "GMAIL_ATTACHMENT_MAX_TOTAL_BYTES must be between "
+                "GMAIL_ATTACHMENT_MAX_BYTES and 268435456"
+            )
+        if not 1 <= self.gmail_attachment_max_mime_depth <= 32:
+            raise ValueError(
+                "GMAIL_ATTACHMENT_MAX_MIME_DEPTH must be between 1 and 32"
+            )
         if not self.gmail_product_runner_ingress_url.startswith(("http://", "https://")):
             raise ValueError("GMAIL_PRODUCT_RUNNER_INGRESS_URL must be http(s)")
         if self.gmail_product_runner_enabled and not self.gmail_connect_enabled:
@@ -252,6 +278,22 @@ class Settings(BaseSettings):
             raise ValueError(
                 "GMAIL_PRODUCT_SCHEDULER_ENABLED requires GMAIL_PRODUCT_RUNNER_ENABLED=true"
             )
+        if self.gmail_attachment_ingestion_enabled:
+            if not self.gmail_product_runner_enabled:
+                raise ValueError(
+                    "GMAIL_ATTACHMENT_INGESTION_ENABLED requires "
+                    "GMAIL_PRODUCT_RUNNER_ENABLED=true"
+                )
+            if not self.artifact_store_enabled:
+                raise ValueError(
+                    "GMAIL_ATTACHMENT_INGESTION_ENABLED requires "
+                    "ARTIFACT_STORE_ENABLED=true"
+                )
+            if self.gmail_attachment_max_bytes > self.artifact_store_max_bytes:
+                raise ValueError(
+                    "GMAIL_ATTACHMENT_MAX_BYTES must not exceed "
+                    "ARTIFACT_STORE_MAX_BYTES when attachment ingestion is enabled"
+                )
         if not 1 <= self.artifact_store_max_bytes <= 1024 * 1024 * 1024:
             raise ValueError(
                 "ARTIFACT_STORE_MAX_BYTES must be between 1 and 1073741824"

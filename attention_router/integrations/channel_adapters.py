@@ -206,7 +206,16 @@ class EmailNormalizedAdapter:
         )
 
         receipts: list[ArtifactReceiptContract] = []
+        artifact_ids: list[str] = []
         for index, attachment in enumerate(staged_attachments):
+            artifact_id = attachment.get("artifact_id")
+            if artifact_id is not None:
+                normalized_artifact_id = _required(
+                    artifact_id,
+                    "EMAIL_ATTACHMENT_ARTIFACT_ID_INVALID",
+                )
+                if normalized_artifact_id not in artifact_ids:
+                    artifact_ids.append(normalized_artifact_id)
             receipt_id = _required(
                 attachment.get("external_receipt_id")
                 or attachment.get("attachment_id")
@@ -288,6 +297,7 @@ class EmailNormalizedAdapter:
                 or f"{source.instance_id}:{message_id}"
             ),
             correlation_id=correlation_id,
+            artifact_ids=artifact_ids,
             metadata_sanitized=metadata_sanitized,
         )
         return ChannelAdapterOutput(event=event, artifact_receipts=tuple(receipts))

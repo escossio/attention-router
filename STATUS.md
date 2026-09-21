@@ -12,9 +12,9 @@ Updated: 2026-09-21
 - Combined resume state is recorded in `docs/checkpoints/ANDY_OPS_GMAIL_CHECKPOINT_20260921.md`.
 - PR #150 (`ops: add Andy Ops live supervisor V1`) is merged into main.
 
-## Artifact Store V1 — candidate
+## Artifact Store V1 — merged
 
-- Issue #153 fills the byte-storage boundary intentionally left open by Artifact Plane V0.
+- PR #154 / issue #153 fill the byte-storage boundary intentionally left open by Artifact Plane V0.
 - Added a provider-neutral ArtifactObjectStore protocol and a local immutable content-addressed backend.
 - Physical object paths are tenant scoped through a hashed tenant namespace; source filenames and provider metadata never control paths.
 - Writes are atomic/fsync-backed and existing objects are revalidated before reuse. Reads fail closed on wrong reference, size/hash mismatch, symlink/non-regular object or tenant mismatch.
@@ -22,8 +22,19 @@ Updated: 2026-09-21
 - Added internal tenant-scoped read by artifact_id; no public download/share route, parsing, OCR, archive extraction or content execution is introduced.
 - Configuration is default-off with a 32 MiB per-object default and a bounded 1 GiB hard configuration ceiling.
 - Local focused validation: Ruff PASS and 74 Artifact Plane/store/integration/config tests PASS.
-- No Gmail provider call, runtime flag enablement, deployment or live filesystem migration is part of this candidate.
-- Next consumer after certification: Gmail attachment download -> Artifact Store staging -> canonical artifact_ids.
+- PR #154 merged Artifact Store V1 with all repository gates green; no runtime flag enablement, deployment or live filesystem migration occurred.
+- Issue #155 is the current consumer: Gmail attachment download -> Artifact Store staging -> canonical artifact_ids.
+
+## Gmail attachment ingestion V1 — candidate
+
+- Issue #155 adds explicit attachment-capable read authority without widening mutation rights: exact `gmail.metadata` remains the legacy minimum profile and exact `gmail.readonly` enables governed attachment ingestion.
+- Gmail MIME discovery uses a bounded fields projection and never requests snippet or MIME `body.data`. Unexpected body data, excessive depth/count or inline attachment data without a provider attachment id fail closed.
+- Attachment downloads are base64url-validated and bounded per attachment and per message before Artifact Plane staging.
+- Artifact bytes and receipts commit in an independent transaction before Neutral Ingress. Cursor rollback therefore cannot erase already-admitted artifact identity; retries resolve to the same canonical `artifact_id`.
+- Canonical e-mail events carry deduplicated `artifact_ids` only. Provider attachment ids, storage providers/references, filenames and bytes do not enter the event payload.
+- All new runtime controls remain default-off. No live OAuth re-consent, Gmail call, Artifact Store enablement or deployment is part of this candidate.
+- Synthetic validation includes metadata-regression coverage, exact readonly authority, bounded provider parsing/download, stable replay, runner E2E, and incremental cursor rollback with durable artifact proof.
+- Local final gate: Ruff PASS, compileall PASS and 333 focused Gmail/Artifact/Integration/config tests PASS. PostgreSQL-heavy certification remains delegated to CI01/CI02/CI03.
 
 ## Distributed validation control-plane rule
 

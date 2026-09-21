@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from attention_router.application.client_session import ClientSessionError
 from attention_router.application.gmail_connection import (
     GMAIL_METADATA_SCOPE,
+    GMAIL_READONLY_SCOPE,
     GmailAuthorizationRejected,
     GmailConnectionConflict,
     GmailConnectionDisabled,
@@ -214,6 +215,7 @@ def build_gmail_connection_router(
 
 __all__ = [
     "GMAIL_METADATA_SCOPE",
+    "GMAIL_READONLY_SCOPE",
     "GmailConnectRequest",
     "GmailConnectionResponse",
     "build_gmail_connection_router",

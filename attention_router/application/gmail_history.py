@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.gmail_connection import gmail_authorization_scope
 from attention_router.application.gmail_product_runner import (
     GmailProductAuthorizationUnavailable,
     GmailProductIngressFailed,
@@ -16,17 +17,12 @@ from attention_router.application.gmail_product_runner import (
     GmailProductRunnerDisabled,
     GmailProductRunnerError,
     _bearer_token,
-    _RunnerIngress,
     _sanitized,
 )
 from attention_router.infrastructure.gmail_slot_lock import acquire_gmail_slot
 from attention_router.infrastructure.provider_authorization_models import ProviderAuthorizationRow
 from attention_router.integrations.gmail_api_reader import history_id
-from attention_router.integrations.gmail_connector import (
-    GmailConnectorConfig,
-    GmailConnectorError,
-    GmailInboundConnector,
-)
+from attention_router.integrations.gmail_connector import GmailConnectorError
 
 
 if TYPE_CHECKING:
@@ -102,16 +98,33 @@ def _cycle(reader, connector, start, limit, max_pages):
             if len(seen) + len(pending) > limit:
                 return cursor, examined, len(seen), accepted, duplicates
             for message_id in pending:
-                message = reader.read_message(message_id)
+                message, staged = connector.prepare_message(message_id)
                 if (
-                    message.message_id != message_id or message.body_observed
-                    or message.attachments_observed or message.body or message.attachments
+                    message.message_id != message_id
+                    or message.body_observed
+                    or message.body
+                ):
+                    raise GmailProductProviderUnavailable()
+                if connector.attachment_mode:
+                    if (
+                        not message.attachments_observed
+                        or len(staged) != len(message.attachments)
+                    ):
+                        raise GmailProductProviderUnavailable()
+                elif (
+                    message.attachments_observed
+                    or message.attachments
+                    or staged
                 ):
                     raise GmailProductProviderUnavailable()
                 # Immutable provider timestamp makes retries byte-identical;
                 # neutral ingress stores the actual admission wall clock.
                 response = connector.ingest_message(
-                    message, received_at=datetime.fromisoformat(message.email_ts.replace("Z", "+00:00"))
+                    message,
+                    staged_attachments=staged,
+                    received_at=datetime.fromisoformat(
+                        message.email_ts.replace("Z", "+00:00")
+                    ),
                 )
                 if response.status_code not in {200, 202}:
                     raise GmailProductIngressFailed()
@@ -171,8 +184,12 @@ def run_incremental(
     row, binding, refresh, bearer = runner._load_governed_authorization(
         session, installation_id, now=runner._utc(now or datetime.now(UTC))
     )
+    scope = gmail_authorization_scope(row.granted_scopes)
+    if scope is None:
+        raise GmailProductProviderUnavailable()
     token = _sanitized(
-        GmailProductRefreshFailed, lambda: runner._token_refresher.refresh_access_token(refresh)
+        GmailProductRefreshFailed,
+        lambda: runner._refresh_access_token(refresh, scope),
     )
     if not _bearer_token(token):
         raise GmailProductRefreshFailed()
@@ -185,14 +202,12 @@ def run_incremental(
         row.gmail_history_id = baseline
         session.flush([row])
         return GmailHistoryResult(row.id, initialized=True, cursor_advanced=True)
-    ingress = _RunnerIngress(_sanitized(
-        GmailProductIngressFailed, lambda: runner._ingress_factory(bearer)
-    ))
-    connector = GmailInboundConnector(reader=reader, ingress=ingress, config=GmailConnectorConfig(
-        tenant_id=row.tenant_id, instance_id=binding.instance_id,
-        account_id=binding.account_key, ingress_url=runner.settings.gmail_product_runner_ingress_url,
+    connector = runner._build_connector(
+        row=row,
+        binding=binding,
+        reader=reader,
         ingress_bearer=bearer,
-    ))
+    )
     failure = GmailProductProviderUnavailable
     try:
         end, examined, selected, accepted, duplicates = _cycle(

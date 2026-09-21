@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import base64
+import binascii
 from datetime import UTC, datetime
 from email.utils import getaddresses, parsedate_to_datetime
 import json
@@ -10,6 +12,7 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from attention_router.integrations.gmail_connector import (
+    GmailAttachmentSummary,
     GmailConnectorError,
     GmailMessage,
     GmailReader,
@@ -65,6 +68,7 @@ class GmailApiReader(GmailReader):
         path: str,
         *,
         query: dict[str, str | int | tuple[str, ...]] | None = None,
+        max_response_bytes: int = 1024 * 1024,
     ) -> dict[str, Any]:
         url = GMAIL_API_BASE + path
         if query:
@@ -91,8 +95,8 @@ class GmailApiReader(GmailReader):
                 elif response.status != 200:
                     failure = "GMAIL_API_REJECTED"
                 else:
-                    body = response.read(1024 * 1024 + 1)
-                    if len(body) <= 1024 * 1024:
+                    body = response.read(max_response_bytes + 1)
+                    if len(body) <= max_response_bytes:
                         decoded = json.loads(body.decode("utf-8"))
                         if isinstance(decoded, dict):
                             return decoded
@@ -180,6 +184,177 @@ class GmailApiReader(GmailReader):
             },
         )
         return _gmail_api_payload_to_message(payload)
+
+
+    def read_message_with_attachments(
+        self,
+        message_id: str,
+        *,
+        max_attachments: int,
+        max_mime_depth: int,
+    ) -> GmailMessage:
+        if type(max_attachments) is not int or not 1 <= max_attachments <= 64:
+            raise ValueError("GMAIL_ATTACHMENT_MAX_COUNT_OUT_OF_RANGE")
+        if type(max_mime_depth) is not int or not 1 <= max_mime_depth <= 32:
+            raise ValueError("GMAIL_ATTACHMENT_MIME_DEPTH_OUT_OF_RANGE")
+        message = self.read_message(message_id)
+        structure = self._get_json(
+            f"/messages/{urllib_parse.quote(message_id, safe='')}",
+            query={
+                "format": "full",
+                "fields": f"payload({_mime_part_projection(max_mime_depth)})",
+            },
+        )
+        attachments = _attachment_summaries(
+            structure,
+            max_attachments=max_attachments,
+            max_mime_depth=max_mime_depth,
+        )
+        return replace(
+            message,
+            attachments=attachments,
+            attachments_observed=True,
+        )
+
+    def read_attachment(
+        self,
+        message_id: str,
+        attachment_id: str,
+        *,
+        expected_size: int,
+        max_bytes: int,
+    ) -> bytes:
+        if not isinstance(message_id, str) or not message_id.strip():
+            raise ValueError("GMAIL_MESSAGE_ID_REQUIRED")
+        if (
+            not isinstance(attachment_id, str)
+            or not 1 <= len(attachment_id) <= 2048
+            or attachment_id.isspace()
+        ):
+            raise ValueError("GMAIL_ATTACHMENT_ID_REQUIRED")
+        if (
+            type(expected_size) is not int
+            or expected_size < 0
+            or type(max_bytes) is not int
+            or not 1 <= max_bytes <= 1024 * 1024 * 1024
+            or expected_size > max_bytes
+        ):
+            raise GmailConnectorError("GMAIL_ATTACHMENT_SIZE_INVALID")
+
+        encoded_limit = 4 * ((max_bytes + 2) // 3) + 8
+        payload = self._get_json(
+            (
+                f"/messages/{urllib_parse.quote(message_id, safe='')}"
+                f"/attachments/{urllib_parse.quote(attachment_id, safe='')}"
+            ),
+            query={"fields": "size,data"},
+            max_response_bytes=encoded_limit + 4096,
+        )
+        reported_size = payload.get("size")
+        encoded = payload.get("data")
+        if (
+            type(reported_size) is not int
+            or reported_size != expected_size
+            or not isinstance(encoded, str)
+            or len(encoded) > encoded_limit
+        ):
+            raise GmailConnectorError("GMAIL_ATTACHMENT_RESPONSE_INVALID")
+        try:
+            raw = encoded.encode("ascii")
+            padding = b"=" * ((-len(raw)) % 4)
+            decoded = base64.b64decode(
+                raw + padding,
+                altchars=b"-_",
+                validate=True,
+            )
+        except (UnicodeEncodeError, binascii.Error, ValueError):
+            raise GmailConnectorError("GMAIL_ATTACHMENT_RESPONSE_INVALID") from None
+        if len(decoded) != expected_size:
+            raise GmailConnectorError("GMAIL_ATTACHMENT_SIZE_MISMATCH")
+        return decoded
+
+
+def _mime_part_projection(depth: int) -> str:
+    fields = "mimeType,filename,body(attachmentId,size)"
+    if depth > 1:
+        fields += f",parts({_mime_part_projection(depth - 1)})"
+    return fields
+
+
+def _attachment_summaries(
+    payload: dict[str, Any],
+    *,
+    max_attachments: int,
+    max_mime_depth: int,
+) -> tuple[GmailAttachmentSummary, ...]:
+    root = payload.get("payload")
+    if not isinstance(root, dict):
+        raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_INVALID")
+
+    attachments: list[GmailAttachmentSummary] = []
+    seen_attachment_ids: set[str] = set()
+    nodes = 0
+
+    def walk(part: dict[str, Any], depth: int) -> None:
+        nonlocal nodes
+        nodes += 1
+        if nodes > 1024:
+            raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_TOO_LARGE")
+
+        mime_type = part.get("mimeType")
+        if not isinstance(mime_type, str) or not 1 <= len(mime_type) <= 160:
+            raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_INVALID")
+        filename = part.get("filename", "")
+        if not isinstance(filename, str) or len(filename) > 512:
+            raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_INVALID")
+        body = part.get("body")
+        if body is None:
+            body = {}
+        if not isinstance(body, dict) or "data" in body:
+            raise GmailConnectorError("GMAIL_MESSAGE_BODY_DATA_FORBIDDEN")
+
+        attachment_id = body.get("attachmentId")
+        size = body.get("size", 0)
+        if type(size) is not int or size < 0:
+            raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_INVALID")
+        if attachment_id is not None:
+            if (
+                not isinstance(attachment_id, str)
+                or not 1 <= len(attachment_id) <= 2048
+                or attachment_id in seen_attachment_ids
+            ):
+                raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_INVALID")
+            seen_attachment_ids.add(attachment_id)
+            attachments.append(
+                GmailAttachmentSummary(
+                    attachment_id=attachment_id,
+                    filename=filename,
+                    mime_type=mime_type,
+                    size_bytes=size,
+                )
+            )
+            if len(attachments) > max_attachments:
+                raise GmailConnectorError("GMAIL_ATTACHMENT_COUNT_EXCEEDED")
+        elif filename and size > 0:
+            # Reading body.data to recover an inline attachment would also risk
+            # observing message-body bytes. V1 fails closed instead.
+            raise GmailConnectorError("GMAIL_INLINE_ATTACHMENT_UNSUPPORTED")
+
+        parts = part.get("parts")
+        if parts is not None:
+            if not isinstance(parts, list) or len(parts) > 512:
+                raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_INVALID")
+            if depth >= max_mime_depth and parts:
+                raise GmailConnectorError("GMAIL_ATTACHMENT_MIME_DEPTH_EXCEEDED")
+            for child in parts:
+                if not isinstance(child, dict):
+                    raise GmailConnectorError("GMAIL_ATTACHMENT_STRUCTURE_INVALID")
+                walk(child, depth + 1)
+        elif depth >= max_mime_depth and mime_type.casefold().startswith("multipart/"):
+            raise GmailConnectorError("GMAIL_ATTACHMENT_MIME_DEPTH_EXCEEDED")
+
+    walk(root, 1)
+    return tuple(attachments)
 
 
 def _header_map(payload: dict[str, Any]) -> dict[str, str]:
