@@ -16,7 +16,7 @@ def test_provider_authorization_v1_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0045_provider_authorization_v1"]
+            ).scalars().all() == ["0046_gmail_history_cursor"]
 
             schema = inspect(connection)
             columns = {
@@ -31,6 +31,7 @@ def test_provider_authorization_v1_schema():
                 "provider",
                 "product",
                 "provider_account_hash",
+                "gmail_history_id",
                 "granted_scopes",
                 "secret_nonce_b64url",
                 "secret_ciphertext_b64url",

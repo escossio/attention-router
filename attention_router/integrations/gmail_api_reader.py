@@ -37,6 +37,15 @@ class StaticGmailAccessTokenProvider:
         return self.token.strip()
 
 
+def history_id(value: object) -> str:
+    if (
+        not isinstance(value, str) or not value.isascii() or not value.isdecimal()
+        or not 1 <= len(value) <= 20 or not 0 < int(value) <= 2**64 - 1
+    ):
+        raise GmailConnectorError("GMAIL_API_RESPONSE_INVALID")
+    return value
+
+
 class GmailApiReader(GmailReader):
     """Read-only Gmail REST reader with no provider state mutation."""
 
@@ -69,34 +78,60 @@ class GmailApiReader(GmailReader):
                 "Accept": "application/json",
             },
         )
+        failure = "GMAIL_API_RESPONSE_INVALID"
         try:
-            response = self._opener(
-                request,
-                timeout=self._timeout_seconds,
-            )
-            status = int(response.status)
-            body = response.read()
+            response = self._opener(request, timeout=self._timeout_seconds)
+            try:
+                if response.status == 404 and path == "/history":
+                    failure = "GMAIL_PRODUCT_HISTORY_STALE"
+                elif response.status in {401, 403}:
+                    failure = "GMAIL_API_UNAUTHENTICATED"
+                elif response.status == 429 or 500 <= response.status <= 599:
+                    failure = "GMAIL_API_UNAVAILABLE"
+                elif response.status != 200:
+                    failure = "GMAIL_API_REJECTED"
+                else:
+                    body = response.read(1024 * 1024 + 1)
+                    if len(body) <= 1024 * 1024:
+                        decoded = json.loads(body.decode("utf-8"))
+                        if isinstance(decoded, dict):
+                            return decoded
+            finally:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
         except urllib_error.HTTPError as exc:
-            if exc.code in {401, 403}:
-                reason = "GMAIL_API_UNAUTHENTICATED"
+            if exc.code == 404 and path == "/history":
+                failure = "GMAIL_PRODUCT_HISTORY_STALE"
+            elif exc.code in {401, 403}:
+                failure = "GMAIL_API_UNAUTHENTICATED"
             elif exc.code == 429 or 500 <= exc.code <= 599:
-                reason = "GMAIL_API_UNAVAILABLE"
+                failure = "GMAIL_API_UNAVAILABLE"
             else:
-                reason = "GMAIL_API_REJECTED"
-            # Never expose provider response bodies, URLs or access tokens.
-            raise GmailConnectorError(reason) from exc
-        except (OSError, TimeoutError) as exc:
-            raise GmailConnectorError("GMAIL_API_UNAVAILABLE") from exc
+                failure = "GMAIL_API_REJECTED"
+        except (OSError, TimeoutError):
+            failure = "GMAIL_API_UNAVAILABLE"
+        except Exception:
+            pass
+        # Do not retain untrusted response bodies/URLs in exception chains.
+        raise GmailConnectorError(failure)
 
-        if status != 200:
-            raise GmailConnectorError("GMAIL_API_REJECTED")
-        try:
-            decoded = json.loads(body.decode("utf-8"))
-        except (UnicodeError, json.JSONDecodeError) as exc:
-            raise GmailConnectorError("GMAIL_API_RESPONSE_INVALID") from exc
-        if not isinstance(decoded, dict):
-            raise GmailConnectorError("GMAIL_API_RESPONSE_INVALID")
-        return decoded
+    def current_history_id(self) -> str:
+        return history_id(self._get_json("/profile", query={"fields": "historyId"}).get(
+            "historyId"
+        ))
+
+    def history_page(self, start: str, page_token: str | None = None) -> dict:
+        query = {
+            "startHistoryId": history_id(start),
+            "historyTypes": "messageAdded",
+            "labelId": "INBOX",
+            "maxResults": 100,
+            "fields": "history(id,messagesAdded(message(id,labelIds))),historyId,nextPageToken",
+        }
+        if page_token is not None:
+            query["pageToken"] = page_token
+        return self._get_json("/history", query=query)
 
     def search_message_ids(
         self,

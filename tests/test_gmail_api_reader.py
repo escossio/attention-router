@@ -20,8 +20,8 @@ class FakeResponse:
         self.status = status
         self._body = json.dumps(payload).encode()
 
-    def read(self):
-        return self._body
+    def read(self, limit=None):
+        return self._body[:limit]
 
 
 def _full_message(*, attachment=False):

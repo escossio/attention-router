@@ -1,8 +1,9 @@
 # Gmail Product Runner V1
 
 The runner added in PR #146 executes one bounded poll for an existing
-`ProviderAuthorization`. This increment hardens that implementation; the
-subscriber continues to use the normal Android **Connect Gmail** flow.
+`ProviderAuthorization`, hardened in PR #147. The next increment adds a durable
+incremental history cursor; the subscriber continues to use the normal Android
+**Connect Gmail** flow.
 
 ```text
 Android Connect Gmail -> GmailConnectionService -> ProviderAuthorization
@@ -15,7 +16,8 @@ Android Connect Gmail -> GmailConnectionService -> ProviderAuthorization
 caller supplies an SQLAlchemy session; the runner does not commit, provision an
 installation or accept manually copied provider/integration tokens. The existing
 one-shot script is an operator entry point, not a prerequisite for subscribers.
-Scheduling, durable history cursors and automatic invocation remain future work.
+Scheduling and automatic invocation remain future work; the durable incremental
+history primitive is described below.
 
 ## Authority and secrets
 
@@ -100,3 +102,91 @@ ID, binding ID and selected/accepted/duplicate counts.
 Validation uses synthetic Connect Gmail persistence, real reader/connector
 composition and fake HTTP responses, including explicit secret sentinels.
 No real Gmail, live runtime, deployment or merge is required for these tests.
+
+## Durable incremental history (0046)
+
+`GmailProductRunner.run_incremental(session, installation_id=..., max_results=...,
+max_pages=10)` adds one bounded execution primitive. `run_once` retains its manual
+INBOX listing behavior. No scheduler, daemon or automatic polling is implemented.
+Android Connect Gmail remains the sole subscriber installation flow.
+
+The nullable `provider_authorizations.gmail_history_id` belongs to the exact
+installation row, with its tenant, human and account identity. Existing rows
+migrate to NULL. Downgrade refuses to discard populated cursors with
+`GMAIL_HISTORY_DOWNGRADE_REQUIRES_DATA_EXPORT`. **First execution reads only `/profile?fields=historyId`, stores
+the current baseline and ingests zero messages. It does not backfill existing
+mail.** The caller must commit that baseline. A new installation always seeds;
+same-account reconnect preserves the cursor, while account replacement clears it
+under the installation lock, including A -> B -> A replacement.
+
+Subsequent calls use `users.history.list` with `historyTypes=messageAdded`,
+`labelId=INBOX`, `maxResults=100` and a fields projection. The exact
+`https://www.googleapis.com/auth/gmail.metadata` scope is unchanged. See the
+[official history contract](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/history/list).
+Only `messagesAdded` entries explicitly carrying INBOX are selected. Other
+changes can advance the cursor without ingestion. History IDs must increase;
+malformed or out-of-order responses fail closed. Message IDs are deduplicated
+within the cycle. Selected messages use the existing metadata-only reader and
+neutral connector; no legacy event DTO or dispatcher change is introduced.
+
+Each cycle permits 1..100 selected messages, 1..10 pages, at most 100 history
+records per page and at most 1 MiB per provider response. Each record is processed
+whole. When the remaining message budget cannot cover the next record, execution
+returns successfully with the last fully processed record as its cursor. A
+record exceeding the configured message budget fails with
+`GMAIL_PRODUCT_HISTORY_RECORD_TOO_LARGE`; it requires an explicitly larger bound
+(up to 100) or future recovery tooling, never a skip. At the page bound only fully
+examined records advance; mailbox-wide `historyId` is used only on the final
+page. Repeated/invalid pagination tokens fail closed. History 404 yields
+`GMAIL_PRODUCT_HISTORY_STALE` and **never reseeds automatically**. Recovery is an
+explicit future workflow; stale history can represent lost provider retention.
+
+### Transactions and replay
+
+Use a clean caller-owned session and commit or rollback promptly after execution.
+The primitive first reads the immutable slot without locking, then acquires a
+PostgreSQL transaction-scoped advisory gate with `pg_try_advisory_xact_lock`.
+It retains the installation `FOR UPDATE NOWAIT` lock and reloads governed
+state after the gate. Concurrent runs fail with `GMAIL_PRODUCT_HISTORY_BUSY`.
+Connect (including first connect and account replacement) and disconnect acquire
+the same gate in waiting mode **before** any Tenant/ProviderAuthorization/Binding/
+Credential row locks. Connect performs provider exchange/profile I/O before the
+gate; disconnect performs revocation before touching binding/credential rows.
+All locks release on caller commit/rollback; there are no hidden commits.
+
+The key is the first eight SHA-256 bytes of
+`attention-router:gmail-slot:v1:` plus the canonical persisted slot, interpreted
+as a signed big-endian 64-bit integer in PostgreSQL's bigint advisory namespace.
+The slot depends only on tenant/human/provider/product identity, not secrets,
+account identity, cursor or installation existence. First connect computes the
+same slot used by later runners. Hash collisions can over-serialize unrelated
+operations or yield BUSY; they never confer authority. Other advisory namespaces
+are domain-separated, though a 64-bit collision remains theoretically possible.
+
+This order prevents reconnect from retaining Tenant while waiting for a runner
+that is awaiting ingress. That original application-level cycle is partly HTTP,
+so PostgreSQL's deadlock detector cannot see the full graph; ingress instead
+hits its lock timeout. The runner holds no Tenant/Binding/Credential locks across
+network I/O. Neutral ingress independently locks and revalidates its authority.
+Use clean caller sessions without pre-acquired locks or pending writes; composing
+these operations after unrelated locks can violate this ordering. SQLite's gate
+is a functional no-op and does not certify concurrency.
+
+Only successful cycles flush a new cursor; failures leave it at the cycle's
+starting position, even if earlier events were admitted. There is no hidden
+commit. A caller rollback also rolls back cursor advancement. HTTP admission is
+independently durable and cannot be rolled back by this transaction.
+
+Incremental events pass the immutable provider message timestamp as the replay
+`received_at` value, so retrying unchanged metadata produces identical event
+bytes. The authoritative actual receipt time remains the neutral inbox's
+`admitted_at`. Manual `run_once` still uses the observation wall clock. Mixing
+manual and incremental admission for the same message/binding can therefore
+produce an idempotency conflict; it fails closed rather than advancing. Changed
+provider metadata can likewise conflict and requires explicit investigation.
+No new timestamp or duplicate semantics are imposed on neutral ingress.
+
+Successful results expose only installation ID, initialization status, record
+count, selected/accepted/duplicate counts and whether the cursor advanced.
+Provider IDs, page tokens and all secrets stay out of result/repr and sanitized
+error chains. No body, snippet, MIME body or attachment bytes are fetched.
