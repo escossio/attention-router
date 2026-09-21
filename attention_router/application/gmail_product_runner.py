@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
-from typing import Callable, Protocol, TypeVar
+from typing import TYPE_CHECKING, Callable, Protocol, TypeVar
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
@@ -36,6 +36,10 @@ from attention_router.security.provider_secrets import (
     ProviderSecretCipher,
     ProviderSecretEnvelope,
 )
+
+
+if TYPE_CHECKING:
+    from attention_router.application.gmail_history import GmailHistoryResult
 
 
 class GmailProductRunnerError(RuntimeError):
@@ -309,6 +313,18 @@ class GmailProductRunner:
         if digest != credential.digest:
             raise GmailProductBindingInvalid()
         return row, binding, refresh_token, ingress_bearer
+
+    def run_incremental(
+        self, session: Session, *, installation_id: str,
+        max_results: int | None = None, max_pages: int = 10, now: datetime | None = None,
+    ) -> GmailHistoryResult:
+        """Flush a bounded history cursor; the caller owns commit/rollback."""
+        from attention_router.application.gmail_history import run_incremental
+
+        return run_incremental(
+            self, session, installation_id=installation_id,
+            max_results=max_results, max_pages=max_pages, now=now,
+        )
 
     def run_once(
         self,

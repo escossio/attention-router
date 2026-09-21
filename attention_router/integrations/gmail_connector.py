@@ -223,7 +223,9 @@ class GmailInboundConnector:
         self._config = config
         self._adapter = EmailNormalizedAdapter()
 
-    def ingest_message(self, message: GmailMessage) -> IntegrationIngressResponse:
+    def ingest_message(
+        self, message: GmailMessage, *, received_at: datetime | None = None
+    ) -> IntegrationIngressResponse:
         normalized = gmail_message_to_normalized_input(message)
         # Attachment bytes/receipts require the Artifact Plane upload boundary.
         # Until that exists, fail closed rather than dropping attachment identity.
@@ -235,7 +237,7 @@ class GmailInboundConnector:
             tenant_id=self._config.tenant_id,
             instance_id=self._config.instance_id,
             account_id=self._config.account_id,
-            received_at=datetime.now(UTC),
+            received_at=received_at or datetime.now(UTC),
         )
         return self._ingress.send(
             output.event.model_dump(mode="json")

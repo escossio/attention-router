@@ -85,7 +85,7 @@ def test_scenario_and_budget_tightening_constraints_are_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0045_provider_authorization_v1"]
+    assert scripts.get_heads() == ["0046_gmail_history_cursor"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -129,3 +129,10 @@ def test_platform_evolution_migration_waves_form_one_chain():
     assert revisions["0036_artifact_registry_v0"].down_revision == "0035_whatsapp_voice_media"
 
     assert revisions["0037_integration_admission_v0"].down_revision == "0036_artifact_registry_v0"
+
+
+def test_gmail_history_migration_parent():
+    scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+    assert scripts.get_revision("0046_gmail_history_cursor").down_revision == (
+        "0045_provider_authorization_v1"
+    )

@@ -19,6 +19,7 @@ from attention_router.application.client_session import (
     ClientSessionService,
 )
 from attention_router.config import Settings
+from attention_router.infrastructure.gmail_slot_lock import acquire_gmail_slot
 from attention_router.infrastructure.models import (
     IntegrationBindingRow,
     IntegrationCredentialRow,
@@ -315,6 +316,17 @@ class GmailConnectionService:
             f"{row_id}|{tenant_id}|{human_identity_id}|GOOGLE|GMAIL"
         ).encode("utf-8")
 
+    @staticmethod
+    def _lock_slot(session: Session, slot: str) -> None:
+        try:
+            acquire_gmail_slot(session, slot)
+        except Exception:
+            pass
+        else:
+            return
+        # Raise outside the handler: no DB diagnostic context escapes.
+        raise GmailConnectionConflict()
+
     def _authority(self, session: Session, session_token: str | None):
         return self.client_sessions.authenticated_bootstrap(
             session,
@@ -376,7 +388,9 @@ class GmailConnectionService:
             authority.human_identity_id,
         )
 
-        # Revalidate client-session authority after provider network calls.
+        self._lock_slot(session, slot)
+
+        # Revalidate client-session authority after provider network calls and slot wait.
         authority = self._authority(session, session_token)
         if slot != self._slot_key(
             authority.active_tenant_id,
@@ -396,6 +410,7 @@ class GmailConnectionService:
             select(ProviderAuthorizationRow)
             .where(ProviderAuthorizationRow.slot_key == slot)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         existing_refresh: str | None = None
         if row is not None:
@@ -514,6 +529,8 @@ class GmailConnectionService:
             )
             session.add(row)
         else:
+            if row.provider_account_hash != account_hash:
+                row.gmail_history_id = None
             row.provider_account_hash = account_hash
             row.granted_scopes = list(grant.granted_scopes)
             row.secret_nonce_b64url = envelope.nonce_b64url
@@ -544,10 +561,12 @@ class GmailConnectionService:
             authority.active_tenant_id,
             authority.human_identity_id,
         )
+        self._lock_slot(session, slot)
         row = session.scalar(
             select(ProviderAuthorizationRow)
             .where(ProviderAuthorizationRow.slot_key == slot)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if row is None or row.status != "ACTIVE":
             return GmailConnectionView("DISCONNECTED", None, ())
