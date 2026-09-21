@@ -39,9 +39,9 @@ def repository_sessions():
         connect_args={"options": "-c statement_timeout=15000 -c lock_timeout=10000"},
     )
     reset = text(
-        "TRUNCATE TABLE client_location_snapshots, client_sessions, client_session_challenges, "
-        "device_bootstrap_challenges, client_devices, client_tenant_memberships, "
-        "human_auth_continuation_grants, "
+        "TRUNCATE TABLE provider_authorizations, client_location_snapshots, "
+        "client_sessions, client_session_challenges, device_bootstrap_challenges, "
+        "client_devices, client_tenant_memberships, human_auth_continuation_grants, "
         "human_auth_transactions, external_identity_bindings, human_identities"
     )
     try:
