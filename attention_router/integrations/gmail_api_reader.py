@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import getaddresses, parsedate_to_datetime
 import json
@@ -14,6 +14,7 @@ from attention_router.integrations.gmail_connector import (
     GmailMessage,
     GmailReader,
 )
+from attention_router.integrations.http_transport import urlopen_without_redirects
 
 
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -28,7 +29,7 @@ class GmailAccessTokenProvider(Protocol):
 class StaticGmailAccessTokenProvider:
     """Opaque token source. The token lifecycle remains external."""
 
-    token: str
+    token: str = field(repr=False)
 
     def access_token(self) -> str:
         if not isinstance(self.token, str) or not self.token.strip():
@@ -48,7 +49,7 @@ class GmailApiReader(GmailReader):
     ):
         self._token_provider = token_provider
         self._timeout_seconds = timeout_seconds
-        self._opener = opener or urllib_request.urlopen
+        self._opener = opener or urlopen_without_redirects
 
     def _get_json(
         self,

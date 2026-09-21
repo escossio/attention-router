@@ -1,4 +1,4 @@
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     )
     gmail_product_runner_max_results: int = 5
     google_workspace_oauth_client_id: str | None = None
-    google_workspace_oauth_client_secret: str | None = None
-    provider_authorization_key_b64url: str | None = None
+    google_workspace_oauth_client_secret: str | None = Field(default=None, repr=False)
+    provider_authorization_key_b64url: str | None = Field(default=None, repr=False)
     internal_ingress_http_host: str = "0.0.0.0"
     internal_ingress_http_port: int = 18102
     internal_ingress_hmac_secret: str | None = None

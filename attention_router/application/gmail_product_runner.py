@@ -3,14 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
-from typing import Callable, Protocol
-from urllib import error as urllib_error
+from typing import Callable, Protocol, TypeVar
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from sqlalchemy.orm import Session
 
-from attention_router.application.gmail_connection import GMAIL_METADATA_SCOPE
+from attention_router.application.gmail_connection import GMAIL_METADATA_SCOPE, GmailConnectionService
 from attention_router.config import Settings
 from attention_router.infrastructure.models import (
     IntegrationBindingRow,
@@ -29,7 +28,9 @@ from attention_router.integrations.gmail_connector import (
     GmailPollResult,
     GmailReader,
     IntegrationIngressClient,
+    IntegrationIngressResponse,
 )
+from attention_router.integrations.http_transport import urlopen_without_redirects
 from attention_router.integrations.tenant_binding import INBOUND_SCOPE, credential_digest
 from attention_router.security.provider_secrets import (
     ProviderSecretCipher,
@@ -39,6 +40,9 @@ from attention_router.security.provider_secrets import (
 
 class GmailProductRunnerError(RuntimeError):
     code = "GMAIL_PRODUCT_RUNNER_UNAVAILABLE"
+
+    def __init__(self):
+        super().__init__(self.code)
 
 
 class GmailProductRunnerDisabled(GmailProductRunnerError):
@@ -53,12 +57,57 @@ class GmailProductAuthorizationInvalid(GmailProductRunnerError):
     code = "GMAIL_PRODUCT_AUTHORIZATION_INVALID"
 
 
+class GmailProductBindingInvalid(GmailProductAuthorizationInvalid):
+    code = "GMAIL_PRODUCT_BINDING_INVALID"
+
+
+class GmailProductSecretInvalid(GmailProductAuthorizationInvalid):
+    code = "GMAIL_PRODUCT_SECRET_INVALID"
+
+
+class GmailProductRefreshFailed(GmailProductRunnerError):
+    code = "GMAIL_PRODUCT_REFRESH_FAILED"
+
+
+class GmailProductProviderUnavailable(GmailProductRunnerError):
+    code = "GMAIL_PRODUCT_PROVIDER_UNAVAILABLE"
+
+
+class GmailProductIngressFailed(GmailProductRunnerError):
+    code = "GMAIL_PRODUCT_INGRESS_FAILED"
+
+
+T = TypeVar("T")
+
+
+def _sanitized(error_type: type[GmailProductRunnerError], operation: Callable[[], T]) -> T:
+    try:
+        return operation()
+    except Exception:
+        pass
+    # Raise outside the handler: neither cause nor context retains provider text.
+    raise error_type()
+
+
+def _exact_scope(value: object, expected: str) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and bool(value)
+        and all(isinstance(scope, str) and scope == expected for scope in value)
+    )
+
+
+def _bearer_token(value: object) -> bool:
+    return isinstance(value, str) and bool(value) and all(32 < ord(c) < 127 for c in value)
+
+
 class GoogleAccessTokenRefresher(Protocol):
     def refresh_access_token(self, refresh_token: str) -> str: ...
 
 
 class GoogleRefreshAccessTokenClient:
     TOKEN_URL = "https://oauth2.googleapis.com/token"
+    MAX_RESPONSE_BYTES = 64 * 1024
 
     def __init__(
         self,
@@ -68,14 +117,41 @@ class GoogleRefreshAccessTokenClient:
         timeout_seconds: float = 10.0,
         opener=None,
     ):
+        if type(timeout_seconds) not in {int, float} or not 0 < timeout_seconds <= 30:
+            raise ValueError("GMAIL_REFRESH_TIMEOUT_INVALID")
         self._client_id = client_id
         self._client_secret = client_secret
         self._timeout_seconds = timeout_seconds
-        self._opener = opener or urllib_request.urlopen
+        self._opener = opener or urlopen_without_redirects
 
     def refresh_access_token(self, refresh_token: str) -> str:
-        if not isinstance(refresh_token, str) or not refresh_token:
-            raise GmailProductAuthorizationInvalid()
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in (refresh_token, self._client_id, self._client_secret)
+        ):
+            raise GmailProductRefreshFailed()
+        payload = _sanitized(
+            GmailProductRefreshFailed, lambda: self._refresh_payload(refresh_token)
+        )
+        if "scope" in payload:
+            raw_scope = payload["scope"]
+            if not isinstance(raw_scope, str) or set(raw_scope.split()) != {GMAIL_METADATA_SCOPE}:
+                raise GmailProductAuthorizationInvalid()
+        token = payload.get("access_token")
+        token_type = payload.get("token_type")
+        if (
+            not _bearer_token(token)
+            or not isinstance(token_type, str)
+            or token_type.casefold() != "bearer"
+        ):
+            raise GmailProductRefreshFailed()
+        if "expires_in" in payload:
+            lifetime = payload["expires_in"]
+            if type(lifetime) is not int or lifetime <= 0:
+                raise GmailProductRefreshFailed()
+        return token
+
+    def _refresh_payload(self, refresh_token: str) -> dict:
         body = urllib_parse.urlencode(
             {
                 "grant_type": "refresh_token",
@@ -90,28 +166,21 @@ class GoogleRefreshAccessTokenClient:
             method="POST",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
+        response = self._opener(request, timeout=self._timeout_seconds)
         try:
-            response = self._opener(request, timeout=self._timeout_seconds)
-            raw = response.read(64 * 1024 + 1)
-            if len(raw) > 64 * 1024:
-                raise GmailProductRunnerError()
+            if response.status != 200:
+                raise GmailProductRefreshFailed()
+            raw = response.read(self.MAX_RESPONSE_BYTES + 1)
+            if len(raw) > self.MAX_RESPONSE_BYTES:
+                raise GmailProductRefreshFailed()
             payload = json.loads(raw.decode("utf-8"))
-        except urllib_error.HTTPError as exc:
-            if exc.code in {400, 401}:
-                raise GmailProductAuthorizationInvalid() from None
-            raise GmailProductRunnerError() from None
-        except (OSError, TimeoutError, urllib_error.URLError, UnicodeError, json.JSONDecodeError):
-            raise GmailProductRunnerError() from None
-        if int(getattr(response, "status", 0)) != 200 or not isinstance(payload, dict):
-            raise GmailProductRunnerError()
-        token = payload.get("access_token")
-        if not isinstance(token, str) or not token:
-            raise GmailProductRunnerError()
-        raw_scope = payload.get("scope")
-        if isinstance(raw_scope, str) and raw_scope.strip():
-            if set(raw_scope.split()) != {GMAIL_METADATA_SCOPE}:
-                raise GmailProductAuthorizationInvalid()
-        return token
+            if not isinstance(payload, dict):
+                raise GmailProductRefreshFailed()
+            return payload
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +192,16 @@ class GmailProductRunResult:
 
 ReaderFactory = Callable[[str], GmailReader]
 IngressFactory = Callable[[str], IntegrationIngressClient]
+
+
+class _RunnerIngress:
+    """Keep ingress failures separate without changing the connector contract."""
+
+    def __init__(self, client: IntegrationIngressClient):
+        self._client = client
+
+    def send(self, payload: dict) -> IntegrationIngressResponse:
+        return _sanitized(GmailProductIngressFailed, lambda: self._client.send(payload))
 
 
 class GmailProductRunner:
@@ -153,9 +232,7 @@ class GmailProductRunner:
 
     @staticmethod
     def _aad(row: ProviderAuthorizationRow) -> bytes:
-        return (
-            f"{row.id}|{row.tenant_id}|{row.human_identity_id}|GOOGLE|GMAIL"
-        ).encode("utf-8")
+        return GmailConnectionService._aad(row.id, row.tenant_id, row.human_identity_id)
 
     @staticmethod
     def _utc(value: datetime) -> datetime:
@@ -170,21 +247,26 @@ class GmailProductRunner:
         *,
         now: datetime,
     ) -> tuple[ProviderAuthorizationRow, IntegrationBindingRow, str, str]:
-        row = session.get(ProviderAuthorizationRow, installation_id)
-        if row is None or row.status != "ACTIVE":
-            raise GmailProductAuthorizationUnavailable()
-        if (
-            row.provider != "GOOGLE"
-            or row.product != "GMAIL"
-            or set(row.granted_scopes) != {GMAIL_METADATA_SCOPE}
-        ):
-            raise GmailProductAuthorizationInvalid()
+        # Authority comes from persisted rows, even when the caller's Session
+        # has an older identity-map entry. Polling must not autoflush writes.
+        with session.no_autoflush:
+            row = session.get(ProviderAuthorizationRow, installation_id, populate_existing=True)
+            if row is None or row.status != "ACTIVE" or row.revoked_at is not None:
+                raise GmailProductAuthorizationUnavailable()
+            if (
+                row.provider != "GOOGLE"
+                or row.product != "GMAIL"
+                or not _exact_scope(row.granted_scopes, GMAIL_METADATA_SCOPE)
+            ):
+                raise GmailProductAuthorizationInvalid()
 
-        binding = session.get(IntegrationBindingRow, row.integration_binding_id)
-        credential = session.get(
-            IntegrationCredentialRow,
-            row.integration_credential_id,
-        )
+            binding = session.get(
+                IntegrationBindingRow, row.integration_binding_id, populate_existing=True
+            )
+            credential = session.get(
+                IntegrationCredentialRow, row.integration_credential_id, populate_existing=True
+            )
+        slot = GmailConnectionService._slot_key(row.tenant_id, row.human_identity_id)
         if (
             binding is None
             or not binding.active
@@ -192,33 +274,40 @@ class GmailProductRunner:
             or binding.audience != self.settings.integration_ingress_audience
             or binding.name != "channel.email"
             or binding.kind != "CHANNEL"
-            or binding.account_key != "sha256:" + row.provider_account_hash
-            or set(binding.scopes) != {INBOUND_SCOPE}
+            or row.slot_key != slot
+            or binding.instance_id != "gmail-" + slot[:24]
+            or binding.account_key != f"sha256:{row.provider_account_hash}"
+            or not _exact_scope(binding.scopes, INBOUND_SCOPE)
             or credential is None
             or credential.revoked
             or credential.binding_id != binding.id
-            or set(credential.scopes) != {INBOUND_SCOPE}
+            or not _exact_scope(credential.scopes, INBOUND_SCOPE)
+            or not isinstance(credential.not_before, datetime)
+            or not isinstance(credential.expires_at, datetime)
             or now < self._utc(credential.not_before)
             or now >= self._utc(credential.expires_at)
         ):
-            raise GmailProductAuthorizationInvalid()
+            raise GmailProductBindingInvalid()
 
         key = self.settings.provider_authorization_key_b64url
         if not key:
             raise GmailProductRunnerDisabled()
-        try:
-            refresh_token, ingress_bearer = ProviderSecretCipher(key).decrypt(
+        refresh_token, ingress_bearer = _sanitized(
+            GmailProductSecretInvalid,
+            lambda: ProviderSecretCipher(key).decrypt(
                 ProviderSecretEnvelope(
                     row.secret_nonce_b64url,
                     row.secret_ciphertext_b64url,
                     row.secret_key_version,
                 ),
                 aad=self._aad(row),
-            )
-        except Exception as exc:
-            raise GmailProductAuthorizationInvalid() from exc
-        if credential_digest(ingress_bearer) != credential.digest:
-            raise GmailProductAuthorizationInvalid()
+            ),
+        )
+        if not _bearer_token(ingress_bearer):
+            raise GmailProductSecretInvalid()
+        digest = _sanitized(GmailProductSecretInvalid, lambda: credential_digest(ingress_bearer))
+        if digest != credential.digest:
+            raise GmailProductBindingInvalid()
         return row, binding, refresh_token, ingress_bearer
 
     def run_once(
@@ -238,19 +327,28 @@ class GmailProductRunner:
             if max_results is None
             else max_results
         )
-        if not 1 <= limit <= 100:
+        if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("GMAIL_POLL_LIMIT_OUT_OF_RANGE")
 
-        current = (now or datetime.now(UTC)).astimezone(UTC)
+        current = self._utc(now or datetime.now(UTC))
         row, binding, refresh_token, ingress_bearer = self._load_governed_authorization(
             session,
             installation_id,
             now=current,
         )
-        access_token = self._token_refresher.refresh_access_token(refresh_token)
+        access_token = _sanitized(
+            GmailProductRefreshFailed,
+            lambda: self._token_refresher.refresh_access_token(refresh_token),
+        )
+        if not _bearer_token(access_token):
+            raise GmailProductRefreshFailed()
 
-        reader = self._reader_factory(access_token)
-        ingress = self._ingress_factory(ingress_bearer)
+        reader = _sanitized(
+            GmailProductProviderUnavailable, lambda: self._reader_factory(access_token)
+        )
+        ingress = _RunnerIngress(_sanitized(
+            GmailProductIngressFailed, lambda: self._ingress_factory(ingress_bearer)
+        ))
         connector = GmailInboundConnector(
             reader=reader,
             ingress=ingress,
@@ -262,17 +360,29 @@ class GmailProductRunner:
                 ingress_bearer=ingress_bearer,
             ),
         )
-        poll = connector.poll(max_results=limit)
-        return GmailProductRunResult(
-            installation_id=row.id,
-            binding_id=binding.id,
-            poll=poll,
-        )
+        failure = GmailProductProviderUnavailable
+        try:
+            poll = connector.poll(max_results=limit)
+            return GmailProductRunResult(
+                installation_id=row.id,
+                binding_id=binding.id,
+                poll=poll,
+            )
+        except GmailProductIngressFailed:
+            failure = GmailProductIngressFailed
+        except Exception:
+            pass
+        raise failure()
 
 
 __all__ = [
     "GmailProductAuthorizationInvalid",
     "GmailProductAuthorizationUnavailable",
+    "GmailProductBindingInvalid",
+    "GmailProductSecretInvalid",
+    "GmailProductRefreshFailed",
+    "GmailProductProviderUnavailable",
+    "GmailProductIngressFailed",
     "GmailProductRunResult",
     "GmailProductRunner",
     "GmailProductRunnerDisabled",

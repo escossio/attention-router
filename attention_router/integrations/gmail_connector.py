@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parseaddr
 import json
@@ -9,6 +9,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from attention_router.integrations.channel_adapters import EmailNormalizedAdapter
+from attention_router.integrations.http_transport import urlopen_without_redirects
 
 
 class GmailConnectorError(RuntimeError):
@@ -45,7 +46,7 @@ class GmailConnectorConfig:
     instance_id: str
     account_id: str | None
     ingress_url: str
-    ingress_bearer: str
+    ingress_bearer: str = field(repr=False)
 
     def __post_init__(self) -> None:
         for value, reason in (
@@ -89,7 +90,7 @@ class IntegrationIngressClient:
         self._url = url
         self._bearer = bearer
         self._timeout_seconds = timeout_seconds
-        self._opener = opener or urllib_request.urlopen
+        self._opener = opener or urlopen_without_redirects
 
     def send(self, payload: dict[str, Any]) -> IntegrationIngressResponse:
         body = json.dumps(
@@ -246,12 +247,12 @@ class GmailInboundConnector:
         query: str = "",
         max_results: int = 20,
     ) -> GmailPollResult:
-        if not 1 <= max_results <= 100:
+        if type(max_results) is not int or not 1 <= max_results <= 100:
             raise ValueError("GMAIL_POLL_LIMIT_OUT_OF_RANGE")
         message_ids = self._reader.search_message_ids(
             query=query,
             max_results=max_results,
-        )
+        )[:max_results]
         accepted = 0
         duplicates = 0
         for message_id in message_ids:
