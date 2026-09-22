@@ -404,8 +404,7 @@ def _resolve_human_approval_lineage(
 
     if evidence is None:
         if (
-            authorization.approval_channel != "meta_whatsapp_interactive"
-            or not authorization.decision_inbound_wamid
+            not authorization.decision_inbound_wamid
             or not authorization.decision_sender
             or not authorization.decision_button_id
             or not authorization.request_wamid
