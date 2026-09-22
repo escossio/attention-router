@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     artifact_store_max_bytes: int = 32 * 1024 * 1024
     whatsapp_artifact_ingestion_enabled: bool = False
     whatsapp_artifact_max_bytes: int = 32 * 1024 * 1024
+    artifact_understanding_enabled: bool = False
+    artifact_understanding_provider: str = "openai"
+    artifact_understanding_model: str = "gpt-5.6-sol"
+    artifact_understanding_max_bytes: int = 20 * 1024 * 1024
+    artifact_understanding_timeout_seconds: float = 60.0
+    artifact_understanding_processing_lease_seconds: int = 180
+    artifact_understanding_batch_size: int = 10
+    artifact_understanding_max_output_tokens: int = 4096
     internal_ingress_http_host: str = "0.0.0.0"
     internal_ingress_http_port: int = 18102
     internal_ingress_hmac_secret: str | None = None
@@ -323,6 +331,54 @@ class Settings(BaseSettings):
                     "WHATSAPP_ARTIFACT_MAX_BYTES must not exceed "
                     "ARTIFACT_STORE_MAX_BYTES when WhatsApp Artifact ingestion "
                     "is enabled"
+                )
+        if self.artifact_understanding_provider not in {"openai"}:
+            raise ValueError(
+                "ARTIFACT_UNDERSTANDING_PROVIDER must be openai"
+            )
+        if not self.artifact_understanding_model.strip():
+            raise ValueError(
+                "ARTIFACT_UNDERSTANDING_MODEL must not be empty"
+            )
+        if not 1 <= self.artifact_understanding_max_bytes <= 64 * 1024 * 1024:
+            raise ValueError(
+                "ARTIFACT_UNDERSTANDING_MAX_BYTES must be between 1 and 67108864"
+            )
+        if not 1 <= self.artifact_understanding_timeout_seconds <= 300:
+            raise ValueError(
+                "ARTIFACT_UNDERSTANDING_TIMEOUT_SECONDS must be between 1 and 300"
+            )
+        if not 30 <= self.artifact_understanding_processing_lease_seconds <= 3600:
+            raise ValueError(
+                "ARTIFACT_UNDERSTANDING_PROCESSING_LEASE_SECONDS must be between 30 and 3600"
+            )
+        if not 1 <= self.artifact_understanding_batch_size <= 100:
+            raise ValueError(
+                "ARTIFACT_UNDERSTANDING_BATCH_SIZE must be between 1 and 100"
+            )
+        if not 256 <= self.artifact_understanding_max_output_tokens <= 16384:
+            raise ValueError(
+                "ARTIFACT_UNDERSTANDING_MAX_OUTPUT_TOKENS must be between 256 and 16384"
+            )
+        if self.artifact_understanding_enabled:
+            if not self.artifact_store_enabled:
+                raise ValueError(
+                    "ARTIFACT_UNDERSTANDING_ENABLED requires "
+                    "ARTIFACT_STORE_ENABLED=true"
+                )
+            if (
+                self.artifact_understanding_max_bytes
+                > self.artifact_store_max_bytes
+            ):
+                raise ValueError(
+                    "ARTIFACT_UNDERSTANDING_MAX_BYTES must not exceed "
+                    "ARTIFACT_STORE_MAX_BYTES when Artifact Understanding "
+                    "is enabled"
+                )
+            if not self.openai_api_key:
+                raise ValueError(
+                    "OPENAI_API_KEY is required when "
+                    "ARTIFACT_UNDERSTANDING_ENABLED=true"
                 )
         if self.gmail_connect_enabled:
             if not self.client_session_enabled:

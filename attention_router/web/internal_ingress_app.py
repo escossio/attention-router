@@ -19,6 +19,10 @@ from attention_router.application.whatsapp_artifacts import (
     WhatsAppArtifactRetryable,
     stage_whatsapp_artifact_notification,
 )
+from attention_router.application.artifact_understanding import (
+    ArtifactUnderstandingError,
+    register_artifact_understanding_notification,
+)
 from attention_router.config import settings
 from attention_router.infrastructure.db import SessionLocal
 from attention_router.infrastructure.models import InboundEventRow, TenantRow
@@ -199,14 +203,23 @@ def process_media_notification(
             if is_voice
             else None
         )
+        canonical_artifact_id = (
+            canonical.registration.artifact.id
+            if canonical
+            else None
+        )
+        understanding = register_artifact_understanding_notification(
+            session,
+            payload,
+            artifact_id=canonical_artifact_id,
+        )
         session.commit()
         return {
             "status": "accepted",
             "artifact_id": legacy.id if legacy else None,
-            "canonical_artifact_id": (
-                canonical.registration.artifact.id
-                if canonical
-                else None
+            "canonical_artifact_id": canonical_artifact_id,
+            "artifact_understanding_id": (
+                understanding.id if understanding else None
             ),
         }
     except HTTPException:
@@ -215,6 +228,17 @@ def process_media_notification(
     except (MediaNotificationRetryable, WhatsAppArtifactRetryable) as exc:
         session.rollback()
         raise HTTPException(status_code=425, detail="inbound event not ready") from exc
+    except ArtifactUnderstandingError as exc:
+        session.rollback()
+        if str(exc) == "INBOUND_EVENT_NOT_COMMITTED":
+            raise HTTPException(
+                status_code=425,
+                detail="inbound event not ready",
+            ) from exc
+        raise HTTPException(
+            status_code=409,
+            detail="artifact understanding conflict",
+        ) from exc
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail="media notification conflict") from exc

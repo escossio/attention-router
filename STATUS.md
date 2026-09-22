@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-09-21
+Updated: 2026-09-22
 
 ## Andy Ops Live Supervisor V1
 
@@ -38,15 +38,26 @@ Updated: 2026-09-21
 - Post-hardening gate after ambiguous externalized-body rejection: Ruff PASS, compileall PASS and 289 affected-surface tests PASS.
 - PR #156 merged the Gmail attachment pipeline and PR #158 merged the ambiguous MIME-body hardening; both completed CodeQL, distributed PostgreSQL, secret scan, Docker, Python, transport and analysis gates successfully.
 
-## WhatsApp inbound media Artifact V1 — candidate
+## WhatsApp inbound media Artifact V1 — merged and live-proven
 
-- Issue #159 reuses the signed local WhatsApp media notification and the explicit tenant boundary already present on main.
-- Generic image/document/video/audio media is downloaded once only when the new WhatsApp Artifact gate is enabled; voice capture remains available independently for transcription compatibility.
-- The backend matches the notification to the committed inbound event under the same tenant/source/external event id, derives source_account and sender from that event, revalidates staging bytes by size/SHA-256, then stages canonical Artifact/Receipt evidence.
-- Filename is metadata only and never controls a filesystem path. Generic content remains opaque: no parsing, OCR, archive extraction, decompression or macro execution is introduced.
-- Voice continues to create the legacy MediaArtifactRow/VoiceTranscription state and may additionally gain a canonical Artifact id when the new gate is enabled.
-- Local focused evidence before publication: 69 affected Python tests PASS and 23 local WhatsApp transport tests PASS; Ruff, compileall and JavaScript syntax checks PASS.
-- All new runtime controls remain default-off; no deployment, live media download or production flag enablement is part of this candidate.
+- Issue #159 / PR #160 route signed, explicit-tenant WhatsApp media into canonical Artifact/Receipt evidence while preserving the legacy voice-transcription path.
+- PR #163 fixed the PostgreSQL Resource-before-Artifact FK ordering exposed by the first real media proof and added a PostgreSQL-marked regression.
+- Exact-SHA distributed certification after the fix passed 439 PostgreSQL tests (CI01 115 / CI02 136 / CI03 188) plus the repository-native checks.
+- Live proof on 2026-09-22 used a real inbound WhatsApp PDF: the pending notification retried after the fix and converged to exactly one Resource, one Artifact, one channel.whatsapp Receipt and one immutable SSD object with matching size.
+- The live Artifact Store is tenant-scoped and remains the source-of-truth byte layer; filename remains metadata only.
+- Artifact Understanding is intentionally a separate derived layer rather than changing Artifact identity or executing received content.
+
+## Artifact Understanding V1 — candidate
+
+- Issue #166 adds governed derived understanding for inbound WhatsApp images and PDF documents without changing the immutable Artifact Store contract.
+- Supported V1 inputs are JPEG, PNG, WebP, GIF and PDF. Bytes are read through the tenant-scoped Artifact Store and passed to a multimodal provider; PostgreSQL never stores the raw file.
+- The OpenAI Responses provider sends images as bounded input_image data URLs and PDFs as bounded input_file data URLs with high page-image detail. Artifact content is explicitly untrusted data and cannot grant authority or supply system instructions.
+- Derived state persists summary, extracted/visible text, visual description, key facts, detected language, truncation state and provider/model/prompt provenance.
+- Decision queues fail closed: image/document decisions wait in WAITING_ARTIFACT_UNDERSTANDING until a READY derivation exists; FAILED understanding cancels the media-dependent decision rather than guessing around the file.
+- Effective conversation text includes the persisted derivation behind an explicit untrusted-attachment boundary, so later turns retain what Andy read without mutating the original inbound event.
+- Same tenant/artifact/provider/model/prompt READY results are reused across repeated deliveries; the provider is not called twice for identical canonical content under the same analysis profile.
+- Runtime controls are default-off and require Artifact Store plus OPENAI_API_KEY.
+- Current evidence: Ruff/compileall PASS, 77 affected unit/integration tests PASS, and a disposable PostgreSQL 16 migration + queue/worker proof PASS. Full exact-SHA distributed certification follows publication.
 
 ## Distributed validation control-plane rule
 

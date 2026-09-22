@@ -96,9 +96,15 @@ def effective_interaction_text(session, interaction: InteractionRow) -> str | No
     )
     if event is None:
         return interaction.inbound_text
+    from attention_router.application.artifact_understanding import (
+        ArtifactUnderstandingError,
+        effective_artifact_text,
+    )
+
     try:
-        return effective_inbound_text(session, event, interaction)
-    except VoiceTranscriptionError:
+        text = effective_inbound_text(session, event, interaction)
+        return effective_artifact_text(session, event, text)
+    except (VoiceTranscriptionError, ArtifactUnderstandingError):
         return None
 
 

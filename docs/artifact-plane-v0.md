@@ -177,3 +177,89 @@ neutral event admission. WhatsApp inbound media can now use the same canonical
 Artifact identity after its signed, explicit-tenant local media notification is
 matched to a committed inbound event. The legacy voice MediaArtifactRow remains
 in parallel only for transcription compatibility during this increment.
+
+## Artifact Understanding V1
+
+Issue #166 adds a derived understanding layer above the immutable Artifact Store.
+The source Artifact remains canonical evidence; model output is a versioned
+derivation and never replaces the bytes, receipt provenance or Resource identity.
+
+V1 is intentionally bounded to inbound WhatsApp image/document events whose
+canonical Artifact is already AVAILABLE. Supported content types are:
+
+- image/jpeg;
+- image/png;
+- image/webp;
+- image/gif;
+- application/pdf.
+
+The application reads bytes only through the tenant-scoped internal Artifact
+read seam. It does not expose a public URL and does not execute or locally parse
+received content. Images are sent to the multimodal provider as image inputs.
+PDFs are sent as file inputs so the provider can use document text plus page
+imagery. Raw bytes never enter PostgreSQL.
+
+### Derived record
+
+Each inbound event may own one artifact_understandings row. The row records:
+
+- explicit tenant and inbound-event identity;
+- optional canonical Artifact identity;
+- PENDING / PROCESSING / READY / FAILED state;
+- IMAGE or DOCUMENT content kind;
+- bounded summary and extracted/visible text;
+- bounded visual description and key facts;
+- detected language and whether text extraction was truncated;
+- provider, model and prompt-version provenance;
+- provider request reference without credentials;
+- bounded retry/lease/error metadata.
+
+Replay of the same inbound event is idempotent. A READY understanding for the
+same tenant-local Artifact may be reused by another inbound event only when the
+provider, model and prompt version also match.
+
+### Decision boundary
+
+When Artifact Understanding is enabled, a supported image/document event may not
+reach agent decision-making until its understanding is READY.
+
+The decision queue uses WAITING_ARTIFACT_UNDERSTANDING while the media
+notification or provider result is pending. FAILED understanding cancels the
+media-dependent decision fail-closed rather than allowing the agent to guess
+about unseen content.
+
+READY derived content is appended to the effective inbound text behind an
+explicit ANEXO_NAO_CONFIAVEL boundary. Text, prompts, policies, instructions,
+links or commands found inside an Artifact remain user-provided data; they do
+not gain system, policy, authorization or execution authority.
+
+Historical conversation rendering reuses the same persisted derivation, so later
+turns retain what was read without mutating the original inbound event.
+
+### Provider boundary
+
+The first provider is OpenAI Responses and is enabled only with explicit
+configuration. Image inputs use bounded base64 data URLs. PDF inputs use bounded
+input_file data URLs and high page-image detail. Provider output is accepted
+only through a strict structured schema.
+
+No provider credential, raw base64 payload or raw file byte sequence is
+persisted as derivation metadata.
+
+### Configuration
+
+Artifact Understanding is default-off:
+
+| Setting | Default |
+| --- | --- |
+| ARTIFACT_UNDERSTANDING_ENABLED | false |
+| ARTIFACT_UNDERSTANDING_PROVIDER | openai |
+| ARTIFACT_UNDERSTANDING_MODEL | gpt-5.6-sol |
+| ARTIFACT_UNDERSTANDING_MAX_BYTES | 20971520 |
+| ARTIFACT_UNDERSTANDING_TIMEOUT_SECONDS | 60 |
+| ARTIFACT_UNDERSTANDING_PROCESSING_LEASE_SECONDS | 180 |
+| ARTIFACT_UNDERSTANDING_BATCH_SIZE | 10 |
+| ARTIFACT_UNDERSTANDING_MAX_OUTPUT_TOKENS | 4096 |
+
+Enabling requires both Artifact Store V1 and OPENAI_API_KEY. The understanding
+byte limit may not exceed the configured Artifact Store object limit.
