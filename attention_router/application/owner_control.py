@@ -277,6 +277,88 @@ def resolve_owner_reply_grace_policy_id(session: Session, *, tenant_id: str) -> 
     return candidates[0]
 
 
+def dispatch_owner_control_action(
+    session: Session,
+    *,
+    tenant_id: str,
+    owner_actor_key: str,
+    action: OwnerControlAction,
+    parameters: OwnerControlParameters,
+    authority: OperatorAuthority,
+    source_channel: str,
+    source_event_id: str,
+    command_id: str | None = None,
+    provenance: dict | None = None,
+) -> OwnerControlDispatchResult:
+    """Provider-neutral owner-control executor.
+
+    Authority is supplied by a trusted ingress adapter (WhatsApp self-chat,
+    authenticated Client Session, or another future channel).  Transport
+    identity never changes the mutation semantics.
+    """
+    if not source_channel.strip() or not source_event_id.strip():
+        raise OwnerControlError("CONTROL_SOURCE_EVENT_REQUIRED")
+    evidence = {"action": action.value, **(provenance or {})}
+
+    if action == OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED:
+        if not isinstance(parameters, AutomaticResponsesEnabledParameters):
+            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
+        mutation = set_automatic_responses_enabled(
+            session,
+            tenant_id=tenant_id,
+            represented_owner_actor_key=owner_actor_key,
+            enabled=parameters.enabled,
+            authority=authority,
+            source_channel=source_channel,
+            source_event_id=source_event_id,
+            provenance=evidence,
+        )
+        return OwnerControlDispatchResult(policy_id=None, mutation=mutation)
+
+    if action in {
+        OwnerControlAction.APPROVE_RESPONSE_REVIEW,
+        OwnerControlAction.REJECT_RESPONSE_REVIEW,
+    }:
+        if not isinstance(parameters, ReviewReferenceParameters):
+            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
+        mutation = apply_owner_response_review(
+            session,
+            tenant_id=tenant_id,
+            reference=parameters.reference,
+            approve=action == OwnerControlAction.APPROVE_RESPONSE_REVIEW,
+            authority=authority,
+        )
+        return OwnerControlDispatchResult(policy_id=None, mutation=mutation)
+
+    policy_id = None
+    if action == OwnerControlAction.SET_OWNER_REPLY_GRACE_SECONDS:
+        if not isinstance(parameters, GraceSecondsParameters):
+            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
+        command_type = OwnerReplyGraceCommandType.SET_OWNER_REPLY_GRACE_SECONDS
+        value: int | bool = parameters.seconds
+    elif action == OwnerControlAction.SET_OWNER_REPLY_GRACE_ENABLED:
+        if not isinstance(parameters, GraceEnabledParameters):
+            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
+        command_type = OwnerReplyGraceCommandType.SET_OWNER_REPLY_GRACE_ENABLED
+        value = parameters.enabled
+    else:
+        raise OwnerControlError("OWNER_CONTROL_ACTION_UNSUPPORTED")
+
+    mutation = execute_owner_reply_grace_control_command(
+        session,
+        tenant_id=tenant_id,
+        command=OwnerReplyGraceControlCommand(
+            command_id=command_id or source_event_id,
+            command_type=command_type,
+            value=value,
+            policy_id=policy_id,
+            source_channel=source_channel,
+        ),
+        authority=authority,
+    )
+    return OwnerControlDispatchResult(policy_id=policy_id, mutation=mutation)
+
+
 def dispatch_owner_control_signal(
     session: Session,
     *,
@@ -285,63 +367,22 @@ def dispatch_owner_control_signal(
 ) -> OwnerControlDispatchResult:
     if signal.signal_kind != OwnerControlSignalKind.COMMAND:
         raise OwnerControlError("OWNER_CONTROL_SIGNAL_KIND_UNSUPPORTED")
-    if signal.action == OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED:
-        if not isinstance(signal.parameters, AutomaticResponsesEnabledParameters):
-            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
-        mutation = set_automatic_responses_enabled(
-            session, tenant_id=signal.tenant_id,
-            represented_owner_actor_key=signal.owner_actor_key,
-            enabled=signal.parameters.enabled, authority=authority,
-            source_channel=signal.source_channel, source_event_id=signal.source_event_id,
-            provenance={
-                "action": signal.action.value,
-                "receipt_id": signal.authority_evidence.receipt_id,
-                "actor_binding_id": signal.authority_evidence.actor_binding_id,
-                "authentication_mechanism": signal.authority_evidence.authentication_mechanism,
-            },
-        )
-        return OwnerControlDispatchResult(policy_id=None, mutation=mutation)
-    if signal.action in {
-        OwnerControlAction.APPROVE_RESPONSE_REVIEW,
-        OwnerControlAction.REJECT_RESPONSE_REVIEW,
-    }:
-        if not isinstance(signal.parameters, ReviewReferenceParameters):
-            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
-        mutation = apply_owner_response_review(
-            session,
-            tenant_id=signal.tenant_id,
-            reference=signal.parameters.reference,
-            approve=signal.action == OwnerControlAction.APPROVE_RESPONSE_REVIEW,
-            authority=authority,
-        )
-        return OwnerControlDispatchResult(policy_id=None, mutation=mutation)
-    # Owner Reply Grace is a single owner-scoped contract, not a policy selector.
-    policy_id = None
-    if signal.action == OwnerControlAction.SET_OWNER_REPLY_GRACE_SECONDS:
-        if not isinstance(signal.parameters, GraceSecondsParameters):
-            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
-        command_type = OwnerReplyGraceCommandType.SET_OWNER_REPLY_GRACE_SECONDS
-        value: int | bool = signal.parameters.seconds
-    elif signal.action == OwnerControlAction.SET_OWNER_REPLY_GRACE_ENABLED:
-        if not isinstance(signal.parameters, GraceEnabledParameters):
-            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
-        command_type = OwnerReplyGraceCommandType.SET_OWNER_REPLY_GRACE_ENABLED
-        value = signal.parameters.enabled
-    else:
-        raise OwnerControlError("OWNER_CONTROL_ACTION_UNSUPPORTED")
-    mutation = execute_owner_reply_grace_control_command(
+    return dispatch_owner_control_action(
         session,
         tenant_id=signal.tenant_id,
-        command=OwnerReplyGraceControlCommand(
-            command_id=signal.signal_id,
-            command_type=command_type,
-            value=value,
-            policy_id=policy_id,
-            source_channel=signal.source_channel,
-        ),
+        owner_actor_key=signal.owner_actor_key,
+        action=signal.action,
+        parameters=signal.parameters,
         authority=authority,
+        source_channel=signal.source_channel,
+        source_event_id=signal.source_event_id,
+        command_id=signal.signal_id,
+        provenance={
+            "receipt_id": signal.authority_evidence.receipt_id,
+            "actor_binding_id": signal.authority_evidence.actor_binding_id,
+            "authentication_mechanism": signal.authority_evidence.authentication_mechanism,
+        },
     )
-    return OwnerControlDispatchResult(policy_id=policy_id, mutation=mutation)
 
 
 __all__ = [
@@ -357,6 +398,7 @@ __all__ = [
     "OwnerControlSignalKind",
     "build_owner_control_signal",
     "build_owner_operator_authority",
+    "dispatch_owner_control_action",
     "dispatch_owner_control_signal",
     "resolve_owner_reply_grace_policy_id",
 ]
