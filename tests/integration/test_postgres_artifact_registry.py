@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from attention_router.application.platform.artifacts import (
     ArtifactReceiptInput,
     register_artifact_receipt,
@@ -10,6 +12,9 @@ from attention_router.infrastructure.artifact_models import (
     ArtifactRow,
 )
 from attention_router.infrastructure.models import ResourceRow
+
+
+pytestmark = pytest.mark.postgres
 
 
 def test_postgres_resource_exists_before_artifact_fk(Session):
