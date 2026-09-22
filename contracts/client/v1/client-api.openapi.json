@@ -1022,6 +1022,170 @@
           }
         }
       }
+    },
+    "/api/v1/client/commands": {
+      "post": {
+        "tags": [
+          "client-command"
+        ],
+        "summary": "Submit Command",
+        "operationId": "submitClientCommand",
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientCommandSubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandView"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "client-command"
+        ],
+        "summary": "List Commands",
+        "operationId": "listClientCommands",
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1851,6 +2015,230 @@
           "expires_at"
         ],
         "title": "ClientApprovalView"
+      },
+      "ClientCommandErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "CLIENT_COMMAND_DISABLED",
+              "CLIENT_COMMAND_AUTHORITY_REJECTED",
+              "CLIENT_COMMAND_CONFLICT",
+              "CLIENT_COMMAND_INVALID",
+              "CLIENT_COMMAND_UNAVAILABLE",
+              "CLIENT_SESSION_UNAUTHENTICATED",
+              "CLIENT_SESSION_AUTHORITY_REJECTED",
+              "CLIENT_SESSION_UNAVAILABLE"
+            ],
+            "title": "Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ClientCommandErrorResponse"
+      },
+      "ClientCommandListResponse": {
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Contract Version"
+          },
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/ClientCommandView"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Commands"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contract_version",
+          "commands"
+        ],
+        "title": "ClientCommandListResponse"
+      },
+      "ClientCommandSubmitRequest": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.:-]+$",
+            "title": "Client Request Id"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "client_request_id",
+          "text"
+        ],
+        "title": "ClientCommandSubmitRequest"
+      },
+      "ClientCommandView": {
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Command Id"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Client Request Id"
+          },
+          "modality": {
+            "type": "string",
+            "enum": [
+              "TEXT",
+              "VOICE"
+            ],
+            "title": "Modality"
+          },
+          "input_text": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Input Text"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "RECEIVED",
+              "COMPLETED",
+              "CLARIFICATION_REQUIRED",
+              "GENERAL_TASK_PENDING",
+              "FAILED"
+            ],
+            "title": "State"
+          },
+          "normalized_action": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalized Action"
+          },
+          "response_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Text"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "processed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "command_id",
+          "client_request_id",
+          "modality",
+          "input_text",
+          "state",
+          "created_at",
+          "processed_at"
+        ],
+        "title": "ClientCommandView"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
       }
     },
     "securitySchemes": {

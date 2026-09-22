@@ -18,6 +18,7 @@ from attention_router.application.client_bootstrap import DeviceBootstrapService
 from attention_router.application.client_session import ClientSessionService
 from attention_router.application.client_location import ClientLocationService
 from attention_router.application.client_approval import ClientApprovalService
+from attention_router.application.client_command import ClientCommandService
 from attention_router.application.gmail_connection import GmailConnectionService
 from attention_router.application.decision_pipeline import decision_to_dict
 from attention_router.application import response_review
@@ -32,6 +33,7 @@ from attention_router.api.v1.client_bootstrap import build_client_bootstrap_rout
 from attention_router.api.v1.client_session import build_client_session_router
 from attention_router.api.v1.client_location import build_client_location_router
 from attention_router.api.v1.client_approval import build_client_approval_router
+from attention_router.api.v1.client_command import build_client_command_router
 from attention_router.api.v1.gmail_connection import build_gmail_connection_router
 from attention_router.core.human_identity import HumanAuthProviderUnavailable, VerifiedProviderIdentity
 from attention_router.core.devices import (
@@ -91,6 +93,10 @@ client_location_service = ClientLocationService(
     session_service=client_session_service,
 )
 client_approval_service = ClientApprovalService(
+    settings=settings,
+    client_sessions=client_session_service,
+)
+client_command_service = ClientCommandService(
     settings=settings,
     client_sessions=client_session_service,
 )
@@ -210,6 +216,10 @@ app.include_router(build_client_location_router(
 app.include_router(build_client_approval_router(
     get_session=get_session,
     service=client_approval_service,
+))
+app.include_router(build_client_command_router(
+    get_session=get_session,
+    service=client_command_service,
 ))
 app.include_router(build_gmail_connection_router(
     get_session=get_session,

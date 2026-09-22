@@ -1,13 +1,13 @@
-"""Inspect Native App Approval V1A decision-evidence schema."""
+"""Inspect Andy Client Command Channel V1 schema."""
 
 import os
 
 import pytest
-from sqlalchemy import String, create_engine, inspect, text
+from sqlalchemy import String, Text, create_engine, inspect, text
 
 
 @pytest.mark.postgres
-def test_client_approval_decision_evidence_migration_schema():
+def test_client_command_channel_migration_schema():
     engine = create_engine(
         os.environ["PUBLIC_POSTGRES_TEST_URL"],
         hide_parameters=True,
@@ -19,68 +19,66 @@ def test_client_approval_decision_evidence_migration_schema():
             ).scalars().all() == ["0049_client_command_channel_v1"]
 
             schema = inspect(connection)
-            tables = set(schema.get_table_names())
-            assert "human_approval_decision_evidence" in tables
-
+            assert "client_command_messages" in set(schema.get_table_names())
             columns = {
                 item["name"]: item
-                for item in schema.get_columns(
-                    "human_approval_decision_evidence"
-                )
+                for item in schema.get_columns("client_command_messages")
             }
             assert set(columns) == {
                 "id",
-                "authorization_id",
                 "tenant_id",
-                "decision",
-                "channel",
-                "approver_reference",
                 "human_identity_id",
                 "device_id",
                 "client_session_id",
-                "provider_event_reference",
-                "idempotency_key",
-                "decided_at",
+                "client_request_id",
+                "modality",
+                "input_text",
+                "state",
+                "normalized_action",
+                "response_text",
+                "error_code",
                 "created_at",
+                "processed_at",
             }
             for name in (
-                "decision",
-                "channel",
-                "approver_reference",
                 "human_identity_id",
                 "device_id",
                 "client_session_id",
-                "provider_event_reference",
-                "idempotency_key",
+                "client_request_id",
+                "modality",
+                "state",
+                "normalized_action",
+                "error_code",
             ):
                 assert isinstance(columns[name]["type"], String)
+            assert isinstance(columns["input_text"]["type"], Text)
+            assert isinstance(columns["response_text"]["type"], Text)
 
             uniques = {
                 item["name"]: item["column_names"]
                 for item in schema.get_unique_constraints(
-                    "human_approval_decision_evidence"
+                    "client_command_messages"
                 )
             }
-            assert uniques["uq_human_approval_decision_authorization"] == [
-                "authorization_id"
-            ]
-            assert uniques["uq_human_approval_decision_idempotency"] == [
-                "idempotency_key"
+            assert uniques["uq_client_command_request"] == [
+                "tenant_id",
+                "human_identity_id",
+                "client_request_id",
             ]
 
             foreign_keys = {
                 tuple(item["constrained_columns"]): item["referred_table"]
                 for item in schema.get_foreign_keys(
-                    "human_approval_decision_evidence"
+                    "client_command_messages"
                 )
             }
-            assert foreign_keys[("authorization_id",)] == (
-                "human_execution_authorizations"
-            )
             assert foreign_keys[("tenant_id",)] == "tenants"
-            assert ("human_identity_id",) not in foreign_keys
-            assert ("device_id",) not in foreign_keys
-            assert ("client_session_id",) not in foreign_keys
+            for raw_identity in (
+                ("human_identity_id",),
+                ("device_id",),
+                ("client_session_id",),
+            ):
+                assert raw_identity not in foreign_keys
 
             forbidden = {
                 "session_token",
@@ -88,8 +86,7 @@ def test_client_approval_decision_evidence_migration_schema():
                 "access_token",
                 "refresh_token",
                 "request_wamid",
-                "decision_inbound_wamid",
-                "decision_button_id",
+                "provider_event_reference",
             }
             assert forbidden.isdisjoint(columns)
     finally:

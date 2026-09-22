@@ -2398,6 +2398,61 @@ class HumanApprovalDecisionEvidenceRow(Base):
     )
 
 
+class ClientCommandMessageRow(Base):
+    """Durable provider-neutral command message from an authenticated client."""
+
+    __tablename__ = "client_command_messages"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("tenants.id"), nullable=False
+    )
+    human_identity_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    device_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_request_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    modality: Mapped[str] = mapped_column(String(16), nullable=False)
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    normalized_action: Mapped[str | None] = mapped_column(String(80))
+    response_text: Mapped[str | None] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "human_identity_id",
+            "client_request_id",
+            name="uq_client_command_request",
+        ),
+        CheckConstraint(
+            "modality in ('TEXT','VOICE')",
+            name="ck_client_command_modality",
+        ),
+        CheckConstraint(
+            "state in ('RECEIVED','COMPLETED','CLARIFICATION_REQUIRED',"
+            "'GENERAL_TASK_PENDING','FAILED')",
+            name="ck_client_command_state",
+        ),
+        CheckConstraint(
+            "length(input_text) between 1 and 4000",
+            name="ck_client_command_input_length",
+        ),
+        Index(
+            "ix_client_command_tenant_created",
+            "tenant_id",
+            "created_at",
+        ),
+        Index(
+            "ix_client_command_human_created",
+            "human_identity_id",
+            "created_at",
+        ),
+    )
+
 
 class HumanApprovalDeliveryEvidenceRow(Base):
     """Exact relational delivery evidence retained for historical HEA requests."""

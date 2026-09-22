@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     client_session_ttl_seconds: int = 900
     client_location_enabled: bool = False
     client_approval_enabled: bool = False
+    client_command_enabled: bool = False
     google_identity_audience: str | None = None
     ingress_http_host: str = "0.0.0.0"
     ingress_http_port: int = 18101
@@ -384,6 +385,10 @@ class Settings(BaseSettings):
         if self.client_approval_enabled and not self.client_session_enabled:
             raise ValueError(
                 "CLIENT_APPROVAL_ENABLED requires CLIENT_SESSION_ENABLED=true"
+            )
+        if self.client_command_enabled and not self.client_session_enabled:
+            raise ValueError(
+                "CLIENT_COMMAND_ENABLED requires CLIENT_SESSION_ENABLED=true"
             )
         if self.gmail_connect_enabled:
             if not self.client_session_enabled:
