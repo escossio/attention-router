@@ -8,6 +8,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import func, select
 
 from attention_router.application.client_command import (
+    ClientCommandAuthorityRejected,
     ClientCommandConflict,
     ClientCommandService,
 )
@@ -24,9 +25,11 @@ from attention_router.infrastructure.client_bootstrap_models import (
 )
 from attention_router.infrastructure.human_identity_models import HumanIdentityRow
 from attention_router.infrastructure.models import (
+    ActorBindingRow,
     ClientCommandMessageRow,
     OwnerAutomationControlChangeRow,
     OwnerOperationalControlRow,
+    TenantRow,
 )
 from attention_router.security.device_keys import encode_unpadded_base64url
 from tests.test_owner_control import _install_owner_and_grace
@@ -35,6 +38,7 @@ from tests.test_owner_control import _install_owner_and_grace
 NOW = datetime(2026, 9, 22, 10, 0, tzinfo=UTC)
 HUMAN_ID = "hid_" + "c" * 24
 DEVICE_ID = "cdev_" + "d" * 24
+PERSONAL_TENANT_ID = "tnt_" + "p" * 24
 
 
 def command_settings() -> Settings:
@@ -71,17 +75,38 @@ def issue_owner_session(session):
     _install_owner_and_grace(session)
     private, spki, public = keypair()
     session.add(HumanIdentityRow(id=HUMAN_ID, created_at=NOW))
-    session.flush()
     session.add(
-        ClientTenantMembershipRow(
-            id="ctm_" + "m" * 24,
-            human_identity_id=HUMAN_ID,
-            tenant_id=DEFAULT_TENANT_ID,
-            role="OWNER",
+        TenantRow(
+            id=PERSONAL_TENANT_ID,
+            slug="personal-command-test",
+            name="Personal",
             status="ACTIVE",
             created_at=NOW,
             updated_at=NOW,
         )
+    )
+    session.flush()
+    session.add_all(
+        [
+            ClientTenantMembershipRow(
+                id="ctm_" + "p" * 24,
+                human_identity_id=HUMAN_ID,
+                tenant_id=PERSONAL_TENANT_ID,
+                role="OWNER",
+                status="ACTIVE",
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+            ClientTenantMembershipRow(
+                id="ctm_" + "o" * 24,
+                human_identity_id=HUMAN_ID,
+                tenant_id=DEFAULT_TENANT_ID,
+                role="OWNER",
+                status="ACTIVE",
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+        ]
     )
     session.add(
         ClientDeviceRow(
@@ -103,7 +128,7 @@ def issue_owner_session(session):
     challenge = sessions.start_session(
         session,
         public_key_spki_b64url=public,
-        requested_tenant_id=DEFAULT_TENANT_ID,
+        requested_tenant_id=PERSONAL_TENANT_ID,
         now=NOW + timedelta(seconds=1),
     )
     issued = sessions.complete_session(
@@ -139,6 +164,8 @@ def test_pause_resume_and_replay_use_client_session_owner_authority(session):
     assert paused.state == "COMPLETED"
     assert paused.normalized_action == "SET_AUTOMATIC_RESPONSES_ENABLED"
     assert "pausada" in (paused.response_text or "").casefold()
+    stored = session.get(ClientCommandMessageRow, paused.command_id)
+    assert stored.tenant_id == PERSONAL_TENANT_ID
     assert automation_denial_reason(session, DEFAULT_TENANT_ID) == OWNER_AUTOMATION_PAUSED
 
     replay = commands.submit_text(
@@ -215,6 +242,34 @@ def test_wait_seconds_and_general_task_are_separate(session):
     assert task.state == "GENERAL_TASK_PENDING"
     assert task.normalized_action is None
     assert "fluxo geral de tarefas" in (task.response_text or "")
+
+
+def test_ambiguous_operational_owner_scope_fails_closed(session):
+    sessions, issued = issue_owner_session(session)
+    session.add(
+        ActorBindingRow(
+            id="personal-owner-binding",
+            tenant_id=PERSONAL_TENANT_ID,
+            source="client-session-test",
+            external_actor_id="personal-owner-external",
+            actor_key="actor_personal_owner",
+            display_name="Personal Owner",
+            actor_category="owner",
+            active_context=None,
+            is_active=True,
+            binding_metadata={"owner": True},
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    session.commit()
+
+    with pytest.raises(ClientCommandAuthorityRejected):
+        service(sessions).list_recent(
+            session,
+            session_token=issued.session_token,
+            now=NOW + timedelta(seconds=10),
+        )
 
 
 def test_recent_timeline_is_scoped_to_authenticated_human(session):
