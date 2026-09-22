@@ -155,7 +155,7 @@ class ClientCommandService:
             or session_row.tenant_id != bootstrap.active_tenant_id
         ):
             raise ClientCommandAuthorityRejected()
-        membership = next(
+        active_membership = next(
             (
                 item
                 for item in bootstrap.memberships
@@ -163,21 +163,41 @@ class ClientCommandService:
             ),
             None,
         )
-        if membership is None or membership.role != TenantRole.OWNER:
+        if (
+            active_membership is None
+            or active_membership.role != TenantRole.OWNER
+        ):
             raise ClientCommandAuthorityRejected()
-        represented = resolve_represented_subject(
-            session,
-            bootstrap.active_tenant_id,
-        )
-        if represented is None:
+
+        operational_scopes: list[tuple[str, str]] = []
+        for membership in bootstrap.memberships:
+            if membership.role != TenantRole.OWNER:
+                continue
+            represented = resolve_represented_subject(
+                session,
+                membership.tenant_id,
+            )
+            if represented is not None:
+                operational_scopes.append(
+                    (membership.tenant_id, represented.entity_id)
+                )
+        if len(operational_scopes) != 1:
             raise ClientCommandAuthorityRejected()
+
+        operational_tenant_id, owner_actor_key = operational_scopes[0]
         operator = OperatorAuthority(
-            tenant_id=bootstrap.active_tenant_id,
-            operator_actor_id=represented.entity_id,
+            tenant_id=operational_tenant_id,
+            operator_actor_id=owner_actor_key,
             authenticated=True,
             roles=["OWNER"],
         )
-        return bootstrap, session_row, represented.entity_id, operator
+        return (
+            bootstrap,
+            session_row,
+            operational_tenant_id,
+            owner_actor_key,
+            operator,
+        )
     @staticmethod
     def _view(row: ClientCommandMessageRow) -> ClientCommandView:
         return ClientCommandView(
@@ -245,7 +265,13 @@ class ClientCommandService:
         ):
             raise ClientCommandInvalid()
 
-        bootstrap, session_row, owner_actor_key, operator = self._authority(
+        (
+            bootstrap,
+            session_row,
+            operational_tenant_id,
+            owner_actor_key,
+            operator,
+        ) = self._authority(
             session,
             session_token,
             now=current,
@@ -362,7 +388,7 @@ class ClientCommandService:
         try:
             result = dispatch_owner_control_action(
                 session,
-                tenant_id=row.tenant_id,
+                tenant_id=operational_tenant_id,
                 owner_actor_key=owner_actor_key,
                 action=parsed.action,
                 parameters=parsed.parameters,
@@ -375,6 +401,8 @@ class ClientCommandService:
                     "human_identity_id": row.human_identity_id,
                     "device_id": row.device_id,
                     "client_session_id": row.client_session_id,
+                    "source_client_tenant_id": row.tenant_id,
+                    "operational_tenant_id": operational_tenant_id,
                     "authentication_mechanism": "CLIENT_SESSION_OWNER",
                 },
             )
@@ -424,7 +452,13 @@ class ClientCommandService:
     ) -> tuple[ClientCommandView, ...]:
         self._require_enabled()
         current = now or datetime.now(UTC)
-        bootstrap, _session_row, _owner_actor_key, _operator = self._authority(
+        (
+            bootstrap,
+            _session_row,
+            _operational_tenant_id,
+            _owner_actor_key,
+            _operator,
+        ) = self._authority(
             session,
             session_token,
             now=current,
