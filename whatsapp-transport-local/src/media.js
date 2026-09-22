@@ -6,6 +6,11 @@ const { deliverPendingFile, enqueuePending, listPending } = require('./spool');
 const { resolveMessageLookupId } = require('./message-id');
 
 const ALLOWED_MIME_TYPES = new Set(['audio/ogg', 'audio/mpeg', 'audio/mp4']);
+const GENERIC_MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/i;
+
+function isVoiceKind(value) {
+  return ['ptt', 'audio'].includes(String(value || '').toLowerCase());
+}
 
 function decodeBase64Strict(value, maxBytes) {
   if (typeof value !== 'string' || value.length === 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
@@ -64,7 +69,7 @@ async function notify(config, normalized, payload, logger, fetchImpl) {
   return deliverPendingFile(spoolConfig, pending.file, logger, fetchImpl);
 }
 
-async function captureVoiceMedia(config, message, normalized, logger = console, fetchImpl = fetch) {
+async function captureInboundMedia(config, message, normalized, logger = console, fetchImpl = fetch) {
   if (!config.mediaRoot || !config.mediaNotificationUrl) return { status: 'media_capture_disabled' };
   const base = {
     tenant_id: normalized.tenant_id,
@@ -111,15 +116,27 @@ async function captureVoiceMedia(config, message, normalized, logger = console, 
       mime_type: mimeType || 'missing',
       media_kind: normalized.message_type,
     });
-    if (!ALLOWED_MIME_TYPES.has(mimeType)) throw new Error('UNSUPPORTED_MEDIA_MIME');
-    const bytes = decodeBase64Strict(media?.data, config.mediaMaxBytes);
+    const voice = isVoiceKind(normalized.message_type);
+    if (voice) {
+      if (!ALLOWED_MIME_TYPES.has(mimeType)) throw new Error('UNSUPPORTED_MEDIA_MIME');
+    } else if (!GENERIC_MIME_RE.test(mimeType)) {
+      throw new Error('UNSUPPORTED_MEDIA_MIME');
+    }
+    const maxBytes = voice
+      ? config.mediaMaxBytes
+      : config.artifactMediaMaxBytes;
+    const bytes = decodeBase64Strict(media?.data, maxBytes);
     const stored = atomicStore(config.mediaRoot, bytes);
+    const filename = typeof media?.filename === 'string' && media.filename.trim()
+      ? media.filename.trim().slice(0, 512)
+      : null;
     const payload = {
       ...base,
-      media_ref: `sha256:${stored.digest}`,
+      media_ref: 'sha256:' + stored.digest,
       content_sha256: stored.digest,
       mime_type: mimeType,
       size_bytes: bytes.length,
+      original_filename: filename,
       capture_status: 'READY',
     };
     const delivery = await notify(config, normalized, payload, logger, fetchImpl);
@@ -149,7 +166,17 @@ async function drainMediaNotifications(config, logger = console, fetchImpl = fet
   return delivered;
 }
 
+async function captureVoiceMedia(config, message, normalized, logger = console, fetchImpl = fetch) {
+  return captureInboundMedia(config, message, normalized, logger, fetchImpl);
+}
+
 module.exports = {
-  ALLOWED_MIME_TYPES, atomicStore, captureVoiceMedia, decodeBase64Strict,
+  ALLOWED_MIME_TYPES,
+  GENERIC_MIME_RE,
+  atomicStore,
+  captureInboundMedia,
+  captureVoiceMedia,
+  decodeBase64Strict,
   drainMediaNotifications,
+  isVoiceKind,
 };

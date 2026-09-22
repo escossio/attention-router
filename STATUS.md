@@ -25,7 +25,7 @@ Updated: 2026-09-21
 - PR #154 merged Artifact Store V1 with all repository gates green; no runtime flag enablement, deployment or live filesystem migration occurred.
 - Issue #155 is the current consumer: Gmail attachment download -> Artifact Store staging -> canonical artifact_ids.
 
-## Gmail attachment ingestion V1 — candidate
+## Gmail attachment ingestion V1 — merged
 
 - Issue #155 adds explicit attachment-capable read authority without widening mutation rights: exact `gmail.metadata` remains the legacy minimum profile and exact `gmail.readonly` enables governed attachment ingestion.
 - Gmail MIME discovery uses a bounded fields projection and never requests snippet or MIME `body.data`. Unexpected body data, excessive depth/count or inline attachment data without a provider attachment id fail closed.
@@ -35,7 +35,18 @@ Updated: 2026-09-21
 - All new runtime controls remain default-off. No live OAuth re-consent, Gmail call, Artifact Store enablement or deployment is part of this candidate.
 - Synthetic validation includes metadata-regression coverage, exact readonly authority, bounded provider parsing/download, ambiguous externalized-body rejection, stable replay, runner E2E, and incremental cursor rollback with durable artifact proof.
 - Pre-hardening focused gate: Ruff PASS, compileall PASS and 333 Gmail/Artifact/Integration/config tests PASS.
-- Post-hardening gate after ambiguous externalized-body rejection: Ruff PASS, compileall PASS and 289 affected-surface tests PASS. PostgreSQL-heavy/full certification remains delegated to CI01/CI02/CI03.
+- Post-hardening gate after ambiguous externalized-body rejection: Ruff PASS, compileall PASS and 289 affected-surface tests PASS.
+- PR #156 merged the Gmail attachment pipeline and PR #158 merged the ambiguous MIME-body hardening; both completed CodeQL, distributed PostgreSQL, secret scan, Docker, Python, transport and analysis gates successfully.
+
+## WhatsApp inbound media Artifact V1 — candidate
+
+- Issue #159 reuses the signed local WhatsApp media notification and the explicit tenant boundary already present on main.
+- Generic image/document/video/audio media is downloaded once only when the new WhatsApp Artifact gate is enabled; voice capture remains available independently for transcription compatibility.
+- The backend matches the notification to the committed inbound event under the same tenant/source/external event id, derives source_account and sender from that event, revalidates staging bytes by size/SHA-256, then stages canonical Artifact/Receipt evidence.
+- Filename is metadata only and never controls a filesystem path. Generic content remains opaque: no parsing, OCR, archive extraction, decompression or macro execution is introduced.
+- Voice continues to create the legacy MediaArtifactRow/VoiceTranscription state and may additionally gain a canonical Artifact id when the new gate is enabled.
+- Local focused evidence before publication: 69 affected Python tests PASS and 23 local WhatsApp transport tests PASS; Ruff, compileall and JavaScript syntax checks PASS.
+- All new runtime controls remain default-off; no deployment, live media download or production flag enablement is part of this candidate.
 
 ## Distributed validation control-plane rule
 

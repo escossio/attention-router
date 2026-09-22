@@ -36,6 +36,7 @@ class MediaReadyNotification(BaseModel):
     mime_type: str | None = Field(default=None, max_length=80)
     size_bytes: int | None = Field(default=None, ge=0)
     media_kind: str = Field(min_length=1, max_length=32)
+    original_filename: str | None = Field(default=None, max_length=512)
     capture_status: str = Field(pattern="^(READY|FAILED|MISSING)$")
 
     @model_validator(mode="after")
