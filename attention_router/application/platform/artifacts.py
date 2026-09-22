@@ -220,6 +220,10 @@ def register_artifact_receipt(
             updated_at=stamp,
         )
         session.add(resource)
+        # PostgreSQL must observe the canonical Resource before ArtifactRow
+        # references resource_id. Without an ORM relationship dependency,
+        # adding both rows before one flush does not guarantee INSERT order.
+        session.flush()
         session.add(artifact)
         session.flush()
     elif artifact.size_bytes != item.size_bytes:
