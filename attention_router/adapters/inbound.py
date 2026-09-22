@@ -45,12 +45,18 @@ class NormalizedInboundEvent(BaseModel):
     @model_validator(mode="after")
     def validate_structural_lineage(self) -> "NormalizedInboundEvent":
         message_type = str(self.metadata.get("message_type") or "").casefold()
+        has_media = self.metadata.get("has_media") is True
         owner_observation = self.event_origin in {
             "OWNER_MANUAL_OUTBOUND_OBSERVED",
             "ROUTER_AUTOMATED_OUTBOUND_OBSERVED",
             "UNKNOWN_FROM_ME",
         }
-        if not self.content.strip() and message_type not in {"ptt", "audio"} and not owner_observation:
+        if (
+            not self.content.strip()
+            and not has_media
+            and message_type not in {"ptt", "audio"}
+            and not owner_observation
+        ):
             raise ValueError("INBOUND_CONTENT_REQUIRED")
         scenario_values = (
             self.scenario_id,

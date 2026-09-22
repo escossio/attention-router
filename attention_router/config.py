@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     artifact_store_enabled: bool = False
     artifact_store_root: str = "/var/lib/attention-router/artifacts"
     artifact_store_max_bytes: int = 32 * 1024 * 1024
+    whatsapp_artifact_ingestion_enabled: bool = False
+    whatsapp_artifact_max_bytes: int = 32 * 1024 * 1024
     internal_ingress_http_host: str = "0.0.0.0"
     internal_ingress_http_port: int = 18102
     internal_ingress_hmac_secret: str | None = None
@@ -305,6 +307,22 @@ class Settings(BaseSettings):
             ):
                 raise ValueError(
                     "ARTIFACT_STORE_ROOT must be an absolute path when enabled"
+                )
+        if not 1 <= self.whatsapp_artifact_max_bytes <= 256 * 1024 * 1024:
+            raise ValueError(
+                "WHATSAPP_ARTIFACT_MAX_BYTES must be between 1 and 268435456"
+            )
+        if self.whatsapp_artifact_ingestion_enabled:
+            if not self.artifact_store_enabled:
+                raise ValueError(
+                    "WHATSAPP_ARTIFACT_INGESTION_ENABLED requires "
+                    "ARTIFACT_STORE_ENABLED=true"
+                )
+            if self.whatsapp_artifact_max_bytes > self.artifact_store_max_bytes:
+                raise ValueError(
+                    "WHATSAPP_ARTIFACT_MAX_BYTES must not exceed "
+                    "ARTIFACT_STORE_MAX_BYTES when WhatsApp Artifact ingestion "
+                    "is enabled"
                 )
         if self.gmail_connect_enabled:
             if not self.client_session_enabled:

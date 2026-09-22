@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { captureVoiceMedia } = require('../src/media');
+const { captureInboundMedia, captureVoiceMedia } = require('../src/media');
 const { resolveMessageLookupId } = require('../src/message-id');
 
 function fixture(t, overrides = {}) {
@@ -14,6 +14,7 @@ function fixture(t, overrides = {}) {
   return {
     hmacSecret: 'synthetic-media-secret', inboundHttpTimeoutMs: 100,
     mediaRoot: path.join(root, 'media'), mediaMaxBytes: 5 * 1024 * 1024,
+    artifactMediaMaxBytes: 32 * 1024 * 1024,
     mediaDownloadTimeoutMs: 30, mediaNotificationUrl: 'http://127.0.0.1/media',
     mediaNotificationPendingDir: path.join(spool, 'pending'), mediaNotificationSendingDir: path.join(spool, 'sending'),
     mediaNotificationSentDir: path.join(spool, 'sent'), mediaNotificationQuarantineDir: path.join(spool, 'quarantine'),
@@ -21,8 +22,12 @@ function fixture(t, overrides = {}) {
   };
 }
 
-function normalized() {
-  return { source: 'wwebjs', external_event_id: 'synthetic', message_type: 'ptt', identity: { idempotency_key: 'synthetic' } };
+function normalized(overrides = {}) {
+  return {
+    tenant_id: '00000000-0000-4000-8000-000000000001',
+    source: 'wwebjs', external_event_id: 'synthetic', message_type: 'ptt',
+    identity: { idempotency_key: 'synthetic' }, ...overrides,
+  };
 }
 
 function message(id, downloadMedia) {
@@ -76,4 +81,69 @@ test('complete compatible media path reaches READY', async (t) => {
   const msg = message({ fromMe: false, remote: 'x@lid', id: 'i', $1: 'false_x@lid_i' }, async () => ({ mimetype: 'audio/ogg', data: Buffer.from('voice').toString('base64') }));
   const result = await captureVoiceMedia(fixture(t), msg, normalized(), { info() {}, warn() {} }, okFetch());
   assert.equal(result.status, 'media_ready_notified');
+});
+
+test('generic image capture uses Artifact bound and preserves filename metadata', async (t) => {
+  const bodies = [];
+  const config = fixture(t, {
+    mediaMaxBytes: 2,
+    artifactMediaMaxBytes: 1024,
+  });
+  const bytes = Buffer.from('synthetic image bytes');
+  const msg = message(
+    { fromMe: false, remote: 'x@lid', id: 'img', $1: 'false_x@lid_img' },
+    async () => ({
+      mimetype: 'image/png',
+      filename: '../../photo.png',
+      data: bytes.toString('base64'),
+    }),
+  );
+  msg.type = 'image';
+  const result = await captureInboundMedia(
+    config,
+    msg,
+    normalized({ message_type: 'image' }),
+    { info() {}, warn() {} },
+    async (_url, options) => {
+      bodies.push(JSON.parse(Buffer.from(options.body).toString('utf8')));
+      return { status: 202, text: async () => '{"status":"accepted"}' };
+    },
+  );
+
+  assert.equal(result.status, 'media_ready_notified');
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].tenant_id, normalized().tenant_id);
+  assert.equal(bodies[0].mime_type, 'image/png');
+  assert.equal(bodies[0].original_filename, '../../photo.png');
+  assert.equal(bodies[0].size_bytes, bytes.length);
+  assert.equal(bodies[0].capture_status, 'READY');
+});
+
+test('generic document capture rejects malformed MIME without fabricating READY', async (t) => {
+  const bodies = [];
+  const msg = message(
+    { fromMe: false, remote: 'x@lid', id: 'doc', $1: 'false_x@lid_doc' },
+    async () => ({
+      mimetype: 'not-a-mime',
+      filename: 'report.bin',
+      data: Buffer.from('doc').toString('base64'),
+    }),
+  );
+  msg.type = 'document';
+  const result = await captureInboundMedia(
+    fixture(t),
+    msg,
+    normalized({ message_type: 'document' }),
+    { info() {}, warn() {} },
+
+    async (_url, options) => {
+      bodies.push(JSON.parse(Buffer.from(options.body).toString('utf8')));
+      return { status: 202, text: async () => '{"status":"accepted"}' };
+    },
+  );
+  assert.equal(result.status, 'media_capture_failed');
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].capture_status, 'FAILED');
+  assert.equal(bodies[0].media_ref, undefined);
+  assert.equal(bodies[0].content_sha256, undefined);
 });

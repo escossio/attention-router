@@ -113,6 +113,14 @@ function createConfig(env = process.env) {
     sourceAccount: env.LOCAL_SOURCE_ACCOUNT || 'default',
     mediaRoot: env.WHATSAPP_MEDIA_ROOT || '/var/lib/attention-router/whatsapp-media',
     mediaMaxBytes: parseInteger(env.WHATSAPP_MEDIA_MAX_BYTES, 5 * 1024 * 1024),
+    whatsappArtifactIngestionEnabled: parseBoolean(
+      env.WHATSAPP_ARTIFACT_INGESTION_ENABLED,
+      false,
+    ),
+    artifactMediaMaxBytes: parseInteger(
+      env.WHATSAPP_ARTIFACT_MAX_BYTES,
+      32 * 1024 * 1024,
+    ),
     mediaDownloadTimeoutMs: parseInteger(env.LOCAL_MEDIA_DOWNLOAD_TIMEOUT_MS, 15000),
     mediaNotificationUrl: env.LOCAL_MEDIA_NOTIFICATION_URL || (
       normalizeInboundForwardUrl(env)

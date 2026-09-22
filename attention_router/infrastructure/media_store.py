@@ -85,10 +85,66 @@ class MediaStore:
             raise MediaStoreError("MEDIA_HASH_MISMATCH")
         return path
 
-    def put_bytes(self, data: bytes, *, mime_type: str) -> tuple[str, str, int, Path]:
-        if mime_type not in ALLOWED_MIME_TYPES:
-            raise MediaStoreError("UNSUPPORTED_MEDIA_MIME")
-        if not data or len(data) > self.max_bytes:
+    def read_opaque_bytes(
+        self,
+        reference: str,
+        *,
+        expected_sha256: str,
+        expected_size: int,
+        max_bytes: int | None = None,
+    ) -> bytes:
+        limit = self.max_bytes if max_bytes is None else max_bytes
+        if type(limit) is not int or limit < 1:
+            raise MediaStoreError("INVALID_MEDIA_SIZE")
+        if expected_size < 1 or expected_size > limit:
+            raise MediaStoreError("INVALID_MEDIA_SIZE")
+        digest = self.digest_from_ref(reference)
+        if digest != expected_sha256:
+            raise MediaStoreError("MEDIA_REF_HASH_MISMATCH")
+        path = self.path_for_digest(digest)
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(path, flags)
+        except FileNotFoundError as exc:
+            raise MediaStoreError("MEDIA_NOT_FOUND") from exc
+        except OSError as exc:
+            raise MediaStoreError("MEDIA_NOT_REGULAR") from exc
+        output = bytearray()
+        hasher = hashlib.sha256()
+        total = 0
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise MediaStoreError("MEDIA_NOT_REGULAR")
+            if info.st_size != expected_size:
+                raise MediaStoreError("MEDIA_SIZE_MISMATCH")
+            while True:
+                chunk = os.read(fd, 64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise MediaStoreError("MEDIA_TOO_LARGE")
+                hasher.update(chunk)
+                output.extend(chunk)
+        finally:
+            os.close(fd)
+        if total != expected_size:
+            raise MediaStoreError("MEDIA_SIZE_MISMATCH")
+        if hasher.hexdigest() != digest:
+            raise MediaStoreError("MEDIA_HASH_MISMATCH")
+        return bytes(output)
+
+    def put_opaque_bytes(
+        self,
+        data: bytes,
+        *,
+        max_bytes: int | None = None,
+    ) -> tuple[str, str, int, Path]:
+        limit = self.max_bytes if max_bytes is None else max_bytes
+        if type(limit) is not int or limit < 1 or not data or len(data) > limit:
             raise MediaStoreError("INVALID_MEDIA_SIZE")
         digest = hashlib.sha256(data).hexdigest()
         target = self.path_for_digest(digest)
@@ -97,12 +153,16 @@ class MediaStore:
             exist_ok=True,
             mode=MEDIA_DIRECTORY_MODE,
         )
-        # mkdir mode is filtered by the process umask. Restore the exact
-        # shared-service contract so the host transport can also create
-        # artifacts inside an existing worker-created shard.
         target.parent.chmod(MEDIA_DIRECTORY_MODE)
         if target.exists():
-            self.validate(media_ref(digest), expected_sha256=digest, expected_size=len(data), mime_type=mime_type)
+            existing = self.read_opaque_bytes(
+                media_ref(digest),
+                expected_sha256=digest,
+                expected_size=len(data),
+                max_bytes=limit,
+            )
+            if existing != data:
+                raise MediaStoreError("MEDIA_HASH_MISMATCH")
             return media_ref(digest), digest, len(data), target
         fd, raw_temp = tempfile.mkstemp(prefix=".media-", dir=target.parent)
         temporary = Path(raw_temp)
@@ -121,6 +181,11 @@ class MediaStore:
         finally:
             temporary.unlink(missing_ok=True)
         return media_ref(digest), digest, len(data), target
+
+    def put_bytes(self, data: bytes, *, mime_type: str) -> tuple[str, str, int, Path]:
+        if mime_type not in ALLOWED_MIME_TYPES:
+            raise MediaStoreError("UNSUPPORTED_MEDIA_MIME")
+        return self.put_opaque_bytes(data)
 
     def delete(self, reference: str) -> bool:
         path = self.path_for_ref(reference)

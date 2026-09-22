@@ -15,6 +15,10 @@ from attention_router.application.voice_media import (
     MediaReadyNotification,
     record_media_notification,
 )
+from attention_router.application.whatsapp_artifacts import (
+    WhatsAppArtifactRetryable,
+    stage_whatsapp_artifact_notification,
+)
 from attention_router.config import settings
 from attention_router.infrastructure.db import SessionLocal
 from attention_router.infrastructure.models import InboundEventRow, TenantRow
@@ -181,10 +185,34 @@ def process_media_notification(
     session = SessionLocal()
     try:
         _require_active_tenant(session, payload.tenant_id)
-        artifact = record_media_notification(session, payload)
+        media_kind = payload.media_kind.casefold()
+        is_voice = media_kind in {"ptt", "audio"}
+        if not is_voice and not settings.whatsapp_artifact_ingestion_enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="whatsapp artifact ingestion disabled",
+            )
+
+        canonical = stage_whatsapp_artifact_notification(session, payload)
+        legacy = (
+            record_media_notification(session, payload)
+            if is_voice
+            else None
+        )
         session.commit()
-        return {"status": "accepted", "artifact_id": artifact.id if artifact else None}
-    except MediaNotificationRetryable as exc:
+        return {
+            "status": "accepted",
+            "artifact_id": legacy.id if legacy else None,
+            "canonical_artifact_id": (
+                canonical.registration.artifact.id
+                if canonical
+                else None
+            ),
+        }
+    except HTTPException:
+        session.rollback()
+        raise
+    except (MediaNotificationRetryable, WhatsAppArtifactRetryable) as exc:
         session.rollback()
         raise HTTPException(status_code=425, detail="inbound event not ready") from exc
     except ValueError as exc:

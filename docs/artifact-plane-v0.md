@@ -158,9 +158,11 @@ The store is default-off:
 
 | Setting | Default | Contract |
 | --- | --- | --- |
-| ARTIFACT_STORE_ENABLED | false | No runtime source uses the store until explicitly enabled. |
+| ARTIFACT_STORE_ENABLED | false | Canonical storage remains opt-in even though Gmail and WhatsApp adapters can consume it. |
 | ARTIFACT_STORE_ROOT | /var/lib/attention-router/artifacts | Must be absolute when enabled. |
 | ARTIFACT_STORE_MAX_BYTES | 33554432 | Per-object bound; configurable from 1 byte to 1 GiB. |
+| WHATSAPP_ARTIFACT_INGESTION_ENABLED | false | Enables canonical staging for signed local WhatsApp media notifications. |
+| WHATSAPP_ARTIFACT_MAX_BYTES | 33554432 | WhatsApp opaque-media bound; cannot exceed the Artifact Store bound when enabled. |
 
 Storage treats content as opaque bytes. MIME type is classification metadata, not
 execution authority. V1 does not parse PDFs, images, spreadsheets, archives or
@@ -170,6 +172,8 @@ V1 also does not expose public download/share URLs. The read seam is internal an
 tenant-scoped. Public/user presentation and grants remain later layers over the
 existing Artifact ResourceRow authority model.
 
-The next source consumer is Gmail attachment ingestion: Gmail may download a
-provider attachment and stage its bytes here, after which the normalized email
-event can reference canonical artifact_ids.
+Gmail attachment ingestion is merged and stages provider attachments here before
+neutral event admission. WhatsApp inbound media can now use the same canonical
+Artifact identity after its signed, explicit-tenant local media notification is
+matched to a committed inbound event. The legacy voice MediaArtifactRow remains
+in parallel only for transcription compatibility during this increment.

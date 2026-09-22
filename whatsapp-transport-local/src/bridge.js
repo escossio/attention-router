@@ -1,6 +1,6 @@
 const { normalizeInboundMessage } = require('./inbound');
 const { enqueuePending, deliverPendingFile } = require('./spool');
-const { captureVoiceMedia } = require('./media');
+const { captureInboundMedia } = require('./media');
 
 function isLocalForwardTarget(url, allowedHosts = ['127.0.0.1', 'localhost', '::1']) {
   try {
@@ -60,10 +60,14 @@ function createInboundBridge(config, logger = console, deps = {}) {
     );
     const pending = enqueuePending(config, normalized, wirePayload);
     const deliveryPromise = deliverPendingFile(config, pending.file, logger, fetchImpl);
-    const mediaPromise = !fromMe
-      && ['ptt', 'audio'].includes(normalized.message_type)
+    const isVoice = ['ptt', 'audio'].includes(
+      String(normalized.message_type || '').toLowerCase(),
+    );
+    const shouldCaptureMedia = !fromMe
       && normalized.has_media
-      ? captureVoiceMedia(config, message, normalized, logger, fetchImpl)
+      && (isVoice || config.whatsappArtifactIngestionEnabled === true);
+    const mediaPromise = shouldCaptureMedia
+      ? captureInboundMedia(config, message, normalized, logger, fetchImpl)
       : Promise.resolve(null);
     const [delivery, media] = await Promise.all([deliveryPromise, mediaPromise]);
     if (delivery.done && (delivery.status === 'accepted' || delivery.status === 'duplicate')) {

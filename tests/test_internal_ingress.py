@@ -10,7 +10,9 @@ from sqlalchemy.orm import sessionmaker
 from attention_router.config import settings
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.models import now_utc
-from attention_router.infrastructure.models import TenantRow
+from attention_router.infrastructure.artifact_models import ArtifactRow
+from attention_router.infrastructure.media_store import MediaStore
+from attention_router.infrastructure.models import MediaArtifactRow, TenantRow
 from attention_router.web.internal_ingress_app import (
     app,
     get_session,
@@ -235,3 +237,143 @@ def test_internal_ingress_uses_dedicated_executor_for_blocking_work():
 
 def test_internal_ingress_ready_uses_separate_unpooled_health_engine():
     assert health_engine.pool.__class__.__name__ == "NullPool"
+
+def _post_media(client: TestClient, data: dict):
+    body = json.dumps(data, separators=(",", ":")).encode()
+    return client.post(
+        "/internal/whatsapp/media",
+        content=body,
+        headers=signed_headers(body),
+    )
+
+
+def test_whatsapp_document_media_stages_canonical_artifact(
+    session,
+    monkeypatch,
+    tmp_path,
+):
+    c = client(session, monkeypatch)
+    monkeypatch.setattr(settings, "artifact_store_enabled", True)
+    monkeypatch.setattr(settings, "artifact_store_root", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(settings, "artifact_store_max_bytes", 1024)
+    monkeypatch.setattr(settings, "whatsapp_artifact_ingestion_enabled", True)
+    monkeypatch.setattr(settings, "whatsapp_artifact_max_bytes", 1024)
+    monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path / "media"))
+    monkeypatch.setattr(settings, "whatsapp_media_max_bytes", 1024)
+
+    event_id = "wamid.document.endpoint"
+    inbound = payload(event_id, "")
+    inbound["message_type"] = "document"
+    inbound["has_media"] = True
+    inbound["metadata"] = {"source_account": "whatsapp-local"}
+
+    assert post(c, inbound).status_code == 200
+
+    staging = MediaStore(tmp_path / "media", 1024)
+    reference, digest, size, _ = staging.put_opaque_bytes(b"endpoint pdf bytes")
+    response = _post_media(
+        c,
+        {
+            "tenant_id": DEFAULT_TENANT_ID,
+            "source": "wwebjs",
+            "external_event_id": event_id,
+            "media_ref": reference,
+            "content_sha256": digest,
+            "mime_type": "application/pdf",
+            "size_bytes": size,
+            "media_kind": "document",
+            "original_filename": "../../report.pdf",
+            "capture_status": "READY",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "accepted"
+    assert body["artifact_id"] is None
+    assert body["canonical_artifact_id"]
+    session.expire_all()
+    artifact = session.get(ArtifactRow, body["canonical_artifact_id"])
+    assert artifact is not None
+    assert artifact.tenant_id == DEFAULT_TENANT_ID
+    assert artifact.mime_type == "application/pdf"
+    assert artifact.original_filename == "../../report.pdf"
+
+
+def test_whatsapp_voice_media_keeps_legacy_and_adds_canonical_artifact(
+    session,
+    monkeypatch,
+    tmp_path,
+):
+    c = client(session, monkeypatch)
+    monkeypatch.setattr(settings, "artifact_store_enabled", True)
+    monkeypatch.setattr(settings, "artifact_store_root", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(settings, "artifact_store_max_bytes", 1024)
+    monkeypatch.setattr(settings, "whatsapp_artifact_ingestion_enabled", True)
+    monkeypatch.setattr(settings, "whatsapp_artifact_max_bytes", 1024)
+    monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path / "media"))
+    monkeypatch.setattr(settings, "whatsapp_media_max_bytes", 1024)
+
+    event_id = "wamid.voice.endpoint"
+    inbound = payload(event_id, "")
+    inbound["message_type"] = "ptt"
+    inbound["has_media"] = True
+    inbound["metadata"] = {"source_account": "whatsapp-local"}
+    assert post(c, inbound).status_code == 200
+
+    staging = MediaStore(tmp_path / "media", 1024)
+    reference, digest, size, _ = staging.put_bytes(
+        b"OggS endpoint voice",
+        mime_type="audio/ogg",
+    )
+    response = _post_media(
+        c,
+        {
+            "tenant_id": DEFAULT_TENANT_ID,
+            "source": "wwebjs",
+            "external_event_id": event_id,
+            "media_ref": reference,
+            "content_sha256": digest,
+            "mime_type": "audio/ogg",
+            "size_bytes": size,
+            "media_kind": "ptt",
+            "capture_status": "READY",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["artifact_id"]
+    assert body["canonical_artifact_id"]
+    assert body["artifact_id"] != body["canonical_artifact_id"]
+    session.expire_all()
+    assert session.get(ArtifactRow, body["canonical_artifact_id"]) is not None
+    assert session.get(MediaArtifactRow, body["artifact_id"]) is not None
+
+def test_whatsapp_generic_media_retries_when_artifact_gate_is_off(
+    session,
+    monkeypatch,
+):
+    c = client(session, monkeypatch)
+    event_id = "wamid.generic.disabled"
+    inbound = payload(event_id, "")
+    inbound["message_type"] = "image"
+    inbound["has_media"] = True
+    assert post(c, inbound).status_code == 200
+
+    response = _post_media(
+        c,
+        {
+            "tenant_id": DEFAULT_TENANT_ID,
+            "source": "wwebjs",
+            "external_event_id": event_id,
+            "media_ref": "sha256:" + "0" * 64,
+            "content_sha256": "0" * 64,
+            "mime_type": "image/png",
+            "size_bytes": 1,
+            "media_kind": "image",
+            "capture_status": "READY",
+        },
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "whatsapp artifact ingestion disabled"

@@ -47,6 +47,8 @@ function tempConfig(t, overrides = {}) {
       hmacSecret: 'unit-test-inbound-secret-32-bytes-minimum',
       mediaRoot: path.join(root, 'media'),
       mediaMaxBytes: 5 * 1024 * 1024,
+      whatsappArtifactIngestionEnabled: false,
+      artifactMediaMaxBytes: 32 * 1024 * 1024,
       mediaDownloadTimeoutMs: 200,
       mediaNotificationUrl: 'http://127.0.0.1:18102/internal/whatsapp/media',
       mediaNotificationPendingDir: path.join(spool, 'media-notifications', 'pending'),
@@ -312,4 +314,87 @@ test('disabled forwarding and invalid target never start media capture', async (
     assert.equal(downloads, 0);
     assert.equal(fs.existsSync(config.mediaRoot), false);
   }
+});
+
+test('generic document is downloaded once only when Artifact ingestion is enabled', async (t) => {
+  const { config } = tempConfig(t, {
+    whatsappArtifactIngestionEnabled: true,
+  });
+  const inboundBodies = [];
+  const mediaBodies = [];
+  let downloads = 0;
+  const bridge = createInboundBridge(config, logger, {
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(Buffer.from(options.body).toString('utf8'));
+      if (url === config.mediaNotificationUrl) {
+        mediaBodies.push(body);
+        return response(202, { status: 'accepted' });
+      }
+      inboundBodies.push(body);
+      return response(202, { status: 'accepted' });
+    },
+  });
+  const result = await bridge.handleMessage({
+    id: { _serialized: 'wamid.document.1', remote: '5500000000029@c.us' },
+    from: '5500000000029@c.us',
+    fromMe: false,
+    type: 'document',
+    body: '',
+    hasMedia: true,
+    timestamp: 1788652800,
+
+    downloadMedia: async () => {
+      downloads += 1;
+      return {
+        mimetype: 'application/pdf',
+        filename: '../../report.pdf',
+        data: Buffer.from('synthetic pdf bytes').toString('base64'),
+      };
+    },
+  });
+
+  assert.equal(result.status, 'delivered');
+  assert.equal(downloads, 1);
+  assert.equal(inboundBodies.length, 1);
+  assert.equal(mediaBodies.length, 1);
+  assert.equal(inboundBodies[0].tenant_id, TENANT_ID);
+  assert.equal(mediaBodies[0].tenant_id, TENANT_ID);
+  assert.equal(mediaBodies[0].external_event_id, 'wamid.document.1');
+  assert.equal(mediaBodies[0].mime_type, 'application/pdf');
+  assert.equal(mediaBodies[0].original_filename, '../../report.pdf');
+  assert.equal(mediaBodies[0].capture_status, 'READY');
+});
+
+test('generic media is not downloaded while Artifact ingestion is disabled', async (t) => {
+  const { config } = tempConfig(t);
+  let downloads = 0;
+  let mediaCalls = 0;
+
+  const bridge = createInboundBridge(config, logger, {
+    fetchImpl: async (url) => {
+      if (url === config.mediaNotificationUrl) mediaCalls += 1;
+      return response(202, { status: 'accepted' });
+    },
+  });
+  const result = await bridge.handleMessage({
+    id: { _serialized: 'wamid.image.disabled', remote: '5500000000029@c.us' },
+    from: '5500000000029@c.us',
+    fromMe: false,
+    type: 'image',
+    body: '',
+    hasMedia: true,
+    timestamp: 1788652800,
+    downloadMedia: async () => {
+      downloads += 1;
+      return {
+        mimetype: 'image/png',
+        data: Buffer.from('image').toString('base64'),
+      };
+    },
+  });
+
+  assert.equal(result.status, 'delivered');
+  assert.equal(downloads, 0);
+  assert.equal(mediaCalls, 0);
+  assert.equal(result.media, null);
 });
