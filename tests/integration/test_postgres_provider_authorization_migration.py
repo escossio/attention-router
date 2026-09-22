@@ -16,7 +16,7 @@ def test_provider_authorization_v1_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0047_artifact_understanding_v1"]
+            ).scalars().all() == ["0048_native_app_approval_v1a"]
 
             schema = inspect(connection)
             columns = {

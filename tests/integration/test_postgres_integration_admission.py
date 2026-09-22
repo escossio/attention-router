@@ -286,7 +286,9 @@ def test_simultaneous_admissions(Session, world, conflict):
 
 
 def wait_for_waiter(Session, blocker):
-    deadline = time.monotonic() + 1.5
+    # The assertion is the observed PostgreSQL lock, not scheduler latency.
+    # Leave headroom for loaded distributed workers before declaring failure.
+    deadline = time.monotonic() + 5.0
     with Session() as observer:
         while time.monotonic() < deadline:
             if observer.scalar(text("SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
@@ -454,7 +456,7 @@ def test_populated_downgrade_refuses_to_drop_receipts(Session, world, pg_url):
     assert count(Session) == 1
     with Session() as session:
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0047_artifact_understanding_v1"
+            "0048_native_app_approval_v1a"
         )
 
 
@@ -1111,4 +1113,4 @@ def test_processed_dispatch_state_blocks_downgrade_without_export(
     with Session() as session:
         assert session.scalar(
             text("SELECT version_num FROM alembic_version")
-        ) == "0047_artifact_understanding_v1"
+        ) == "0048_native_app_approval_v1a"

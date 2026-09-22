@@ -85,7 +85,7 @@ def test_scenario_and_budget_tightening_constraints_are_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0047_artifact_understanding_v1"]
+    assert scripts.get_heads() == ["0048_native_app_approval_v1a"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (

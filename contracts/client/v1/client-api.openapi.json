@@ -748,6 +748,280 @@
           }
         }
       }
+    },
+    "/api/v1/client/approvals/pending": {
+      "get": {
+        "tags": [
+          "client-approval"
+        ],
+        "summary": "List Pending",
+        "operationId": "listPendingClientApprovals",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ]
+      }
+    },
+    "/api/v1/client/approvals/{approval_id}": {
+      "get": {
+        "tags": [
+          "client-approval"
+        ],
+        "summary": "Get Approval",
+        "operationId": "getClientApproval",
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalView"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/client/approvals/{approval_id}/decision": {
+      "post": {
+        "tags": [
+          "client-approval"
+        ],
+        "summary": "Decide",
+        "operationId": "decideClientApproval",
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientApprovalDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalView"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientApprovalErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1441,14 +1715,150 @@
             ]
           }
         }
+      },
+      "ClientApprovalDecisionRequest": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "APPROVE",
+              "DENY"
+            ],
+            "title": "Decision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "ClientApprovalDecisionRequest"
+      },
+      "ClientApprovalErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "CLIENT_APPROVAL_DISABLED",
+              "CLIENT_APPROVAL_NOT_FOUND",
+              "CLIENT_APPROVAL_AUTHORITY_REJECTED",
+              "CLIENT_APPROVAL_CONFLICT",
+              "CLIENT_APPROVAL_EXPIRED",
+              "CLIENT_APPROVAL_UNAVAILABLE",
+              "CLIENT_SESSION_UNAUTHENTICATED",
+              "CLIENT_SESSION_AUTHORITY_REJECTED",
+              "CLIENT_SESSION_UNAVAILABLE"
+            ],
+            "title": "Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ClientApprovalErrorResponse"
+      },
+      "ClientApprovalListResponse": {
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Contract Version"
+          },
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/ClientApprovalView"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Approvals"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contract_version",
+          "approvals"
+        ],
+        "title": "ClientApprovalListResponse"
+      },
+      "ClientApprovalView": {
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Approval Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING_HUMAN_APPROVAL",
+              "APPROVED",
+              "DENIED",
+              "EXPIRED",
+              "CONSUMED",
+              "REVOKED"
+            ],
+            "title": "State"
+          },
+          "capability": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Capability"
+          },
+          "operation": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Operation"
+          },
+          "target": {
+            "type": "string",
+            "maxLength": 180,
+            "minLength": 1,
+            "title": "Target"
+          },
+          "preview": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Preview"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Issued At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "approval_id",
+          "state",
+          "capability",
+          "operation",
+          "target",
+          "preview",
+          "issued_at",
+          "expires_at"
+        ],
+        "title": "ClientApprovalView"
       }
     },
     "securitySchemes": {
       "ClientSession": {
         "type": "http",
+        "description": "Short-lived opaque client-session credential scoped server-side to Human Identity, device and active tenant.",
         "scheme": "bearer",
-        "bearerFormat": "opaque-client-session-v03c",
-        "description": "Short-lived opaque client-session credential scoped server-side to Human Identity, device and active tenant."
+        "bearerFormat": "opaque-client-session-v03c"
       }
     }
   }
