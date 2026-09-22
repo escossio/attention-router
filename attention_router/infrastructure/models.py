@@ -2337,6 +2337,67 @@ class HumanExecutionAuthorizationRow(Base):
         ),
     )
 
+class HumanApprovalDecisionEvidenceRow(Base):
+    """Provider-neutral evidence for exactly one terminal human approval decision."""
+
+    __tablename__ = "human_approval_decision_evidence"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    authorization_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("human_execution_authorizations.id"),
+        nullable=False,
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("tenants.id"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    approver_reference: Mapped[str] = mapped_column(String(120), nullable=False)
+    human_identity_id: Mapped[str | None] = mapped_column(String(64))
+    device_id: Mapped[str | None] = mapped_column(String(64))
+    client_session_id: Mapped[str | None] = mapped_column(String(64))
+    provider_event_reference: Mapped[str | None] = mapped_column(String(180))
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            name="uq_human_approval_decision_authorization",
+        ),
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_human_approval_decision_idempotency",
+        ),
+        CheckConstraint(
+            "decision in ('APPROVE','DENY')",
+            name="ck_human_approval_decision_value",
+        ),
+        CheckConstraint(
+            "channel in ('META_WHATSAPP','ANDROID_CLIENT')",
+            name="ck_human_approval_decision_channel",
+        ),
+        CheckConstraint(
+            "(channel='ANDROID_CLIENT' and human_identity_id is not null "
+            "and device_id is not null and client_session_id is not null "
+            "and provider_event_reference is null) or "
+            "(channel='META_WHATSAPP' and provider_event_reference is not null "
+            "and human_identity_id is null and device_id is null "
+            "and client_session_id is null)",
+            name="ck_human_approval_decision_channel_evidence",
+        ),
+        Index(
+            "ix_human_approval_decision_tenant_decided",
+            "tenant_id",
+            "decided_at",
+        ),
+    )
+
+
 
 class HumanApprovalDeliveryEvidenceRow(Base):
     """Exact relational delivery evidence retained for historical HEA requests."""

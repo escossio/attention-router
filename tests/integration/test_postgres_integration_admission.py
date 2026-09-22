@@ -454,7 +454,7 @@ def test_populated_downgrade_refuses_to_drop_receipts(Session, world, pg_url):
     assert count(Session) == 1
     with Session() as session:
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0047_artifact_understanding_v1"
+            "0048_native_app_approval_v1a"
         )
 
 
@@ -1111,4 +1111,4 @@ def test_processed_dispatch_state_blocks_downgrade_without_export(
     with Session() as session:
         assert session.scalar(
             text("SELECT version_num FROM alembic_version")
-        ) == "0047_artifact_understanding_v1"
+        ) == "0048_native_app_approval_v1a"

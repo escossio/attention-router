@@ -16,6 +16,7 @@ from attention_router.infrastructure.models import (
     ExecutionClassVersionRow,
     ExecutionIntentRow,
     ExecutionIntentTargetBindingRow,
+    HumanApprovalDecisionEvidenceRow,
     HumanExecutionAuthorizationRow,
     InboundEventRow,
     InteractionRow,
@@ -361,6 +362,116 @@ def materialize_production_agent_intent(
     return projection
 
 
+def _resolve_human_approval_lineage(
+    session: Session,
+    *,
+    authorization: HumanExecutionAuthorizationRow,
+    parent: ExecutionIntentRow,
+) -> dict[str, str | None]:
+    tenant_id = parent.scope["target"]["tenant"]
+    evidence = session.scalar(
+        select(HumanApprovalDecisionEvidenceRow).where(
+            HumanApprovalDecisionEvidenceRow.authorization_id
+            == authorization.id
+        )
+    )
+
+    def resolve_meta(provider_event_reference: str) -> InboundEventRow:
+        normalized = session.scalar(
+            select(InboundEventRow)
+            .where(
+                InboundEventRow.tenant_id == tenant_id,
+                InboundEventRow.source == "meta_whatsapp_shadow",
+                InboundEventRow.external_event_id
+                == provider_event_reference,
+            )
+            .order_by(InboundEventRow.received_at.desc())
+            .limit(1)
+        )
+        payload = normalized.payload if normalized is not None else {}
+        if (
+            normalized is None
+            or payload.get("sender") != authorization.decision_sender
+            or payload.get("message_type") != "interactive"
+            or payload.get("interactive_type") != "button_reply"
+            or payload.get("button_reply_id") != authorization.decision_button_id
+            or payload.get("context_id") != authorization.request_wamid
+            or payload.get("normalization") != "PASS"
+            or payload.get("dispatch_enabled") is not False
+        ):
+            raise ProductionAuthorityDenied("REAL_META_APPROVAL_LINEAGE_MISSING")
+        return normalized
+
+    if evidence is None:
+        if (
+            authorization.approval_channel != "meta_whatsapp_interactive"
+            or not authorization.decision_inbound_wamid
+            or not authorization.decision_sender
+            or not authorization.decision_button_id
+            or not authorization.request_wamid
+        ):
+            raise ProductionAuthorityDenied("HEA_APPROVAL_EVIDENCE_INCOMPLETE")
+        normalized = resolve_meta(authorization.decision_inbound_wamid)
+        return {
+            "channel": "LEGACY_META_WHATSAPP",
+            "decision_evidence_id": None,
+            "actor_reference": authorization.decision_sender,
+            "external_event_id": authorization.decision_inbound_wamid,
+            "source_inbound_event_id": normalized.id,
+        }
+
+    if (
+        evidence.authorization_id != authorization.id
+        or evidence.tenant_id != tenant_id
+        or evidence.decision != "APPROVE"
+        or evidence.approver_reference != authorization.expected_approver
+        or authorization.decision_at is None
+        or _utc(evidence.decided_at) != _utc(authorization.decision_at)
+    ):
+        raise ProductionAuthorityDenied("HEA_APPROVAL_EVIDENCE_INCOMPLETE")
+
+    if evidence.channel == "META_WHATSAPP":
+        if (
+            authorization.approval_channel != "meta_whatsapp_interactive"
+            or not evidence.provider_event_reference
+            or evidence.human_identity_id is not None
+            or evidence.device_id is not None
+            or evidence.client_session_id is not None
+            or authorization.decision_inbound_wamid != evidence.provider_event_reference
+            or authorization.decision_sender != evidence.approver_reference
+            or not authorization.decision_button_id
+            or not authorization.request_wamid
+        ):
+            raise ProductionAuthorityDenied("HEA_APPROVAL_EVIDENCE_INCOMPLETE")
+        normalized = resolve_meta(evidence.provider_event_reference)
+        return {
+            "channel": evidence.channel,
+            "decision_evidence_id": evidence.id,
+            "actor_reference": evidence.approver_reference,
+            "external_event_id": evidence.provider_event_reference,
+            "source_inbound_event_id": normalized.id,
+        }
+
+    if evidence.channel == "ANDROID_CLIENT":
+        if (
+            authorization.approval_channel != "android_client"
+            or evidence.human_identity_id != evidence.approver_reference
+            or not evidence.device_id
+            or not evidence.client_session_id
+            or evidence.provider_event_reference is not None
+        ):
+            raise ProductionAuthorityDenied("HEA_APPROVAL_EVIDENCE_INCOMPLETE")
+        return {
+            "channel": evidence.channel,
+            "decision_evidence_id": evidence.id,
+            "actor_reference": evidence.approver_reference,
+            "external_event_id": evidence.id,
+            "source_inbound_event_id": None,
+        }
+
+    raise ProductionAuthorityDenied("HEA_APPROVAL_EVIDENCE_INCOMPLETE")
+
+
 def materialize_approved_production_agent_intent(
     session: Session,
     *,
@@ -370,14 +481,7 @@ def materialize_approved_production_agent_intent(
     effective_response_snapshot: str,
     now: datetime | None = None,
 ) -> AgentExecutionIntentRow:
-    """Project real approved control-plane evidence into the legacy ledger.
-
-    Meta ingress intentionally remains in shadow mode.  This seam creates only
-    the minimum technical lineage required by the legacy execution ledger and
-    derives it from the persisted, HMAC-gated button reply; it never fabricates
-    or replays a webhook and performs no run, safety or transport work.
-    """
-
+    """Project one human-approved frozen production authority into the ledger."""
     timestamp = (now or datetime.now(UTC)).astimezone(UTC)
     parent = session.execute(
         select(ExecutionIntentRow)
@@ -386,6 +490,7 @@ def materialize_approved_production_agent_intent(
     ).scalar_one_or_none()
     if parent is None:
         raise ProductionAuthorityDenied("EXECUTION_INTENT_NOT_FOUND")
+
     authorization = session.execute(
         select(HumanExecutionAuthorizationRow)
         .where(HumanExecutionAuthorizationRow.id == authorization_id)
@@ -396,38 +501,21 @@ def materialize_approved_production_agent_intent(
         or authorization.execution_intent_id != parent.id
         or authorization.state != "APPROVED"
         or authorization.execution_intent_fingerprint != expected_fingerprint
-        or not authorization.decision_inbound_wamid
-        or not authorization.decision_sender
-        or not authorization.decision_button_id
-        or not authorization.request_wamid
+        or authorization.decision_at is None
     ):
         raise ProductionAuthorityDenied("HEA_APPROVAL_EVIDENCE_INCOMPLETE")
     if _utc(authorization.expires_at) <= timestamp:
         raise ProductionAuthorityDenied("HEA_NOT_APPROVED")
 
-    normalized = session.scalar(
-        select(InboundEventRow)
-        .where(
-            InboundEventRow.tenant_id == parent.scope["target"]["tenant"],
-            InboundEventRow.source == "meta_whatsapp_shadow",
-            InboundEventRow.external_event_id
-            == authorization.decision_inbound_wamid,
-        )
-        .order_by(InboundEventRow.received_at.desc())
-        .limit(1)
+    lineage = _resolve_human_approval_lineage(
+        session,
+        authorization=authorization,
+        parent=parent,
     )
-    payload = normalized.payload if normalized is not None else {}
-    if (
-        normalized is None
-        or payload.get("sender") != authorization.decision_sender
-        or payload.get("message_type") != "interactive"
-        or payload.get("interactive_type") != "button_reply"
-        or payload.get("button_reply_id") != authorization.decision_button_id
-        or payload.get("context_id") != authorization.request_wamid
-        or payload.get("normalization") != "PASS"
-        or payload.get("dispatch_enabled") is not False
-    ):
-        raise ProductionAuthorityDenied("REAL_META_APPROVAL_LINEAGE_MISSING")
+    actor_reference = str(lineage["actor_reference"])
+    source_inbound_event_id = lineage["source_inbound_event_id"]
+    decision_evidence_id = lineage["decision_evidence_id"]
+    decision_channel = str(lineage["channel"])
 
     suffix = hashlib.sha256(authorization.id.encode()).hexdigest()[:40]
     interaction_id = f"prod-int-{suffix}"
@@ -439,8 +527,12 @@ def materialize_approved_production_agent_intent(
             id=interaction_id,
             tenant_id=parent.scope["target"]["tenant"],
             event_type="production_human_approval",
-            contact_id=authorization.decision_sender,
-            contact_name="Production approver",
+            contact_id=actor_reference,
+            contact_name=(
+                "Authenticated app approver"
+                if decision_channel == "ANDROID_CLIENT"
+                else "Production approver"
+            ),
             relationship_category="authorized_operator",
             inbound_text="[persisted human approval control event]",
             state="closed",
@@ -451,23 +543,40 @@ def materialize_approved_production_agent_intent(
         )
         session.add(interaction)
         session.flush()
+
     event = session.get(InboundEventRow, event_id)
-    event_payload = {
-        "authorization_id": authorization.id,
-        "execution_intent_id": parent.id,
-        "decision": "APPROVE",
-        "source_inbound_event_id": normalized.id,
-    }
+    if decision_evidence_id is None:
+        event_payload = {
+            "authorization_id": authorization.id,
+            "execution_intent_id": parent.id,
+            "decision": "APPROVE",
+            "source_inbound_event_id": source_inbound_event_id,
+        }
+    else:
+        event_payload = {
+            "authorization_id": authorization.id,
+            "execution_intent_id": parent.id,
+            "decision": "APPROVE",
+            "decision_evidence_id": decision_evidence_id,
+            "decision_channel": decision_channel,
+        }
+        if source_inbound_event_id is not None:
+            event_payload["source_inbound_event_id"] = source_inbound_event_id
+
     if event is None:
         event = InboundEventRow(
             id=event_id,
             tenant_id=interaction.tenant_id,
             source="production_human_approval",
-            external_event_id=authorization.decision_inbound_wamid,
+            external_event_id=str(lineage["external_event_id"]),
             event_type="approval",
             payload=event_payload,
             payload_hash=hashlib.sha256(
-                json.dumps(event_payload, sort_keys=True, separators=(",", ":")).encode()
+                json.dumps(
+                    event_payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
             ).hexdigest(),
             received_at=authorization.decision_at or timestamp,
             processed_at=timestamp,
@@ -478,13 +587,20 @@ def materialize_approved_production_agent_intent(
         )
         session.add(event)
         session.flush()
+    elif (
+        event.tenant_id != interaction.tenant_id
+        or event.payload != event_payload
+        or event.external_event_id != str(lineage["external_event_id"])
+    ):
+        raise ProductionAuthorityDenied("PRODUCTION_LINEAGE_SEMANTIC_DRIFT")
+
     decision = session.get(AgentDecisionRow, decision_id)
     if decision is None:
         decision = AgentDecisionRow(
             id=decision_id,
             event_id=event.id,
             interaction_id=interaction.id,
-            actor_id=authorization.decision_sender,
+            actor_id=actor_reference,
             audience="single_authorized_recipient",
             decision_pipeline_version="production-authority-v1",
             decision_type="RESPOND",
@@ -498,7 +614,9 @@ def materialize_approved_production_agent_intent(
             response_source="frozen_authority",
             execution_allowed=False,
             external_delivery_allowed=False,
-            reasoning_summary="Exact human-approved frozen production authority projection",
+            reasoning_summary=(
+                "Exact human-approved frozen production authority projection"
+            ),
             status="APPROVED_CONTROL_ONLY",
             created_at=timestamp,
         )
@@ -511,7 +629,9 @@ def materialize_approved_production_agent_intent(
             {
                 "execution_intent_id": parent.id,
                 "authorization_id": authorization.id,
-                "source_inbound_event_id": normalized.id,
+                "decision_evidence_id": decision_evidence_id,
+                "decision_channel": decision_channel,
+                "source_inbound_event_id": source_inbound_event_id,
             },
             correlation_id=authorization.correlation_id,
             causation_id=authorization.id,
@@ -521,6 +641,7 @@ def materialize_approved_production_agent_intent(
         decision.event_id != event.id
         or decision.interaction_id != interaction.id
         or decision.proposed_response != effective_response_snapshot
+        or decision.actor_id != actor_reference
     ):
         raise ProductionAuthorityDenied("PRODUCTION_LINEAGE_SEMANTIC_DRIFT")
 
@@ -532,6 +653,8 @@ def materialize_approved_production_agent_intent(
         effective_response_snapshot=effective_response_snapshot,
         now=timestamp,
     )
+
+
 
 
 __all__ = [

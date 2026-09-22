@@ -23,6 +23,7 @@ from attention_router.infrastructure.models import (
     ExecutionClassVersionRow,
     ExecutionIntentRow,
     ExecutionIntentTargetBindingRow,
+    HumanApprovalDecisionEvidenceRow,
     HumanExecutionAuthorizationRow,
     InboundEventRow,
     MetaDeliveryReconciliationRow,
@@ -38,6 +39,7 @@ from attention_router.infrastructure.models import (
     StaticIntentAuthorityProfileRow,
 )
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
+from attention_router.platform.human_approval_decision import decide_human_approval
 from attention_router.platform.human_execution_authorization import fingerprint
 from attention_router.platform.meta_callback_reconciliation import (
     admit_meta_callback_evidence,
@@ -343,6 +345,78 @@ def test_r2_t01a_materializes_from_real_approved_meta_lineage(Session):
         assert replay.id == projection.id
         assert session.get(ExecutionIntentRow, parent.id).state == "MATERIALIZED"
         assert session.get(AgentDecisionRow, projection.agent_decision_id).semantic_source == "approved_execution_intent"
+
+
+def test_r2_t01aa_materializes_from_android_client_decision_evidence(Session):
+    with Session() as session:
+        parent = _parent(session)
+        authorization = session.scalar(
+            select(HumanExecutionAuthorizationRow).where(
+                HumanExecutionAuthorizationRow.execution_intent_id
+                == parent.id
+            )
+        )
+        authorization.state = "PENDING_HUMAN_APPROVAL"
+        authorization.approval_channel = "android_client"
+        authorization.expected_approver = "hid_synthetic_android_owner"
+        authorization.decision_at = None
+        authorization.decision_inbound_wamid = None
+        authorization.decision_sender = None
+        authorization.decision_button_id = None
+        session.flush()
+
+        decision_result = decide_human_approval(
+            session,
+            authorization_id=authorization.id,
+            decision="APPROVE",
+            channel="ANDROID_CLIENT",
+            approver_reference=authorization.expected_approver,
+            tenant_id=DEFAULT_TENANT_ID,
+            decision_reference="android-decision-" + uuid4().hex,
+            human_identity_id=authorization.expected_approver,
+            device_id="cdev_synthetic_android",
+            client_session_id="csn_synthetic_android",
+        )
+        session.flush()
+
+        projection = materialize_approved_production_agent_intent(
+            session,
+            execution_intent_id=parent.id,
+            authorization_id=authorization.id,
+            expected_fingerprint=parent.scope_fingerprint,
+            effective_response_snapshot="ok",
+        )
+        replay = materialize_approved_production_agent_intent(
+            session,
+            execution_intent_id=parent.id,
+            authorization_id=authorization.id,
+            expected_fingerprint=parent.scope_fingerprint,
+            effective_response_snapshot="ok",
+        )
+
+        evidence = session.get(
+            HumanApprovalDecisionEvidenceRow,
+            decision_result.evidence.id,
+        )
+        control_decision = session.get(
+            AgentDecisionRow,
+            projection.agent_decision_id,
+        )
+        source_event = session.get(InboundEventRow, control_decision.event_id)
+        assert replay.id == projection.id
+        assert evidence.channel == "ANDROID_CLIENT"
+        assert evidence.provider_event_reference is None
+        assert source_event.source == "production_human_approval"
+        assert source_event.payload["decision_channel"] == "ANDROID_CLIENT"
+        assert (
+            source_event.payload["decision_evidence_id"] == evidence.id
+        )
+        assert session.scalar(
+            select(func.count()).select_from(InboundEventRow).where(
+                InboundEventRow.source == "meta_whatsapp_shadow",
+                InboundEventRow.external_event_id == evidence.id,
+            )
+        ) == 0
 
 
 def test_r2_t01b_one_bounded_production_reply_reaches_terminal_state(Session):

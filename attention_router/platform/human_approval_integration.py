@@ -17,7 +17,11 @@ from attention_router.infrastructure.models import (
 )
 from attention_router.infrastructure.repository import audit
 from attention_router.platform.execution_intent_retirement import retire_execution_intent
-from attention_router.platform.human_execution_authorization import prepare, request_approval
+from attention_router.platform.human_execution_authorization import (
+    prepare,
+    request_approval,
+    request_client_approval,
+)
 from attention_router.platform.meta_callback_reconciliation import (
     ADMISSION_GRACE_SECONDS,
     persist_human_approval_delivery_evidence,
@@ -65,7 +69,52 @@ def prepare_production_human_approval(
         correlation_id=correlation_id,
         now=timestamp,
         scope={"buttons": buttons},
+        approval_channel="meta_whatsapp_interactive",
     )
+
+
+def prepare_production_client_app_approval(
+    session: Session,
+    *,
+    execution_intent_id: str,
+    human_identity_id: str,
+    ttl_seconds: int,
+    correlation_id: str,
+    now: datetime | None = None,
+) -> HumanExecutionAuthorizationRow:
+    """Prepare a provider-neutral Android Client approval request."""
+    timestamp = (now or datetime.now(UTC)).astimezone(UTC)
+    parent = session.execute(
+        select(ExecutionIntentRow)
+        .where(ExecutionIntentRow.id == execution_intent_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if parent is None:
+        raise PermissionError("EXECUTION_INTENT_NOT_FOUND")
+    try:
+        validate_frozen_execution_intent_authority(
+            session,
+            parent=parent,
+            expected_fingerprint=parent.scope_fingerprint,
+            effective_response_snapshot=parent.scope[
+                "immutable_inputs"
+            ]["effective_response_snapshot"],
+            now=timestamp,
+        )
+    except (KeyError, ProductionAuthorityDenied) as exc:
+        raise PermissionError(str(exc)) from exc
+    row = prepare(
+        session,
+        execution_intent_id=parent.id,
+        expected_approver=human_identity_id,
+        ttl_seconds=ttl_seconds,
+        correlation_id=correlation_id,
+        now=timestamp,
+        scope={},
+        approval_channel="android_client",
+    )
+    request_client_approval(session, row.id, now=timestamp)
+    return row
 
 
 def build_production_human_approval_request(
@@ -74,7 +123,11 @@ def build_production_human_approval_request(
     """Build, but never send, the interactive Meta request for a PREPARED HEA."""
     timestamp = (now or datetime.now(UTC)).astimezone(UTC)
     hea = session.get(HumanExecutionAuthorizationRow, authorization_id)
-    if hea is None or hea.state != "PREPARED":
+    if (
+        hea is None
+        or hea.state != "PREPARED"
+        or hea.approval_channel != "meta_whatsapp_interactive"
+    ):
         raise PermissionError("HUMAN_AUTH_INVALID_REQUEST")
     parent = session.get(ExecutionIntentRow, hea.execution_intent_id)
     if parent is None:
@@ -278,5 +331,6 @@ __all__ = [
     "build_production_human_approval_request",
     "close_failed_production_human_approval",
     "mark_production_human_approval_requested",
+    "prepare_production_client_app_approval",
     "prepare_production_human_approval",
 ]
