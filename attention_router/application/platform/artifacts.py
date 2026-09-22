@@ -220,6 +220,10 @@ def register_artifact_receipt(
             updated_at=stamp,
         )
         session.add(resource)
+        # ResourceRow and ArtifactRow intentionally have no ORM relationship.
+        # PostgreSQL therefore cannot infer INSERT dependency ordering from the
+        # in-memory graph. Materialize the FK target before adding ArtifactRow.
+        session.flush()
         session.add(artifact)
         session.flush()
     elif artifact.size_bytes != item.size_bytes:
