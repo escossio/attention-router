@@ -1,6 +1,6 @@
 # Pending Intent V1 — Contract
 
-Status: frozen design candidate / no runtime implementation
+Status: active runtime implementation; provider-neutral provenance extended for native Client Command
 
 Related:
 - #84 Personal Context V1
@@ -61,10 +61,12 @@ Proposed logical fields:
 - `id`
 - `schema_version`
 - `semantic_registry_version`
-- `tenant_id`
+- `tenant_id` — semantic/operational tenant that owns the canonical person and learned meaning
+- `source_tenant_id` — tenant in which the source transport/client message was authenticated/persisted
 - `person_actor_key`
-- `source_inbound_event_id`
-- `source_interaction_id`
+- exactly one source provenance:
+  - `source_inbound_event_id` + `source_interaction_id`; or
+  - `source_client_command_id`
 - `source_channel`
 - `conversation_key_hash`
 - `state`
@@ -73,7 +75,9 @@ Proposed logical fields:
 - `candidate_set_fingerprint`
 - `clarification_outbox_id`
 - `clarification_delivered_at`
-- `resolution_inbound_event_id`
+- exactly one resolution provenance when resolved:
+  - `resolution_inbound_event_id`; or
+  - `resolution_client_command_id`
 - `selected_candidate_key`
 - `resolution_kind`
 - `created_at`
@@ -83,7 +87,7 @@ Proposed logical fields:
 - `correlation_id`
 - `provenance`
 
-The original message remains canonical in `InboundEventRow`; do not duplicate an unrestricted transcript into Pending Intent.
+The original message remains canonical in its source ledger (`InboundEventRow` or `ClientCommandMessageRow`); do not duplicate an unrestricted transcript into Pending Intent. The semantic tenant and source tenant may differ only when the authenticated client bridge has already resolved one unambiguous operational owner scope.
 
 ## 4. Candidate contract
 
@@ -123,7 +127,7 @@ Invalid or unrelated replies do not mutate the Pending Intent to a fake terminal
 
 ## 6. Active-intent constraint
 
-Because current WhatsApp transport does not yet preserve a quoted-message/reply reference in the normalized inbound contract, V1 must not rely on reply-thread identity that is not actually available.
+Because current transports do not uniformly preserve a quoted-message/reply reference, V1 must not rely on reply-thread identity that is not actually available. WhatsApp uses its normalized conversation identity; the native Android Client Command channel derives one bounded conversation scope per authenticated Human Identity.
 
 For the same:
 
@@ -169,7 +173,7 @@ Prefer, in order:
 2. structured option/button reference;
 3. unique active Pending Intent + same conversation + bounded TTL + unambiguous resolution text.
 
-V1 WhatsApp self-chat currently starts at level 3 because quoted-message correlation is not present in the normalized contract.
+V1 WhatsApp self-chat and the native Client Command channel currently start at level 3 because neither path exposes a stronger structured reply reference in this contract.
 
 ## 9. Bare `sim` rule
 
@@ -383,3 +387,12 @@ Desired conceptual flow:
 10. explicit resolution may become #90 idiolect evidence.
 
 This is the behavior that prevents a linguistically plausible but materially wrong silent action.
+## 14. Native Client Command bridge
+
+The authenticated Android Client Command channel reuses the same closed semantic registry, clarification resolver, Pending Intent lifecycle and User Idiolect projection. It must not maintain a second clarification engine or manufacture synthetic WhatsApp/inbound events.
+
+For a native command:
+
+`ClientCommandMessageRow -> semantic interpretation -> candidate set -> PendingIntent -> human resolution -> canonical semantic intent -> authority/execution -> confirmed idiolect evidence`
+
+The source command remains in the client-command ledger. `PendingIntent` stores only bounded provenance IDs and the frozen candidate set. A confirmed meaning is recorded against the semantic/operational tenant and canonical owner, while provenance continues to point to the authenticated source tenant and client command.
