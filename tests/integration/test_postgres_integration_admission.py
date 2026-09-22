@@ -286,7 +286,9 @@ def test_simultaneous_admissions(Session, world, conflict):
 
 
 def wait_for_waiter(Session, blocker):
-    deadline = time.monotonic() + 1.5
+    # The assertion is the observed PostgreSQL lock, not scheduler latency.
+    # Leave headroom for loaded distributed workers before declaring failure.
+    deadline = time.monotonic() + 5.0
     with Session() as observer:
         while time.monotonic() < deadline:
             if observer.scalar(text("SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
