@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from attention_router.application.client_session import (
     ClientSessionAuthorityRejected,
+    ClientSessionChallengeConflict,
     ClientSessionChallengeConsumed,
     ClientSessionService,
     ClientSessionSignatureInvalid,
@@ -143,6 +144,161 @@ def test_same_challenge_cannot_issue_twice(session):
             session, session_challenge_id=challenge.session_challenge_id,
             device_signature_b64url=signature, now=NOW + timedelta(seconds=2),
         )
+
+
+def test_same_context_retry_returns_same_pending_challenge_and_completes(session):
+    private, spki, public = keypair()
+    seed(session, spki)
+    service = ClientSessionService(settings=settings())
+    first = service.start_session(
+        session, public_key_spki_b64url=public, requested_tenant_id=TENANT_ID, now=NOW
+    )
+    session.commit()
+
+    retry = service.start_session(
+        session,
+        public_key_spki_b64url=public,
+        requested_tenant_id=TENANT_ID,
+        now=NOW + timedelta(seconds=1),
+    )
+    session.commit()
+
+    assert first == retry
+    assert first.session_challenge_id.startswith("csc_r1_")
+    row = session.get(ClientSessionChallengeRow, first.session_challenge_id)
+    raw = base64.urlsafe_b64decode(first.challenge_b64url + "=")
+    assert row.challenge_digest == hashlib.sha256(raw).hexdigest()
+    assert row.state == "PENDING"
+    assert session.scalar(select(func.count()).select_from(ClientSessionChallengeRow)) == 1
+
+    issued = service.complete_session(
+        session,
+        session_challenge_id=retry.session_challenge_id,
+        device_signature_b64url=sign(private, retry.challenge_b64url),
+        now=NOW + timedelta(seconds=2),
+    )
+    session.commit()
+    assert issued.tenant_id == TENANT_ID
+
+
+def test_retryable_challenge_derivation_has_stable_domain_vector(session, monkeypatch):
+    _, spki, public = keypair()
+    seed(session, spki)
+    entropy = bytes(range(32))
+    monkeypatch.setattr(
+        "attention_router.application.client_session.secrets.token_bytes",
+        lambda size: entropy if size == 32 else None,
+    )
+
+    challenge = ClientSessionService(settings=settings()).start_session(
+        session, public_key_spki_b64url=public, requested_tenant_id=None, now=NOW
+    )
+
+    assert challenge.session_challenge_id == (
+        "csc_r1_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    )
+    assert challenge.challenge_b64url == "iyiTGXN74DDOEMbkf-P1yhusxdJ1cr3YVkf40tjDAWQ"
+    row = session.get(ClientSessionChallengeRow, challenge.session_challenge_id)
+    assert row.challenge_digest == (
+        "3c810af648c2eab9fa84341212c8761fef3f76d2f0ae92cdbc25a4cee6e2dce9"
+    )
+
+
+def test_different_tenant_context_does_not_reuse_pending_challenge(session):
+    _, spki, public = keypair()
+    seed(session, spki)
+    service = ClientSessionService(settings=settings())
+    first = service.start_session(
+        session, public_key_spki_b64url=public, requested_tenant_id=TENANT_ID, now=NOW
+    )
+    session.commit()
+
+    with pytest.raises(ClientSessionChallengeConflict):
+        service.start_session(
+            session,
+            public_key_spki_b64url=public,
+            requested_tenant_id="tnt_" + "o" * 24,
+            now=NOW + timedelta(seconds=1),
+        )
+    session.rollback()
+
+    row = session.get(ClientSessionChallengeRow, first.session_challenge_id)
+    assert row.state == "PENDING"
+    assert row.requested_tenant_id == TENANT_ID
+    assert session.scalar(select(func.count()).select_from(ClientSessionChallengeRow)) == 1
+
+
+def test_legacy_pending_challenge_conflicts_until_expiry_then_is_replaced(session):
+    _, spki, public = keypair()
+    seed(session, spki)
+    legacy = ClientSessionChallengeRow(
+        # A legacy 32-character suffix can begin with "r1_"; exact length keeps
+        # it distinct from the new 43-character retryable suffix.
+        id="csc_r1_" + "l" * 29,
+        device_id=DEVICE_ID,
+        human_identity_id=HUMAN_ID,
+        requested_tenant_id=TENANT_ID,
+        challenge_digest="a" * 64,
+        state="PENDING",
+        created_at=NOW,
+        expires_at=NOW + timedelta(seconds=1),
+        verified_at=None,
+        rejected_at=None,
+    )
+    session.add(legacy)
+    session.commit()
+    service = ClientSessionService(settings=settings())
+
+    with pytest.raises(ClientSessionChallengeConflict):
+        service.start_session(
+            session,
+            public_key_spki_b64url=public,
+            requested_tenant_id=TENANT_ID,
+            now=NOW,
+        )
+    session.rollback()
+    assert session.get(ClientSessionChallengeRow, legacy.id).state == "PENDING"
+
+    replacement = service.start_session(
+        session,
+        public_key_spki_b64url=public,
+        requested_tenant_id=TENANT_ID,
+        now=NOW + timedelta(seconds=2),
+    )
+    session.commit()
+    assert replacement.session_challenge_id.startswith("csc_r1_")
+    assert session.get(ClientSessionChallengeRow, legacy.id).state == "REJECTED"
+
+
+def test_retry_fails_closed_when_retryable_challenge_digest_is_tampered(session):
+    private, spki, public = keypair()
+    seed(session, spki)
+    service = ClientSessionService(settings=settings())
+    challenge = service.start_session(
+        session, public_key_spki_b64url=public, requested_tenant_id=TENANT_ID, now=NOW
+    )
+    session.commit()
+    row = session.get(ClientSessionChallengeRow, challenge.session_challenge_id)
+    row.challenge_digest = "0" * 64
+    session.commit()
+
+    with pytest.raises(ClientSessionChallengeConflict):
+        service.start_session(
+            session,
+            public_key_spki_b64url=public,
+            requested_tenant_id=TENANT_ID,
+            now=NOW + timedelta(seconds=1),
+        )
+    session.rollback()
+    with pytest.raises(ClientSessionSignatureInvalid):
+        service.complete_session(
+            session,
+            session_challenge_id=challenge.session_challenge_id,
+            device_signature_b64url=sign(private, challenge.challenge_b64url),
+            now=NOW + timedelta(seconds=1),
+        )
+    session.rollback()
+    assert session.scalar(select(func.count()).select_from(ClientSessionRow)) == 0
 
 
 def test_membership_suspension_invalidates_unexpired_session(session):

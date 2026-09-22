@@ -2,6 +2,24 @@
 
 Updated: 2026-09-22
 
+## ClientSession idempotent challenge retry — branch candidate
+
+- A repeated challenge start for the same server-resolved device and exact
+  `requested_tenant_id` now returns the same unexpired `PENDING` challenge,
+  including its original expiry, instead of failing or invalidating it.
+- New `csc_r1_` challenge ids carry 256 bits of random entropy. Challenge bytes
+  are reconstructed with domain-separated SHA-256; persistence still keeps the
+  challenge digest, and completion still requires the enrolled P-256 signature
+  plus current device, Human Identity, membership and tenant authority.
+- Different tenant contexts, legacy unrederivable pending rows, digest tampering
+  and multiple unexpired rows fail closed. A legacy row becomes replaceable only
+  through the existing expiry cleanup.
+- Focused evidence: Ruff passed; 42 ClientSession service/core/contract/API tests
+  passed; six PostgreSQL tests collect successfully. PostgreSQL concurrency
+  execution remains delegated to the exact-SHA distributed gate after publication.
+- No API shape, migration, runtime flag, database, deployment or live service
+  was changed.
+
 ## Andy Ops Live Supervisor V1
 
 - Added a sanitized, reproducible LAN-only operational panel package under `ops/provisioning/andy-ops-panel/`.
