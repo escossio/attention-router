@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -106,4 +108,75 @@ class ArtifactReceiptRow(Base):
     )
 
 
-__all__ = ["ArtifactReceiptRow", "ArtifactRow"]
+class ArtifactUnderstandingRow(Base):
+    """Derived, tenant-scoped understanding of one inbound Artifact."""
+
+    __tablename__ = "artifact_understandings"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    artifact_id: Mapped[str | None] = mapped_column(String(64))
+    inbound_event_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("inbound_events.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    content_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    summary_text: Mapped[str | None] = mapped_column(Text)
+    extracted_text: Mapped[str | None] = mapped_column(Text)
+    visual_description: Mapped[str | None] = mapped_column(Text)
+    key_facts_json: Mapped[list[str]] = mapped_column(
+        "key_facts", JsonType, nullable=False, default=list
+    )
+    language: Mapped[str | None] = mapped_column(String(40))
+    text_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    provider: Mapped[str | None] = mapped_column(String(32))
+    model: Mapped[str | None] = mapped_column(String(80))
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_request_reference: Mapped[str | None] = mapped_column(String(180))
+    error_code: Mapped[str | None] = mapped_column(String(120))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_by: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "artifact_id"],
+            ["artifacts.tenant_id", "artifacts.id"],
+            name="fk_artifact_understanding_tenant_artifact",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "inbound_event_id",
+            name="uq_artifact_understanding_tenant_event",
+        ),
+        CheckConstraint(
+            "status in ('PENDING','PROCESSING','READY','FAILED')",
+            name="ck_artifact_understanding_status",
+        ),
+        CheckConstraint(
+            "content_kind in ('IMAGE','DOCUMENT')",
+            name="ck_artifact_understanding_kind",
+        ),
+        CheckConstraint(
+            "(status='READY' and summary_text is not null) or "
+            "(status<>'READY' and summary_text is null)",
+            name="ck_artifact_understanding_ready_summary",
+        ),
+        Index(
+            "ix_artifact_understanding_tenant_status_created",
+            "tenant_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_artifact_understanding_tenant_artifact",
+            "tenant_id",
+            "artifact_id",
+        ),
+    )
+
+
+__all__ = ["ArtifactReceiptRow", "ArtifactRow", "ArtifactUnderstandingRow"]

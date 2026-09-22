@@ -615,7 +615,7 @@ def _cancel_window(
     queue_rows = session.scalars(
         select(QueueRow).where(
             QueueRow.payload["grace_window_id"].as_string() == window.id,
-            QueueRow.status.in_(["PENDING", "pending", "WAITING_TRANSCRIPTION"]),
+            QueueRow.status.in_(["PENDING", "pending", "WAITING_TRANSCRIPTION", "WAITING_ARTIFACT_UNDERSTANDING"]),
         )
     ).all()
     for queue in queue_rows:

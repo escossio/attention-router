@@ -30,6 +30,11 @@ from attention_router.application.voice_transcription import (
     process_voice_transcriptions,
     voice_decision_readiness,
 )
+from attention_router.application.artifact_understanding import (
+    artifact_decision_readiness,
+    is_artifact_understanding_input_event,
+    process_artifact_understandings,
+)
 from attention_router.integrations.dispatch import process_integration_inbox
 from attention_router.application.voice_tts import process_tts_derivations
 from attention_router.application.voice_media import cleanup_expired_media
@@ -97,6 +102,33 @@ def process_agent_decisions(session, worker: str, limit: int = 10) -> int:
                     origin="voice_transcription",
                 )
                 continue
+
+            artifact_state, artifact_reason = artifact_decision_readiness(
+                session,
+                event,
+            )
+            if artifact_state == "WAITING":
+                queue.status = "WAITING_ARTIFACT_UNDERSTANDING"
+                queue.processed_at = None
+                audit(
+                    session,
+                    queue.payload["interaction_id"],
+                    "artifact.decision_waiting",
+                    {"queue_id": queue.id, "reason": artifact_reason},
+                    origin="artifact_understanding",
+                )
+                continue
+            if artifact_state == "FAILED":
+                queue.status = "CANCELED"
+                queue.processed_at = now_utc()
+                audit(
+                    session,
+                    queue.payload["interaction_id"],
+                    "artifact.decision_canceled",
+                    {"queue_id": queue.id, "reason": artifact_reason},
+                    origin="artifact_understanding",
+                )
+                continue
         queue.status = "PROCESSING"
         session.flush()
         queue_id = queue.id
@@ -142,6 +174,37 @@ def process_agent_decisions(session, worker: str, limit: int = 10) -> int:
                         "voice.decision_deferred",
                         {"queue_id": queue.id, "reason": voice_reason},
                         origin="voice_transcription",
+                    )
+                    continue
+                elif (
+                    event is not None
+                    and is_artifact_understanding_input_event(event)
+                ):
+                    artifact_state, artifact_reason = artifact_decision_readiness(
+                        session,
+                        event,
+                    )
+                    if not grace_allows_interaction(
+                        session, queue.payload["interaction_id"]
+                    ):
+                        queue.status = "CANCELED"
+                        queue.processed_at = now_utc()
+                    elif artifact_state == "FAILED":
+                        queue.status = "CANCELED"
+                        queue.processed_at = now_utc()
+                    else:
+                        queue.status = (
+                            "WAITING_ARTIFACT_UNDERSTANDING"
+                            if artifact_state == "WAITING"
+                            else "PENDING"
+                        )
+                        queue.processed_at = None
+                    audit(
+                        session,
+                        queue.payload["interaction_id"],
+                        "artifact.decision_deferred",
+                        {"queue_id": queue.id, "reason": artifact_reason},
+                        origin="artifact_understanding",
                     )
                     continue
             queue.status = (
@@ -270,6 +333,10 @@ def run_forever() -> None:
             grace_count = process_due_grace_windows(session, identity)
             session.commit()
             transcription_count = process_voice_transcriptions(session, identity)
+            artifact_understanding_count = process_artifact_understandings(
+                session,
+                identity,
+            )
             decision_count = process_agent_decisions(session, identity)
             session.commit()
             execution_count = enqueue_ready_intents(
@@ -397,6 +464,7 @@ def run_forever() -> None:
         if (
             grace_count
             or transcription_count
+            or artifact_understanding_count
             or decision_count
             or execution_count
             or tts_count
@@ -445,7 +513,8 @@ def run_forever() -> None:
             or meta_inbox.selected
         ):
             logger.info(
-                "processed worker_id=%s grace_count=%s decision_count=%s outbox_count=%s "
+                "processed worker_id=%s grace_count=%s "
+                "artifact_understanding_count=%s decision_count=%s outbox_count=%s "
                 "timer_count=%s scheduled_event_count=%s "
                 "integration_dispatch_processed=%s "
                 "integration_dispatch_blocked=%s "
@@ -460,6 +529,7 @@ def run_forever() -> None:
                 "meta_reconciliation_failed=%s meta_inbox_correlated=%s",
                 identity,
                 grace_count,
+                artifact_understanding_count,
                 decision_count,
                 outbox_count,
                 timer_count,

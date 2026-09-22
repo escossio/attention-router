@@ -1934,7 +1934,7 @@ def human_reply(session: Session, interaction_id: str, text: str) -> dict:
     )
     session.execute(
         update(QueueRow)
-        .where(QueueRow.payload["interaction_id"].as_string() == interaction_id, QueueRow.status.in_(["pending", "PENDING", "WAITING_TRANSCRIPTION"]))
+        .where(QueueRow.payload["interaction_id"].as_string() == interaction_id, QueueRow.status.in_(["pending", "PENDING", "WAITING_TRANSCRIPTION", "WAITING_ARTIFACT_UNDERSTANDING"]))
         .values(status="CANCELED")
     )
     audit(session, interaction_id, "human_reply_canceled", {"text": text}, row.correlation_id, row.causation_id)

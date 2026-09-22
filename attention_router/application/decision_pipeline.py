@@ -6,6 +6,11 @@ from attention_router.application.voice_transcription import (
     is_voice_input_event,
     voice_decision_readiness,
 )
+from attention_router.application.artifact_understanding import (
+    artifact_decision_readiness,
+    effective_artifact_text,
+    is_artifact_understanding_input_event,
+)
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -386,7 +391,39 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             )
             session.flush()
         return None
+
+    artifact_state, artifact_reason = artifact_decision_readiness(
+        session,
+        event,
+    )
+    if (
+        is_artifact_understanding_input_event(event)
+        and artifact_state != "READY"
+    ):
+        already_audited = session.scalar(
+            select(AuditEventRow.id).where(
+                AuditEventRow.tenant_id == interaction.tenant_id,
+                AuditEventRow.interaction_id == interaction.id,
+                AuditEventRow.event_type
+                == "artifact.understanding_required",
+            )
+        )
+        if already_audited is None:
+            _audit(
+                session,
+                interaction.id,
+                "artifact.understanding_required",
+                {"reason_code": artifact_reason},
+            )
+            session.flush()
+        return None
+
     effective_text = effective_inbound_text(session, event, interaction)
+    effective_text = effective_artifact_text(
+        session,
+        event,
+        effective_text,
+    )
     canonical_event = normalize_inbound_event(session, event, actor_id=interaction.contact_id)
     _audit(session, interaction.id, "decision.started", {"pipeline_version": settings.agent_decision_pipeline_version})
     routing = resolve_decision_routing(session, event, interaction)
