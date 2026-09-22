@@ -15,6 +15,7 @@ from attention_router.application.client_command import (
 
 NOW = datetime(2026, 9, 22, 10, 30, tzinfo=UTC)
 COMMANDS = "/api/v1/client/commands"
+VOICE = "/api/v1/client/commands/voice"
 
 
 class FakeSession:
@@ -33,6 +34,15 @@ class FakeService:
             raise self.error
         return command()
 
+    def submit_voice(self, session, **kwargs):
+        self.calls.append(("voice", session, kwargs))
+        if self.error:
+            raise self.error
+        return command(
+            modality="VOICE",
+            input_text="pare",
+        )
+
     def list_recent(self, session, **kwargs):
         self.calls.append(("list", session, kwargs))
         if self.error:
@@ -40,12 +50,16 @@ class FakeService:
         return (command(),)
 
 
-def command():
+def command(
+    *,
+    modality: str = "TEXT",
+    input_text: str = "pare",
+):
     return ClientCommandView(
         command_id="cmd_test",
         client_request_id="req_test",
-        modality="TEXT",
-        input_text="pare",
+        modality=modality,
+        input_text=input_text,
         state="COMPLETED",
         normalized_action="SET_AUTOMATIC_RESPONSES_ENABLED",
         response_text="Andy pausada.",
@@ -109,14 +123,18 @@ def test_runtime_openapi_matches_frozen_command_contract(client):
         )
     )
     runtime = client[0].app.openapi()
-    for method in ("post", "get"):
+    for path, method in (
+        (COMMANDS, "post"),
+        (COMMANDS, "get"),
+        (VOICE, "post"),
+    ):
         assert (
-            runtime["paths"][COMMANDS][method]["operationId"]
-            == frozen["paths"][COMMANDS][method]["operationId"]
+            runtime["paths"][path][method]["operationId"]
+            == frozen["paths"][path][method]["operationId"]
         )
         assert (
-            runtime["paths"][COMMANDS][method]["security"]
-            == frozen["paths"][COMMANDS][method]["security"]
+            runtime["paths"][path][method]["security"]
+            == frozen["paths"][path][method]["security"]
         )
     assert set(
         runtime["components"]["schemas"]["ClientCommandView"]
@@ -168,3 +186,42 @@ def test_errors_are_bounded(client, error, status_code, code):
     )
     assert response.status_code == status_code
     assert response.json() == {"code": code}
+
+
+def test_voice_upload_is_raw_audio_with_session_authority(client):
+    http, service, session = client
+
+    response = http.post(
+        VOICE,
+        headers={
+            **auth(),
+            "X-Client-Request-Id": "voice_req_1",
+            "Content-Type": "audio/mp4",
+        },
+        content=b"synthetic-mp4-bytes",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["modality"] == "VOICE"
+    assert response.json()["input_text"] == "pare"
+    assert service.calls[-1][0] == "voice"
+    assert service.calls[-1][1] is session
+    assert service.calls[-1][2]["client_request_id"] == "voice_req_1"
+    assert service.calls[-1][2]["audio"] == b"synthetic-mp4-bytes"
+    assert service.calls[-1][2]["mime_type"] == "audio/mp4"
+
+
+def test_voice_requires_bounded_request_id_header(client):
+    http, service, _ = client
+
+    response = http.post(
+        VOICE,
+        headers={
+            **auth(),
+            "Content-Type": "audio/mp4",
+        },
+        content=b"audio",
+    )
+
+    assert response.status_code == 422
+    assert not any(call[0] == "voice" for call in service.calls)

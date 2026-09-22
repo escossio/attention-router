@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     client_location_enabled: bool = False
     client_approval_enabled: bool = False
     client_command_enabled: bool = False
+    client_command_voice_enabled: bool = False
+    client_command_voice_max_bytes: int = 5 * 1024 * 1024
     google_identity_audience: str | None = None
     ingress_http_host: str = "0.0.0.0"
     ingress_http_port: int = 18101
@@ -389,6 +391,19 @@ class Settings(BaseSettings):
         if self.client_command_enabled and not self.client_session_enabled:
             raise ValueError(
                 "CLIENT_COMMAND_ENABLED requires CLIENT_SESSION_ENABLED=true"
+            )
+        if self.client_command_voice_enabled:
+            if not self.client_command_enabled:
+                raise ValueError(
+                    "CLIENT_COMMAND_VOICE_ENABLED requires CLIENT_COMMAND_ENABLED=true"
+                )
+            if not self.stt_enabled:
+                raise ValueError(
+                    "CLIENT_COMMAND_VOICE_ENABLED requires STT_ENABLED=true"
+                )
+        if not 1 <= self.client_command_voice_max_bytes <= 5 * 1024 * 1024:
+            raise ValueError(
+                "CLIENT_COMMAND_VOICE_MAX_BYTES must be between 1 and 5242880"
             )
         if self.gmail_connect_enabled:
             if not self.client_session_enabled:

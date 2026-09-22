@@ -10,8 +10,12 @@ from sqlalchemy import func, select
 from attention_router.application.client_command import (
     ClientCommandConflict,
     ClientCommandService,
+    ClientCommandVoiceInvalid,
 )
 from attention_router.application.client_session import ClientSessionService
+from attention_router.application.speech_transcription import (
+    SpeechTranscriptionResult,
+)
 from attention_router.application.owner_automation_control import (
     OWNER_AUTOMATION_PAUSED,
     automation_denial_reason,
@@ -49,6 +53,42 @@ def command_settings() -> Settings:
         client_command_enabled=True,
         owner_control_semantic_enabled=False,
     )
+
+
+def voice_settings() -> Settings:
+    return Settings(
+        _env_file=None,
+        app_env="test",
+        admin_auth_enabled=False,
+        internal_ingress_hmac_secret="x" * 32,
+        client_session_enabled=True,
+        client_session_challenge_ttl_seconds=300,
+        client_session_ttl_seconds=900,
+        client_command_enabled=True,
+        client_command_voice_enabled=True,
+        client_command_voice_max_bytes=1024 * 1024,
+        stt_enabled=True,
+        stt_internal_token="synthetic-stt-token",
+        owner_control_semantic_enabled=False,
+    )
+
+
+class FakeTranscriber:
+    def __init__(self, transcript: str):
+        self.transcript = transcript
+        self.calls = 0
+
+    def transcribe_bytes(self, audio, *, mime_type, max_bytes):
+        self.calls += 1
+        assert audio
+        assert mime_type == "audio/mp4"
+        assert max_bytes == 1024 * 1024
+        return SpeechTranscriptionResult(
+            transcript=self.transcript,
+            provider="synthetic",
+            model="synthetic-stt",
+            request_id="opaque-synthetic-request",
+        )
 
 
 def keypair():
@@ -237,3 +277,108 @@ def test_recent_timeline_is_scoped_to_authenticated_human(session):
         now=NOW + timedelta(seconds=10),
     )
     assert [item.input_text for item in recent] == ["pare", "retome"]
+
+
+def test_voice_transcript_uses_same_pause_control_and_replay_skips_stt(session):
+    sessions, issued = issue_owner_session(session)
+    transcriber = FakeTranscriber("pare")
+    commands = ClientCommandService(
+        settings=voice_settings(),
+        client_sessions=sessions,
+        speech_transcriber=transcriber,
+    )
+
+    paused = commands.submit_voice(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-pause-1",
+        audio=b"synthetic-mp4-bytes",
+        mime_type="audio/mp4",
+        now=NOW + timedelta(seconds=3),
+    )
+    session.commit()
+
+    assert paused.modality == "VOICE"
+    assert paused.input_text == "pare"
+    assert paused.state == "COMPLETED"
+    assert paused.normalized_action == "SET_AUTOMATIC_RESPONSES_ENABLED"
+    assert automation_denial_reason(session, DEFAULT_TENANT_ID) == OWNER_AUTOMATION_PAUSED
+    assert transcriber.calls == 1
+
+    replay = commands.submit_voice(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-pause-1",
+        audio=b"different-retry-bytes",
+        mime_type="audio/mp4",
+        now=NOW + timedelta(seconds=4),
+    )
+    session.commit()
+
+    assert replay.command_id == paused.command_id
+    assert transcriber.calls == 1
+    assert (
+        session.scalar(
+            select(func.count()).select_from(OwnerAutomationControlChangeRow)
+        )
+        == 1
+    )
+
+
+def test_voice_invalid_mime_fails_before_stt(session):
+    sessions, issued = issue_owner_session(session)
+    transcriber = FakeTranscriber("pare")
+    commands = ClientCommandService(
+        settings=voice_settings(),
+        client_sessions=sessions,
+        speech_transcriber=transcriber,
+    )
+
+    with pytest.raises(ClientCommandVoiceInvalid):
+        commands.submit_voice(
+            session,
+            session_token=issued.session_token,
+            client_request_id="voice-invalid",
+            audio=b"bytes",
+            mime_type="audio/wav",
+            now=NOW + timedelta(seconds=3),
+        )
+    assert transcriber.calls == 0
+
+
+def test_voice_and_text_share_timeline(session):
+    sessions, issued = issue_owner_session(session)
+    transcriber = FakeTranscriber("retome")
+    commands = ClientCommandService(
+        settings=voice_settings(),
+        client_sessions=sessions,
+        speech_transcriber=transcriber,
+    )
+
+    commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="text-pause",
+        text="pare",
+        now=NOW + timedelta(seconds=3),
+    )
+    commands.submit_voice(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-resume",
+        audio=b"synthetic-mp4",
+        mime_type="audio/mp4",
+        now=NOW + timedelta(seconds=4),
+    )
+    session.commit()
+
+    timeline = commands.list_recent(
+        session,
+        session_token=issued.session_token,
+        limit=50,
+        now=NOW + timedelta(seconds=5),
+    )
+    assert [(item.modality, item.input_text) for item in timeline] == [
+        ("TEXT", "pare"),
+        ("VOICE", "retome"),
+    ]

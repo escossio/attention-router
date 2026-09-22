@@ -1186,6 +1186,120 @@
           }
         }
       }
+    },
+    "/api/v1/client/commands/voice": {
+      "post": {
+        "tags": [
+          "client-command"
+        ],
+        "summary": "Submit Voice Command",
+        "operationId": "submitClientVoiceCommand",
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Client-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[A-Za-z0-9_.:-]+$",
+              "title": "X-Client-Request-Id"
+            }
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "title": "Content-Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "audio/mp4": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 5242880,
+                "title": "Audio"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandView"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2025,6 +2139,9 @@
               "CLIENT_COMMAND_AUTHORITY_REJECTED",
               "CLIENT_COMMAND_CONFLICT",
               "CLIENT_COMMAND_INVALID",
+              "CLIENT_COMMAND_VOICE_DISABLED",
+              "CLIENT_COMMAND_VOICE_INVALID",
+              "CLIENT_COMMAND_VOICE_UNAVAILABLE",
               "CLIENT_COMMAND_UNAVAILABLE",
               "CLIENT_SESSION_UNAUTHENTICATED",
               "CLIENT_SESSION_AUTHORITY_REJECTED",

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
-from urllib import error, request
 
 from sqlalchemy import select
 
+from attention_router.application.speech_transcription import (
+    InternalSpeechTranscriber,
+    SpeechTranscriptionError,
+)
 from attention_router.config import settings
 from attention_router.domain.enums import InteractionState
 from attention_router.domain.models import now_utc
@@ -110,43 +112,21 @@ def effective_interaction_text(session, interaction: InteractionRow) -> str | No
 
 class SwitcherSTTClient:
     def transcribe(self, path: Path, mime_type: str) -> dict[str, str]:
-        if not settings.stt_enabled:
-            raise VoiceTranscriptionError("STT_DISABLED")
-        if not settings.stt_internal_token:
-            raise VoiceTranscriptionError("STT_INTERNAL_TOKEN_MISSING")
-        body = path.read_bytes()
-        req = request.Request(
-            f"{settings.stt_internal_url.rstrip('/')}/transcribe",
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {settings.stt_internal_token}",
-                "Content-Type": mime_type,
-                "Accept": "application/json",
-            },
-        )
         try:
-            with request.urlopen(req, timeout=settings.stt_timeout_seconds) as response:
-                raw = response.read(64 * 1024)
-        except TimeoutError as exc:
-            raise VoiceTranscriptionError("STT_TIMEOUT") from exc
-        except error.HTTPError as exc:
-            exc.read(4096)
-            raise VoiceTranscriptionError(f"STT_HTTP_{exc.code}") from None
-        except OSError as exc:
-            raise VoiceTranscriptionError("STT_NETWORK_ERROR") from exc
-        try:
-            value = json.loads(raw)
-        except (ValueError, TypeError) as exc:
-            raise VoiceTranscriptionError("STT_INVALID_RESPONSE") from exc
-        transcript = value.get("transcript")
-        if value.get("status") != "ok" or not isinstance(transcript, str) or not transcript.strip():
-            raise VoiceTranscriptionError("STT_EMPTY_TRANSCRIPT")
+            result = InternalSpeechTranscriber(
+                settings=settings
+            ).transcribe_bytes(
+                path.read_bytes(),
+                mime_type=mime_type,
+                max_bytes=settings.whatsapp_media_max_bytes,
+            )
+        except SpeechTranscriptionError as exc:
+            raise VoiceTranscriptionError(str(exc)) from exc
         return {
-            "transcript": transcript.strip(),
-            "provider": str(value.get("provider") or "openai")[:32],
-            "model": str(value.get("model") or "")[:80],
-            "request_id": str(value.get("request_id") or "")[:180],
+            "transcript": result.transcript,
+            "provider": result.provider or "openai",
+            "model": result.model,
+            "request_id": result.request_id or "",
         }
 
 
