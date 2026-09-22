@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import re
 import unicodedata
 from uuid import uuid4
@@ -30,6 +30,39 @@ from attention_router.application.owner_control_semantic import (
     OwnerControlSemanticError,
     interpret_owner_control_semantically,
 )
+from attention_router.application.owner_control_clarification import (
+    OwnerClarificationResolutionKind,
+    OwnerControlClarificationError,
+    render_owner_control_clarification,
+    render_owner_control_clarification_canceled,
+    render_owner_control_clarification_unavailable,
+    resolve_owner_control_clarification_reply,
+    selected_candidate,
+)
+from attention_router.application.owner_control_semantic_candidates import (
+    OwnerControlCandidateBuilderError,
+    interpret_owner_control_candidates,
+)
+from attention_router.application.owner_control_semantic_registry import (
+    materialize_owner_control_candidate,
+)
+from attention_router.application.pending_intent import (
+    PendingIntentError,
+    cancel_pending_intent,
+    create_pending_intent,
+    expire_due_pending_intents,
+    find_active_pending_intent,
+    resolve_pending_intent,
+    supersede_pending_intent,
+)
+from attention_router.application.user_idiolect import (
+    retrieve_idiolect_interpretation_evidence,
+    select_unique_confirmed_candidate,
+)
+from attention_router.application.user_idiolect_projection import (
+    IdiolectProjectionError,
+    project_resolved_pending_intent_language_fact,
+)
 from attention_router.application.owner_operational_control import (
     OperationalControlConflict,
     OperationalControlError,
@@ -40,6 +73,7 @@ from attention_router.config import Settings
 from attention_router.core.client.bootstrap import TenantRole
 from attention_router.core.events import OperatorAuthority, OwnerCommandUnauthorized
 from attention_router.infrastructure import client_session_repository
+from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import ClientCommandMessageRow
 from attention_router.infrastructure.repository import audit
 
@@ -338,7 +372,237 @@ class ClientCommandService:
             created_at=current,
         )
 
-        parsed = self._interpret(stripped)
+        conversation_key_hash = stable_hash(
+            f"{CLIENT_COMMAND_SOURCE_CHANNEL}:{bootstrap.human_identity_id}"
+        )
+        expire_due_pending_intents(session, timestamp=current, limit=100)
+        active_pending = find_active_pending_intent(
+            session,
+            tenant_id=operational_tenant_id,
+            represented_owner_actor_key=owner_actor_key,
+            source_channel=CLIENT_COMMAND_SOURCE_CHANNEL,
+            conversation_key_hash=conversation_key_hash,
+            timestamp=current,
+        )
+
+        parsed: OwnerControlParseResult
+        if active_pending is not None:
+            try:
+                resolution = resolve_owner_control_clarification_reply(
+                    stripped,
+                    active_pending.candidate_set,
+                )
+            except OwnerControlClarificationError:
+                resolution = None
+
+            if (
+                resolution is not None
+                and resolution.kind == OwnerClarificationResolutionKind.CANCEL
+            ):
+                cancel_pending_intent(
+                    session,
+                    pending_intent_id=active_pending.id,
+                    reason="OWNER_REJECTED_CLARIFICATION",
+                    resolution_client_command_id=row.id,
+                    timestamp=current,
+                )
+                row.state = "COMPLETED"
+                row.response_text = render_owner_control_clarification_canceled()
+                row.processed_at = current
+                session.flush()
+                return self._view(row)
+
+            if (
+                resolution is not None
+                and resolution.kind == OwnerClarificationResolutionKind.SELECT
+            ):
+                assert resolution.candidate_key is not None
+                try:
+                    resolve_pending_intent(
+                        session,
+                        pending_intent_id=active_pending.id,
+                        tenant_id=operational_tenant_id,
+                        represented_owner_actor_key=owner_actor_key,
+                        source_channel=CLIENT_COMMAND_SOURCE_CHANNEL,
+                        conversation_key_hash=conversation_key_hash,
+                        selected_candidate_key=resolution.candidate_key,
+                        resolution_kind="EXPLICIT_OPTION_SELECTION",
+                        resolution_client_command_id=row.id,
+                        timestamp=current,
+                    )
+                    candidate = selected_candidate(
+                        active_pending.candidate_set,
+                        resolution.candidate_key,
+                    )
+                except (PendingIntentError, OwnerControlClarificationError):
+                    row.state = "CLARIFICATION_REQUIRED"
+                    row.error_code = "CONTROL_COMMAND_NEEDS_CLARIFICATION"
+                    row.response_text = render_owner_control_clarification(
+                        active_pending.candidate_set
+                    )
+                    row.processed_at = current
+                    session.flush()
+                    return self._view(row)
+
+                try:
+                    project_resolved_pending_intent_language_fact(
+                        session,
+                        pending_intent_id=active_pending.id,
+                    )
+                except IdiolectProjectionError as exc:
+                    audit(
+                        session,
+                        None,
+                        "idiolect.confirmed_projection_failed",
+                        {
+                            "pending_intent_id": active_pending.id,
+                            "error_code": str(exc),
+                        },
+                        correlation_id=row.id,
+                        causation_id=row.id,
+                        origin="user_idiolect",
+                        tenant_id=operational_tenant_id,
+                        created_at=current,
+                    )
+
+                materialized = materialize_owner_control_candidate(
+                    intent_key=str(candidate["semantic_intent_key"]),
+                    parameters=dict(candidate["parameters"]),
+                )
+                if materialized is None:
+                    row.state = "COMPLETED"
+                    row.response_text = render_owner_control_clarification_unavailable(
+                        candidate
+                    )
+                    row.processed_at = current
+                    session.flush()
+                    return self._view(row)
+                action, parameters = materialized
+                parsed = OwnerControlParseResult(
+                    OwnerControlParseStatus.MATCHED,
+                    action,
+                    parameters,
+                )
+            else:
+                explicit = self._interpret(stripped)
+                if explicit.status == OwnerControlParseStatus.MATCHED:
+                    supersede_pending_intent(
+                        session,
+                        pending_intent_id=active_pending.id,
+                        superseding_source_client_command_id=row.id,
+                        reason="NEWER_EXPLICIT_COMMAND",
+                        timestamp=current,
+                    )
+                    parsed = explicit
+                else:
+                    row.state = "CLARIFICATION_REQUIRED"
+                    row.error_code = "CONTROL_COMMAND_NEEDS_CLARIFICATION"
+                    row.response_text = render_owner_control_clarification(
+                        active_pending.candidate_set
+                    )
+                    row.processed_at = current
+                    session.flush()
+                    return self._view(row)
+        else:
+            parsed = self._interpret(stripped)
+
+        candidate_set: dict[str, object] | None = None
+        if (
+            parsed.status == OwnerControlParseStatus.REJECTED
+            and parsed.reason_code == "CONTROL_COMMAND_NEEDS_CLARIFICATION"
+        ):
+            try:
+                candidate_set = interpret_owner_control_candidates(stripped)
+            except OwnerControlCandidateBuilderError:
+                candidate_set = None
+            if candidate_set is not None:
+                try:
+                    evidence = retrieve_idiolect_interpretation_evidence(
+                        session,
+                        tenant_id=operational_tenant_id,
+                        actor_key=owner_actor_key,
+                        utterance=stripped,
+                        source_channel=CLIENT_COMMAND_SOURCE_CHANNEL,
+                        conversation_key_hash=conversation_key_hash,
+                    )
+                except Exception:
+                    evidence = ()
+                learned = select_unique_confirmed_candidate(
+                    evidence,
+                    candidate_set,
+                )
+                if learned is not None:
+                    materialized = materialize_owner_control_candidate(
+                        intent_key=str(learned["semantic_intent_key"]),
+                        parameters=dict(learned["parameters"]),
+                    )
+                    if materialized is not None:
+                        action, parameters = materialized
+                        parsed = OwnerControlParseResult(
+                            OwnerControlParseStatus.MATCHED,
+                            action,
+                            parameters,
+                        )
+
+            if (
+                parsed.status == OwnerControlParseStatus.REJECTED
+                and candidate_set is not None
+            ):
+                try:
+                    pending = create_pending_intent(
+                        session,
+                        tenant_id=operational_tenant_id,
+                        represented_owner_actor_key=owner_actor_key,
+                        source_tenant_id=row.tenant_id,
+                        source_channel=CLIENT_COMMAND_SOURCE_CHANNEL,
+                        conversation_key_hash=conversation_key_hash,
+                        semantic_registry_version=str(
+                            candidate_set["semantic_registry_version"]
+                        ),
+                        ambiguity_reason="CONTROL_COMMAND_NEEDS_CLARIFICATION",
+                        candidates=list(candidate_set["candidates"]),
+                        expires_at=current
+                        + timedelta(
+                            seconds=self.settings.owner_control_clarification_ttl_seconds
+                        ),
+                        source_client_command_id=row.id,
+                        provenance={
+                            "normalization_source": "SEMANTIC_AI",
+                            "candidate_builder": "owner_control_v1b",
+                            "client_command_id": row.id,
+                        },
+                        timestamp=current,
+                    )
+                    prompt = render_owner_control_clarification(
+                        pending.candidate_set
+                    )
+                except (PendingIntentError, OwnerControlClarificationError):
+                    pass
+                else:
+                    row.state = "CLARIFICATION_REQUIRED"
+                    row.error_code = "CONTROL_COMMAND_NEEDS_CLARIFICATION"
+                    row.response_text = prompt
+                    row.processed_at = current
+                    audit(
+                        session,
+                        None,
+                        "client_command.clarification_requested",
+                        {
+                            "command_id": row.id,
+                            "pending_intent_id": pending.id,
+                            "candidate_count": len(
+                                pending.candidate_set["candidates"]
+                            ),
+                        },
+                        correlation_id=row.id,
+                        causation_id=row.id,
+                        origin="client_command",
+                        tenant_id=row.tenant_id,
+                        created_at=current,
+                    )
+                    session.flush()
+                    return self._view(row)
+
         if parsed.status == OwnerControlParseStatus.NOT_CONTROL_COMMAND:
             row.state = "GENERAL_TASK_PENDING"
             row.response_text = (

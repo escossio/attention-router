@@ -12,6 +12,7 @@ from attention_router.application.owner_control_semantic_registry import (
 from attention_router.application.platform.entities import record_fact
 from attention_router.core.entities import EntityReference, FactClass
 from attention_router.infrastructure.models import (
+    ClientCommandMessageRow,
     FactRow,
     InboundEventRow,
     PendingIntentRow,
@@ -119,7 +120,11 @@ def project_resolved_pending_intent_language_fact(
         raise IdiolectProjectionError("IDIOLECT_PENDING_INTENT_NOT_FOUND")
     if row.state != "RESOLVED":
         return None
-    if row.resolved_at is None or row.resolution_inbound_event_id is None:
+    if row.resolved_at is None:
+        raise IdiolectProjectionError("IDIOLECT_RESOLUTION_INCOMPLETE")
+    has_inbound_resolution = row.resolution_inbound_event_id is not None
+    has_client_resolution = row.resolution_client_command_id is not None
+    if has_inbound_resolution == has_client_resolution:
         raise IdiolectProjectionError("IDIOLECT_RESOLUTION_INCOMPLETE")
 
     existing = session.scalar(
@@ -135,17 +140,35 @@ def project_resolved_pending_intent_language_fact(
     if existing is not None:
         return existing
 
-    source = session.get(InboundEventRow, row.source_inbound_event_id)
-    resolution = session.get(InboundEventRow, row.resolution_inbound_event_id)
-    if (
-        source is None
-        or resolution is None
-        or source.tenant_id != row.tenant_id
-        or resolution.tenant_id != row.tenant_id
-    ):
-        raise IdiolectProjectionError("IDIOLECT_SOURCE_SCOPE_INVALID")
+    if row.source_client_command_id is not None:
+        source_command = session.get(
+            ClientCommandMessageRow,
+            row.source_client_command_id,
+        )
+        if source_command is None or source_command.tenant_id != row.source_tenant_id:
+            raise IdiolectProjectionError("IDIOLECT_SOURCE_SCOPE_INVALID")
+        expression = source_command.input_text
+    else:
+        source = session.get(InboundEventRow, row.source_inbound_event_id)
+        if source is None or source.tenant_id != row.source_tenant_id:
+            raise IdiolectProjectionError("IDIOLECT_SOURCE_SCOPE_INVALID")
+        expression = (source.payload or {}).get("content")
 
-    expression = (source.payload or {}).get("content")
+    if row.resolution_client_command_id is not None:
+        resolution_command = session.get(
+            ClientCommandMessageRow,
+            row.resolution_client_command_id,
+        )
+        if (
+            resolution_command is None
+            or resolution_command.tenant_id != row.source_tenant_id
+        ):
+            raise IdiolectProjectionError("IDIOLECT_SOURCE_SCOPE_INVALID")
+    else:
+        resolution = session.get(InboundEventRow, row.resolution_inbound_event_id)
+        if resolution is None or resolution.tenant_id != row.source_tenant_id:
+            raise IdiolectProjectionError("IDIOLECT_SOURCE_SCOPE_INVALID")
+
     if not isinstance(expression, str) or not expression.strip():
         raise IdiolectProjectionError("IDIOLECT_SOURCE_EXPRESSION_INVALID")
 
@@ -204,8 +227,11 @@ def project_resolved_pending_intent_language_fact(
         ),
         metadata_sanitized={
             "pending_intent_id": row.id,
+            "source_tenant_id": row.source_tenant_id,
             "source_inbound_event_id": row.source_inbound_event_id,
+            "source_client_command_id": row.source_client_command_id,
             "resolution_inbound_event_id": row.resolution_inbound_event_id,
+            "resolution_client_command_id": row.resolution_client_command_id,
             "candidate_set_fingerprint": row.candidate_set_fingerprint,
             "sensitivity": "PRIVATE",
         },

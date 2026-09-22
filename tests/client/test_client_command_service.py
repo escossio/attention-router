@@ -7,12 +7,21 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import func, select
 
+from attention_router.adapters.wwebjs_owner_control import (
+    OwnerControlParseResult,
+    OwnerControlParseStatus,
+)
+from attention_router.application import client_command as client_command_module
 from attention_router.application.client_command import (
     ClientCommandAuthorityRejected,
     ClientCommandConflict,
     ClientCommandService,
 )
 from attention_router.application.client_session import ClientSessionService
+from attention_router.application.owner_control import (
+    AutomaticResponsesEnabledParameters,
+    OwnerControlAction,
+)
 from attention_router.application.owner_automation_control import (
     OWNER_AUTOMATION_PAUSED,
     automation_denial_reason,
@@ -27,8 +36,10 @@ from attention_router.infrastructure.human_identity_models import HumanIdentityR
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     ClientCommandMessageRow,
+    FactRow,
     OwnerAutomationControlChangeRow,
     OwnerOperationalControlRow,
+    PendingIntentRow,
     TenantRow,
 )
 from attention_router.security.device_keys import encode_unpadded_base64url
@@ -292,3 +303,171 @@ def test_recent_timeline_is_scoped_to_authenticated_human(session):
         now=NOW + timedelta(seconds=10),
     )
     assert [item.input_text for item in recent] == ["pare", "retome"]
+
+
+def test_free_language_semantic_resume_maps_to_canonical_action(session, monkeypatch):
+    sessions, issued = issue_owner_session(session)
+    commands = service(sessions)
+
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_semantically",
+        lambda text: OwnerControlParseResult(
+            OwnerControlParseStatus.MATCHED,
+            OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED,
+            AutomaticResponsesEnabledParameters(enabled=True),
+        ),
+    )
+
+    result = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-free-resume",
+        text="voltar à vida",
+        now=NOW + timedelta(seconds=20),
+    )
+    session.commit()
+
+    assert result.state == "COMPLETED"
+    assert result.normalized_action == "SET_AUTOMATIC_RESPONSES_ENABLED"
+    assert "ativa" in (result.response_text or "").casefold()
+
+
+def test_android_client_clarification_roundtrip_learns_confirmed_idiolect(
+    session,
+    monkeypatch,
+):
+    sessions, issued = issue_owner_session(session)
+    commands = service(sessions)
+
+    def semantic(text: str) -> OwnerControlParseResult:
+        if text == "retorne em 30 segundos":
+            return OwnerControlParseResult(
+                OwnerControlParseStatus.REJECTED,
+                reason_code="CONTROL_COMMAND_NEEDS_CLARIFICATION",
+            )
+        return OwnerControlParseResult(OwnerControlParseStatus.NOT_CONTROL_COMMAND)
+
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_semantically",
+        semantic,
+    )
+
+    ambiguous = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-clarify-source",
+        text="retorne em 30 segundos",
+        now=NOW + timedelta(seconds=30),
+    )
+    session.commit()
+
+    assert ambiguous.state == "CLARIFICATION_REQUIRED"
+    assert "1)" in (ambiguous.response_text or "")
+    assert "2)" in (ambiguous.response_text or "")
+
+    pending = session.scalar(select(PendingIntentRow))
+    assert pending is not None
+    assert pending.state == "PENDING"
+    assert pending.tenant_id == DEFAULT_TENANT_ID
+    assert pending.source_tenant_id == PERSONAL_TENANT_ID
+    assert pending.source_client_command_id == ambiguous.command_id
+    assert pending.source_channel == "android-client-command"
+
+    resolved = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-clarify-resolution",
+        text="1",
+        now=NOW + timedelta(seconds=31),
+    )
+    session.commit()
+    session.refresh(pending)
+
+    assert pending.state == "RESOLVED"
+    assert pending.resolution_client_command_id == resolved.command_id
+    assert resolved.state == "COMPLETED"
+    assert resolved.normalized_action == "SET_OWNER_REPLY_GRACE_SECONDS"
+    assert "30 segundos" in (resolved.response_text or "")
+
+    control = session.scalar(select(OwnerOperationalControlRow))
+    assert control is not None
+    assert control.integer_value == 30
+
+    learned = session.scalar(
+        select(FactRow).where(
+            FactRow.fact_class == "USER_CONFIRMED_LANGUAGE",
+            FactRow.predicate == "idiolect.pragmatic_mapping",
+        )
+    )
+    assert learned is not None
+    assert learned.value_json["expression"] == "retorne em 30 segundos"
+    assert learned.value_json["semantic_intent_key"] == "CONFIGURE_OWNER_REPLY_GRACE"
+    assert learned.value_json["parameters"] == {"seconds": 30}
+
+    repeated = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-clarify-repeat",
+        text="retorne em 30 segundos",
+        now=NOW + timedelta(seconds=32),
+    )
+    session.commit()
+
+    assert repeated.state == "COMPLETED"
+    assert repeated.normalized_action == "SET_OWNER_REPLY_GRACE_SECONDS"
+    assert session.scalar(
+        select(func.count())
+        .select_from(PendingIntentRow)
+        .where(PendingIntentRow.state == "PENDING")
+    ) == 0
+
+
+def test_android_client_explicit_command_supersedes_pending_clarification(
+    session,
+    monkeypatch,
+):
+    sessions, issued = issue_owner_session(session)
+    commands = service(sessions)
+
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_semantically",
+        lambda text: (
+            OwnerControlParseResult(
+                OwnerControlParseStatus.REJECTED,
+                reason_code="CONTROL_COMMAND_NEEDS_CLARIFICATION",
+            )
+            if text == "retorne em 30 segundos"
+            else OwnerControlParseResult(OwnerControlParseStatus.NOT_CONTROL_COMMAND)
+        ),
+    )
+
+    commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-supersede-source",
+        text="retorne em 30 segundos",
+        now=NOW + timedelta(seconds=40),
+    )
+    session.commit()
+    pending = session.scalar(select(PendingIntentRow))
+    assert pending is not None
+    assert pending.state == "PENDING"
+
+    explicit = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-supersede-pare",
+        text="pare",
+        now=NOW + timedelta(seconds=41),
+    )
+    session.commit()
+    session.refresh(pending)
+
+    assert explicit.state == "COMPLETED"
+    assert pending.state == "SUPERSEDED"
+    assert (pending.provenance or {})["superseding_source_client_command_id"] == (
+        explicit.command_id
+    )

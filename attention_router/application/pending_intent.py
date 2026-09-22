@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import (
+    ClientCommandMessageRow,
     InboundEventRow,
     InteractionRow,
     OutboxMessageRow,
@@ -184,22 +185,73 @@ def _scope_matches(
     )
 
 
+def _source_causation_id(row: PendingIntentRow) -> str:
+    value = row.source_inbound_event_id or row.source_client_command_id
+    if not value:
+        raise PendingIntentScopeError("PENDING_INTENT_SOURCE_NOT_FOUND")
+    return value
+
+
+def _find_pending_by_source(
+    session: Session,
+    *,
+    source_inbound_event_id: str | None,
+    source_client_command_id: str | None,
+) -> PendingIntentRow | None:
+    if source_inbound_event_id is not None:
+        return session.scalar(
+            select(PendingIntentRow).where(
+                PendingIntentRow.source_inbound_event_id == source_inbound_event_id
+            )
+        )
+    if source_client_command_id is not None:
+        return session.scalar(
+            select(PendingIntentRow).where(
+                PendingIntentRow.source_client_command_id == source_client_command_id
+            )
+        )
+    return None
+
+
 def _validate_source(
     session: Session,
     *,
     tenant_id: str,
-    source_inbound_event_id: str,
-    source_interaction_id: str,
-) -> tuple[InboundEventRow, InteractionRow]:
+    source_tenant_id: str,
+    source_inbound_event_id: str | None,
+    source_interaction_id: str | None,
+    source_client_command_id: str | None,
+) -> tuple[str | None, str, str]:
+    has_inbound = (
+        source_inbound_event_id is not None or source_interaction_id is not None
+    )
+    has_client = source_client_command_id is not None
+    if has_inbound == has_client:
+        raise PendingIntentScopeError("PENDING_INTENT_SOURCE_INVALID")
+
+    if has_client:
+        if source_inbound_event_id is not None or source_interaction_id is not None:
+            raise PendingIntentScopeError("PENDING_INTENT_SOURCE_INVALID")
+        command = session.get(ClientCommandMessageRow, source_client_command_id)
+        if command is None:
+            raise PendingIntentScopeError("PENDING_INTENT_SOURCE_NOT_FOUND")
+        if command.tenant_id != source_tenant_id:
+            raise PendingIntentScopeError("PENDING_INTENT_SOURCE_TENANT_SCOPE_MISMATCH")
+        return None, command.id, command.id
+
+    if source_inbound_event_id is None or source_interaction_id is None:
+        raise PendingIntentScopeError("PENDING_INTENT_SOURCE_INVALID")
     event = session.get(InboundEventRow, source_inbound_event_id)
     interaction = session.get(InteractionRow, source_interaction_id)
     if event is None or interaction is None:
         raise PendingIntentScopeError("PENDING_INTENT_SOURCE_NOT_FOUND")
-    if event.tenant_id != tenant_id or interaction.tenant_id != tenant_id:
+    if source_tenant_id != tenant_id:
+        raise PendingIntentScopeError("PENDING_INTENT_TENANT_SCOPE_MISMATCH")
+    if event.tenant_id != source_tenant_id or interaction.tenant_id != source_tenant_id:
         raise PendingIntentScopeError("PENDING_INTENT_TENANT_SCOPE_MISMATCH")
     if event.interaction_id != interaction.id:
         raise PendingIntentScopeError("PENDING_INTENT_INTERACTION_SCOPE_MISMATCH")
-    return event, interaction
+    return interaction.id, event.correlation_id or event.id, event.id
 
 
 def _expire_row(
@@ -219,7 +271,7 @@ def _expire_row(
         "intent_clarification.expired",
         {"pending_intent_id": row.id},
         row.correlation_id,
-        row.source_inbound_event_id,
+        _source_causation_id(row),
         previous_state="PENDING",
         next_state="EXPIRED",
         origin="intent_clarification",
@@ -282,14 +334,16 @@ def create_pending_intent(
     *,
     tenant_id: str,
     represented_owner_actor_key: str,
-    source_inbound_event_id: str,
-    source_interaction_id: str,
+    source_tenant_id: str | None = None,
     source_channel: str,
     conversation_key_hash: str,
     semantic_registry_version: str,
     ambiguity_reason: str,
     candidates: list[dict[str, Any]],
     expires_at: datetime,
+    source_inbound_event_id: str | None = None,
+    source_interaction_id: str | None = None,
+    source_client_command_id: str | None = None,
     provenance: dict[str, Any] | None = None,
     timestamp: datetime | None = None,
 ) -> PendingIntentRow:
@@ -302,11 +356,14 @@ def create_pending_intent(
     if not ambiguity_reason or len(ambiguity_reason) > 120:
         raise PendingIntentError("PENDING_INTENT_AMBIGUITY_REASON_INVALID")
 
-    event, _interaction = _validate_source(
+    effective_source_tenant_id = source_tenant_id or tenant_id
+    audit_interaction_id, correlation_id, causation_id = _validate_source(
         session,
         tenant_id=tenant_id,
+        source_tenant_id=effective_source_tenant_id,
         source_inbound_event_id=source_inbound_event_id,
         source_interaction_id=source_interaction_id,
+        source_client_command_id=source_client_command_id,
     )
     candidate_set = build_candidate_set(
         candidates,
@@ -314,10 +371,10 @@ def create_pending_intent(
     )
     fingerprint = candidate_set_fingerprint(candidate_set)
 
-    existing = session.scalar(
-        select(PendingIntentRow).where(
-            PendingIntentRow.source_inbound_event_id == source_inbound_event_id
-        )
+    existing = _find_pending_by_source(
+        session,
+        source_inbound_event_id=source_inbound_event_id,
+        source_client_command_id=source_client_command_id,
     )
     if existing is not None:
         if (
@@ -328,7 +385,9 @@ def create_pending_intent(
                 source_channel=source_channel,
                 conversation_key_hash=conversation_key_hash,
             )
+            and existing.source_tenant_id == effective_source_tenant_id
             and existing.source_interaction_id == source_interaction_id
+            and existing.source_client_command_id == source_client_command_id
             and existing.candidate_set_fingerprint == fingerprint
             and existing.semantic_registry_version == semantic_registry_version
             and existing.ambiguity_reason == ambiguity_reason
@@ -366,9 +425,11 @@ def create_pending_intent(
     row = PendingIntentRow(
         id=new_id(),
         tenant_id=tenant_id,
+        source_tenant_id=effective_source_tenant_id,
         represented_owner_actor_key=represented_owner_actor_key,
         source_inbound_event_id=source_inbound_event_id,
         source_interaction_id=source_interaction_id,
+        source_client_command_id=source_client_command_id,
         source_channel=source_channel,
         conversation_key_hash=conversation_key_hash,
         semantic_registry_version=semantic_registry_version,
@@ -377,7 +438,7 @@ def create_pending_intent(
         candidate_set=candidate_set,
         candidate_set_fingerprint=fingerprint,
         expires_at=expiry,
-        correlation_id=event.correlation_id,
+        correlation_id=correlation_id,
         provenance=provenance or {},
         version=1,
         created_at=stamp,
@@ -388,10 +449,10 @@ def create_pending_intent(
             session.add(row)
             session.flush()
     except IntegrityError as exc:
-        replay = session.scalar(
-            select(PendingIntentRow).where(
-                PendingIntentRow.source_inbound_event_id == source_inbound_event_id
-            )
+        replay = _find_pending_by_source(
+            session,
+            source_inbound_event_id=source_inbound_event_id,
+            source_client_command_id=source_client_command_id,
         )
         if replay is not None and replay.candidate_set_fingerprint == fingerprint:
             return replay
@@ -399,7 +460,7 @@ def create_pending_intent(
 
     audit(
         session,
-        source_interaction_id,
+        audit_interaction_id,
         "intent_clarification.created",
         {
             "pending_intent_id": row.id,
@@ -407,9 +468,12 @@ def create_pending_intent(
             "candidate_set_fingerprint": fingerprint,
             "semantic_registry_version": semantic_registry_version,
             "ambiguity_reason": ambiguity_reason,
+            "source_kind": (
+                "CLIENT_COMMAND" if source_client_command_id is not None else "INBOUND_EVENT"
+            ),
         },
         row.correlation_id,
-        source_inbound_event_id,
+        causation_id,
         previous_state=None,
         next_state="PENDING",
         origin="intent_clarification",
@@ -520,8 +584,9 @@ def _validate_resolution_scope(
     represented_owner_actor_key: str,
     source_channel: str,
     conversation_key_hash: str,
-    resolution_inbound_event_id: str,
-) -> InboundEventRow:
+    resolution_inbound_event_id: str | None = None,
+    resolution_client_command_id: str | None = None,
+) -> str:
     if not _scope_matches(
         row,
         tenant_id=tenant_id,
@@ -530,8 +595,37 @@ def _validate_resolution_scope(
         conversation_key_hash=conversation_key_hash,
     ):
         raise PendingIntentScopeError("PENDING_INTENT_RESOLUTION_SCOPE_MISMATCH")
+
+    has_inbound = resolution_inbound_event_id is not None
+    has_client = resolution_client_command_id is not None
+    if has_inbound == has_client:
+        raise PendingIntentScopeError("PENDING_INTENT_RESOLUTION_SOURCE_INVALID")
+
+    if has_client:
+        command = session.get(ClientCommandMessageRow, resolution_client_command_id)
+        if command is None or command.tenant_id != row.source_tenant_id:
+            raise PendingIntentScopeError(
+                "PENDING_INTENT_RESOLUTION_EVENT_SCOPE_MISMATCH"
+            )
+        if command.id == row.source_client_command_id:
+            raise PendingIntentScopeError("PENDING_INTENT_SOURCE_CANNOT_RESOLVE_ITSELF")
+        if _utc(command.created_at) < _utc(row.created_at):
+            raise PendingIntentScopeError(
+                "PENDING_INTENT_RESOLUTION_PRECEDES_CLARIFICATION"
+            )
+        other = session.scalar(
+            select(PendingIntentRow).where(
+                PendingIntentRow.resolution_client_command_id == command.id,
+                PendingIntentRow.id != row.id,
+            )
+        )
+        if other is not None:
+            raise PendingIntentConflict("PENDING_INTENT_RESOLUTION_EVENT_ALREADY_USED")
+        return command.id
+
+    assert resolution_inbound_event_id is not None
     event = session.get(InboundEventRow, resolution_inbound_event_id)
-    if event is None or event.tenant_id != tenant_id:
+    if event is None or event.tenant_id != row.source_tenant_id:
         raise PendingIntentScopeError("PENDING_INTENT_RESOLUTION_EVENT_SCOPE_MISMATCH")
     if event.id == row.source_inbound_event_id:
         raise PendingIntentScopeError("PENDING_INTENT_SOURCE_CANNOT_RESOLVE_ITSELF")
@@ -545,7 +639,7 @@ def _validate_resolution_scope(
     )
     if other is not None:
         raise PendingIntentConflict("PENDING_INTENT_RESOLUTION_EVENT_ALREADY_USED")
-    return event
+    return event.id
 
 
 def resolve_pending_intent(
@@ -556,9 +650,10 @@ def resolve_pending_intent(
     represented_owner_actor_key: str,
     source_channel: str,
     conversation_key_hash: str,
-    resolution_inbound_event_id: str,
     selected_candidate_key: str,
     resolution_kind: str,
+    resolution_inbound_event_id: str | None = None,
+    resolution_client_command_id: str | None = None,
     timestamp: datetime | None = None,
 ) -> PendingIntentRow:
     stamp = _utc(timestamp or now_utc())
@@ -569,6 +664,7 @@ def resolve_pending_intent(
     if row.state == "RESOLVED":
         if (
             row.resolution_inbound_event_id == resolution_inbound_event_id
+            and row.resolution_client_command_id == resolution_client_command_id
             and row.selected_candidate_key == selected_candidate_key
             and row.resolution_kind == resolution_kind
         ):
@@ -585,7 +681,7 @@ def resolve_pending_intent(
     if not resolution_kind or len(resolution_kind) > 40:
         raise PendingIntentError("PENDING_INTENT_RESOLUTION_KIND_INVALID")
 
-    _validate_resolution_scope(
+    causation_id = _validate_resolution_scope(
         session,
         row,
         tenant_id=tenant_id,
@@ -593,12 +689,14 @@ def resolve_pending_intent(
         source_channel=source_channel,
         conversation_key_hash=conversation_key_hash,
         resolution_inbound_event_id=resolution_inbound_event_id,
+        resolution_client_command_id=resolution_client_command_id,
     )
     previous = row.state
     try:
         with session.begin_nested():
             row.state = "RESOLVED"
             row.resolution_inbound_event_id = resolution_inbound_event_id
+            row.resolution_client_command_id = resolution_client_command_id
             row.selected_candidate_key = selected_candidate_key
             row.resolution_kind = resolution_kind
             row.resolved_at = stamp
@@ -613,9 +711,14 @@ def resolve_pending_intent(
                     "selected_candidate_key": selected_candidate_key,
                     "candidate_set_fingerprint": row.candidate_set_fingerprint,
                     "resolution_kind": resolution_kind,
+                    "resolution_source_kind": (
+                        "CLIENT_COMMAND"
+                        if resolution_client_command_id is not None
+                        else "INBOUND_EVENT"
+                    ),
                 },
                 row.correlation_id,
-                resolution_inbound_event_id,
+                causation_id,
                 previous_state=previous,
                 next_state="RESOLVED",
                 origin="intent_clarification",
@@ -637,6 +740,7 @@ def cancel_pending_intent(
     pending_intent_id: str,
     reason: str,
     resolution_inbound_event_id: str | None = None,
+    resolution_client_command_id: str | None = None,
     timestamp: datetime | None = None,
 ) -> PendingIntentRow:
     stamp = _utc(timestamp or now_utc())
@@ -646,6 +750,7 @@ def cancel_pending_intent(
     if row.state == "CANCELED":
         if (
             row.resolution_inbound_event_id == resolution_inbound_event_id
+            and row.resolution_client_command_id == resolution_client_command_id
             and row.resolution_kind == reason
         ):
             return row
@@ -654,18 +759,23 @@ def cancel_pending_intent(
         raise PendingIntentConflict("PENDING_INTENT_TERMINAL")
     if not reason or len(reason) > 120:
         raise PendingIntentError("PENDING_INTENT_CANCEL_REASON_INVALID")
-    resolution_event_id = None
-    if resolution_inbound_event_id is not None:
-        event = session.get(InboundEventRow, resolution_inbound_event_id)
-        if event is None or event.tenant_id != row.tenant_id:
-            raise PendingIntentScopeError("PENDING_INTENT_RESOLUTION_EVENT_SCOPE_MISMATCH")
-        if event.id == row.source_inbound_event_id:
-            raise PendingIntentScopeError("PENDING_INTENT_SOURCE_CANNOT_RESOLVE_ITSELF")
-        resolution_event_id = event.id
+
+    causation_id = _source_causation_id(row)
+    if resolution_inbound_event_id is not None or resolution_client_command_id is not None:
+        causation_id = _validate_resolution_scope(
+            session,
+            row,
+            tenant_id=row.tenant_id,
+            represented_owner_actor_key=row.represented_owner_actor_key,
+            source_channel=row.source_channel,
+            conversation_key_hash=row.conversation_key_hash,
+            resolution_inbound_event_id=resolution_inbound_event_id,
+            resolution_client_command_id=resolution_client_command_id,
+        )
     try:
         with session.begin_nested():
-            if resolution_event_id is not None:
-                row.resolution_inbound_event_id = resolution_event_id
+            row.resolution_inbound_event_id = resolution_inbound_event_id
+            row.resolution_client_command_id = resolution_client_command_id
             row.state = "CANCELED"
             row.resolution_kind = reason
             row.version += 1
@@ -676,7 +786,7 @@ def cancel_pending_intent(
                 "intent_clarification.canceled",
                 {"pending_intent_id": row.id, "reason": reason},
                 row.correlation_id,
-                resolution_inbound_event_id or row.source_inbound_event_id,
+                causation_id,
                 previous_state="PENDING",
                 next_state="CANCELED",
                 origin="intent_clarification",
@@ -696,8 +806,9 @@ def supersede_pending_intent(
     session: Session,
     *,
     pending_intent_id: str,
-    superseding_source_inbound_event_id: str,
     reason: str = "NEWER_INCOMPATIBLE_CLARIFICATION",
+    superseding_source_inbound_event_id: str | None = None,
+    superseding_source_client_command_id: str | None = None,
     timestamp: datetime | None = None,
 ) -> PendingIntentRow:
     stamp = _utc(timestamp or now_utc())
@@ -706,25 +817,61 @@ def supersede_pending_intent(
         raise PendingIntentError("PENDING_INTENT_NOT_FOUND")
     if not reason or len(reason) > 120:
         raise PendingIntentError("PENDING_INTENT_SUPERSEDE_REASON_INVALID")
+
+    has_inbound = superseding_source_inbound_event_id is not None
+    has_client = superseding_source_client_command_id is not None
+    if has_inbound == has_client:
+        raise PendingIntentScopeError("PENDING_INTENT_SUPERSEDING_SOURCE_INVALID")
+
+    superseding_id: str
+    superseding_kind: str
+    if has_client:
+        command = session.get(
+            ClientCommandMessageRow,
+            superseding_source_client_command_id,
+        )
+        if command is None or command.tenant_id != row.source_tenant_id:
+            raise PendingIntentScopeError(
+                "PENDING_INTENT_SUPERSEDING_EVENT_SCOPE_MISMATCH"
+            )
+        superseding_id = command.id
+        superseding_kind = "CLIENT_COMMAND"
+    else:
+        assert superseding_source_inbound_event_id is not None
+        event = session.get(InboundEventRow, superseding_source_inbound_event_id)
+        if event is None or event.tenant_id != row.source_tenant_id:
+            raise PendingIntentScopeError(
+                "PENDING_INTENT_SUPERSEDING_EVENT_SCOPE_MISMATCH"
+            )
+        superseding_id = event.id
+        superseding_kind = "INBOUND_EVENT"
+
     if row.state == "SUPERSEDED":
         if (
-            (row.provenance or {}).get("superseding_source_inbound_event_id")
-            == superseding_source_inbound_event_id
+            (row.provenance or {}).get("superseding_source_id") == superseding_id
             and row.resolution_kind == reason[:40]
         ):
             return row
         raise PendingIntentConflict("PENDING_INTENT_ALREADY_SUPERSEDED")
     if row.state != "PENDING":
         raise PendingIntentConflict("PENDING_INTENT_TERMINAL")
-    event = session.get(InboundEventRow, superseding_source_inbound_event_id)
-    if event is None or event.tenant_id != row.tenant_id:
-        raise PendingIntentScopeError("PENDING_INTENT_SUPERSEDING_EVENT_SCOPE_MISMATCH")
+
     row.state = "SUPERSEDED"
     row.resolution_kind = reason[:40]
-    row.provenance = {
+    provenance = {
         **(row.provenance or {}),
-        "superseding_source_inbound_event_id": superseding_source_inbound_event_id,
+        "superseding_source_kind": superseding_kind,
+        "superseding_source_id": superseding_id,
     }
+    if superseding_source_inbound_event_id is not None:
+        provenance["superseding_source_inbound_event_id"] = (
+            superseding_source_inbound_event_id
+        )
+    if superseding_source_client_command_id is not None:
+        provenance["superseding_source_client_command_id"] = (
+            superseding_source_client_command_id
+        )
+    row.provenance = provenance
     row.version += 1
     row.updated_at = stamp
     audit(
@@ -734,10 +881,11 @@ def supersede_pending_intent(
         {
             "pending_intent_id": row.id,
             "reason": reason,
-            "superseding_source_event_id": superseding_source_inbound_event_id,
+            "superseding_source_kind": superseding_kind,
+            "superseding_source_id": superseding_id,
         },
         row.correlation_id,
-        superseding_source_inbound_event_id,
+        superseding_id,
         previous_state="PENDING",
         next_state="SUPERSEDED",
         origin="intent_clarification",
