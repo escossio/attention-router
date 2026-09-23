@@ -1,6 +1,17 @@
 # Project status
 
-Updated: 2026-09-22
+Updated: 2026-09-23
+
+## Android Client Command Clarification + User Idiolect — physical E2E complete
+
+- PR #176 connected the native Android Client Command channel to the existing Intent Clarification / PendingIntent / User Idiolect pipeline and generalized PendingIntent provenance for Client Command sources.
+- PR #181 closed the remaining semantic gap: when semantic owner-control is enabled, `NOT_CONTROL_COMMAND` receives one candidate-builder pass before falling through to `GENERAL_TASK_PENDING`.
+- Live backend proof ran at `6b2aa7325ef57e3e876b62705f5bff725eafbba0` with schema `0050_client_pending_source`.
+- Physical Android proof: `pare -> voltar a trabalhar -> clarification -> sim -> canonical resume -> pare -> voltar a trabalhar -> direct canonical resume`.
+- The first confirmation projected `USER_CONFIRMED_LANGUAGE / idiolect.pragmatic_mapping`; the repeated expression was reused without a second clarification.
+- No new hardcoded alias or executor was added for `voltar a trabalhar`; the existing closed semantic registry remained authoritative.
+- This checkpoint does not claim support for `voltar à vida`, executable one-shot reply delay, or closure of Android session/dual-stack resilience.
+- Canonical resume state: [Android Client Command Clarification + User Idiolect physical proof](docs/checkpoints/ANDROID_CLIENT_COMMAND_CLARIFICATION_IDIOLECT_E2E_20260923.md).
 
 ## Andy Ops Live Supervisor V1
 
