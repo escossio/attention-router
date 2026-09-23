@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -23,6 +24,32 @@ LISTEN_ADDRESS = os.environ.get("ANDY_OPS_LISTEN_ADDRESS", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("ANDY_OPS_LISTEN_PORT", "18121"))
 POLL_SECONDS = float(os.environ.get("ANDY_OPS_POLL_SECONDS", "1.5"))
 SSH_TIMEOUT = float(os.environ.get("ANDY_OPS_SSH_TIMEOUT", "1.2"))
+
+
+def _observability_url(name: str) -> str | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return raw.rstrip("/") + "/"
+
+
+GOACCESS_URL = _observability_url("ANDY_OPS_GOACCESS_URL")
+DOZZLE_URL = _observability_url("ANDY_OPS_DOZZLE_URL")
+OBSERVABILITY_CONFIG = {
+    "goaccess_url": GOACCESS_URL,
+    "dozzle_url": DOZZLE_URL,
+}
+FRAME_SOURCES = sorted(
+    {
+        f"{parsed.scheme}://{parsed.netloc}"
+        for value in OBSERVABILITY_CONFIG.values()
+        if value
+        for parsed in [urlsplit(value)]
+    }
+)
 
 NODES = {
     "agt": {"label": "AGT", "role": "CONTROL PLANE", "host": None},
@@ -602,10 +629,16 @@ class OpsHandler(SimpleHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
+        frame_src = (
+            "frame-src 'self' " + " ".join(FRAME_SOURCES)
+            if FRAME_SOURCES
+            else "frame-src 'none'"
+        )
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self'; "
-            "connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
+            "connect-src 'self'; img-src 'self' data:; object-src 'none'; "
+            f"{frame_src}; frame-ancestors 'none'",
         )
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
@@ -627,6 +660,9 @@ class OpsHandler(SimpleHTTPRequestHandler):
             with _state_lock:
                 payload = json.loads(json.dumps(_state))
             self._json(payload)
+            return
+        if path == "/api/config":
+            self._json({"observability": OBSERVABILITY_CONFIG})
             return
         super().do_GET()
 

@@ -23,6 +23,8 @@
   <nav class="tabs" aria-label="Painéis">
     <button class="tab is-active" data-tab="compute" type="button">COMPUTE</button>
     <button class="tab" data-tab="chat" type="button">CHAT / CONSOLE</button>
+    <button class="tab" data-tab="goaccess" type="button">HTTP / GOACCESS</button>
+    <button class="tab" data-tab="dozzle" type="button">CONTAINERS / DOZZLE</button>
   </nav>
 
   <main>
@@ -93,6 +95,40 @@
         </div>
         <div id="tool-history" class="tool-history"></div>
       </section>
+    </section>
+
+    <section id="goaccess-view" class="view observability-view">
+      <section class="observability-hero">
+        <div>
+          <span class="section-label">TRÁFEGO HTTP</span>
+          <h2>GoAccess · Client API / Apache</h2>
+          <p>Rotas, métodos, status HTTP, origem e latência vistos no ponto de entrada público da Client API.</p>
+        </div>
+        <div class="observability-actions">
+          <span id="goaccess-state" class="source-state">AGUARDANDO</span>
+          <a id="goaccess-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+        </div>
+      </section>
+      <div class="observability-frame-shell">
+        <iframe id="goaccess-frame" title="GoAccess HTTP observability" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </section>
+
+    <section id="dozzle-view" class="view observability-view">
+      <section class="observability-hero">
+        <div>
+          <span class="section-label">LOGS DE CONTAINERS</span>
+          <h2>Dozzle · Docker runtime</h2>
+          <p>Logs dos containers do AGT para correlacionar o que entrou no Apache com o que aconteceu dentro dos serviços.</p>
+        </div>
+        <div class="observability-actions">
+          <span id="dozzle-state" class="source-state">AGUARDANDO</span>
+          <a id="dozzle-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+        </div>
+      </section>
+      <div class="observability-frame-shell">
+        <iframe id="dozzle-frame" title="Dozzle Docker logs" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      </div>
     </section>
 
     <section id="error-panel" class="error-panel" hidden></section>
