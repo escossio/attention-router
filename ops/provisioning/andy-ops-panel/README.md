@@ -6,6 +6,7 @@ The first version answers two questions quickly:
 
 1. Are AGT / CI01 / CI02 / CI03 actually using CPU, and what job did AGT assign?
 2. Is the Chat -> Remote Desktop Commander -> AGT tool channel still producing observable work even when the ChatGPT UI appears stalled?
+3. What HTTP traffic is entering the Client API, and what do the Docker services log for the same runtime activity?
 
 ## Scope
 
@@ -44,6 +45,15 @@ The installed Remote Desktop Commander keeps a bounded JSONL tool-call history. 
 
 Arguments are summarized and obvious token/secret/password/bearer patterns are redacted before data reaches the browser. The panel must remain LAN-only because command summaries can still contain operational context.
 
+### HTTP / GoAccess and Containers / Dozzle views
+
+Two optional lazy-loaded tabs embed the existing LAN-only observability UIs without proxying or duplicating their data:
+
+- HTTP / GOACCESS embeds the Apache / Client API traffic view;
+- CONTAINERS / DOZZLE embeds the Docker log viewer.
+
+The panel does not gain Docker socket access and does not parse application logs itself. URLs are host configuration supplied by environment and are never hardcoded in the public package. The server CSP admits only the configured frame origins.
+
 ## Architecture
 
 `browser -> stdlib Python HTTP server on AGT`
@@ -70,6 +80,8 @@ Environment variables:
 - `ANDY_OPS_CI01_HOST`, `ANDY_OPS_CI02_HOST`, `ANDY_OPS_CI03_HOST` - SSH aliases;
 - `ANDY_OPS_CI_LOG_ROOT` - defaults to `/var/log/andy-ci`;
 - `ANDY_OPS_TOOL_HISTORY` - defaults to the current user's Desktop Commander JSONL history path.
+- ANDY_OPS_GOACCESS_URL - optional LAN URL for the GoAccess UI;
+- ANDY_OPS_DOZZLE_URL - optional LAN URL for the Dozzle UI.
 
 Copy `andy-ops-panel.env.example` to `/etc/default/andy-ops-panel` and set the private LAN bind there.
 

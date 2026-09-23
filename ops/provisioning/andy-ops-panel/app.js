@@ -4,6 +4,22 @@ const state = {
   tab: "compute",
   lastPayload: null,
   timer: null,
+  config: null,
+};
+
+const observabilitySources = {
+  goaccess: {
+    key: "goaccess_url",
+    frame: "#goaccess-frame",
+    status: "#goaccess-state",
+    open: "#goaccess-open",
+  },
+  dozzle: {
+    key: "dozzle_url",
+    frame: "#dozzle-frame",
+    status: "#dozzle-state",
+    open: "#dozzle-open",
+  },
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -274,6 +290,76 @@ function render(payload) {
   $("#error-panel").hidden = true;
 }
 
+function configureObservability(config) {
+  state.config = config || {};
+  Object.entries(observabilitySources).forEach(([name, source]) => {
+    const url = state.config[source.key];
+    const status = $(source.status);
+    const link = $(source.open);
+
+    if (!url) {
+      status.textContent = "NÃO CONFIGURADO";
+      status.className = "source-state offline";
+      link.hidden = true;
+      return;
+    }
+
+    link.href = url;
+    link.hidden = false;
+    status.textContent = "PRONTO";
+    status.className = "source-state ready";
+
+    const frame = $(source.frame);
+    if (!frame.dataset.loadBound) {
+      frame.addEventListener("load", () => {
+        status.textContent = "AO VIVO";
+        status.className = "source-state live";
+      });
+      frame.dataset.loadBound = "1";
+    }
+
+    if (state.tab === name) ensureObservabilityLoaded(name);
+  });
+}
+
+function ensureObservabilityLoaded(name) {
+  const source = observabilitySources[name];
+  if (!source || !state.config) return;
+
+  const url = state.config[source.key];
+  if (!url) return;
+
+  const frame = $(source.frame);
+  if (!frame.dataset.loaded) {
+    $(source.status).textContent = "CARREGANDO";
+    $(source.status).className = "source-state loading";
+    frame.src = url;
+    frame.dataset.loaded = "1";
+  }
+}
+
+async function loadConfig() {
+  try {
+    const response = await fetch("/api/config?ts=" + Date.now(), { cache: "no-store" });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const payload = await response.json();
+    configureObservability(payload.observability || {});
+  } catch (_error) {
+    configureObservability({});
+  }
+}
+
+function setTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll(".tab").forEach((candidate) => {
+    candidate.classList.toggle("is-active", candidate.dataset.tab === tab);
+  });
+  document.querySelectorAll(".view").forEach((view) => {
+    view.classList.toggle("is-active", view.id === tab + "-view");
+  });
+  ensureObservabilityLoaded(tab);
+}
+
 async function refresh() {
   try {
     const response = await fetch("/api/status?ts=" + Date.now(), { cache: "no-store" });
@@ -289,13 +375,9 @@ async function refresh() {
 }
 
 document.querySelectorAll(".tab").forEach((button) => {
-  button.addEventListener("click", () => {
-    state.tab = button.dataset.tab;
-    document.querySelectorAll(".tab").forEach((candidate) => candidate.classList.toggle("is-active", candidate === button));
-    $("#compute-view").classList.toggle("is-active", state.tab === "compute");
-    $("#chat-view").classList.toggle("is-active", state.tab === "chat");
-  });
+  button.addEventListener("click", () => setTab(button.dataset.tab));
 });
 
+loadConfig();
 refresh();
 state.timer = window.setInterval(refresh, 1500);
