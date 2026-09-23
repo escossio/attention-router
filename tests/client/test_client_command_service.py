@@ -22,6 +22,11 @@ from attention_router.application.owner_control import (
     AutomaticResponsesEnabledParameters,
     OwnerControlAction,
 )
+from attention_router.application.owner_control_semantic_registry import (
+    OWNER_CONTROL_SEMANTIC_REGISTRY_VERSION,
+    build_registered_semantic_candidate,
+)
+from attention_router.application.pending_intent import build_candidate_set
 from attention_router.application.owner_automation_control import (
     OWNER_AUTOMATION_PAUSED,
     automation_denial_reason,
@@ -303,6 +308,174 @@ def test_recent_timeline_is_scoped_to_authenticated_human(session):
         now=NOW + timedelta(seconds=10),
     )
     assert [item.input_text for item in recent] == ["pare", "retome"]
+
+
+def _semantic_enabled_commands(sessions):
+    settings = command_settings().model_copy(
+        update={"owner_control_semantic_enabled": True}
+    )
+    return ClientCommandService(
+        settings=settings,
+        client_sessions=sessions,
+    )
+
+
+def _resume_candidate_set():
+    candidate = build_registered_semantic_candidate(
+        intent_key="SET_AUTOMATIC_RESPONSES",
+        parameters={"enabled": True},
+        confidence="medium",
+    )
+    return build_candidate_set(
+        [candidate],
+        semantic_registry_version=OWNER_CONTROL_SEMANTIC_REGISTRY_VERSION,
+    )
+
+
+def test_not_control_candidate_requires_clarification_then_learns_idiolect(
+    session,
+    monkeypatch,
+):
+    sessions, issued = issue_owner_session(session)
+    commands = _semantic_enabled_commands(sessions)
+
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_semantically",
+        lambda _text: OwnerControlParseResult(
+            OwnerControlParseStatus.NOT_CONTROL_COMMAND
+        ),
+    )
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_candidates",
+        lambda text: _resume_candidate_set()
+        if text == "voltar a trabalhar"
+        else None,
+    )
+
+    paused = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-not-control-pause",
+        text="pare",
+        now=NOW + timedelta(seconds=20),
+    )
+    session.commit()
+    assert paused.state == "COMPLETED"
+    assert automation_denial_reason(session, DEFAULT_TENANT_ID) == OWNER_AUTOMATION_PAUSED
+
+    clarification = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-not-control-source",
+        text="voltar a trabalhar",
+        now=NOW + timedelta(seconds=21),
+    )
+    session.commit()
+
+    assert clarification.state == "CLARIFICATION_REQUIRED"
+    assert clarification.normalized_action is None
+    assert "ativar as respostas automáticas" in (
+        clarification.response_text or ""
+    ).casefold()
+    assert 'responda "sim" ou "não"' in (
+        clarification.response_text or ""
+    ).casefold()
+
+    pending = session.scalar(
+        select(PendingIntentRow).where(PendingIntentRow.state == "PENDING")
+    )
+    assert pending is not None
+    assert pending.source_client_command_id == clarification.command_id
+
+    resolved = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-not-control-confirm",
+        text="sim",
+        now=NOW + timedelta(seconds=22),
+    )
+    session.commit()
+    session.refresh(pending)
+
+    assert pending.state == "RESOLVED"
+    assert resolved.state == "COMPLETED"
+    assert resolved.normalized_action == "SET_AUTOMATIC_RESPONSES_ENABLED"
+    assert automation_denial_reason(session, DEFAULT_TENANT_ID) is None
+
+    learned = session.scalar(
+        select(FactRow).where(
+            FactRow.fact_class == "USER_CONFIRMED_LANGUAGE",
+            FactRow.predicate == "idiolect.pragmatic_mapping",
+        )
+    )
+    assert learned is not None
+    assert learned.value_json["expression"] == "voltar a trabalhar"
+    assert learned.value_json["semantic_intent_key"] == "SET_AUTOMATIC_RESPONSES"
+    assert learned.value_json["parameters"] == {"enabled": True}
+
+    commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-not-control-pause-again",
+        text="pare",
+        now=NOW + timedelta(seconds=23),
+    )
+    session.commit()
+    assert automation_denial_reason(session, DEFAULT_TENANT_ID) == OWNER_AUTOMATION_PAUSED
+
+    repeated = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-not-control-repeat",
+        text="voltar a trabalhar",
+        now=NOW + timedelta(seconds=24),
+    )
+    session.commit()
+
+    assert repeated.state == "COMPLETED"
+    assert repeated.normalized_action == "SET_AUTOMATIC_RESPONSES_ENABLED"
+    assert automation_denial_reason(session, DEFAULT_TENANT_ID) is None
+    assert session.scalar(
+        select(func.count())
+        .select_from(PendingIntentRow)
+        .where(PendingIntentRow.state == "PENDING")
+    ) == 0
+
+
+def test_not_control_without_candidates_remains_general_task(
+    session,
+    monkeypatch,
+):
+    sessions, issued = issue_owner_session(session)
+    commands = _semantic_enabled_commands(sessions)
+
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_semantically",
+        lambda _text: OwnerControlParseResult(
+            OwnerControlParseStatus.NOT_CONTROL_COMMAND
+        ),
+    )
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_candidates",
+        lambda _text: None,
+    )
+
+    result = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="req-not-control-general",
+        text="veja meu Gmail e me diga o que chegou",
+        now=NOW + timedelta(seconds=20),
+    )
+    session.commit()
+
+    assert result.state == "GENERAL_TASK_PENDING"
+    assert result.normalized_action is None
+    assert "fluxo geral de tarefas" in (result.response_text or "")
 
 
 def test_free_language_semantic_resume_maps_to_canonical_action(session, monkeypatch):

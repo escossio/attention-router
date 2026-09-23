@@ -507,10 +507,17 @@ class ClientCommandService:
             parsed = self._interpret(stripped)
 
         candidate_set: dict[str, object] | None = None
-        if (
-            parsed.status == OwnerControlParseStatus.REJECTED
-            and parsed.reason_code == "CONTROL_COMMAND_NEEDS_CLARIFICATION"
-        ):
+        should_build_candidates = (
+            (
+                parsed.status == OwnerControlParseStatus.REJECTED
+                and parsed.reason_code == "CONTROL_COMMAND_NEEDS_CLARIFICATION"
+            )
+            or (
+                parsed.status == OwnerControlParseStatus.NOT_CONTROL_COMMAND
+                and self.settings.owner_control_semantic_enabled
+            )
+        )
+        if should_build_candidates:
             try:
                 candidate_set = interpret_owner_control_candidates(stripped)
             except OwnerControlCandidateBuilderError:
@@ -545,7 +552,11 @@ class ClientCommandService:
                         )
 
             if (
-                parsed.status == OwnerControlParseStatus.REJECTED
+                parsed.status
+                in {
+                    OwnerControlParseStatus.REJECTED,
+                    OwnerControlParseStatus.NOT_CONTROL_COMMAND,
+                }
                 and candidate_set is not None
             ):
                 try:
