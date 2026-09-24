@@ -36,7 +36,8 @@ _SPAN_NAMES = frozenset({
     "outbox.enqueue", "transport.send", "worker.dispatch", "andy.agent.context_build",
     "andy.agent.run", "andy.agent.validate", "authority.evaluate", "capability.execute",
     "capability.resolve", "event.normalize", "provider.resolve", "relationship.resolve",
-    "scheduler.fire", "lab.delivery.consume", "lab.delivery.reserve", "lab.delivery.validate",
+    "ingress.accept", "scheduler.fire", "lab.delivery.consume", "lab.delivery.reserve",
+    "lab.delivery.validate",
     "lab.session.claim_inbound",
 })
 _OUTCOMES = frozenset({

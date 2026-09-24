@@ -27,9 +27,18 @@ from attention_router.config import settings
 from attention_router.infrastructure.db import SessionLocal
 from attention_router.infrastructure.models import InboundEventRow, TenantRow
 from attention_router.infrastructure.repository import audit, mask_identifier
+from attention_router.observability.tracing import (
+    configure_tracing,
+    extract_trace_context,
+    link_from_carrier,
+    safe_set_attribute,
+    set_outcome,
+    start_span,
+)
 from attention_router.web.internal_security import verify_internal_signature
 
 
+configure_tracing(service_name="attention-router-ingress")
 internal_adapter = InternalIngressAdapter()
 internal_ingress_executor = ThreadPoolExecutor(max_workers=16, thread_name_prefix="internal-ingress")
 health_engine = create_engine(
@@ -73,6 +82,7 @@ def process_internal_event(
     body: bytes,
     x_attention_timestamp: str | None,
     x_attention_signature: str | None,
+    traceparent: str | None = None,
 ) -> dict[str, Any]:
     session = SessionLocal()
     try:
@@ -106,6 +116,14 @@ def process_internal_event(
         if event.tenant_id != explicit_tenant_id:
             raise HTTPException(status_code=422, detail="tenant normalization mismatch")
         _require_active_tenant(session, event.tenant_id)
+        trace_carrier = {"traceparent": traceparent} if type(traceparent) is str else {}
+        with start_span(
+            "ingress.accept",
+            context=extract_trace_context(trace_carrier),
+            attributes={"roc.synthetic": False, "roc.trace_source": "native"},
+        ) as ingress_span:
+            safe_set_attribute(ingress_span, "roc.result", "ACCEPTED")
+            set_outcome(ingress_span, "ACCEPTED")
         audit(
             session,
             None,
@@ -127,38 +145,51 @@ def process_internal_event(
             source=event.source,
             external_event_id=event.external_event_id,
         ).first()
-        try:
-            result = services.receive_normalized_inbound_event(session, event)
-        except services.DuplicatePayloadConflictError as exc:
+        with start_span(
+            "attention.message",
+            context=extract_trace_context(None),
+            links=link_from_carrier(trace_carrier),
+            attributes={"roc.synthetic": False, "roc.trace_source": "native"},
+        ) as message_span:
+            try:
+                result = services.receive_normalized_inbound_event(session, event)
+            except services.DuplicatePayloadConflictError as exc:
+                audit(
+                    session,
+                    existing.interaction_id if existing else None,
+                    "internal_event_conflict",
+                    {"source": event.source, "external_event_id": event.external_event_id},
+                    event.correlation_id,
+                    None,
+                    origin="ingress",
+                    tenant_id=event.tenant_id,
+                )
+                raise HTTPException(status_code=409, detail="event id conflict") from exc
+            status_value = "duplicate" if existing else "accepted"
+            audit_type = "internal_event_replay" if existing else "internal_event_accepted"
+            correlation_id = result.get("correlation_id", event.correlation_id)
             audit(
                 session,
-                existing.interaction_id if existing else None,
-                "internal_event_conflict",
+                result.get("id"),
+                audit_type,
                 {"source": event.source, "external_event_id": event.external_event_id},
-                event.correlation_id,
+                correlation_id,
                 None,
                 origin="ingress",
                 tenant_id=event.tenant_id,
             )
-            raise HTTPException(status_code=409, detail="event id conflict") from exc
-        status_value = "duplicate" if existing else "accepted"
-        audit_type = "internal_event_replay" if existing else "internal_event_accepted"
-        audit(
-            session,
-            result.get("id"),
-            audit_type,
-            {"source": event.source, "external_event_id": event.external_event_id},
-            result.get("correlation_id", event.correlation_id),
-            None,
-            origin="ingress",
-            tenant_id=event.tenant_id,
-        )
-        session.commit()
-        return {
-            "status": status_value,
-            "interaction_id": result.get("id"),
-            "correlation_id": result.get("correlation_id", event.correlation_id),
-        }
+            safe_set_attribute(message_span, "roc.correlation_id", correlation_id)
+            safe_set_attribute(
+                message_span,
+                "roc.result",
+                "DUPLICATE" if existing else "ACCEPTED",
+            )
+            session.commit()
+            return {
+                "status": status_value,
+                "interaction_id": result.get("id"),
+                "correlation_id": correlation_id,
+            }
     except Exception:
         session.rollback()
         raise
@@ -270,6 +301,7 @@ def create_internal_ingress_app() -> FastAPI:
         request: Request,
         x_attention_timestamp: Annotated[str | None, Header(alias="X-Attention-Timestamp")] = None,
         x_attention_signature: Annotated[str | None, Header(alias="X-Attention-Signature")] = None,
+        traceparent: Annotated[str | None, Header(alias="traceparent")] = None,
     ) -> dict[str, Any]:
         body = await request.body()
         loop = asyncio.get_running_loop()
@@ -279,6 +311,7 @@ def create_internal_ingress_app() -> FastAPI:
             body,
             x_attention_timestamp,
             x_attention_signature,
+            traceparent,
         )
 
     @app.post("/internal/whatsapp/media", tags=["internal-ingress"])
