@@ -41,11 +41,20 @@ Esta base contém Persistent Memory e Conversation Repetition Guard. Os spans `m
 
 ## Privacidade
 
-Attributes nunca recebem texto bruto, telefone, token, cookie, OTP, password, API key, `spoken_text` ou resposta completa. Texto é representado por comprimento, presença, família/objetivo e hash SHA-256 quando necessário. Identificadores potencialmente externos são reduzidos a hash curto; IDs internos aparecem apenas quando já são referências operacionais não sensíveis.
+O primeiro gate de hardening restringe atributos e Resources às allowlists e aos
+validadores de valores descritos em [`tracing-schema.md`](tracing-schema.md).
+Comprimentos, presença, enums operacionais e referências internas UUID permitidas
+continuam disponíveis. Texto bruto, objetivos/raciocínio de IA, hashes de
+conteúdo/identidade, PII e credenciais são descartados.
 
 ## Falhas e async
 
-`record_exception` e `ERROR` são usados para exceções funcionais. Exporter indisponível degrada para no-op e não mascara a exceção original. O contexto W3C pode ser injetado em metadado de job e extraído no worker; quando não houver contexto válido, o span continua como novo trace local.
+Exceções funcionais recebem somente `error.type` allowlisted, outcome `FAILED` e
+status `ERROR` sem descrição. Não há captura completa ou evento duplicado de
+exceção. Falhas de telemetria preservam o resultado/erro funcional original.
+`traceparent` válido pode ser injetado em metadata de job; extração inválida usa
+contexto vazio e abre novo trace local sem herdar outra operação. Exportação HTTP
+e flush têm timeouts separados; ver [`tracing-schema.md`](tracing-schema.md).
 
 O adapter Node/WhatsApp não é alterado nesta etapa. A correlação disponível até a fronteira é o `correlation_id` da outbox e o contrato de propagação; `traceparent` atravessando o protocolo do transport fica para a Etapa 2.
 

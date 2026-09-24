@@ -231,3 +231,20 @@ poster beside it. It is synthetic-only and offline: no real names, phone
 numbers, messages, hostnames, private paths, secrets, or provider calls are
 used. The renderer is `scripts/render_public_demo.py` and the README links to
 the assets and `docs/demo.md`.
+
+## Native OpenTelemetry audit — 2026-09-24
+
+- Read-only native OpenTelemetry audit completed against the current runtime evidence and preserved in [docs/observability/AUDITORIA_OTEL_NATIVO_20260924.md](docs/observability/AUDITORIA_OTEL_NATIVO_20260924.md).
+- No native tracing implementation, runtime change, restart, migration, database mutation, push or PR was performed by the audit.
+- The audit found an existing partial native OpenTelemetry foundation and recommends hardening that foundation before enabling the Transport → Ingress boundary.
+- First hardening gate: attribute/resource allowlist, removal of full exception capture and duplicate capture, no-op fallback preserving functional exceptions, invalid-context isolation, and separate exporter/flush timeouts.
+- Native OpenTelemetry implementation must proceed from a clean GitHub-based worktree and be certified by pull request checks before runtime rollout.
+
+## Native OpenTelemetry first hardening gate — 2026-09-24
+
+- Gate 1 locally certified: explicit key/value allowlists for spans and Resources, sanitized/idempotent error metadata, fail-open no-op fallback, isolated context extraction/restoration and separate exporter/flush timeouts. No new functional instrumentation.
+- Working on `feat/native-opentelemetry-v1`; the pre-existing audit and status changes are preserved. Local ignored backups were made before editing.
+- Expanded `tests/test_tracing.py` with synthetic privacy checks across exported surfaces, original exception identity/chain preservation, failure injection, valid/invalid context, disabled/global-provider isolation, configuration parsing, bounded batch/flush and concurrent initialization cases.
+- Validation: targeted `compileall`, `git diff --check` and Ruff 0.6.3 PASS. In an existing offline test runner with OpenTelemetry SDK 1.27.0 and pydantic-settings 2.5.2, `tests/test_tracing.py` completed 132/132 PASS after preloading the existing human identity model metadata required by the SQLite fixture. The same three fixture setup errors seen before that preload were reproduced unchanged on base `548524f`, so they are not a Gate 1 regression. The local runner has pytest 8.3.2; the repository pin remains pytest 9.1.1 and must be revalidated by GitHub Actions.
+- Residuals: allowlists intentionally drop unapproved values; SDK shutdown/retry total duration is not certified by the independent flush budget. No Collector/Tempo or E2E certification.
+- No dependency pins, runtime, containers, Generic Worker, database, Transport or functional Ingress changes. Do not advance to Transport → Ingress until the GitHub pull request checks are reviewed and accepted.
