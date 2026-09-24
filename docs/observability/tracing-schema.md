@@ -75,8 +75,29 @@ Sem argumento `context`, spans síncronos continuam filhos da operação corrent
 Links preservam apenas SpanContext válido, sem atributos ou tracestate.
 
 Esse helper valida formato, não identidade/autoridade: o consumidor continua
-responsável pelo vínculo autorizado da metadata ao trabalho/tenant. Não houve
-mudança de autenticação, Ingress, Transport ou raiz canônica nesta etapa.
+responsável pelo vínculo autorizado da metadata ao trabalho/tenant.
+
+### Internal Ingress — Etapa 1A
+
+O Internal Ingress aceita `traceparent` W3C opcional exclusivamente como contexto
+de observabilidade. O header não participa do body nem do HMAC e não concede
+autoridade. Ele só é consumido depois de assinatura, payload, tenant explícito e
+tenant ativo terem sido validados; requisição não autenticada não cria spans
+ligados ao contexto recebido.
+
+A rota transfere o `traceparent` explicitamente para o `ThreadPoolExecutor`, sem
+depender de contexto ambiente da thread. `ingress.accept` usa o SpanContext remoto
+válido como parent. Em seguida `attention.message` é aberto sobre contexto vazio,
+portanto recebe um novo `trace_id`, e carrega um Span Link para a tentativa remota.
+Depois que a recepção funcional cria ou recupera a identidade da Andy, o root
+recebe `roc.correlation_id` com o mesmo valor retornado pelo Ingress e `roc.result`
+`ACCEPTED` ou `DUPLICATE`. Replay preserva a correlação da Andy mesmo quando cada
+tentativa HTTP pertence a outro trace.
+
+`service.name` desse processo é inicializado como `attention-router-ingress`.
+Carrier ausente ou inválido continua fail-open e abre traces locais limpos. Esta
+subetapa não adiciona dependência Node nem faz o Transport gerar/injetar
+`traceparent`; isso pertence à Etapa 1B.
 
 ## Exceções e status
 
@@ -91,7 +112,7 @@ captura automática do SDK fica desabilitada. Cada span que falha recebe outcome
 não substituem nem suprimem sua exceção. Exporters que lançam exceções são
 encapsulados para evitar também o log automático da cadeia pelo processor.
 
-Este documento descreve somente o primeiro gate local. A auditoria canônica
-`AUDITORIA_OTEL_NATIVO_20260924.md` permanece como registro histórico; não há
-certificação E2E Collector/Tempo, rollout ou autorização para avançar à borda
-Transport → Ingress.
+A auditoria canônica `AUDITORIA_OTEL_NATIVO_20260924.md` permanece como registro
+histórico. Gate 1 foi incorporado à `main`; a Etapa 1A acima é uma instrumentação
+incremental apenas do lado Ingress. Ainda não há certificação E2E Collector/Tempo,
+rollout de runtime nem implementação Transport → Ingress completa.
