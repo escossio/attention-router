@@ -2,39 +2,96 @@
 
 ## Configuração
 
-- `OTEL_TRACING_ENABLED=false` — fail-safe; sem SDK ativo, o tracer é no-op.
-- `OTEL_SERVICE_NAME=attention-router-api` — identificação do processo.
-- `OTEL_SERVICE_VERSION=0.1.0` — versão da aplicação.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` — endpoint HTTP OTLP opcional; não é necessário para testes.
-- `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` — protocolo candidate suportado.
-- `OTEL_RESOURCE_ATTRIBUTES` — pares `key=value` adicionais, filtrados contra nomes sensíveis.
-- `OTEL_TRACES_SAMPLER=parentbased_traceidratio` e `OTEL_TRACES_SAMPLER_ARG=1.0` — sampling configurável; 100% somente no candidate sintético.
+- `OTEL_TRACING_ENABLED=false` — padrão; no-op local independente de um provider global.
+- `OTEL_SERVICE_NAME=attention-router-api` — identidade operacional do processo, validada pela allowlist.
+- `OTEL_SERVICE_VERSION=0.1.0` — versão numérica `major.minor.patch` (até quatro dígitos por componente).
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — endpoint HTTP OTLP opcional; testes não fazem chamadas reais.
+- `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` — único protocolo suportado neste gate.
+- `OTEL_RESOURCE_ATTRIBUTES` — somente overrides de `service.name`, `service.version` e `deployment.environment`, com os mesmos validadores dos defaults.
+- `OTEL_TRACES_SAMPLER=parentbased_traceidratio` e `OTEL_TRACES_SAMPLER_ARG=1.0` — razão finita entre 0 e 1; também são aceitos `always_on` e `always_off`.
+- `OTEL_BATCH_MAX_QUEUE_SIZE=2048` — 1..8192 spans.
+- `OTEL_BATCH_MAX_EXPORT_BATCH_SIZE=512` — 1..1024 spans, nunca maior que a fila.
+- `OTEL_BATCH_SCHEDULE_DELAY_MILLIS=500` — 10..60000 ms.
+- `OTEL_EXPORT_TIMEOUT_MILLIS=5000` — timeout HTTP do exporter, 1..10000 ms; convertido em segundos no construtor OTLP.
+- `OTEL_FLUSH_TIMEOUT_MILLIS=1000` — orçamento de espera de `flush_tracing()`, 0..10000 ms. Um argumento explícito, inclusive zero, substitui esse default.
 
-O provider é configurado em `attention_router/observability/tracing.py`. Aplicação não instancia exporter diretamente.
-Quando há exporter OTLP, o provider usa `BatchSpanProcessor` com fila, lote,
-timeout e intervalo bounded por configuração. `flush_tracing`/`shutdown_tracing`
-são best-effort.
+O provider é local, inicializado uma única vez sob lock. Falha de configuração,
+SDK, provider, processor ou exporter degrada a telemetria para no-op. Valores OTel
+malformados no parsing de `Settings` desabilitam tracing sem relaxar a validação
+das configurações funcionais. Falhas posteriores podem descartar o span.
+Não é registrado shutdown automático no encerramento do processo; spans ainda
+na fila podem ser perdidos se o chamador não fizer o flush explícito.
 
-## Attributes permitidos
+O caminho OTLP usa `BatchSpanProcessor`, sem I/O de exportação ou flush por
+mensagem. O hook `configure_test_tracing` usa exportação síncrona exclusivamente
+para testes offline. O parâmetro `export_timeout_millis` do
+[BatchSpanProcessor 1.27](https://github.com/open-telemetry/opentelemetry-python/blob/v1.27.0/opentelemetry-sdk/src/opentelemetry/sdk/trace/export/__init__.py)
+controla seu default de espera de flush; por isso recebe o orçamento de flush,
+enquanto o exporter HTTP recebe o timeout de exportação separadamente.
 
-Os nomes são estáveis e sanitizados:
+`shutdown_tracing()` continua best-effort: absorve exceções, mas o `shutdown()` do
+SDK espera o término da thread de exportação. O orçamento de flush não é um
+limite total de shutdown ou dos retries HTTP do SDK. Não executar shutdown por
+mensagem; este gate não certifica latência de encerramento em runtime.
 
-- `attention.inbound_event_id`, `attention.interaction_id`, `attention.actor_id`, `attention.binding_id`;
-- `attention.decision_id`, `attention.execution_intent_id`, `attention.outbox_id`, `attention.correlation_id`;
-- `attention.message_type`, `attention.message_from_me`, `attention.message_length`, `attention.message_text_sha256`;
-- `attention.response_source`, `attention.response_text_present`, `attention.response_text_length`;
-- `attention.final_outcome`, `attention.outcome`, `attention.external_send`;
-- atributos específicos de resolução, behavior, repetition, autonomy, memory e outbox descritos em `live-flow.md`.
+## Allowlist de spans e atributos
 
-Texto bruto e credenciais são rejeitados pelo helper `safe_set_attribute`, mesmo que um chamador tente registrá-los.
+A política central fica em `attention_router/observability/tracing.py` e aplica-se
+a atributos iniciais, `safe_set_attribute`, chamadas diretas no Span retornado e
+`current_span()`. Chaves desconhecidas, valores inválidos, listas e objetos são
+descartados sem conversão para texto. Não há autorização baseada em substring,
+sufixo ou prefixo de chave.
+
+- Outcomes, modo de autonomia, resolução, origem da resposta e motivo de repetição usam enums fechados.
+- Presença, supressão, resolução e permissões aceitam apenas booleanos.
+- Contagens/comprimentos aceitam inteiros de 0 a 1.000.000; confiança aceita número finito entre 0 e 1; status HTTP aceita inteiro de 100 a 599.
+- Correlações e referências internas explicitamente listadas aceitam apenas UUID canônico. IDs externos, telefone, identidade de ator e hashes de conteúdo/identidade são descartados.
+- `roc.synthetic` aceita apenas `false`; `roc.trace_source` apenas `native`. A inclusão na allowlist não cria automaticamente esses atributos nem novos estágios.
+- Até 32 atributos por span, strings até 128 caracteres (UUID: 36), zero eventos e até oito Links sem atributos ou tracestate.
+- Nomes de span usam a lista das operações já existentes. Nomes desconhecidos são substituídos por `attention.operation`.
+
+Objetivo, raciocínio, falha livre, corpo, telefone, nome pessoal, e-mail, arquivo,
+prompt, resposta de IA, token, payload, URL, SQL e texto/stack de exceção não são
+atributos permitidos. Hash de conteúdo também não é permitido neste gate.
+
+Resources são construídos diretamente, sem `Resource.create()` ou detectores
+que acrescentem atributos do ambiente. Somente as três chaves acima são aceitas:
+`service.name` usa a lista fechada de processos/testes em `_RESOURCE_SERVICES`;
+ambiente aceita `test`, `development`, `production` e `private`. Valores
+personalizados exigem revisão explícita dessa lista, mesmo sob uma chave válida.
 
 ## Propagação
 
-O inbound injeta W3C Trace Context em metadado de fila somente quando há contexto válido. O worker extrai esse contexto e cria spans filhos/relacionados. A mesma estratégia pode ser usada pelos futuros jobs de Memory com `inject_trace_context`, `extract_trace_context` e `link_from_carrier`.
+A metadata de fila existente continua carregando W3C `traceparent`. O helper
+aceita o formato v00 canônico, IDs não nulos e flag `00`/`01`. Extrai sempre sobre
+contexto vazio, confere o resultado e remove `tracestate`/`baggage`. Carrier
+inexistente, inválido ou falha de extração gera contexto vazio; um consumidor
+abre novo trace e nunca herda o item anterior. Contexto inválido passado
+diretamente a `start_span` também é isolado.
 
-## Status
+Carrier válido preserva trace ID e parent span ID mesmo sob outro trace corrente.
+O contexto anterior é restaurado ao sair do span, inclusive por erro funcional.
+Sem argumento `context`, spans síncronos continuam filhos da operação corrente.
+Links preservam apenas SpanContext válido, sem atributos ou tracestate.
 
-Cada span termina em `OK` para outcomes funcionais como `SUPPRESSED`, `BLOCKED` e `NOT_APPLICABLE`; `ERROR` só representa exception funcional. `attention.message` recebe o resumo final quando a camada que abriu o root conhece o resultado.
+Esse helper valida formato, não identidade/autoridade: o consumidor continua
+responsável pelo vínculo autorizado da metadata ao trabalho/tenant. Não houve
+mudança de autenticação, Ingress, Transport ou raiz canônica nesta etapa.
 
-O backend candidate da Etapa 2 é consultado por trace ID em Tempo; o helper
-read-only aplica uma allowlist de attributes para evitar imprimir conteúdo bruto.
+## Exceções e status
+
+`safe_record_exception` grava somente `error.type` de uma lista de classes builtin;
+classes desconhecidas tornam-se `Exception`. A operação é idempotente por
+atributo: nenhuma mensagem, stack, causa ou evento de exceção é exportado. A
+captura automática do SDK fica desabilitada. Cada span que falha recebe outcome
+`FAILED` e `ERROR`, sem descrição textual; isso não duplica eventos da exceção.
+
+`set_outcome` usa `OK` para resultados funcionais como `SUPPRESSED`, `BLOCKED` e
+`NOT_APPLICABLE`. Setup e cleanup de telemetria ficam fora do bloco funcional e
+não substituem nem suprimem sua exceção. Exporters que lançam exceções são
+encapsulados para evitar também o log automático da cadeia pelo processor.
+
+Este documento descreve somente o primeiro gate local. A auditoria canônica
+`AUDITORIA_OTEL_NATIVO_20260924.md` permanece como registro histórico; não há
+certificação E2E Collector/Tempo, rollout ou autorização para avançar à borda
+Transport → Ingress.
