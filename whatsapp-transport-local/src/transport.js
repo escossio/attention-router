@@ -736,6 +736,7 @@ async function startTransport(config, logger = console, deps = {}) {
   const outboundProvenance = deps.outboundProvenance;
   const probeDebugUrl = deps.probeBrowserDebugUrl || probeBrowserDebugUrl;
   const preparePage = deps.prepareAuthenticatedPage || prepareAuthenticatedPage;
+  const recoverPage = deps.recoverConnectedPage || recoverConnectedPage;
   const verifyOwner = deps.verifyConfiguredOwner || verifyConfiguredOwner;
   const ClientClass = deps.Client || Client;
 
@@ -1207,6 +1208,7 @@ async function startTransport(config, logger = console, deps = {}) {
     preparation.dispose();
     throw error;
   }).finally(() => preparation.broker.restore());
+  void recoverPage(client, status, logger);
 
   return {
     client,

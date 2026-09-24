@@ -138,7 +138,7 @@ async function transportAuthorityHarness(options = {}) {
       broker: { consumed: () => true, restore() {} }, dispose() {},
     }),
     probeBrowserDebugUrl: async () => true,
-    recoverConnectedPage: async () => false,
+    recoverConnectedPage: options.recoverConnectedPage || (async () => false),
     verifyConfiguredOwner: verifyOwner,
     ownerAuthorityReverifyIntervalMs: options.ownerAuthorityReverifyIntervalMs,
     ownerAuthorityReverifyTimeoutMs: options.ownerAuthorityReverifyTimeoutMs,
@@ -154,6 +154,17 @@ async function transportAuthorityHarness(options = {}) {
     verificationCalls,
   };
 }
+
+test('startTransport starts connected-page recovery after attach setup', async () => {
+  let recoveryCalls = 0;
+  await transportAuthorityHarness({
+    recoverConnectedPage: async () => {
+      recoveryCalls += 1;
+      return false;
+    },
+  });
+  assert.equal(recoveryCalls, 1);
+});
 
 async function classifyObservedMessage(harness, message) {
   const start = harness.logs.length;
