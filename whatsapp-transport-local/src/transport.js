@@ -1198,8 +1198,9 @@ async function startTransport(config, logger = console, deps = {}) {
     });
   });
 
-  const initPromise = Promise.resolve().then(() => client.initialize()).then(() => {
+  const initPromise = Promise.resolve().then(() => client.initialize()).then(async () => {
     if (!preparation.broker.consumed()) throw new Error('EXISTING_PAGE_ATTACH_NOT_CONSUMED');
+    await recoverPage(client, status, logger);
   }).catch((error) => {
     authorityCleanup.get(client)?.();
     authorityCleanup.delete(client);
@@ -1209,7 +1210,6 @@ async function startTransport(config, logger = console, deps = {}) {
     preparation.dispose();
     throw error;
   }).finally(() => preparation.broker.restore());
-  void recoverPage(client, status, logger);
 
   return {
     client,
