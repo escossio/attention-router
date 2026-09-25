@@ -2,13 +2,16 @@
 
 Updated: 2026-09-25
 
-## Native OpenTelemetry Transport → Ingress — runtime certification in progress
+## Native OpenTelemetry Transport → Ingress — runtime certified
 
-- PR #191 is merged through protected main; source `8c2dff7f7875b2d55e68b4e84ab6932adb973c59` includes serialized recovery after existing-page attach.
-- Release dependency and tracing prechecks passed as the Transport service user.
-- Controlled rollout exposed an immutable Puppeteer ESM namespace: direct assignment to its `connect` export cannot arm the existing-page broker. The rollout was rolled back to the known-good Transport with browser/session continuity preserved.
-- The compatibility correction intercepts the writable base method used by the installed Puppeteer export, restricted to the expected instance and exact browser URL; it restores the original descriptor and retains canonical-page revalidation and the serialized recovery from #191.
-- Focused offline validation: 30 selected startup tests and 108 Transport tests PASS, including the real dependency attach regression and recovery ordering. Real-message E2E certification remains pending the protected-branch gates and renewed rollout.
+- PR #191 serialized recovery after existing-page attach; PR #192 fixed compatibility with Puppeteer's immutable ESM namespace while preserving canonical-page revalidation and fail-closed authority. Both merged through protected main with all required checks green; #192 passed 444 distributed PostgreSQL tests.
+- Runtime source `fedd841bb660f0ff820ae0ff218d55b18e7a3ec8` is READY with native OTel enabled. Internal Ingress remains READY with native OTel on its separately deployed release.
+- The initial attach failure was rolled back safely. The corrected rollout preserved the browser PID/session across both attempts and restored connected client and owner authority READY.
+- A real inbound canary was delivered and forwarded. Both components exported after the canary through the source-restricted host OTLP edge, and Tempo returned the native traces.
+- Direct span-ID checks proved the Transport receive → attempt → remote Ingress chain and the separate canonical message root with its exact Span Link. Andy correlation identity and OTel trace identity remain distinct.
+- Native attributes and the complete trace privacy audit PASS. The independent ROC reconstruction bridge remained healthy without restart and produced a recent trace.
+- Sampling remains `parentbased_traceidratio` at `1.0`; steady-state policy remains a separate operational decision. Raw evidence is retained privately; the public record is sanitized.
+- See [runtime certification, 2026-09-25](docs/observability/NATIVE_OTEL_RUNTIME_CERTIFICATION_20260925.md).
 
 ## Andy Ops Live Supervisor V1
 
