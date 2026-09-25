@@ -1,0 +1,31 @@
+Listen @BIND_IP@:@BIND_PORT@
+
+<VirtualHost @BIND_IP@:@BIND_PORT@>
+    ServerName native-otel-edge.invalid
+    ServerSignature Off
+    ProxyRequests Off
+    ProxyPreserveHost Off
+    LimitRequestBody 4194304
+
+    ErrorLog ${APACHE_LOG_DIR}/attention-native-otel-edge-error.log
+    CustomLog ${APACHE_LOG_DIR}/attention-native-otel-edge-access.log "%a %t %m %U %>s %B"
+
+    <Location "/">
+        Require all denied
+    </Location>
+
+    <Location "/v1/traces">
+        AuthMerging Off
+
+        <Limit POST>
+            Require ip @TRANSPORT_SOURCE_IP@ @INGRESS_SOURCE_IP@
+        </Limit>
+
+        <LimitExcept POST>
+            Require all denied
+        </LimitExcept>
+
+        ProxyPass "http://127.0.0.1:@COLLECTOR_LOOPBACK_PORT@/v1/traces" retry=0 connectiontimeout=2 timeout=10
+        ProxyPassReverse "http://127.0.0.1:@COLLECTOR_LOOPBACK_PORT@/v1/traces"
+    </Location>
+</VirtualHost>

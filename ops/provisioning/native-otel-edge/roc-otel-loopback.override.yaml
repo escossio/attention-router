@@ -1,0 +1,4 @@
+services:
+  roc-otel-collector:
+    ports:
+      - "127.0.0.1:${NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT:-14318}:4318"
