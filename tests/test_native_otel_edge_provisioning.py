@@ -11,6 +11,7 @@ PACKAGE = ROOT / "ops" / "provisioning" / "native-otel-edge"
 RENDERER_PATH = PACKAGE / "render.py"
 TEMPLATE_PATH = PACKAGE / "apache-site.conf.template"
 EXAMPLE_PATH = PACKAGE / "native-otel-edge.env.example"
+OVERRIDE_PATH = PACKAGE / "roc-otel-loopback.override.yaml"
 
 
 spec = importlib.util.spec_from_file_location("native_otel_edge_render", RENDERER_PATH)
@@ -92,3 +93,11 @@ def test_public_example_contains_only_documentation_addresses() -> None:
     assert "203.0.113.18" in example
     assert "10.77." not in example
     assert "192.168." not in example
+
+
+def test_collector_override_keeps_internal_monitoring_and_adds_edge_for_loopback() -> None:
+    override = OVERRIDE_PATH.read_text(encoding="utf-8")
+    assert "roc-monitoring" in override
+    assert "roc-edge" in override
+    assert "127.0.0.1:${NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT:-14318}:4318" in override
+    assert "0.0.0.0" not in override
