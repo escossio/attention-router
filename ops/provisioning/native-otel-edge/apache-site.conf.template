@@ -18,7 +18,7 @@ Listen @BIND_IP@:@BIND_PORT@
         AuthMerging Off
 
         <Limit POST>
-            Require ip @TRANSPORT_SOURCE_IP@ @INGRESS_SOURCE_IP@
+            Require ip @TRANSPORT_SOURCE_IP@ @INGRESS_SOURCE_IP@ @WORKER_SOURCE_IP@
         </Limit>
 
         <LimitExcept POST>
