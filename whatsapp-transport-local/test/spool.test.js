@@ -4,8 +4,17 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { InMemorySpanExporter } = require('@opentelemetry/sdk-trace');
 const { createInboundBridge } = require('../src/bridge');
-const { deliverPendingFile, enqueuePending, ensureSpool, listPending } = require('../src/spool');
+const { signBody } = require('../src/hmac');
+const { createTransportTracing } = require('../src/observability');
+const {
+  deliverPendingFile,
+  drainInboundPending,
+  enqueuePending,
+  ensureSpool,
+  listPending,
+} = require('../src/spool');
 
 const TENANT_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -192,4 +201,103 @@ test('inbound spool quarantines bad payload and keeps retryable failures pending
   }));
   assert.equal(quarantine.done, true);
   assert.equal(quarantine.status, 'bad_payload');
+});
+
+test('native tracing preserves spool body and HMAC while linking receive to ingress attempt', async () => {
+  const { config } = tempConfig({
+    inboundForwardEnabled: true,
+    inboundForwardUrl: 'http://127.0.0.1:18102/api/v1/ingress/internal/events',
+  });
+  const exporter = new InMemorySpanExporter();
+  const observability = createTransportTracing({
+    appEnv: 'test',
+    otelServiceVersion: '0.1.0',
+    otelTracesSampler: 'always_on',
+  }, { exporter });
+  const seen = {};
+  const bridge = createInboundBridge(config, { info() {}, error() {}, warn() {} }, {
+    observability,
+    fetchImpl: async (_url, options) => {
+      seen.body = Buffer.from(options.body);
+      seen.headers = { ...options.headers };
+      return {
+        status: 200,
+        text: async () => JSON.stringify({
+          status: 'accepted',
+          interaction_id: 'int-native-otel',
+          correlation_id: '00000000-0000-4000-8000-000000000099',
+        }),
+      };
+    },
+  });
+  const privateContent = 'synthetic private payload token:not-real';
+  const result = await bridge.handleMessage({
+    id: { _serialized: 'wamid.synthetic.native-otel' },
+    from: '5500000000029@c.us',
+    type: 'chat',
+    body: privateContent,
+    timestamp: 1723520000,
+  });
+
+  assert.equal(result.status, 'delivered');
+  assert.equal(JSON.parse(seen.body.toString('utf8')).content, privateContent);
+  assert.match(seen.headers.traceparent, /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  assert.equal(seen.headers.tracestate, undefined);
+  assert.equal(seen.headers.baggage, undefined);
+  const timestamp = seen.headers['X-Attention-Timestamp'];
+  assert.equal(
+    seen.headers['X-Attention-Signature'],
+    signBody({ secret: config.hmacSecret, timestamp, body: seen.body }),
+  );
+
+  const spans = exporter.getFinishedSpans();
+  assert.equal(spans.length, 2);
+  const receive = spans.find((span) => span.name === 'transport.receive');
+  const attempt = spans.find((span) => span.name === 'transport.ingress_attempt');
+  assert.equal(attempt.spanContext().traceId, receive.spanContext().traceId);
+  assert.equal(attempt.parentSpanContext.spanId, receive.spanContext().spanId);
+  assert.equal(receive.attributes['roc.result'], 'DELIVERED');
+  assert.equal(attempt.attributes['roc.result'], 'ACCEPTED');
+  assert.equal(attempt.attributes['http.response.status_code'], 200);
+  for (const span of spans) {
+    assert.equal(JSON.stringify(span.attributes).includes(privateContent), false);
+    assert.equal(span.events.length, 0);
+    assert.equal(span.status.message, undefined);
+  }
+  await observability.shutdown();
+});
+
+test('background spool drain creates standalone ingress attempt trace', async () => {
+  const { config } = tempConfig({
+    inboundForwardEnabled: true,
+    inboundForwardUrl: 'http://127.0.0.1:18102/api/v1/ingress/internal/events',
+  });
+  const exporter = new InMemorySpanExporter();
+  const observability = createTransportTracing({
+    appEnv: 'test',
+    otelServiceVersion: '0.1.0',
+    otelTracesSampler: 'always_on',
+  }, { exporter });
+  enqueuePending(
+    config,
+    { identity: { idempotency_key: 'wwebjs:standalone-retry' } },
+    { schema_version: '1', synthetic: true },
+  );
+
+  const result = await drainInboundPending(
+    config,
+    { info() {}, error() {}, warn() {} },
+    async () => ({
+      status: 200,
+      text: async () => JSON.stringify({ status: 'accepted' }),
+    }),
+    { observability },
+  );
+  assert.equal(result.delivered, 1);
+  const spans = exporter.getFinishedSpans();
+  assert.equal(spans.length, 1);
+  assert.equal(spans[0].name, 'transport.ingress_attempt');
+  assert.equal(spans[0].parentSpanContext, undefined);
+  assert.equal(spans[0].attributes['roc.result'], 'ACCEPTED');
+  await observability.shutdown();
 });

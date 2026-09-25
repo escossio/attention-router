@@ -732,6 +732,7 @@ async function startTransport(config, logger = console, deps = {}) {
   status.service_state = 'attaching';
   const inboundBridge = (deps.createInboundBridge || createInboundBridge)(config, logger, {
     onCounters: (counters) => applyStatusCounters(status, counters),
+    observability: deps.observability,
   });
   const outboundProvenance = deps.outboundProvenance;
   const probeDebugUrl = deps.probeBrowserDebugUrl || probeBrowserDebugUrl;

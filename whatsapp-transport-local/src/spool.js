@@ -1,10 +1,22 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { stableHash, headersForBody } = require('./hmac');
+const { createNoopTransportTracing } = require('./observability');
 
 const RETRY_MS = [2000, 5000, 15000, 30000, 60000];
 const pendingDeliveryFlights = new Map();
 const inboundDrainFlights = new WeakMap();
+
+function tracingResult(result) {
+  if (result?.status === 'accepted') return 'ACCEPTED';
+  if (result?.status === 'duplicate') return 'DUPLICATE';
+  if (result?.status === 'conflict') return 'CONFLICT';
+  if (result?.status === 'bad_payload') return 'BAD_PAYLOAD';
+  if (result?.status === 'auth_failed') return 'AUTH_FAILED';
+  if (result?.status === 'missing') return 'MISSING';
+  if (result?.status === 'retry') return 'RETRY';
+  return result?.done ? 'ACCEPTED' : 'RETRY';
+}
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -72,57 +84,93 @@ function markSent(config, normalized) {
   return to;
 }
 
-async function deliverPendingFileOnce(config, file, logger, fetchImpl = fetch) {
-  if (!fs.existsSync(file)) {
-    return { done: false, status: 'missing' };
-  }
-  const body = fs.readFileSync(file);
-  const parsed = JSON.parse(body.toString('utf8'));
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.inboundHttpTimeoutMs);
-  try {
-    const headers = headersForBody({ secret: config.hmacSecret, body, now: Date.now });
-    const response = await fetchImpl(config.inboundForwardUrl, {
-      method: 'POST',
-      headers,
-      body,
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let json = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      json = null;
-    }
-    if ([200, 201, 202].includes(response.status)) {
-      fs.unlinkSync(file);
-      return { done: true, status: json?.status || 'accepted', response: json, http_status: response.status };
-    }
-    if (response.status === 409) {
-      moveToQuarantine(config, file);
-      return { done: true, status: 'conflict', http_status: response.status };
-    }
-    if (response.status === 400 || response.status === 422) {
-      moveToQuarantine(config, file);
-      return { done: true, status: 'bad_payload', http_status: response.status };
-    }
-    if (response.status === 401 || response.status === 403) {
-      return { done: false, stop: true, status: 'auth_failed', http_status: response.status };
-    }
-    return { done: false, status: 'retry', http_status: response.status };
-  } catch (error) {
-    return { done: false, status: 'retry', error: String(error?.message || error) };
-  } finally {
-    clearTimeout(timeout);
-  }
+async function deliverPendingFileOnce(
+  config,
+  file,
+  logger,
+  fetchImpl = fetch,
+  options = {},
+) {
+  const observability = options.observability || createNoopTransportTracing();
+  return observability.withSpan(
+    'transport.ingress_attempt',
+    options.parentContext || null,
+    async (attemptSpan) => {
+      const finish = (result) => {
+        attemptSpan.setResult(tracingResult(result));
+        if (Number.isInteger(result?.http_status)) {
+          attemptSpan.setHttpStatus(result.http_status);
+        }
+        return result;
+      };
+      if (!fs.existsSync(file)) {
+        return finish({ done: false, status: 'missing' });
+      }
+      const body = fs.readFileSync(file);
+      JSON.parse(body.toString('utf8'));
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), config.inboundHttpTimeoutMs);
+      try {
+        const headers = headersForBody({ secret: config.hmacSecret, body, now: Date.now });
+        observability.injectTraceparent(headers, attemptSpan.context);
+        const response = await fetchImpl(config.inboundForwardUrl, {
+          method: 'POST',
+          headers,
+          body,
+          signal: controller.signal,
+        });
+        const text = await response.text();
+        let json = null;
+        try {
+          json = text ? JSON.parse(text) : null;
+        } catch {
+          json = null;
+        }
+        if ([200, 201, 202].includes(response.status)) {
+          fs.unlinkSync(file);
+          return finish({
+            done: true,
+            status: json?.status || 'accepted',
+            response: json,
+            http_status: response.status,
+          });
+        }
+        if (response.status === 409) {
+          moveToQuarantine(config, file);
+          return finish({ done: true, status: 'conflict', http_status: response.status });
+        }
+        if (response.status === 400 || response.status === 422) {
+          moveToQuarantine(config, file);
+          return finish({ done: true, status: 'bad_payload', http_status: response.status });
+        }
+        if (response.status === 401 || response.status === 403) {
+          return finish({
+            done: false,
+            stop: true,
+            status: 'auth_failed',
+            http_status: response.status,
+          });
+        }
+        return finish({ done: false, status: 'retry', http_status: response.status });
+      } catch (error) {
+        attemptSpan.recordError(error);
+        return finish({
+          done: false,
+          status: 'retry',
+          error: String(error?.message || error),
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+  );
 }
 
-async function deliverPendingFile(config, file, logger, fetchImpl = fetch) {
+async function deliverPendingFile(config, file, logger, fetchImpl = fetch, options = {}) {
   const flightKey = path.resolve(file);
   const active = pendingDeliveryFlights.get(flightKey);
   if (active) return active;
-  const flight = deliverPendingFileOnce(config, file, logger, fetchImpl);
+  const flight = deliverPendingFileOnce(config, file, logger, fetchImpl, options);
   pendingDeliveryFlights.set(flightKey, flight);
   try {
     return await flight;
@@ -133,7 +181,7 @@ async function deliverPendingFile(config, file, logger, fetchImpl = fetch) {
   }
 }
 
-async function drainInboundPendingOnce(config, logger, fetchImpl) {
+async function drainInboundPendingOnce(config, logger, fetchImpl, options = {}) {
   if (!config.inboundForwardEnabled || !config.inboundForwardUrl || !config.inboundPendingDir) {
     return { attempted: 0, delivered: 0, stop: false, status: 'disabled' };
   }
@@ -141,7 +189,7 @@ async function drainInboundPendingOnce(config, logger, fetchImpl) {
   let delivered = 0;
   for (const file of listPending(config)) {
     attempted += 1;
-    const result = await deliverPendingFile(config, file, logger, fetchImpl);
+    const result = await deliverPendingFile(config, file, logger, fetchImpl, options);
     if (result.done) delivered += 1;
     if (result.stop) {
       return { attempted, delivered, stop: true, status: result.status };
@@ -150,10 +198,10 @@ async function drainInboundPendingOnce(config, logger, fetchImpl) {
   return { attempted, delivered, stop: false, status: 'complete' };
 }
 
-async function drainInboundPending(config, logger = console, fetchImpl = fetch) {
+async function drainInboundPending(config, logger = console, fetchImpl = fetch, options = {}) {
   const active = inboundDrainFlights.get(config);
   if (active) return active;
-  const flight = drainInboundPendingOnce(config, logger, fetchImpl);
+  const flight = drainInboundPendingOnce(config, logger, fetchImpl, options);
   inboundDrainFlights.set(config, flight);
   try {
     return await flight;
@@ -169,13 +217,14 @@ function startInboundPendingDrain(
   logger = console,
   fetchImpl = fetch,
   intervalMs = 2000,
+  options = {},
 ) {
   let stopped = false;
   let authFailed = false;
   let timer = null;
   const run = async () => {
     if (stopped || authFailed) return { stop: authFailed, status: 'stopped' };
-    const result = await drainInboundPending(config, logger, fetchImpl);
+    const result = await drainInboundPending(config, logger, fetchImpl, options);
     if (result.stop && result.status === 'auth_failed') {
       authFailed = true;
       if (timer) clearInterval(timer);

@@ -95,9 +95,33 @@ recebe `roc.correlation_id` com o mesmo valor retornado pelo Ingress e `roc.resu
 tentativa HTTP pertence a outro trace.
 
 `service.name` desse processo é inicializado como `attention-router-ingress`.
-Carrier ausente ou inválido continua fail-open e abre traces locais limpos. Esta
-subetapa não adiciona dependência Node nem faz o Transport gerar/injetar
-`traceparent`; isso pertence à Etapa 1B.
+Carrier ausente ou inválido continua fail-open e abre traces locais limpos.
+
+### Transport → Ingress — Etapa 1B
+
+O Transport usa instrumentação manual, sem auto-instrumentação de `fetch`,
+Puppeteer ou `whatsapp-web.js` e sem contexto global/AsyncLocalStorage. O SDK é
+mantido explícito com `@opentelemetry/api` 1.9.1, core/resources/sdk-trace 2.11.0
+e exporter OTLP HTTP/protobuf 0.222.0. O Resource do processo usa
+`service.name=attention-router-transport`; `service.version` e ambiente continuam
+validados e nenhum detector de ambiente acrescenta atributos arbitrários.
+
+`transport.receive` envolve a operação real do bridge uma única vez. Na entrega
+imediata, `transport.ingress_attempt` é filho explícito desse contexto. O body já
+persistido no spool continua sendo o mesmo Buffer usado no HMAC e no `fetch`;
+`traceparent` é injetado somente no objeto de headers, depois da assinatura, sem
+`tracestate` ou `baggage`. O header não altera payload, idempotência ou autoridade.
+
+O drainer de spool que não possui contexto transitório abre
+`transport.ingress_attempt` como trace local independente. Persistência de
+SpanContext ao lado do spool para continuidade após restart pertence à etapa
+durável posterior; esta etapa não modifica o arquivo JSON funcional.
+
+Tracing desabilitado, endpoint ausente ou configuração OTel inválida degrada para
+no-op. Exceções do exporter são sanitizadas fora do caminho funcional; nenhuma
+mensagem de erro é gravada em spans. Exportação usa `BatchSpanProcessor` e não há
+flush por mensagem. O shutdown faz flush best-effort com espera bounded pelo
+orçamento configurado antes da saída do processo.
 
 ## Exceções e status
 
@@ -113,6 +137,6 @@ não substituem nem suprimem sua exceção. Exporters que lançam exceções sã
 encapsulados para evitar também o log automático da cadeia pelo processor.
 
 A auditoria canônica `AUDITORIA_OTEL_NATIVO_20260924.md` permanece como registro
-histórico. Gate 1 foi incorporado à `main`; a Etapa 1A acima é uma instrumentação
-incremental apenas do lado Ingress. Ainda não há certificação E2E Collector/Tempo,
-rollout de runtime nem implementação Transport → Ingress completa.
+histórico. Gate 1 e Etapa 1A foram incorporados à `main`; a Etapa 1B completa o
+carrier nativo da tentativa Transport → Ingress no código, mas ainda não certifica
+Collector/Tempo, continuidade durável após restart nem rollout de runtime.

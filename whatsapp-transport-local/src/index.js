@@ -4,12 +4,23 @@ const { createServer } = require('./server');
 const { createOutboundProvenanceLedger } = require('./outbound-provenance');
 const { drainMediaNotifications } = require('./media');
 const { startInboundPendingDrain } = require('./spool');
+const { createTransportTracing } = require('./observability');
 
 async function main() {
   const config = createConfig();
-  const inboundDrain = startInboundPendingDrain(config, console);
+  const observability = createTransportTracing(config);
+  const inboundDrain = startInboundPendingDrain(
+    config,
+    console,
+    fetch,
+    2000,
+    { observability },
+  );
   const outboundProvenance = createOutboundProvenanceLedger(config);
-  const { status, initPromise, client } = await startTransport(config, console, { outboundProvenance });
+  const { status, initPromise, client } = await startTransport(config, console, {
+    outboundProvenance,
+    observability,
+  });
   const server = createServer(config, status, client, { outboundProvenance });
   const mediaRetryTimer = setInterval(() => {
     void drainMediaNotifications(config, console).catch((error) => {
@@ -47,6 +58,7 @@ async function main() {
     } catch (error) {
       console.error(JSON.stringify({ ts: new Date().toISOString(), event: 'detach_failed', error: String(error?.message || error) }));
     } finally {
+      await observability.shutdown();
       process.exit(0);
     }
   };

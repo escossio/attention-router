@@ -256,4 +256,15 @@ the assets and `docs/demo.md`.
 - Canonical `attention.message` starts from explicit empty context, receives a Link to the remote attempt, and records the Andy `roc.correlation_id` only after the functional receive path creates or recovers it. Replay keeps the same Andy correlation while distinct HTTP attempts may have distinct trace identities.
 - Invalid/absent carriers fail open to clean local traces; unauthenticated requests cannot create spans from a supplied trace header. Body, HMAC, payload, idempotency, database schema and functional correlation semantics are unchanged.
 - Local targeted validation: `tests/test_internal_ingress.py` + `tests/test_tracing.py` = 156 PASS with the known SQLite model preload; Ruff on the changed Python files = PASS. The normal targeted run still exposes the pre-existing `human_identities` fixture-registration defect before affected tests execute.
-- Scope stops at Ingress 1A. No Node OpenTelemetry dependency, Transport span, header injection, Collector/Tempo rollout, runtime restart, database/migration or Generic Worker change is included. Etapa 1B remains pending.
+- PR #186 was merged into `main` as `9d53b755be36986d9f46857bd1d7bd90368c4492` after all eight checks passed, including the full Python suite and distributed PostgreSQL gate (444 tests). No runtime rollout was performed by the merge.
+
+## Native OpenTelemetry Transport attempt — Etapa 1B — 2026-09-24
+
+- Candidate branch: `feat/native-otel-transport-attempt-v1`, based on merged Etapa 1A at `9d53b755be36986d9f46857bd1d7bd90368c4492`.
+- Transport uses manual OpenTelemetry only: `@opentelemetry/api` 1.9.1, core/resources/sdk-trace 2.11.0 and OTLP HTTP/protobuf exporter 0.222.0. No automatic instrumentation, global context manager, Puppeteer hook or whatsapp-web.js hook is added.
+- `transport.receive` wraps the bridge operation once. Immediate `transport.ingress_attempt` is an explicit child; background spool retries without transient context start a clean local attempt trace. Durable context across restart remains a later stage.
+- The persisted spool JSON and HMAC contract are unchanged. The exact body Buffer is signed and sent; W3C `traceparent` is injected only as a lateral HTTP header, with no `tracestate` or `baggage`.
+- Resource identity is fixed to `service.name=attention-router-transport`; span attributes are closed to finite operational values. Exception messages, payload, phone identifiers and secrets are not exported.
+- Tracing disabled, missing endpoint or invalid telemetry configuration degrades to no-op. Exporter failures are sanitized and cannot re-run or replace the functional operation. Batch export remains off the per-message functional path.
+- Local validation on the AGT: focused tracing/bridge/spool suite 17/17 PASS, including bounded flush and explicit Resource privacy checks; full local Transport suite 243/243 PASS; `node --check` on changed JavaScript and `git diff --check` PASS. The AGT shell is Node 20 while the package requires Node >=22.12, so GitHub Actions remains the authoritative runtime certification.
+- No production restart, Collector/Tempo rollout, database/migration, Generic Worker or frozen release change is part of this candidate.
