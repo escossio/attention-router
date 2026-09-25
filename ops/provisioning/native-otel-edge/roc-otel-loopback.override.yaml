@@ -1,4 +1,7 @@
 services:
   roc-otel-collector:
+    networks:
+      - roc-monitoring
+      - roc-edge
     ports:
       - "127.0.0.1:${NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT:-14318}:4318"

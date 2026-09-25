@@ -13,6 +13,9 @@ configured source addresses and only `POST /v1/traces`, then proxies to a
 Collector port published on host loopback.
 
 The Collector itself is **not** exposed on the LAN and is not attached to the
+application VLANs. It remains on the internal `roc-monitoring` network and also
+joins the existing non-internal `roc-edge` bridge solely so Docker can publish
+the OTLP receiver to host loopback. This does not create a route to the Andy
 application VLANs.
 
 ```text
@@ -73,8 +76,12 @@ docker compose \
 ```
 
 Expected invariant after recreation: OTLP/HTTP is reachable on
-`127.0.0.1:$NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT` and is not bound directly to a
-LAN address.
+`127.0.0.1:$NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT`, the Collector remains attached
+to `roc-monitoring` for Tempo/bridge traffic, it is additionally attached to
+`roc-edge` for loopback publication, and OTLP is not bound directly to a LAN
+address. `roc-monitoring` is intentionally internal; publishing a port while the
+Collector is attached only to that network does not create a reachable host
+listener on the deployed Docker runtime.
 
 This step is observability-only. A short Collector restart may lose telemetry,
 but must not affect Andy's functional path. The ROC trace bridge remains
