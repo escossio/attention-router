@@ -18,8 +18,9 @@ A degradação operacional já era percebida antes da introdução de VLANs e Op
 | [AFO-2026-008](AFO-2026-008.md) | Blueprint de canário contamina contexto orgânico sem binding | `ROOT_CAUSE_PROVEN / PARKED` |
 | [AFO-2026-009](AFO-2026-009.md) | Grupo WhatsApp não recebe classificação canônica de grupo | `ROOT_CAUSE_PROVEN / PARKED` |
 | [AFO-2026-010](AFO-2026-010.md) | Identidade de desenvolvimento “Alex” vaza para resposta real | `ROOT_CAUSE_PROVEN / PARKED` |
+| [AFO-2026-011](AFO-2026-011.md) | Gate PostgreSQL distribuído aborta por dependência rígida de worker indisponível | `ROOT_CAUSE_PROVEN` |
 
-**Versão:** 0.1  
+**Versão:** 0.2  
 **Data:** 2026-09-25  
 **Estado:** documento vivo de investigação; nenhuma correção de código autorizada por este registro  
 **Baseline de referência:** último runtime comprovadamente capaz de responder ponta a ponta em 2026-09-20
@@ -131,6 +132,7 @@ O rollout de observabilidade teve falhas próprias, registradas abaixo, mas post
 - AFO-004 explica por que, depois de religado, o Worker atual não é semanticamente equivalente ao último runtime funcional.
 - AFO-005, AFO-006 e AFO-007 são falhas encontradas no esforço de observabilidade/Transport; são posteriores à falha original e não devem ser confundidas com sua causa.
 - AFO-008, AFO-009 e AFO-010 são falhas de contexto/classificação já demonstradas, mas não explicam por que a Engine deixou de enviar após 20/09. Ficam estacionadas até recuperação do baseline operacional.
+- AFO-011 foi descoberta durante a certificação OTel: o scheduler CI V1 falha globalmente quando um único worker/dependência fica offline, mesmo havendo capacidade saudável remanescente.
 
 ---
 
