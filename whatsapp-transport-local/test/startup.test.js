@@ -144,6 +144,100 @@ test('unpatchable connect fails before Client can acquire a new page', () => {
   assert.equal(f.puppeteerModule.connect, original);
   assert.equal(f.browser.newCalls, 0);
 });
+
+for (const changedPage of [false, true]) {
+  test(`installed ESM Puppeteer and real Client preserve existing-page attach (changed=${changedPage})`, async (t) => {
+    const puppeteer = require('puppeteer');
+    const { Client } = require('whatsapp-web.js');
+    assert.equal(puppeteer[Symbol.toStringTag], 'Module');
+    assert.equal(Object.isExtensible(puppeteer), false);
+    const target = puppeteer.Puppeteer.prototype;
+    const original = Object.getOwnPropertyDescriptor(target, 'connect');
+    const namedConnect = puppeteer.connect;
+    const f = fixture();
+    let preparations = 0;
+    // The actual named export and Client run, but no browser/network I/O can run.
+    const syntheticConnect = async function () {
+      assert.equal(this, puppeteer.default);
+      preparations += 1;
+      return f.browser;
+    };
+    Object.defineProperty(target, 'connect', { ...original, value: syntheticConnect });
+    let preparation;
+    t.after(() => {
+      try { preparation?.dispose?.(); }
+      finally { Object.defineProperty(target, 'connect', original); }
+    });
+    preparation = await prepareAuthenticatedPage(url, logger);
+    assert.equal(preparation.result, 'SELECTED');
+    const client = new Client({ puppeteer: { browserURL: url }, userAgent: false });
+    const reachedExistingPage = new Error('SYNTHETIC_ATTACH_COMPLETE');
+    client.authStrategy.beforeBrowserInitialized = async () => {};
+    client.authStrategy.afterBrowserInitialized = async () => {
+      assert.equal(client.pupBrowser, f.browser);
+      assert.equal(client.pupPage, f.browser.pageList[0]);
+      throw reachedExistingPage; // Stop before navigation/injection into any page.
+    };
+    if (changedPage) f.browser.pageList.push(new Page());
+    await assert.rejects(client.initialize(), changedPage
+      ? /CANONICAL_PAGE_SELECTION_CHANGED/ : (error) => error === reachedExistingPage);
+    assert.equal(preparation.broker.consumed(), !changedPage);
+    assert.equal(preparations, 1);
+    assert.equal(f.browser.newCalls, 0);
+    assert.equal(f.browser.pageList[0].closeCalls, 0);
+    assert.equal(Object.hasOwn(f.browser, 'newPage'), false);
+    assert.equal(target.connect, syntheticConnect);
+    assert.equal(puppeteer.connect, namedConnect);
+  });
+}
+
+test('ESM seam isolates receiver and shared brokers, preserves other URLs and restores', async (t) => {
+  const puppeteer = require('puppeteer');
+  const target = puppeteer.Puppeteer.prototype;
+  const original = Object.getOwnPropertyDescriptor(target, 'connect');
+  const f = fixture();
+  const otherOptions = { browserURL: 'http://127.0.0.1:9223' };
+  const otherInstance = new puppeteer.PuppeteerNode({ isPuppeteerCore: true });
+  let otherCalls = 0;
+  const syntheticConnect = async function (options) {
+    assert.ok(this === puppeteer.default || this === otherInstance);
+    assert.equal(options.browserURL, this === puppeteer.default ? otherOptions.browserURL : url);
+    otherCalls += 1;
+    return f.browser;
+  };
+  Object.defineProperty(target, 'connect', { ...original, value: syntheticConnect });
+  let broker;
+  t.after(() => {
+    try { broker?.restore(); }
+    finally { Object.defineProperty(target, 'connect', original); }
+  });
+  broker = armExistingPageAttach(puppeteer, f.browser, f.browser.pageList[0], url, logger);
+  const sharedWrapper = {
+    [Symbol.toStringTag]: 'Module', Puppeteer: puppeteer.Puppeteer, default: puppeteer.default,
+  };
+  assert.throws(() => armExistingPageAttach(sharedWrapper, f.browser, f.browser.pageList[0], url, logger),
+    /ATTACH_BROKER_ALREADY_ARMED/);
+  assert.equal(await puppeteer.connect(otherOptions), f.browser);
+  assert.equal(await otherInstance.connect({ browserURL: url }), f.browser);
+  assert.equal(otherCalls, 2);
+  assert.equal(broker.consumed(), false);
+  broker.restore();
+  assert.equal(target.connect, syntheticConnect);
+  assert.equal(f.browser.newCalls, 0);
+});
+
+test('unpatchable ESM connect seam fails closed', async () => {
+  const puppeteer = await import('data:text/javascript,export class Puppeteer { connect() {} }');
+  const target = puppeteer.Puppeteer.prototype;
+  const original = target.connect;
+  Object.defineProperty(target, 'connect', { value: original, writable: false });
+  const f = fixture();
+  assert.throws(() => armExistingPageAttach(puppeteer, f.browser, f.browser.pageList[0], url, logger),
+    /CONNECT_INTERCEPT_UNAVAILABLE/);
+  assert.equal(target.connect, original);
+  assert.equal(f.browser.newCalls, 0);
+});
+
 for (const phase of ['before-connect', 'before-newPage', 'closed-page']) {
   test(`broker restores both functions after ${phase} failure`, async () => {
     const page = new Page(); const f = fixture([page]);

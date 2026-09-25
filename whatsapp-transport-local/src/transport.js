@@ -517,29 +517,46 @@ async function selectCanonicalConnectedWhatsAppPage(pages) {
 
 const activeAttachBrokers = new WeakSet();
 
+function connectInterceptTarget(puppeteerModule) {
+  // Puppeteer 25 exposes an immutable ESM namespace. Its bound Node connect
+  // still delegates to Puppeteer.prototype.connect; intercept that shared seam.
+  return puppeteerModule[Symbol.toStringTag] === 'Module'
+    ? puppeteerModule.Puppeteer?.prototype : puppeteerModule;
+}
+
 function armExistingPageAttach(puppeteerModule, browser, page, browserURL, logger = console) {
-  if (activeAttachBrokers.has(puppeteerModule)) throw new Error('ATTACH_BROKER_ALREADY_ARMED');
-  const originalConnect = puppeteerModule.connect;
+  const connectTarget = connectInterceptTarget(puppeteerModule);
+  if (typeof connectTarget?.connect !== 'function') throw new Error('CONNECT_INTERCEPT_UNAVAILABLE');
+  if (activeAttachBrokers.has(connectTarget)) throw new Error('ATTACH_BROKER_ALREADY_ARMED');
+  const originalConnect = connectTarget.connect;
+  const originalConnectDescriptor = Object.getOwnPropertyDescriptor(connectTarget, 'connect');
   const originalNewPageDescriptor = Object.getOwnPropertyDescriptor(browser, 'newPage');
   let connected = false;
   let consumed = false;
   let restored = false;
-  activeAttachBrokers.add(puppeteerModule);
+  activeAttachBrokers.add(connectTarget);
+  function restoreConnect() {
+    if (originalConnectDescriptor) Object.defineProperty(connectTarget, 'connect', originalConnectDescriptor);
+    else delete connectTarget.connect;
+  }
   function restore() {
     if (restored) return;
     restored = true;
-    puppeteerModule.connect = originalConnect;
+    restoreConnect();
     if (originalNewPageDescriptor) Object.defineProperty(browser, 'newPage', originalNewPageDescriptor);
     else delete browser.newPage;
-    activeAttachBrokers.delete(puppeteerModule);
+    activeAttachBrokers.delete(connectTarget);
     logger.info?.('existing_page_attach_restored');
   }
   try {
-    const interceptConnect = async (options) => {
-      if (options?.browserURL !== browserURL) return originalConnect.call(puppeteerModule, options);
+    const interceptConnect = async function (options) {
+      if (options?.browserURL !== browserURL
+        || (connectTarget !== puppeteerModule && this !== puppeteerModule.default)) {
+        return originalConnect.call(this, options);
+      }
       if (restored) throw new Error('ATTACH_BROKER_RESTORED');
       connected = true;
-      puppeteerModule.connect = originalConnect;
+      restoreConnect();
       try {
         const acquireExistingPage = async () => {
           try {
@@ -556,8 +573,8 @@ function armExistingPageAttach(puppeteerModule, browser, page, browserURL, logge
       } catch (error) { restore(); throw error; }
       return browser;
     };
-    puppeteerModule.connect = interceptConnect;
-    if (puppeteerModule.connect !== interceptConnect) throw new Error('CONNECT_INTERCEPT_UNAVAILABLE');
+    connectTarget.connect = interceptConnect;
+    if (connectTarget.connect !== interceptConnect) throw new Error('CONNECT_INTERCEPT_UNAVAILABLE');
     logger.info?.('existing_page_attach_armed');
   } catch (error) { restore(); throw error; }
   return { restore, consumed: () => connected && consumed };
@@ -568,7 +585,7 @@ async function prepareAuthenticatedPage(browserDebugUrl, logger = console, optio
     timeoutMs = 60000, intervalMs = 500 } = options;
   let browser;
   try {
-    if (activeAttachBrokers.has(puppeteerModule)) return { result: 'ATTACH_BROKER_ALREADY_ARMED' };
+    if (activeAttachBrokers.has(connectInterceptTarget(puppeteerModule))) return { result: 'ATTACH_BROKER_ALREADY_ARMED' };
     if (puppeteerModule === puppeteer) {
       const wwebjsPath = require.resolve('whatsapp-web.js');
       const peerPuppeteer = require(require.resolve('puppeteer', { paths: [require('node:path').dirname(wwebjsPath)] }));
