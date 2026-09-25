@@ -1,6 +1,14 @@
 # Project status
 
-Updated: 2026-09-22
+Updated: 2026-09-25
+
+## Native OpenTelemetry Transport → Ingress — runtime certification in progress
+
+- PR #191 is merged through protected main; source `8c2dff7f7875b2d55e68b4e84ab6932adb973c59` includes serialized recovery after existing-page attach.
+- Release dependency and tracing prechecks passed as the Transport service user.
+- Controlled rollout exposed an immutable Puppeteer ESM namespace: direct assignment to its `connect` export cannot arm the existing-page broker. The rollout was rolled back to the known-good Transport with browser/session continuity preserved.
+- The compatibility correction intercepts the writable base method used by the installed Puppeteer export, restricted to the expected instance and exact browser URL; it restores the original descriptor and retains canonical-page revalidation and the serialized recovery from #191.
+- Focused offline validation: 30 selected startup tests and 108 Transport tests PASS, including the real dependency attach regression and recovery ordering. Real-message E2E certification remains pending the protected-branch gates and renewed rollout.
 
 ## Andy Ops Live Supervisor V1
 
