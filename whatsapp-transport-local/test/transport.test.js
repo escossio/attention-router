@@ -93,7 +93,9 @@ async function transportAuthorityHarness(options = {}) {
 
     async getState() { return options.getState ? options.getState() : 'CONNECTED'; }
 
-    async initialize() {}
+    async initialize() {
+      if (options.initialize) return options.initialize();
+    }
   }
   const verificationCalls = [];
   const logs = [];
@@ -152,17 +154,26 @@ async function transportAuthorityHarness(options = {}) {
     normalized,
     status: transport.status,
     verificationCalls,
+    initPromise: transport.initPromise,
   };
 }
 
-test('startTransport starts connected-page recovery after attach setup', async () => {
+test('startTransport waits for attach initialization before connected-page recovery', async () => {
+  const initialization = deferred();
   let recoveryCalls = 0;
-  await transportAuthorityHarness({
+  const harness = await transportAuthorityHarness({
+    initialize: () => initialization.promise,
     recoverConnectedPage: async () => {
       recoveryCalls += 1;
       return false;
     },
   });
+
+  await flushMicrotasks();
+  assert.equal(recoveryCalls, 0);
+
+  initialization.resolve();
+  await harness.initPromise;
   assert.equal(recoveryCalls, 1);
 });
 
