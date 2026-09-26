@@ -18,11 +18,17 @@ A degradação operacional já era percebida antes da introdução de VLANs e Op
 | [AFO-2026-008](AFO-2026-008.md) | Blueprint de canário contamina contexto orgânico sem binding | `ROOT_CAUSE_PROVEN / PARKED` |
 | [AFO-2026-009](AFO-2026-009.md) | Grupo WhatsApp não recebe classificação canônica de grupo | `ROOT_CAUSE_PROVEN / PARKED` |
 | [AFO-2026-010](AFO-2026-010.md) | Identidade de desenvolvimento “Alex” vaza para resposta real | `ROOT_CAUSE_PROVEN / PARKED` |
-| [AFO-2026-011](AFO-2026-011.md) | Gate PostgreSQL distribuído aborta por dependência rígida de worker indisponível | `ROOT_CAUSE_PROVEN` |
+| [AFO-2026-012](AFO-2026-012.md) | Proxy Grafana perde upgrade Live e encaminha Basic Auth externo | `VERIFIED` |
 
-**Versão:** 0.2  
-**Data:** 2026-09-25  
-**Estado:** documento vivo de investigação; nenhuma correção de código autorizada por este registro  
+### Registros descartados
+
+| ID reservado | Motivo | Estado |
+| --- | --- | --- |
+| [AFO-2026-011](AFO-2026-011.md) | Ausência planejada da VM no notebook do operador; não constitui incidente | `DISCARDED` |
+
+**Versão:** 0.3
+**Data:** 2026-09-25
+**Estado:** documento vivo de investigação; nenhuma correção de código autorizada por este registro
 **Baseline de referência:** último runtime comprovadamente capaz de responder ponta a ponta em 2026-09-20
 
 ## Princípio operacional
@@ -30,6 +36,10 @@ A degradação operacional já era percebida antes da introdução de VLANs e Op
 As falhas reais passam a ser tratadas como laboratório de engenharia. Nenhuma falha é considerada encerrada apenas porque o serviço voltou a funcionar. Cada AFO deve produzir evidência, causa raiz, observabilidade, teste de regressão, procedimento de recuperação e medição antes/depois.
 
 IDs AFO são permanentes. Sintomas não recebem IDs independentes quando pertencem à mesma causa raiz; ficam ligados à AFO causal. Novas evidências podem alterar a interpretação e o status, mas não reutilizam o número.
+
+`DISCARDED` registra uma observação invalidada, fora do ciclo de falhas válidas.
+O arquivo permanece como tombstone; seu ID não volta ao conjunto disponível.
+Após a reconciliação do AFO-011, AFO-2026-012 foi reservado para a falha de proxy Grafana comprovada independentemente.
 
 Estados permitidos:
 
@@ -132,7 +142,8 @@ O rollout de observabilidade teve falhas próprias, registradas abaixo, mas post
 - AFO-004 explica por que, depois de religado, o Worker atual não é semanticamente equivalente ao último runtime funcional.
 - AFO-005, AFO-006 e AFO-007 são falhas encontradas no esforço de observabilidade/Transport; são posteriores à falha original e não devem ser confundidas com sua causa.
 - AFO-008, AFO-009 e AFO-010 são falhas de contexto/classificação já demonstradas, mas não explicam por que a Engine deixou de enviar após 20/09. Ficam estacionadas até recuperação do baseline operacional.
-- AFO-011 foi descoberta durante a certificação OTel: o scheduler CI V1 falha globalmente quando um único worker/dependência fica offline, mesmo havendo capacidade saudável remanescente.
+- AFO-012 registra duas falhas comprovadas da fronteira Apache/Grafana; não estabelece causalidade para o erro DOM `insertBefore`.
+- AFO-011 foi descartada por esclarecimento do operador: a ausência da VM era esperada. Não fundamenta correção, incidente ou mudança de CI; o ID permanece reservado e não será reutilizado.
 
 ---
 

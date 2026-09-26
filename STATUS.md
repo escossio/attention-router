@@ -2,6 +2,16 @@
 
 Updated: 2026-09-25
 
+## AFO registry — Grafana proxy investigation
+
+- AFO-2026-011 reconciled to DISCARDED after operator clarification; its ID stays
+  reserved and does not justify any CI change.
+- AFO-2026-012 records independently reproduced Apache/Grafana WebSocket and
+  authentication faults and the scoped vhost correction: VERIFIED after 300s
+  of external dashboard refresh, 30 HTTP 200 queries, Live 101 and no browser
+  exceptions. The DOM insertBefore cause remains unproven; protected runtime
+  components are unchanged.
+
 ## Native OpenTelemetry Transport → Ingress — runtime certified
 
 - PR #191 serialized recovery after existing-page attach; PR #192 fixed compatibility with Puppeteer's immutable ESM namespace while preserving canonical-page revalidation and fail-closed authority. Both merged through protected main with all required checks green; #192 passed 444 distributed PostgreSQL tests.
