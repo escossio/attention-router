@@ -72,10 +72,13 @@ def seed(Session, spki: bytes):
         ))
 
 
-def start(Session, public):
+def start(Session, public, *, requested_tenant_id=None):
     with Session.begin() as session:
         return service().start_session(
-            session, public_key_spki_b64url=public, requested_tenant_id=None, now=NOW
+            session,
+            public_key_spki_b64url=public,
+            requested_tenant_id=requested_tenant_id,
+            now=NOW,
         )
 
 
@@ -103,23 +106,109 @@ def test_same_challenge_complete_is_exactly_once(Session):
 
 
 def test_concurrent_session_starts_allow_only_one_pending_challenge(Session):
-    _, spki, public = keypair()
+    private, spki, public = keypair()
     seed(Session, spki)
     barrier = threading.Barrier(2)
     def create(_):
         with Session.begin() as session:
             barrier.wait()
-            try:
-                return service().start_session(
-                    session, public_key_spki_b64url=public, requested_tenant_id=None, now=NOW
-                )
-            except ClientSessionChallengeConflict:
-                return None
+            return service().start_session(
+                session, public_key_spki_b64url=public, requested_tenant_id=None, now=NOW
+            )
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(create, range(2)))
-    assert sum(item is not None for item in results) == 1
+    assert results[0] == results[1]
     with Session() as session:
         assert session.scalar(select(func.count()).select_from(ClientSessionChallengeRow)) == 1
+        row = session.scalar(select(ClientSessionChallengeRow))
+        assert row.state == "PENDING"
+        assert row.id == results[0].session_challenge_id
+    with Session.begin() as session:
+        service().complete_session(
+            session,
+            session_challenge_id=results[0].session_challenge_id,
+            device_signature_b64url=sign(private, results[0].challenge_b64url),
+            now=NOW + timedelta(seconds=1),
+        )
+    with Session() as session:
+        assert session.scalar(select(func.count()).select_from(ClientSessionRow)) == 1
+
+
+def test_concurrent_different_tenant_context_does_not_reuse_pending_challenge(Session):
+    _, spki, public = keypair()
+    seed(Session, spki)
+    barrier = threading.Barrier(2)
+    contexts = (TENANT_ID, "tnt_" + "o" * 24)
+
+    def create(requested_tenant_id):
+        with Session.begin() as session:
+            barrier.wait()
+            try:
+                challenge = service().start_session(
+                    session,
+                    public_key_spki_b64url=public,
+                    requested_tenant_id=requested_tenant_id,
+                    now=NOW,
+                )
+            except ClientSessionChallengeConflict:
+                return requested_tenant_id, None
+            return requested_tenant_id, challenge
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(create, contexts))
+    assert sum(challenge is not None for _, challenge in results) == 1
+    successful_context = next(context for context, challenge in results if challenge is not None)
+    with Session() as session:
+        rows = list(session.scalars(select(ClientSessionChallengeRow)).all())
+        assert len(rows) == 1
+        assert rows[0].state == "PENDING"
+        assert rows[0].requested_tenant_id == successful_context
+
+
+def test_concurrent_retry_and_completion_preserve_single_use_and_lock_order(Session):
+    private, spki, public = keypair()
+    seed(Session, spki)
+    original = start(Session, public)
+    barrier = threading.Barrier(2)
+
+    def retry():
+        with Session.begin() as session:
+            barrier.wait()
+            return service().start_session(
+                session,
+                public_key_spki_b64url=public,
+                requested_tenant_id=None,
+                now=NOW + timedelta(seconds=1),
+            )
+
+    def complete():
+        with Session.begin() as session:
+            barrier.wait()
+            return service().complete_session(
+                session,
+                session_challenge_id=original.session_challenge_id,
+                device_signature_b64url=sign(private, original.challenge_b64url),
+                now=NOW + timedelta(seconds=1),
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        retry_future = pool.submit(retry)
+        complete_future = pool.submit(complete)
+        retried = retry_future.result()
+        completed = complete_future.result()
+
+    assert completed.session_id.startswith("csn_")
+    with Session() as session:
+        rows = list(session.scalars(
+            select(ClientSessionChallengeRow).order_by(ClientSessionChallengeRow.created_at)
+        ).all())
+        assert session.scalar(select(func.count()).select_from(ClientSessionRow)) == 1
+        assert session.get(ClientSessionChallengeRow, original.session_challenge_id).state == "VERIFIED"
+        if retried.session_challenge_id == original.session_challenge_id:
+            assert len(rows) == 1
+        else:
+            assert len(rows) == 2
+            assert session.get(ClientSessionChallengeRow, retried.session_challenge_id).state == "PENDING"
 
 
 @pytest.mark.parametrize(("target", "new_status"), [("membership", "REVOKED"), ("device", "REVOKED")])
