@@ -75,6 +75,29 @@ def test_wwebjs_adapter_hmac_signature(session):
     assert headers["X-Attention-Signature"] == _signature("x" * 32, headers["X-Attention-Timestamp"], body)
 
 
+def test_wwebjs_adapter_adds_only_traceparent_outside_signed_body(session, monkeypatch):
+    result = add_wwebjs_interaction(session)
+    outbox = services.enqueue_wwebjs_controlled_outbound(
+        session, result["id"], "Teste controlado."
+    )
+    traceparent = "00-1234567890abcdef1234567890abcdef-1234567890abcdef-01"
+
+    def inject(carrier):
+        carrier["traceparent"] = traceparent
+        return carrier
+
+    monkeypatch.setattr(wwebjs_adapter_module, "inject_trace_context", inject)
+    adapter = WwebjsOutboundAdapter(secret="x" * 32)
+    body, headers = adapter.build_request(outbox)
+
+    assert headers["traceparent"] == traceparent
+    assert "tracestate" not in headers
+    assert "baggage" not in headers
+    assert headers["X-Attention-Signature"] == _signature(
+        "x" * 32, headers["X-Attention-Timestamp"], body
+    )
+
+
 def test_wwebjs_ambiguous_outcome_is_not_replayed(session, monkeypatch):
     result = add_wwebjs_interaction(session)
     outbox = services.enqueue_wwebjs_controlled_outbound(session, result["id"], "Teste controlado.")
