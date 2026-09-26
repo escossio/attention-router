@@ -4,6 +4,7 @@ const { isReady, snapshot } = require('./status');
 const { fetchHistoryMessages, listHistoryChats, verifyHistoryHmac } = require('./history');
 const { identityFromAliases } = require('./conversation');
 const { createOutboundProvenanceLedger } = require('./outbound-provenance');
+const { createNoopTransportTracing } = require('./observability');
 const fs = require('node:fs');
 const path = require('node:path');
 const { MessageMedia } = require('whatsapp-web.js');
@@ -62,6 +63,7 @@ function createServer(config, status, client = null, deps = {}) {
   const outboundProvenance = deps.outboundProvenance || createOutboundProvenanceLedger(config);
   const MessageMediaClass = deps.MessageMedia || MessageMedia;
   const logger = deps.logger || console;
+  const observability = deps.observability || createNoopTransportTracing();
   return http.createServer((req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || `${config.httpHost}:${config.httpPort}`}`);
     if (req.method === 'POST' && url.pathname === config.outboundPath) {
@@ -135,16 +137,26 @@ function createServer(config, status, client = null, deps = {}) {
           return;
         }
         try {
-          const message = voice
-            ? await client.sendMessage(
-              destination,
-              loadVoiceMedia(config, payload, MessageMediaClass),
-              { sendAudioAsVoice: true },
-            )
-            : await client.sendMessage(destination, payload.text);
-          const reference = message?.id?._serialized || message?.id?.id || `accepted-${now()}`;
-          outboundProvenance.markSent(provenance, reference);
-          deliveries.set(key, reference);
+          const parentContext = observability.extractTraceparent(req.headers);
+          let reference;
+          await observability.withSpan(
+            'transport.outbound_send',
+            parentContext,
+            async (sendSpan) => {
+              const message = voice
+                ? await client.sendMessage(
+                  destination,
+                  loadVoiceMedia(config, payload, MessageMediaClass),
+                  { sendAudioAsVoice: true },
+                )
+                : await client.sendMessage(destination, payload.text);
+              reference = message?.id?._serialized || message?.id?.id || `accepted-${now()}`;
+              outboundProvenance.markSent(provenance, reference);
+              deliveries.set(key, reference);
+              sendSpan.setResult('DELIVERED');
+              sendSpan.setHttpStatus(200);
+            },
+          );
           respondJson(res, 200, { status: 'sent', message_reference: reference, idempotency_key: key });
         } catch (error) {
           logger.error(JSON.stringify({
