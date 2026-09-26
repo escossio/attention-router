@@ -27,7 +27,7 @@ function request(port, path) {
   });
 }
 
-function postJson(port, path, body, secret) {
+function postJson(port, path, body, secret, extraHeaders = {}) {
   const raw = Buffer.from(JSON.stringify(body));
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = `sha256=${crypto.createHmac('sha256', secret).update(`${timestamp}.${raw}`).digest('hex')}`;
@@ -37,6 +37,7 @@ function postJson(port, path, body, secret) {
       headers: {
         'content-type': 'application/json', 'content-length': raw.length,
         'x-attention-timestamp': timestamp, 'x-attention-signature': signature,
+        ...extraHeaders,
       },
     }, (res) => {
       const chunks = [];
@@ -130,6 +131,66 @@ test('authenticated outbound endpoint sends once and deduplicates delivery', asy
   assert.equal(first.body.status, 'sent');
   assert.equal(second.body.status, 'already_sent');
   assert.equal(sends, 1);
+  await new Promise((resolve) => server.close(resolve));
+});
+
+test('outbound send continues an incoming traceparent into the real sendMessage span', async (t) => {
+  const secret = 'unit-test-outbound-secret-32-bytes-minimum';
+  const provenanceDir = fs.mkdtempSync(pathModule.join(os.tmpdir(), 'attention-server-provenance-'));
+  t.after(() => fs.rmSync(provenanceDir, { recursive: true, force: true }));
+  const config = createConfig({
+    LOCAL_TRANSPORT_HTTP_PORT: '0',
+    EXTERNAL_DELIVERY_ENABLED: 'true',
+    LOCAL_OUTBOUND_HMAC_SECRET: secret,
+    LOCAL_OUTBOUND_PROVENANCE_DIR: provenanceDir,
+  });
+  const status = createStatus(config, {
+    service_state: 'ready',
+    browser_debug_reachable: true,
+    wwebjs_connected: true,
+    ready: true,
+    client_state: 'CONNECTED',
+    qr_seen: false,
+  });
+  const calls = [];
+  const parentContext = { marker: 'remote-parent' };
+  const observability = {
+    extractTraceparent(headers) {
+      calls.push(['extract', headers.traceparent]);
+      return parentContext;
+    },
+    async withSpan(name, parent, operation) {
+      calls.push(['span', name, parent]);
+      const scope = {
+        setResult(value) { calls.push(['result', value]); },
+        setHttpStatus(value) { calls.push(['http', value]); },
+      };
+      return operation(scope);
+    },
+  };
+  const client = {
+    sendMessage: async () => ({ id: { _serialized: 'otel-message-ref' } }),
+  };
+  const server = createServer(config, status, client, { observability });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const traceparent = '00-1234567890abcdef1234567890abcdef-1234567890abcdef-01';
+  const response = await postJson(
+    address.port,
+    '/internal/send',
+    {
+      idempotency_key: 'execution:otel-outbound',
+      destination: 'contact@c.us',
+      text: 'controlled response',
+    },
+    secret,
+    { traceparent },
+  );
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(calls[0], ['extract', traceparent]);
+  assert.deepEqual(calls[1], ['span', 'transport.outbound_send', parentContext]);
+  assert.ok(calls.some((item) => item[0] === 'result' && item[1] === 'DELIVERED'));
+  assert.ok(calls.some((item) => item[0] === 'http' && item[1] === 200));
   await new Promise((resolve) => server.close(resolve));
 });
 
