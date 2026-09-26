@@ -77,15 +77,17 @@ andy-ci-reprofile <40-char-sha>
 andy-ci-distributed <40-char-sha> postgres
 ```
 
-`andy-ci-reprofile` executes one full duration-instrumented run on the primary compute worker only when the exact PostgreSQL test-file set has no cached profile. Profiles are keyed by a deterministic SHA-256 of the C-locale-sorted file list, so switching between branches with different test sets does not thrash one global profile.
+`andy-ci-reprofile` asks the local host registry for READY hosts with the `postgres-worker` capability and runs duration profiling on the fastest eligible worker. If that worker becomes unavailable, profiling falls through to the remaining eligible pool. Profiles are keyed by a deterministic SHA-256 of the C-locale-sorted file list, so switching between branches with different test sets does not thrash one global profile.
 
-`andy-ci-distributed` resolves the exact-SHA test-file set, selects its cached profile, verifies worker readiness, copies generated shard manifests, starts all workers concurrently, waits for every result and writes a structured JSON summary.
+`andy-ci-distributed` resolves the exact-SHA test-file set, selects its cached profile, derives the active worker pool from the host registry, verifies required dependencies, dispatches shards concurrently and requeues work when infrastructure disappears mid-run. A real test failure remains terminal and is never converted into infrastructure failover.
 
 ## Package contents
 
 - `worker/andy-ci-run`: exact-SHA worker executor with disposable worktrees, dependency caching and PostgreSQL shard support.
-- `control-plane/andy-ci-distributed`: distributed orchestrator.
-- `control-plane/andy-ci-reprofile`: safe profile refresh.
+- `control-plane/andy-ci-distributed`: capability-based distributed orchestrator with infrastructure requeue.
+- `control-plane/andy-ci-reprofile`: failover-safe profile refresh.
+- `control-plane/host-registry.py`: local SQLite source of host identity, capabilities, dependencies and reconciled health.
+- `control-plane/replan-postgres.py`: redistributes pending PostgreSQL files across the currently eligible pool.
 - `control-plane/plan-postgres.py`: duration-aware heterogeneous bin-packing planner.
 - `examples/worker-capacity.benchmark.json`: benchmarked capacity model without network addressing.
 - `examples/ssh-config.example`: alias pattern; real addresses and credentials stay outside Git.
