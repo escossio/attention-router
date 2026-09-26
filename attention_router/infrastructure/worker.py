@@ -48,7 +48,7 @@ from attention_router.platform.meta_callback_reconciliation import (
     reconcile_due_meta_callback_outcomes,
     reconcile_pending_meta_callback_inbox,
 )
-from attention_router.observability.tracing import extract_trace_context, identifier_hash, safe_set_attribute, set_outcome, start_span
+from attention_router.observability.tracing import extract_trace_context, identifier_hash, inject_trace_context, safe_set_attribute, set_outcome, start_span
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -207,6 +207,14 @@ def process_agent_decisions(session, worker: str, limit: int = 10) -> int:
                         origin="artifact_understanding",
                     )
                     continue
+                downstream_carrier: dict[str, str] = {}
+                inject_trace_context(downstream_carrier)
+                if downstream_carrier:
+                    payload = dict(queue.payload or {})
+                    observability = dict(payload.get("observability") or {})
+                    observability["downstream_trace_context"] = downstream_carrier
+                    payload["observability"] = observability
+                    queue.payload = payload
             queue.status = (
                 "DONE"
                 if grace_allows_interaction(session, queue.payload["interaction_id"])

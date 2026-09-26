@@ -19,6 +19,7 @@ from attention_router.infrastructure.models import (
     InboundEventRow,
     InteractionRow,
     OutboxMessageRow,
+    QueueRow,
     EffectBudgetRow,
     EffectConsumptionRow,
     ExecutionLeaseRow,
@@ -29,7 +30,13 @@ from attention_router.infrastructure.repository import audit, mask_identifier
 from attention_router.application.repetition import suppress_if_repeated
 from attention_router.application.owner_reply_grace import grace_allows_interaction
 from attention_router.application.owner_automation_control import automation_denial_reason
-from attention_router.observability.tracing import current_span, safe_set_attribute, set_outcome, traced_span
+from attention_router.observability.tracing import (
+    extract_trace_context,
+    inject_trace_context,
+    safe_set_attribute,
+    set_outcome,
+    start_span,
+)
 from attention_router.platform.execution_safety import (
     DispatchSafetyInput,
     EffectDirection,
@@ -393,7 +400,6 @@ def validate_platform_outbox_safety(
     )
 
 
-@traced_span("outbox.enqueue")
 def enqueue_ready_intents(
     session: Session,
     limit: int = 10,
@@ -489,13 +495,45 @@ def enqueue_ready_intents(
             count += 1
             continue
         stamp = _now()
-        outbox = OutboxMessageRow(
-            id=new_id(), interaction_id=interaction.id, action_type="agent_execution_text", destination="local_transport",
-            payload={"external_actor_id": recipient.reference, "message_type": "text", "text": response, "execution_intent_id": intent.id},
-            status="PENDING", created_at=stamp, available_at=stamp, attempt_count=0,
-            idempotency_key=f"execution:{intent.id}", correlation_id=interaction.correlation_id,
-            causation_id=decision.id, execution_intent_id=intent.id,
+        queue = session.get(QueueRow, f"decision:{decision.event_id}")
+        queue_observability = (
+            ((queue.payload or {}).get("observability") or {})
+            if queue is not None
+            else {}
         )
+        trace_carrier = (
+            queue_observability.get("downstream_trace_context")
+            or queue_observability.get("trace_context")
+        )
+        with start_span(
+            "outbox.enqueue",
+            context=extract_trace_context(trace_carrier),
+        ) as outbox_span:
+            outbox_carrier: dict[str, str] = {}
+            inject_trace_context(outbox_carrier)
+            outbox = OutboxMessageRow(
+                id=new_id(),
+                interaction_id=interaction.id,
+                action_type="agent_execution_text",
+                destination="local_transport",
+                payload={
+                    "external_actor_id": recipient.reference,
+                    "message_type": "text",
+                    "text": response,
+                    "execution_intent_id": intent.id,
+                    "observability": {"trace_context": outbox_carrier},
+                },
+                status="PENDING",
+                created_at=stamp,
+                available_at=stamp,
+                attempt_count=0,
+                idempotency_key=f"execution:{intent.id}",
+                correlation_id=interaction.correlation_id,
+                causation_id=decision.id,
+                execution_intent_id=intent.id,
+            )
+            safe_set_attribute(outbox_span, "attention.outbox_count", 1)
+            set_outcome(outbox_span, "ENQUEUED")
         if requires_platform_execution_safety(session, intent):
             try:
                 with session.begin_nested():
@@ -524,8 +562,6 @@ def enqueue_ready_intents(
         audit(session, interaction.id, "execution.outbox_enqueued", {"intent_id": intent.id, "outbox_id": outbox.id})
         count += 1
     session.flush()
-    safe_set_attribute(current_span(), "attention.outbox_count", count)
-    set_outcome(current_span(), "ENQUEUED" if count else "NO_OUTBOX")
     return count
 
 

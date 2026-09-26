@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 from io import BytesIO
+from types import SimpleNamespace
 from urllib import error
 
 import pytest
@@ -73,6 +74,43 @@ def test_wwebjs_adapter_hmac_signature(session):
     adapter = WwebjsOutboundAdapter(secret="x" * 32)
     body, headers = adapter.build_request(outbox)
     assert headers["X-Attention-Signature"] == _signature("x" * 32, headers["X-Attention-Timestamp"], body)
+
+
+def test_wwebjs_adapter_adds_only_traceparent_outside_signed_body(monkeypatch):
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from attention_router.observability import tracing
+
+    outbox = SimpleNamespace(
+        action_type="agent_execution", id="outbox-fixture",
+        idempotency_key="execution:fixture", correlation_id="correlation-fixture",
+        interaction_id="interaction-fixture",
+        payload={"external_actor_id": "fixture@c.us", "text": "Synthetic private text"},
+    )
+    monkeypatch.setattr(wwebjs_adapter_module.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(settings, "otel_tracing_enabled", False)
+    monkeypatch.setattr(settings, "otel_traces_sampler", "always_on")
+    tracing.reset_tracing()
+    adapter = WwebjsOutboundAdapter(secret="x" * 32)
+    try:
+        plain_body, plain_headers = adapter.build_request(outbox)
+        assert "traceparent" not in plain_headers
+        tracing.configure_test_tracing(InMemorySpanExporter())
+        with tracing.start_span("transport.send") as span:
+            body, headers = adapter.build_request(outbox)
+            context = span.get_span_context()
+            assert headers.pop("traceparent") == (
+                f"00-{context.trace_id:032x}-{context.span_id:016x}-01"
+            )
+        assert body == plain_body
+        assert headers == plain_headers
+        assert "tracestate" not in headers
+        assert "baggage" not in headers
+        assert headers["X-Attention-Signature"] == _signature(
+            "x" * 32, headers["X-Attention-Timestamp"], body
+        )
+    finally:
+        tracing.reset_tracing()
 
 
 def test_wwebjs_ambiguous_outcome_is_not_replayed(session, monkeypatch):
