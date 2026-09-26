@@ -137,6 +137,7 @@ function createServer(config, status, client = null, deps = {}) {
           return;
         }
         try {
+          const media = voice ? loadVoiceMedia(config, payload, MessageMediaClass) : null;
           const parentContext = observability.extractTraceparent(req.headers);
           let reference;
           await observability.withSpan(
@@ -146,7 +147,7 @@ function createServer(config, status, client = null, deps = {}) {
               const message = voice
                 ? await client.sendMessage(
                   destination,
-                  loadVoiceMedia(config, payload, MessageMediaClass),
+                  media,
                   { sendAudioAsVoice: true },
                 )
                 : await client.sendMessage(destination, payload.text);

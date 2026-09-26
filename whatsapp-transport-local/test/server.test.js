@@ -9,6 +9,8 @@ const pathModule = require('node:path');
 const { createConfig } = require('../src/config');
 const { createStatus } = require('../src/status');
 const { createServer } = require('../src/server');
+const { createTransportTracing } = require('../src/observability');
+const { InMemorySpanExporter } = require('@opentelemetry/sdk-trace');
 
 function request(port, path) {
   return new Promise((resolve, reject) => {
@@ -192,6 +194,69 @@ test('outbound send continues an incoming traceparent into the real sendMessage 
   assert.ok(calls.some((item) => item[0] === 'result' && item[1] === 'DELIVERED'));
   assert.ok(calls.some((item) => item[0] === 'http' && item[1] === 200));
   await new Promise((resolve) => server.close(resolve));
+});
+
+test('real outbound telemetry preserves remote parent, privacy and durable replay', async (t) => {
+  const secret = 'unit-test-outbound-secret-32-bytes-minimum';
+  const provenanceDir = fs.mkdtempSync(pathModule.join(os.tmpdir(), 'attention-server-otel-'));
+  const exporter = new InMemorySpanExporter();
+  const observability = createTransportTracing({ appEnv: 'test' }, { exporter });
+  t.after(async () => {
+    await observability.shutdown();
+    fs.rmSync(provenanceDir, { recursive: true, force: true });
+  });
+  const config = createConfig({ LOCAL_TRANSPORT_HTTP_PORT: '0', EXTERNAL_DELIVERY_ENABLED: 'true',
+    LOCAL_OUTBOUND_HMAC_SECRET: secret, LOCAL_OUTBOUND_PROVENANCE_DIR: provenanceDir });
+  const status = createStatus(config, { service_state: 'ready', browser_debug_reachable: true,
+    wwebjs_connected: true, ready: true, client_state: 'CONNECTED', qr_seen: false });
+  let sends = 0;
+  const client = { async sendMessage() {
+    sends += 1;
+    // The enclosing send span must still be open at the real effect boundary.
+    assert.equal(exporter.getFinishedSpans().length, sends - 1);
+    return { id: { _serialized: 'private-provider-reference' } };
+  } };
+  const payload = { idempotency_key: 'execution:private-key', destination: 'private-peer@c.us', text: 'private-body' };
+  const headers = { traceparent: '00-1234567890abcdef1234567890abcdef-1234567890abcdef-01',
+    baggage: 'private-baggage', tracestate: 'vendor=private-state' };
+  async function start() {
+    const server = createServer(config, status, client, { observability, logger: { error() {} } });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    return server.address().port;
+  }
+  const port = await start();
+  assert.equal((await postJson(port, '/internal/send', payload, secret, headers)).body.status, 'sent');
+  assert.equal((await postJson(port, '/internal/send', payload, secret, headers)).body.status, 'already_sent');
+  const restartedPort = await start();
+  assert.equal((await postJson(restartedPort, '/internal/send', payload, secret, headers)).body.status, 'already_sent');
+  assert.equal(sends, 1);
+  const [span] = exporter.getFinishedSpans();
+  assert.equal(exporter.getFinishedSpans().length, 1);
+  assert.equal(span.name, 'transport.outbound_send');
+  assert.equal(span.spanContext().traceId, '1234567890abcdef1234567890abcdef');
+  assert.equal(span.parentSpanContext.spanId, '1234567890abcdef');
+  assert.equal(span.parentSpanContext.isRemote, true);
+  assert.equal(span.resource.attributes['service.name'], 'attention-router-transport');
+  assert.equal(span.attributes['roc.result'], 'DELIVERED');
+  assert.equal(span.status.code, 1);
+  assert.equal(span.events.length, 0);
+  assert.doesNotMatch(JSON.stringify([span.attributes, span.resource.attributes, span.status, span.links]), /private-|execution:/);
+
+  const invalid = await postJson(port, '/internal/send', { ...payload, idempotency_key: 'execution:invalid-parent' }, secret,
+    { traceparent: 'invalid-private-parent' });
+  assert.equal(invalid.body.status, 'sent');
+  assert.equal(sends, 2);
+  assert.equal(exporter.getFinishedSpans()[1].parentSpanContext, undefined);
+
+  const voice = await postJson(port, '/internal/send', {
+    idempotency_key: 'execution:missing-media', external_actor_id: payload.destination, message_type: 'ptt',
+    media_ref: `sha256:${'a'.repeat(64)}`, content_sha256: 'a'.repeat(64), mime_type: 'audio/ogg',
+    size_bytes: 10, execution_intent_id: 'intent-fixture', outbox_id: 'outbox-fixture',
+  }, secret, headers);
+  assert.equal(voice.statusCode, 503);
+  assert.equal(sends, 2);
+  assert.equal(exporter.getFinishedSpans().length, 2);
 });
 
 test('voice outbound uses MessageMedia and sendAudioAsVoice', async (t) => {
