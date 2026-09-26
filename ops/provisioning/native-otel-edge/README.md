@@ -8,7 +8,7 @@ Worker, Tempo, or the independent ROC reconstruction bridge.
 ## Topology
 
 The runtime components remain in their existing isolated network domains. They
-send OTLP/HTTP to one host-bound Apache endpoint. Apache accepts only the two
+send OTLP/HTTP to one host-bound Apache endpoint. Apache accepts only the three
 configured source addresses and only `POST /v1/traces`, then proxies to a
 Collector port published on host loopback.
 
@@ -19,9 +19,9 @@ the OTLP receiver to host loopback. This does not create a route to the Andy
 application VLANs.
 
 ```text
-Transport domain ----\
-                      > host Apache OTLP edge -> 127.0.0.1:14318 -> Collector -> Tempo
-Ingress domain ------/
+Transport domain -----\
+Ingress domain --------+--> host Apache OTLP edge -> 127.0.0.1:14318 -> Collector -> Tempo
+Generic Worker domain -/
 ```
 
 Real addresses are host-local configuration. The repository intentionally uses
@@ -30,10 +30,10 @@ RFC 5737 documentation addresses only.
 ## Files
 
 - `apache-site.conf.template`: closed Apache vhost. Default access is denied;
-  the OTLP traces endpoint allows POST only from the two configured component
+  the OTLP traces endpoint allows POST only from the three configured component
   addresses.
 - `render.py`: strict renderer. Unknown keys, duplicates, missing keys, invalid
-  IPv4 values and invalid ports fail closed.
+  IPv4 values, duplicate component source addresses and invalid ports fail closed.
 - `native-otel-edge.env.example`: documentation-only example. Never replace it
   with real runtime values in Git.
 - `roc-otel-loopback.override.yaml`: publishes Collector OTLP/HTTP only on
@@ -57,6 +57,17 @@ install -m 0640 native-otel-edge.env /etc/attention-router/native-otel-edge.env
 
 The file contains network inventory, not application credentials, but it still
 belongs to the private host configuration.
+
+The three source addresses are independent configuration inputs:
+
+- Transport runtime source;
+- Internal Ingress runtime source;
+- Generic Worker runtime source.
+
+They must be distinct usable IPv4 addresses. Adding the Worker to the edge
+allowlist does **not** enable Worker tracing and grants no application authority;
+it only allows OTLP/HTTP emitted by that exact runtime source to reach the
+loopback Collector.
 
 ## Collector loopback publication
 
@@ -103,7 +114,7 @@ sudo NATIVE_OTEL_EDGE_ENV_FILE=/etc/attention-router/native-otel-edge.env \
 
 The edge is intentionally narrow:
 
-- bind address and source addresses are explicit;
+- bind address and all source addresses are explicit;
 - default location is denied;
 - only `POST /v1/traces` is accepted;
 - request bodies are bounded to 4 MiB;
@@ -112,16 +123,16 @@ The edge is intentionally narrow:
 - no Collector/Tempo health dependency is added to application health checks.
 
 An unauthorized source must receive denial and must not reach the loopback
-Collector. Both authorized runtime sources must preserve their original source
-addresses at the host boundary; do not deploy this package behind source NAT
-without revisiting the allowlist model.
+Collector. All three authorized runtime sources must preserve their original
+source addresses at the host boundary; do not deploy this package behind source
+NAT without revisiting the allowlist model.
 
 ## Runtime tracing rollout
 
 Only after the edge is installed and its deny/allow behavior is certified should
-the merged native tracing code be rolled out.
+native tracing be enabled on a runtime component.
 
-For both components, the OTLP endpoint is the private host edge:
+For each component, the OTLP endpoint is the private host edge:
 
 ```text
 OTEL_TRACING_ENABLED=true
@@ -131,14 +142,24 @@ OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=1.0
 ```
 
-Use `1.0` only for the controlled certification canary. Sampling policy after
-certification is a separate operational decision.
+Use `1.0` only for controlled certification. Sampling policy after certification
+is a separate operational decision.
 
-The Transport and Internal Ingress must be rolled out independently. A failure
-to export is allowed to lose telemetry; it is not allowed to change message
-admission, HMAC verification, correlation, retry, idempotency or delivery.
+Service identity is mandatory and must match the component. In particular the
+Worker must export with:
 
-## E2E PASS criteria
+```text
+OTEL_SERVICE_NAME=attention-router-worker
+```
+
+because the generic settings default is not a Worker identity.
+
+Transport, Internal Ingress and Generic Worker must be rolled out independently.
+A failure to export is allowed to lose telemetry; it is not allowed to change
+message admission, HMAC verification, correlation, queue processing, autonomy,
+execution, idempotency or delivery.
+
+## E2E PASS criteria — Transport and Ingress
 
 A port-open test is not sufficient. PASS requires one controlled canary whose
 native traces are queried from Tempo and whose graph demonstrates:
@@ -153,6 +174,28 @@ native traces are queried from Tempo and whose graph demonstrates:
    Resources, span attributes, events, status descriptions or propagated state;
 8. the ROC reconstructed trace continuing to exist independently.
 
+## E2E PASS criteria — Generic Worker
+
+Worker certification is separate from the Transport/Ingress proof. It requires a
+controlled message whose persisted queue carrier is consumed by the real Worker
+and queried from Tempo.
+
+PASS requires:
+
+1. Resource `service.name=attention-router-worker`;
+2. `worker.dispatch` exported from the Worker runtime;
+3. the expected downstream spans for the path actually reached, such as
+   `actor.resolve`, `policy.resolve`, `andy.agent.context_build`,
+   `andy.agent.run`, `decision.evaluate`, `behavior.generate`,
+   `repetition_guard.evaluate`, `autonomy.evaluate`, `execution.intent`,
+   `outbox.enqueue` and `transport.send`;
+4. stages that are not reached are explained by the persisted reason code rather
+   than misreported as successful;
+5. W3C context is restored from the queue carrier when present;
+6. exported resources, attributes, Links, events and status remain within the
+   privacy allowlist;
+7. Collector/Tempo failure remains fail-open for the functional Worker path.
+
 Rollback is component-local: disable tracing or restore the previous runtime
-artifact. Do not mutate queues, messages, correlation IDs or the reconstruction
-bridge to undo tracing.
+artifact/config. Do not mutate queues, messages, correlation IDs, authority state
+or the reconstruction bridge to undo tracing.

@@ -14,6 +14,7 @@ REQUIRED_KEYS = frozenset(
         "NATIVE_OTEL_EDGE_BIND_PORT",
         "NATIVE_OTEL_TRANSPORT_SOURCE_IP",
         "NATIVE_OTEL_INGRESS_SOURCE_IP",
+        "NATIVE_OTEL_WORKER_SOURCE_IP",
         "NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT",
     }
 )
@@ -23,6 +24,7 @@ TOKEN_MAP = {
     "@BIND_PORT@": "NATIVE_OTEL_EDGE_BIND_PORT",
     "@TRANSPORT_SOURCE_IP@": "NATIVE_OTEL_TRANSPORT_SOURCE_IP",
     "@INGRESS_SOURCE_IP@": "NATIVE_OTEL_INGRESS_SOURCE_IP",
+    "@WORKER_SOURCE_IP@": "NATIVE_OTEL_WORKER_SOURCE_IP",
     "@COLLECTOR_LOOPBACK_PORT@": "NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT",
 }
 UNRESOLVED_TOKEN = re.compile(r"@[A-Z0-9_]+@")
@@ -96,13 +98,22 @@ def validated_values(values: dict[str, str]) -> dict[str, str]:
             values["NATIVE_OTEL_INGRESS_SOURCE_IP"],
             "NATIVE_OTEL_INGRESS_SOURCE_IP",
         ),
+        "NATIVE_OTEL_WORKER_SOURCE_IP": _ipv4(
+            values["NATIVE_OTEL_WORKER_SOURCE_IP"],
+            "NATIVE_OTEL_WORKER_SOURCE_IP",
+        ),
         "NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT": _port(
             values["NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT"],
             "NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT",
         ),
     }
-    if result["NATIVE_OTEL_TRANSPORT_SOURCE_IP"] == result["NATIVE_OTEL_INGRESS_SOURCE_IP"]:
-        raise ValueError("Transport and Ingress source addresses must be distinct")
+    source_addresses = {
+        result["NATIVE_OTEL_TRANSPORT_SOURCE_IP"],
+        result["NATIVE_OTEL_INGRESS_SOURCE_IP"],
+        result["NATIVE_OTEL_WORKER_SOURCE_IP"],
+    }
+    if len(source_addresses) != 3:
+        raise ValueError("Transport, Ingress and Worker source addresses must be distinct")
     return result
 
 

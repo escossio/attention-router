@@ -26,6 +26,7 @@ def valid_values() -> dict[str, str]:
         "NATIVE_OTEL_EDGE_BIND_PORT": "4318",
         "NATIVE_OTEL_TRANSPORT_SOURCE_IP": "198.51.100.10",
         "NATIVE_OTEL_INGRESS_SOURCE_IP": "203.0.113.18",
+        "NATIVE_OTEL_WORKER_SOURCE_IP": "198.51.100.26",
         "NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT": "14318",
     }
 
@@ -38,7 +39,10 @@ def test_renderer_produces_closed_otlp_edge() -> None:
 
     assert "Listen 192.0.2.10:4318" in rendered
     assert "Require all denied" in rendered
-    assert "Require ip 198.51.100.10 203.0.113.18" in rendered
+    assert (
+        "Require ip 198.51.100.10 203.0.113.18 198.51.100.26"
+        in rendered
+    )
     assert "<Limit POST>" in rendered
     assert "<LimitExcept POST>" in rendered
     assert "http://127.0.0.1:14318/v1/traces" in rendered
@@ -53,6 +57,7 @@ def test_renderer_produces_closed_otlp_edge() -> None:
         ("NATIVE_OTEL_EDGE_BIND_PORT", "0"),
         ("NATIVE_OTEL_TRANSPORT_SOURCE_IP", "0.0.0.0"),
         ("NATIVE_OTEL_INGRESS_SOURCE_IP", "ff02::1"),
+        ("NATIVE_OTEL_WORKER_SOURCE_IP", "224.0.0.1"),
         ("NATIVE_OTEL_COLLECTOR_LOOPBACK_PORT", "70000"),
     ],
 )
@@ -66,12 +71,21 @@ def test_renderer_rejects_invalid_network_values(key: str, value: str) -> None:
         )
 
 
-def test_renderer_rejects_same_component_source_address() -> None:
+@pytest.mark.parametrize(
+    ("duplicate_key", "source_key"),
+    [
+        ("NATIVE_OTEL_INGRESS_SOURCE_IP", "NATIVE_OTEL_TRANSPORT_SOURCE_IP"),
+        ("NATIVE_OTEL_WORKER_SOURCE_IP", "NATIVE_OTEL_TRANSPORT_SOURCE_IP"),
+        ("NATIVE_OTEL_WORKER_SOURCE_IP", "NATIVE_OTEL_INGRESS_SOURCE_IP"),
+    ],
+)
+def test_renderer_rejects_duplicate_component_source_addresses(
+    duplicate_key: str,
+    source_key: str,
+) -> None:
     values = valid_values()
-    values["NATIVE_OTEL_INGRESS_SOURCE_IP"] = values[
-        "NATIVE_OTEL_TRANSPORT_SOURCE_IP"
-    ]
-    with pytest.raises(ValueError):
+    values[duplicate_key] = values[source_key]
+    with pytest.raises(ValueError, match="must be distinct"):
         renderer.validated_values(values)
 
 
@@ -91,6 +105,7 @@ def test_public_example_contains_only_documentation_addresses() -> None:
     assert "192.0.2.10" in example
     assert "198.51.100.10" in example
     assert "203.0.113.18" in example
+    assert "198.51.100.26" in example
     assert "10.77." not in example
     assert "192.168." not in example
 
