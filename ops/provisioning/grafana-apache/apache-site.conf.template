@@ -1,0 +1,31 @@
+<VirtualHost *:80>
+    ServerName @SERVER_NAME@
+    ServerAdmin webmaster@localhost
+
+    ProxyPreserveHost On
+
+    <Location />
+        AuthType Basic
+        AuthName "ROC-E2E Grafana"
+        AuthUserFile @AUTH_USER_FILE@
+        Require valid-user
+
+        # Authenticate at Apache first; do not forward its Basic credential.
+        RequestHeader unset Authorization
+    </Location>
+
+    # The specific Live route must precede the generic HTTP route.
+    ProxyPass /api/live/ws ws://127.0.0.1:@UPSTREAM_PORT@/api/live/ws
+    ProxyPassReverse /api/live/ws ws://127.0.0.1:@UPSTREAM_PORT@/api/live/ws
+
+    ProxyPass / http://127.0.0.1:@UPSTREAM_PORT@/ retry=0 timeout=60
+    ProxyPassReverse / http://127.0.0.1:@UPSTREAM_PORT@/
+
+    Header always set X-Robots-Tag "noindex, nofollow, noarchive"
+    Header always set Cache-Control "no-store"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+
+    ErrorLog ${APACHE_LOG_DIR}/grafana-roc-e2e-error.log
+    CustomLog ${APACHE_LOG_DIR}/grafana-roc-e2e-access.log combined
+</VirtualHost>

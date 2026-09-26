@@ -2,6 +2,25 @@
 
 Updated: 2026-09-25
 
+## Grafana Apache boundary — runtime verified
+
+- Main baseline: `ec215e07ee3f07c26eed0ad4ce4eb5259df92f00`.
+- A valid Grafana Live handshake returns 101 directly but 400 through the origin
+  Apache vhost and external edge. Apache Basic credentials also reach Grafana's
+  internal Basic authentication client and cause password-auth failures.
+- Added a Grafana-only Apache template and renderer. A short isolated Apache
+  fixture preserves external authentication and HTTP while changing Live 400 to
+  101 and removing upstream Authorization. The live vhost matches the rendered
+  source; configtest passed and Apache was reloaded without a restart.
+- External HTTP/Live and both datasource health checks pass. A five-minute clean
+  Chrome run at 10s refresh produced 30 successful query responses, Live 101, zero
+  WebSocket errors, zero console errors and zero page exceptions.
+- Post-reload logs contain no repeated Live 400 or proxy-caused password failures.
+  All 28 container IDs/start times and protected configuration digests are intact;
+  Tempo received-span count rose from 2803 to 3145 and trace retrieval passed.
+- The frontend DOM exception was not reproduced before or after the correction;
+  its causal relation to the proxy remains unproven. No CI workload was dispatched.
+
 ## Native OpenTelemetry Transport → Ingress — runtime certified
 
 - PR #191 serialized recovery after existing-page attach; PR #192 fixed compatibility with Puppeteer's immutable ESM namespace while preserving canonical-page revalidation and fail-closed authority. Both merged through protected main with all required checks green; #192 passed 444 distributed PostgreSQL tests.
