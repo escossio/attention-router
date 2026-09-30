@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
+import hmac
 import re
 import secrets
 
@@ -27,6 +30,9 @@ from attention_router.security.device_keys import (
 )
 
 _SESSION_TOKEN = re.compile(r"^cst_[A-Za-z0-9_-]{43}$")
+_RETRYABLE_CHALLENGE_ID = re.compile(r"^csc_r1_([A-Za-z0-9_-]{43})$")
+_CHALLENGE_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_RETRYABLE_CHALLENGE_DOMAIN = b"attention-router/client-session-challenge/r1\x00"
 
 
 class ClientSessionError(Exception):
@@ -96,6 +102,24 @@ def _aware(value: datetime, reference: datetime) -> datetime:
     return value.replace(tzinfo=reference.tzinfo or UTC) if value.tzinfo is None else value
 
 
+def _new_retryable_challenge_id() -> str:
+    return "csc_r1_" + encode_unpadded_base64url(secrets.token_bytes(32))
+
+
+def _challenge_bytes_from_retryable_id(challenge_id: str) -> bytes | None:
+    match = _RETRYABLE_CHALLENGE_ID.fullmatch(challenge_id)
+    if match is None:
+        return None
+    encoded_entropy = match.group(1)
+    try:
+        entropy = base64.b64decode(encoded_entropy + "=", altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if len(entropy) != 32 or encode_unpadded_base64url(entropy) != encoded_entropy:
+        return None
+    return hashlib.sha256(_RETRYABLE_CHALLENGE_DOMAIN + entropy).digest()
+
+
 def _membership_authority(row) -> SessionMembershipAuthority:
     return SessionMembershipAuthority(
         membership_id=row.id, human_identity_id=row.human_identity_id, tenant_id=row.tenant_id,
@@ -149,20 +173,32 @@ class ClientSessionService:
             or device.public_key_spki != public_key_spki or "CLIENT" not in device.roles
         ):
             raise ClientSessionDeviceRejected()
-        raw = secrets.token_bytes(32)
+        challenge_id = _new_retryable_challenge_id()
+        raw = _challenge_bytes_from_retryable_id(challenge_id)
+        if raw is None:
+            raise ClientSessionUnavailable()
         digest = hashlib.sha256(raw).hexdigest()
         expires_at = current + timedelta(seconds=self.settings.client_session_challenge_ttl_seconds)
         try:
-            row = repository.create_session_challenge(
-                session, device=device, requested_tenant_id=requested_tenant_id,
+            row = repository.create_or_reuse_session_challenge(
+                session, device=device, challenge_id=challenge_id,
+                requested_tenant_id=requested_tenant_id,
                 challenge_digest=digest, now=current, expires_at=expires_at,
             )
         except repository.SessionChallengeConflict as error:
             raise ClientSessionChallengeConflict() from error
+        raw = _challenge_bytes_from_retryable_id(row.id)
+        if (
+            raw is None
+            or not isinstance(row.challenge_digest, str)
+            or _CHALLENGE_DIGEST.fullmatch(row.challenge_digest) is None
+            or not hmac.compare_digest(row.challenge_digest, hashlib.sha256(raw).hexdigest())
+        ):
+            raise ClientSessionChallengeConflict()
         return ClientSessionChallenge(
             session_challenge_id=row.id,
             challenge_b64url=encode_unpadded_base64url(raw),
-            expires_at=expires_at,
+            expires_at=_aware(row.expires_at, current),
         )
 
     def complete_session(self, session: Session, *, session_challenge_id: str,
