@@ -207,17 +207,18 @@ def test_pairing_confirmation_reuse_and_missing_consent(session, tmp_path):
 
 
 def test_pairing_challenge_event_does_not_call_provider_or_write_outbox(session, tmp_path):
-    opened_at = now_utc().replace(tzinfo=timezone.utc)
+    pilot_output = tmp_path / "pilot"
+    pilot_output.mkdir()
+    (pilot_output / "EVENTS_REDACTED.jsonl").touch()
+    cfg = config(pilot_output, actor="other-actor")
+    opened_at = cfg.started_at
     paths = pilot_pairing.pairing_paths(tmp_path / "pairing")
     _state, challenge = pilot_pairing.arm_pairing(session, paths, at=opened_at)
     add_pairing_event(session, "pair-only", "actor-a", challenge, opened_at + pilot_pairing.timedelta(seconds=1))
     session.commit()
     before = session.query(OutboxMessageRow).count()
     provider = FakePilotProvider()
-    pilot_output = tmp_path / "pilot"
-    pilot_output.mkdir()
-    (pilot_output / "EVENTS_REDACTED.jsonl").touch()
-    result = process_events(session, config(pilot_output, actor="other-actor"), provider, prompt(), {"real_escalation_with_retumption": False})
+    result = process_events(session, cfg, provider, prompt(), {"real_escalation_with_retumption": False})
     assert result["blocked"] == 1
     assert provider.calls == 0
     assert session.query(OutboxMessageRow).count() == before

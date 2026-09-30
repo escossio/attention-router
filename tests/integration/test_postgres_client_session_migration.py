@@ -12,7 +12,7 @@ def test_client_session_authority_migration_schema():
     try:
         with engine.connect() as connection:
             assert connection.execute(text("SELECT version_num FROM alembic_version")).scalars().all() == [
-                "0049_client_command_channel_v1"
+                "0050_client_pending_source"
             ]
             schema = inspect(connection)
             assert {"client_session_challenges", "client_sessions"} <= set(schema.get_table_names())

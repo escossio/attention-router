@@ -4,7 +4,9 @@ import json
 import time
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from sqlalchemy.orm import sessionmaker
 
 from attention_router.config import settings
@@ -13,6 +15,7 @@ from attention_router.domain.models import now_utc
 from attention_router.infrastructure.artifact_models import ArtifactRow
 from attention_router.infrastructure.media_store import MediaStore
 from attention_router.infrastructure.models import MediaArtifactRow, TenantRow
+from attention_router.observability.tracing import configure_test_tracing, reset_tracing
 from attention_router.web.internal_ingress_app import (
     app,
     get_session,
@@ -22,6 +25,18 @@ from attention_router.web.internal_ingress_app import (
 
 
 SECRET = "unit-test-internal-ingress-secret-32-bytes"
+VALID_TRACEPARENT = "00-1234567890abcdef1234567890abcdef-1234567890abcdef-01"
+SECOND_TRACEPARENT = "00-abcdef1234567890abcdef1234567890-fedcba0987654321-01"
+
+
+@pytest.fixture()
+def otel_exporter():
+    exporter = InMemorySpanExporter()
+    configure_test_tracing(exporter)
+    try:
+        yield exporter
+    finally:
+        reset_tracing()
 
 
 def teardown_function():
@@ -83,9 +98,21 @@ def client(session, monkeypatch):
     return TestClient(app)
 
 
-def post(client: TestClient, data: dict, headers: dict[str, str] | None = None):
+def post(
+    client: TestClient,
+    data: dict,
+    headers: dict[str, str] | None = None,
+    traceparent: str | None = None,
+):
     body = json.dumps(data, separators=(",", ":")).encode()
-    return client.post("/api/v1/ingress/internal/events", content=body, headers=headers or signed_headers(body))
+    request_headers = dict(headers or signed_headers(body))
+    if traceparent is not None:
+        request_headers["traceparent"] = traceparent
+    return client.post(
+        "/api/v1/ingress/internal/events",
+        content=body,
+        headers=request_headers,
+    )
 
 
 def test_internal_ingress_valid_hmac_accepts_payload(session, monkeypatch):
@@ -94,6 +121,100 @@ def test_internal_ingress_valid_hmac_accepts_payload(session, monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
     assert response.json()["interaction_id"]
+
+
+def test_internal_ingress_valid_traceparent_links_canonical_message_root(
+    session,
+    monkeypatch,
+    otel_exporter,
+):
+    c = client(session, monkeypatch)
+    response = post(c, payload(), traceparent=VALID_TRACEPARENT)
+
+    assert response.status_code == 200
+    trace_id = int(VALID_TRACEPARENT.split("-")[1], 16)
+    span_id = int(VALID_TRACEPARENT.split("-")[2], 16)
+    spans = otel_exporter.get_finished_spans()
+    admission = next(span for span in spans if span.name == "ingress.accept")
+    message = next(
+        span for span in spans
+        if span.name == "attention.message" and span.parent is None
+    )
+
+    assert admission.context.trace_id == trace_id
+    assert admission.parent is not None
+    assert admission.parent.span_id == span_id
+    assert admission.parent.is_remote
+    assert admission.attributes["roc.result"] == "ACCEPTED"
+    assert admission.attributes["roc.trace_source"] == "native"
+    assert admission.attributes["roc.synthetic"] is False
+
+    assert message.context.trace_id != trace_id
+    assert len(message.links) == 1
+    assert message.links[0].context.trace_id == trace_id
+    assert message.links[0].context.span_id == span_id
+    assert message.attributes["roc.correlation_id"] == response.json()["correlation_id"]
+    assert message.attributes["roc.result"] == "ACCEPTED"
+    assert message.attributes["roc.trace_source"] == "native"
+    assert message.attributes["roc.synthetic"] is False
+
+
+def test_internal_ingress_invalid_traceparent_starts_clean_local_traces(
+    session,
+    monkeypatch,
+    otel_exporter,
+):
+    c = client(session, monkeypatch)
+    response = post(c, payload(), traceparent="invalid")
+
+    assert response.status_code == 200
+    spans = otel_exporter.get_finished_spans()
+    admission = next(span for span in spans if span.name == "ingress.accept")
+    message = next(
+        span for span in spans
+        if span.name == "attention.message" and span.parent is None
+    )
+
+    assert admission.parent is None
+    assert message.parent is None
+    assert not message.links
+    assert message.context.trace_id != admission.context.trace_id
+    assert message.attributes["roc.correlation_id"] == response.json()["correlation_id"]
+
+
+def test_internal_ingress_replay_keeps_andy_correlation_across_distinct_trace_attempts(
+    session,
+    monkeypatch,
+    otel_exporter,
+):
+    c = client(session, monkeypatch)
+    data = payload("otel-replay-correlation")
+    first = post(c, data, traceparent=VALID_TRACEPARENT)
+    second = post(c, data, traceparent=SECOND_TRACEPARENT)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["status"] == "accepted"
+    assert second.json()["status"] == "duplicate"
+    assert first.json()["correlation_id"] == second.json()["correlation_id"]
+
+    message_roots = [
+        span for span in otel_exporter.get_finished_spans()
+        if span.name == "attention.message" and span.parent is None
+    ]
+    assert len(message_roots) == 2
+    assert {
+        span.attributes["roc.result"] for span in message_roots
+    } == {"ACCEPTED", "DUPLICATE"}
+    assert {
+        span.attributes["roc.correlation_id"] for span in message_roots
+    } == {first.json()["correlation_id"]}
+    assert {
+        span.links[0].context.trace_id for span in message_roots
+    } == {
+        int(VALID_TRACEPARENT.split("-")[1], 16),
+        int(SECOND_TRACEPARENT.split("-")[1], 16),
+    }
 
 
 def test_internal_ingress_requires_explicit_tenant(session, monkeypatch):
@@ -135,6 +256,26 @@ def test_internal_ingress_invalid_hmac_rejected(session, monkeypatch):
     body = json.dumps(payload()).encode()
     response = c.post("/api/v1/ingress/internal/events", content=body, headers=signed_headers(body, "wrong-secret"))
     assert response.status_code == 401
+
+
+def test_internal_ingress_rejects_trace_context_before_authentication(
+    session,
+    monkeypatch,
+    otel_exporter,
+):
+    c = client(session, monkeypatch)
+    body = json.dumps(payload(), separators=(",", ":")).encode()
+    headers = signed_headers(body, "wrong-secret")
+    headers["traceparent"] = VALID_TRACEPARENT
+
+    response = c.post(
+        "/api/v1/ingress/internal/events",
+        content=body,
+        headers=headers,
+    )
+
+    assert response.status_code == 401
+    assert otel_exporter.get_finished_spans() == ()
 
 
 def test_internal_ingress_missing_signature_rejected(session, monkeypatch):

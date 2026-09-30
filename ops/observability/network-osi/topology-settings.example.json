@@ -1,0 +1,7 @@
+{
+  "ssh_alias": "router-example",
+  "parent_name": "ether-example",
+  "sender_address": "192.0.2.2",
+  "host_name": "MikroTik - Andy Runtime Network",
+  "evidence_file": "/etc/andy-ops-network/topology-current.json"
+}

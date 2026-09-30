@@ -14,7 +14,7 @@ def test_human_identity_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0049_client_command_channel_v1"]
+            ).scalars().all() == ["0050_client_pending_source"]
 
             schema = inspect(connection)
             expected_columns = {

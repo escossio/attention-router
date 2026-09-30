@@ -568,12 +568,18 @@ class PendingIntentRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("tenants.id"), nullable=False
     )
-    represented_owner_actor_key: Mapped[str] = mapped_column(String(120), nullable=False)
-    source_inbound_event_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("inbound_events.id"), nullable=False
+    source_tenant_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("tenants.id"), nullable=False
     )
-    source_interaction_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("interactions.id"), nullable=False
+    represented_owner_actor_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_inbound_event_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("inbound_events.id"), nullable=True
+    )
+    source_interaction_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("interactions.id"), nullable=True
+    )
+    source_client_command_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("client_command_messages.id"), nullable=True
     )
     source_channel: Mapped[str] = mapped_column(String(80), nullable=False)
     conversation_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -589,6 +595,9 @@ class PendingIntentRow(Base):
     resolution_inbound_event_id: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("inbound_events.id")
     )
+    resolution_client_command_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("client_command_messages.id"), nullable=True
+    )
     selected_candidate_key: Mapped[str | None] = mapped_column(String(64))
     resolution_kind: Mapped[str | None] = mapped_column(String(40))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -603,6 +612,10 @@ class PendingIntentRow(Base):
             "source_inbound_event_id",
             name="uq_pending_intent_source_event",
         ),
+        UniqueConstraint(
+            "source_client_command_id",
+            name="uq_pending_intent_source_client_command",
+        ),
         CheckConstraint(
             "state in ('PENDING','RESOLVED','CANCELED','SUPERSEDED','EXPIRED')",
             name="ck_pending_intent_state",
@@ -616,13 +629,28 @@ class PendingIntentRow(Base):
             name="ck_pending_intent_version_positive",
         ),
         CheckConstraint(
+            "((source_inbound_event_id is not null and "
+            "source_interaction_id is not null and source_client_command_id is null) or "
+            "(source_inbound_event_id is null and source_interaction_id is null and "
+            "source_client_command_id is not null))",
+            name="ck_pending_intent_source_exactly_one",
+        ),
+        CheckConstraint(
+            "not (resolution_inbound_event_id is not null and "
+            "resolution_client_command_id is not null)",
+            name="ck_pending_intent_resolution_at_most_one",
+        ),
+        CheckConstraint(
             "selected_candidate_key is null or state = 'RESOLVED'",
             name="ck_pending_intent_selected_only_when_resolved",
         ),
         CheckConstraint(
             "state != 'RESOLVED' or "
             "(selected_candidate_key is not null and "
-            "resolution_inbound_event_id is not null and "
+            "((resolution_inbound_event_id is not null and "
+            "resolution_client_command_id is null) or "
+            "(resolution_inbound_event_id is null and "
+            "resolution_client_command_id is not null)) and "
             "resolution_kind is not null and resolved_at is not null)",
             name="ck_pending_intent_resolved_complete",
         ),
@@ -643,6 +671,13 @@ class PendingIntentRow(Base):
             unique=True,
             postgresql_where=text("resolution_inbound_event_id IS NOT NULL"),
             sqlite_where=text("resolution_inbound_event_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_pending_intent_resolution_client_command",
+            "resolution_client_command_id",
+            unique=True,
+            postgresql_where=text("resolution_client_command_id IS NOT NULL"),
+            sqlite_where=text("resolution_client_command_id IS NOT NULL"),
         ),
         Index(
             "uq_pending_intent_active_scope",

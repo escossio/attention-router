@@ -33,6 +33,13 @@ from attention_router.infrastructure.models import (
     QueueRow,
 )
 from attention_router.infrastructure.repository import audit, create_inbound_event
+from attention_router.observability.tracing import (
+    extract_trace_context,
+    inject_trace_context,
+    link_from_carrier,
+    set_outcome,
+    start_span,
+)
 
 
 CANARY_ACTOR_ID = "actor_sr_morgan_example"
@@ -216,6 +223,8 @@ def defer_decision_for_grace(
     interaction: InteractionRow,
 ) -> bool:
     """Open or extend the owner's direct-conversation Grace before decision enqueue."""
+    trace_carrier: dict[str, str] = {}
+    inject_trace_context(trace_carrier)
     routing = resolve_decision_routing(session, event, interaction)
     eligibility = grace_eligibility(session, routing, event=event, lock_control=True)
     if not eligibility.eligible:
@@ -323,6 +332,12 @@ def defer_decision_for_grace(
                 "enabled": eligibility.enabled,
                 "control_source": eligibility.control_source,
                 "control_revision": eligibility.control_revision,
+                "observability": {
+                    "anchor_trace_context": dict(trace_carrier),
+                    "member_trace_contexts": (
+                        [dict(trace_carrier)] if trace_carrier else []
+                    ),
+                },
             },
             created_at=stamp,
             updated_at=stamp,
@@ -341,10 +356,25 @@ def defer_decision_for_grace(
         # Every distinct membership advances generation, including late arrivals.
         # Receipt time remains the existing trailing-edge clock; older events
         # must not displace the anchor or shorten a previously established wait.
-        if stamp >= _utc(window.last_inbound_at):
+        becomes_anchor = stamp >= _utc(window.last_inbound_at)
+        if becomes_anchor:
             window.last_inbound_at = stamp
             window.anchor_event_id = event.id
             window.anchor_interaction_id = interaction.id
+        provenance = dict(window.provenance or {})
+        observability = dict(provenance.get("observability") or {})
+        members = [
+            dict(item)
+            for item in (observability.get("member_trace_contexts") or [])
+            if isinstance(item, dict)
+        ]
+        if trace_carrier and trace_carrier not in members:
+            members.append(dict(trace_carrier))
+        observability["member_trace_contexts"] = members[-8:]
+        if becomes_anchor and trace_carrier:
+            observability["anchor_trace_context"] = dict(trace_carrier)
+        provenance["observability"] = observability
+        window.provenance = provenance
         window.due_at = max(
             _utc(window.due_at),
             _utc(window.last_inbound_at) + timedelta(seconds=eligibility.seconds),
@@ -470,18 +500,36 @@ def release_grace_window(
     queue_id = f"decision:{event.id}"
     existing = session.get(QueueRow, queue_id)
     if existing is None:
-        session.add(QueueRow(
-            id=queue_id,
-            kind="decision",
-            payload={
-                "event_id": event.id,
-                "interaction_id": interaction.id,
-                "grace_window_id": window.id,
-                "grace_generation": expected_generation,
-            },
-            status="PENDING",
-            created_at=stamp,
-        ))
+        observability = dict((window.provenance or {}).get("observability") or {})
+        anchor_carrier = observability.get("anchor_trace_context")
+        member_carriers = observability.get("member_trace_contexts") or []
+        links = []
+        for member_carrier in member_carriers:
+            if member_carrier != anchor_carrier:
+                links.extend(link_from_carrier(member_carrier))
+        with start_span(
+            "grace.release",
+            context=extract_trace_context(anchor_carrier),
+            links=links,
+        ) as grace_span:
+            with start_span("queue.enqueue") as queue_span:
+                queue_carrier: dict[str, str] = {}
+                inject_trace_context(queue_carrier)
+                session.add(QueueRow(
+                    id=queue_id,
+                    kind="decision",
+                    payload={
+                        "event_id": event.id,
+                        "interaction_id": interaction.id,
+                        "grace_window_id": window.id,
+                        "grace_generation": expected_generation,
+                        "observability": {"trace_context": queue_carrier},
+                    },
+                    status="PENDING",
+                    created_at=stamp,
+                ))
+                set_outcome(queue_span, "ENQUEUED")
+            set_outcome(grace_span, "PROCESSED")
     window.state = "RELEASED"
     window.released_at = stamp
     window.updated_at = stamp
