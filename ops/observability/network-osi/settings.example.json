@@ -1,0 +1,14 @@
+{
+  "api_url": "http://127.0.0.1:18082/api_jsonrpc.php",
+  "username": "CONFIGURE_PRIVATELY",
+  "password": "CONFIGURE_PRIVATELY",
+  "host_name": "MikroTik - Andy Runtime Network",
+  "parent_index": 0,
+  "auth_protocol": 1,
+  "snmp": {
+    "security_name": "CONFIGURE_PRIVATELY",
+    "auth_password": "GENERATE_PRIVATELY",
+    "privacy_password": "GENERATE_PRIVATELY",
+    "target": "192.0.2.1"
+  }
+}

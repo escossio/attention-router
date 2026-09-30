@@ -1,0 +1,14 @@
+[Unit]
+Description=Read-only RouterOS topology evidence for ROC NETWORK / OSI
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/andy-network-osi/topology.py --settings /etc/andy-ops-network/topology-settings.json
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/etc/andy-ops-network
+TimeoutStartSec=90
