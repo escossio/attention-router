@@ -21,7 +21,7 @@ async function main() {
     outboundProvenance,
     observability,
   });
-  const server = createServer(config, status, client, { outboundProvenance });
+  const server = createServer(config, status, client, { outboundProvenance, observability });
   const mediaRetryTimer = setInterval(() => {
     void drainMediaNotifications(config, console).catch((error) => {
       console.error(JSON.stringify({

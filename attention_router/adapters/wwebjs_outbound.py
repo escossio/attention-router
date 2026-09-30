@@ -7,6 +7,7 @@ from typing import Any
 from urllib import error, request
 
 from attention_router.config import settings
+from attention_router.observability.tracing import inject_trace_context
 
 
 class WwebjsOutboundError(RuntimeError):
@@ -77,6 +78,11 @@ class WwebjsOutboundAdapter:
             "X-Attention-Timestamp": timestamp,
             "X-Attention-Signature": _signature(self.secret, timestamp, body),
         }
+        carrier: dict[str, str] = {}
+        inject_trace_context(carrier)
+        traceparent = carrier.get("traceparent")
+        if traceparent:
+            headers["traceparent"] = traceparent
         return body, headers
 
     def dispatch_outbox(self, outbox) -> WwebjsOutboundResult:

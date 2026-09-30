@@ -2,6 +2,11 @@
 
 Updated: 2026-09-25
 
+## Native OpenTelemetry outbound — PR #197
+
+- Python sends only the active `traceparent` outside the unchanged signed body; Node continues it around the real send with the shared configured tracer.
+- Offline validation: 156 focused Python tests, 17 Node observability/server tests, compile and Ruff PASS. Integrated coverage proves remote parent, privacy, durable replay and no send span for rejected media. Physical outbound certification remains pending deployment of this candidate.
+
 ## Native OpenTelemetry Transport → Ingress — runtime certified
 
 - PR #191 serialized recovery after existing-page attach; PR #192 fixed compatibility with Puppeteer's immutable ESM namespace while preserving canonical-page revalidation and fail-closed authority. Both merged through protected main with all required checks green; #192 passed 444 distributed PostgreSQL tests.
