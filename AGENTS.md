@@ -6,6 +6,14 @@ Use synthetic fixtures. Never place credentials, real conversations or environme
 Run the documented offline tests for affected components. Provider and transport calls require explicit authorization.
 Future design documents are not claims of implemented functionality.
 
+## GitHub-first development control loop
+- Follow [docs/operations/github-first-development-control-loop.md](docs/operations/github-first-development-control-loop.md) for agentic investigation and remote-runtime work.
+- GitHub defines the expected contract and versioned implementation; runtime/AGT is evidence of the currently observed behavior.
+- Do not infer that a feature is absent from a failed runtime behavior or missing conversational context. Verify existing contracts, tests and history first.
+- Before a tool burst, state purpose, first source, expected scope/duration and whether the work is read-only or state-changing.
+- Keep investigations bounded, checkpoint between logical phases, and freeze secondary issues instead of silently switching frontiers.
+- Establish artifact provenance before deep debugging whenever an APK, container or other built artifact is involved.
+
 ## Distributed validation policy
 - Treat a host with `andy-ci-distributed` installed as the CI control plane, not as a heavy test worker.
 - On the control plane, do not run the full PostgreSQL suite, migration-heavy regression suites, full repository test sweeps, or other long CPU/I/O-heavy validation locally while distributed workers are available.
