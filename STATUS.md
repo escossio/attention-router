@@ -1,6 +1,22 @@
 # Project status
 
-Updated: 2026-09-25
+Updated: 2026-09-30
+
+## NETWORK / OSI — finalized with degraded runtime evidence
+
+- Read-only resumption confirmed existing evidence, unchanged ROC container identities/start times, template/host/dashboard and the available NETWORK / OSI tab. Current health and enabled trigger dependencies match the final checkpoint; diff check passes. No repeated discovery, tests, provisioning, runtime changes, commit or push.
+
+- Clean worktree `feat/network-osi-roc` derives from current origin/main `ec215e07ee3f07c26eed0ad4ce4eb5259df92f00`; no commit or push.
+- Existing ROC Zabbix 7.4.14 / Grafana 13.2.2 and its Zabbix datasource reused. Native SNMPv3 authPriv, dependent interface/neighbor items and native ICMP checks discover all eight runtime domains. The host's legacy Zabbix was ignored.
+- The separately authorized edge attachment preserves the ROC Zabbix server's monitoring network/IP, container identity and start time. No ROC container was recreated or restarted.
+- The separate dashboard and authenticated, lazy NETWORK / OSI iframe show L1 UNKNOWN, L2 DEGRADED and L3 FAIL: eight incomplete neighbors, no resolved MAC and no reachable endpoint (100% loss). The declared trunk has carrier, but its association with the real VLAN parent is unverified; individual physical states remain visible.
+- Superseded partial definitions and a duplicate ROC network host were disabled with private backups/history preserved. Hierarchical dependencies and parent/topology guards leave one current L2_TOPOLOGY_MISMATCH problem while all downstream failing measurements remain visible.
+- Read-only topology snapshots refresh through a separate five-minute timer. No direct Zabbix calls are added to Andy Ops. Only Apache framing headers changed; authentication and existing cookies are preserved. The existing datasource metadata cache is one minute.
+- Two SNMP master walks poll counters/neighbors every 30s, plus discovery every 5m; the final capture measured approximately 14 outbound SNMP requests per counter cycle, including engine probes. ICMP and dashboard refresh are 10s; dependent items/browser refresh cause no extra SNMP polling.
+- Existing focused parser tests, four topology/panel URL tests, Ruff, compilation and diff checks pass. Final authenticated headless acceptance passes for lazy loading, iframe, both real eight-row tables, degraded state and absence of credential exposure. All dashboard queries returned HTTP 200. Existing E2E dashboard content/hash remains intact.
+- No application repair, recreation or manual restart was performed. External physical/bridge state changes and the pre-existing API automatic restart loop are distinguished from this implementation.
+- Private checkpoint, inventory, screenshots, credentials and raw evidence remain outside Git. New NETWORK / OSI artifacts contain configurable/synthetic data only.
+- Follow-ups only: investigate and recover the actual physical association/runtime in a separately authorized pass; optional cleanup of unused earlier panel files and pre-existing browser warnings/history. No further implementation or tests are planned in this pass.
 
 ## Native OpenTelemetry Transport → Ingress — runtime certified
 

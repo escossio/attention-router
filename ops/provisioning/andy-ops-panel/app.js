@@ -8,6 +8,12 @@ const state = {
 };
 
 const observabilitySources = {
+  network: {
+    key: "network_osi_url",
+    frame: "#network-frame",
+    status: "#network-state",
+    open: "#network-open",
+  },
   goaccess: {
     key: "goaccess_url",
     frame: "#goaccess-frame",
