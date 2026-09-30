@@ -8,7 +8,6 @@ import json
 import pathlib
 import re
 import sqlite3
-import sys
 
 SCHEMA_VERSION = 1
 HOST_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
