@@ -46,15 +46,18 @@ def lock_client_device_by_id(session: Session, *, device_id: str) -> ClientDevic
     )
 
 
-def create_session_challenge(
+def create_or_reuse_session_challenge(
     session: Session,
     *,
     device: ClientDeviceRow,
+    challenge_id: str,
     requested_tenant_id: str | None,
     challenge_digest: str,
     now: datetime,
     expires_at: datetime,
 ) -> ClientSessionChallengeRow:
+    # The caller holds the device row FOR UPDATE, serializing reuse and insertion
+    # for all challenges that belong to the same enrolled device.
     pending = list(session.scalars(
         select(ClientSessionChallengeRow)
         .where(ClientSessionChallengeRow.device_id == device.id, ClientSessionChallengeRow.state == "PENDING")
@@ -62,14 +65,24 @@ def create_session_challenge(
         .with_for_update()
         .execution_options(populate_existing=True)
     ).all())
-    for existing in pending:
-        if _aware(existing.expires_at, now) > now:
+    unexpired = [existing for existing in pending if _aware(existing.expires_at, now) > now]
+    if unexpired:
+        if len(unexpired) != 1:
             raise SessionChallengeConflict()
+        existing = unexpired[0]
+        if (
+            existing.human_identity_id != device.human_identity_id
+            or existing.requested_tenant_id != requested_tenant_id
+        ):
+            raise SessionChallengeConflict()
+        return existing
+
+    for existing in pending:
         existing.state = "REJECTED"
         existing.rejected_at = now
 
     row = ClientSessionChallengeRow(
-        id="csc_" + secrets.token_urlsafe(24),
+        id=challenge_id,
         device_id=device.id,
         human_identity_id=device.human_identity_id,
         requested_tenant_id=requested_tenant_id,
