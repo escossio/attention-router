@@ -171,6 +171,7 @@ from attention_router.infrastructure.repository import (
     to_domain_interaction,
 )
 from attention_router.observability.tracing import (
+    extract_trace_context,
     inject_trace_context,
     message_trace,
     safe_set_attribute,
@@ -1475,17 +1476,23 @@ def receive_inbound_event(
         if settings.agent_decision_pipeline_enabled:
             interaction = session.get(InteractionRow, result["id"])
             if not defer_decision_for_grace(session, receipt, interaction):
-                carrier: dict[str, str] = {}
-                inject_trace_context(carrier)
-                session.add(
-                    QueueRow(
-                        id=f"decision:{receipt.id}",
-                        kind="decision",
-                        payload={"event_id": receipt.id, "interaction_id": result["id"], "observability": {"trace_context": carrier}},
-                        status="PENDING",
-                        created_at=now_utc(),
+                with start_span("queue.enqueue") as queue_span:
+                    carrier: dict[str, str] = {}
+                    inject_trace_context(carrier)
+                    session.add(
+                        QueueRow(
+                            id=f"decision:{receipt.id}",
+                            kind="decision",
+                            payload={
+                                "event_id": receipt.id,
+                                "interaction_id": result["id"],
+                                "observability": {"trace_context": carrier},
+                            },
+                            status="PENDING",
+                            created_at=now_utc(),
+                        )
                     )
-                )
+                    set_outcome(queue_span, "ENQUEUED")
         if settings.persistent_memory_enabled and (
             not settings.persistent_memory_canary_binding_id or
             settings.persistent_memory_canary_binding_id == contact_id
@@ -2556,7 +2563,11 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                 raise RuntimeError("forced outbox failure")
             if row.destination == "wwebjs" and row.action_type in {"wwebjs_outbound_text", "wwebjs_manual_reply_text"}:
                 external_attempted = True
-                with start_span("transport.send") as transport_span:
+                trace_carrier = ((row.payload or {}).get("observability") or {}).get("trace_context")
+                with start_span(
+                    "transport.send",
+                    context=extract_trace_context(trace_carrier),
+                ) as transport_span:
                     result = wwebjs_outbound.dispatch_outbox(row)
                     provider_confirmed = result.status in {"sent", "already_sent"}
                     safe_set_attribute(transport_span, "attention.delivery_type", "wwebjs")
@@ -2584,7 +2595,11 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                     from attention_router.application.voice_tts import validate_voice_outbox
                     validate_voice_outbox(session, row, intent)
                 external_attempted = True
-                with start_span("transport.send") as transport_span:
+                trace_carrier = ((row.payload or {}).get("observability") or {}).get("trace_context")
+                with start_span(
+                    "transport.send",
+                    context=extract_trace_context(trace_carrier),
+                ) as transport_span:
                     result = local_transport_outbound.dispatch_outbox(row)
                     provider_confirmed = result.status in {"sent", "already_sent"}
                     safe_set_attribute(transport_span, "attention.delivery_type", "local_transport")

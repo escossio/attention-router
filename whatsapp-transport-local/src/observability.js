@@ -1,5 +1,5 @@
 const TRACEPARENT = /^00-[0-9a-f]{32}-[0-9a-f]{16}-(?:00|01)$/;
-const SPAN_NAMES = new Set(['transport.receive', 'transport.ingress_attempt']);
+const SPAN_NAMES = new Set(['transport.receive', 'transport.ingress_attempt', 'transport.outbound_send']);
 const RESULTS = new Set([
   'ACCEPTED', 'AUTH_FAILED', 'BAD_PAYLOAD', 'BLOCKED', 'CONFLICT',
   'DELIVERED', 'DUPLICATE', 'FAILED', 'IGNORED', 'MISSING', 'RETRY',
@@ -31,6 +31,9 @@ function createNoopTransportTracing() {
         delete headers.baggage;
       }
       return headers;
+    },
+    extractTraceparent() {
+      return null;
     },
     async forceFlush() {
       return false;
@@ -326,6 +329,33 @@ function createTransportTracing(config = {}, deps = {}) {
       return headers;
     };
 
+    const extractTraceparent = (headers) => {
+      try {
+        if (!headers || typeof headers !== 'object') return null;
+        const raw = headers.traceparent;
+        const parent = Array.isArray(raw) ? raw[0] : raw;
+        if (typeof parent !== 'string' || !TRACEPARENT.test(parent)) return null;
+        const carrier = { traceparent: parent };
+        const extracted = propagator.extract(api.ROOT_CONTEXT, carrier, {
+          get(target, key) {
+            return key === 'traceparent' ? target.traceparent : undefined;
+          },
+          keys() {
+            return ['traceparent'];
+          },
+        });
+        const spanContext = api.trace.getSpanContext(extracted);
+        if (!spanContext || !api.isSpanContextValid(spanContext)
+            || spanContext.traceId !== parent.slice(3, 35)
+            || spanContext.spanId !== parent.slice(36, 52)) {
+          return null;
+        }
+        return extracted;
+      } catch {
+        return null;
+      }
+    };
+
     const forceFlush = async (timeoutMillis = flushTimeout) => {
       try {
         const timeout = boundedInteger(timeoutMillis, flushTimeout, 0, 10000);
@@ -346,6 +376,7 @@ function createTransportTracing(config = {}, deps = {}) {
       enabled: true,
       withSpan,
       injectTraceparent,
+      extractTraceparent,
       forceFlush,
       shutdown,
     };

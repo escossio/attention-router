@@ -18,6 +18,11 @@ Updated: 2026-09-30
 - Private checkpoint, inventory, screenshots, credentials and raw evidence remain outside Git. New NETWORK / OSI artifacts contain configurable/synthetic data only.
 - Follow-ups only: investigate and recover the actual physical association/runtime in a separately authorized pass; optional cleanup of unused earlier panel files and pre-existing browser warnings/history. No further implementation or tests are planned in this pass.
 
+## Native OpenTelemetry outbound — PR #197
+
+- Python sends only the active `traceparent` outside the unchanged signed body; Node continues it around the real send with the shared configured tracer.
+- Offline validation: 156 focused Python tests, 17 Node observability/server tests, compile and Ruff PASS. Integrated coverage proves remote parent, privacy, durable replay and no send span for rejected media. Physical outbound certification remains pending deployment of this candidate.
+
 ## Native OpenTelemetry Transport → Ingress — runtime certified
 
 - PR #191 serialized recovery after existing-page attach; PR #192 fixed compatibility with Puppeteer's immutable ESM namespace while preserving canonical-page revalidation and fail-closed authority. Both merged through protected main with all required checks green; #192 passed 444 distributed PostgreSQL tests.
