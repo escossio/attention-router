@@ -531,6 +531,7 @@ class ClientCommandService:
                         utterance=stripped,
                         source_channel=CLIENT_COMMAND_SOURCE_CHANNEL,
                         conversation_key_hash=conversation_key_hash,
+                        now=current,
                     )
                 except Exception:
                     evidence = ()
