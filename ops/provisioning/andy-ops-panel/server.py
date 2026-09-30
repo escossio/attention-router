@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -31,16 +31,22 @@ def _observability_url(name: str) -> str | None:
     if not raw:
         return None
     parsed = urlsplit(raw)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if (parsed.scheme not in {"http", "https"} or not parsed.netloc
+            or parsed.username or parsed.password
+            or not re.fullmatch(r"[A-Za-z0-9.:-]+", parsed.hostname or "")
+            or any(re.search(r"(?i)(token|password|secret|api.key|authorization)", key)
+                   for key, _ in parse_qsl(parsed.query))):
         return None
-    return raw.rstrip("/") + "/"
+    return raw if parsed.query else raw.rstrip("/") + "/"
 
 
 GOACCESS_URL = _observability_url("ANDY_OPS_GOACCESS_URL")
 DOZZLE_URL = _observability_url("ANDY_OPS_DOZZLE_URL")
+NETWORK_OSI_URL = _observability_url("ANDY_OPS_NETWORK_OSI_URL")
 OBSERVABILITY_CONFIG = {
     "goaccess_url": GOACCESS_URL,
     "dozzle_url": DOZZLE_URL,
+    "network_osi_url": NETWORK_OSI_URL,
 }
 FRAME_SOURCES = sorted(
     {

@@ -1,0 +1,7 @@
+# Existing networks only. Apply on a future planned ROC deployment.
+# The initial rollout uses docker network connect without recreating containers.
+services:
+  roc-zabbix-server:
+    networks:
+      - roc-monitoring
+      - roc-edge

@@ -1,0 +1,2764 @@
+{
+  "uid": "roc-network-osi",
+  "title": "ROC-NETWORK / OSI",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "timezone": "browser",
+  "time": {
+    "from": "now-10m",
+    "to": "now"
+  },
+  "tags": [
+    "roc",
+    "network",
+    "osi"
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "NETWORK HEALTH",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "targets": [],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "L1 PHYSICAL",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 8,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "NETWORK HEALTH: L1 PHYSICAL"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "UNKNOWN",
+                  "color": "gray",
+                  "index": 0
+                },
+                "1": {
+                  "text": "PASS",
+                  "color": "green",
+                  "index": 1
+                },
+                "2": {
+                  "text": "DEGRADED",
+                  "color": "orange",
+                  "index": 2
+                },
+                "3": {
+                  "text": "FAIL",
+                  "color": "red",
+                  "index": 3
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "L2 DATA LINK",
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 8,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "NETWORK HEALTH: L2 DATA LINK"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "UNKNOWN",
+                  "color": "gray",
+                  "index": 0
+                },
+                "1": {
+                  "text": "PASS",
+                  "color": "green",
+                  "index": 1
+                },
+                "2": {
+                  "text": "DEGRADED",
+                  "color": "orange",
+                  "index": 2
+                },
+                "3": {
+                  "text": "FAIL",
+                  "color": "red",
+                  "index": 3
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "L3 NETWORK",
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 8,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "NETWORK HEALTH: L3 NETWORK"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "UNKNOWN",
+                  "color": "gray",
+                  "index": 0
+                },
+                "1": {
+                  "text": "PASS",
+                  "color": "green",
+                  "index": 1
+                },
+                "2": {
+                  "text": "DEGRADED",
+                  "color": "orange",
+                  "index": 2
+                },
+                "3": {
+                  "text": "FAIL",
+                  "color": "red",
+                  "index": 3
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "DOMAINS",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "NETWORK: domains"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "COMPLETE",
+      "gridPos": {
+        "x": 6,
+        "y": 5,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "NETWORK: complete"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "INCOMPLETE",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "NETWORK: incomplete"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "REACHABLE",
+      "gridPos": {
+        "x": 18,
+        "y": 5,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "NETWORK: reachable"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "L1 \u2014 PHYSICAL",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 1
+      },
+      "targets": [],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Declared trunk \u00b7 association below",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "2",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "L1 PHYSICAL: parent/trunk"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^(?!Time$).+/",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Link / carrier",
+      "gridPos": {
+        "x": 6,
+        "y": 10,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "L1 PHYSICAL: oper"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 0
+                },
+                "2": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 1
+                },
+                "0": {
+                  "text": "UNKNOWN",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Admin",
+      "gridPos": {
+        "x": 9,
+        "y": 10,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "L1 PHYSICAL: admin"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "ENABLED",
+                  "color": "green",
+                  "index": 0
+                },
+                "2": {
+                  "text": "DISABLED",
+                  "color": "red",
+                  "index": 1
+                },
+                "0": {
+                  "text": "UNKNOWN",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Speed \u00b7 Mbps",
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "L1 PHYSICAL: speed"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NO LINK",
+                  "color": "red",
+                  "index": 0
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Duplex",
+      "gridPos": {
+        "x": 15,
+        "y": 10,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "2",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "L1 PHYSICAL: duplex"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "1h",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^(?!Time$).+/",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "RX errors / s",
+      "gridPos": {
+        "x": 18,
+        "y": 10,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "L1 PHYSICAL: rx_errors"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "RX discards / s",
+      "gridPos": {
+        "x": 21,
+        "y": 10,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "L1 PHYSICAL: rx_discards"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "90s",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Parent RX/TX, errors and discards \u00b7 30s",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "/^L1 PHYSICAL: (rx|tx|rx_errors|tx_errors|rx_discards|tx_discards)$/"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Parent association \u00b7 read-only RouterOS evidence",
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "2",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "NETWORK: Parent / trunk evidence"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "timeFrom": "1h",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^(?!Time$).+/",
+          "values": false
+        },
+        "text": {
+          "valueSize": 15
+        }
+      },
+      "description": "Topology is UNKNOWN after one hour without a new RouterOS snapshot. ifStack and duplex were not exposed; neither is assumed."
+    },
+    {
+      "id": 19,
+      "type": "table",
+      "title": "Physical members of the actual VLAN parent and declared trunk",
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "/^PHYSICAL .* \\/ (ADMIN|OPER|SPEED|RX_ERRORS|TX_ERRORS|RX_DISCARDS|TX_DISCARDS)$/"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "2",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "/^PHYSICAL .* \\/ (INTERFACE|ROLE)$/"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OPER"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "1": {
+                        "text": "UP",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "2": {
+                        "text": "DOWN",
+                        "color": "red",
+                        "index": 1
+                      },
+                      "0": {
+                        "text": "UNKNOWN",
+                        "color": "gray",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "SPEED"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "Mbps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "INTERFACE"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ROLE"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          }
+        ]
+      },
+      "timeFrom": "10m",
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "sortBy": [
+          {
+            "displayName": "VLAN",
+            "desc": false
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "reduce",
+          "filter": {
+            "id": "byRefId",
+            "options": "A"
+          },
+          "options": {
+            "reducers": [
+              "last"
+            ],
+            "includeTimeField": false,
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "Last",
+                "destinationType": "string"
+              }
+            ]
+          }
+        },
+        {
+          "id": "reduce",
+          "filter": {
+            "id": "byRefId",
+            "options": "B"
+          },
+          "options": {
+            "reducers": [
+              "last"
+            ],
+            "includeTimeField": false,
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Field",
+            "format": "regexp",
+            "regExp": "/^PHYSICAL (?<VLAN>[0-9]+) \\/ (?<COLUMN>.+)$/",
+            "replace": false
+          }
+        },
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "VLAN",
+            "columnField": "COLUMN",
+            "valueField": "Last"
+          }
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "VLAN\\COLUMN",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "ADMIN",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "OPER",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "SPEED",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "RX_ERRORS",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "TX_ERRORS",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "RX_DISCARDS",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "TX_DISCARDS",
+                "destinationType": "number"
+              }
+            ]
+          }
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "type": "exclude",
+            "match": "any",
+            "filters": [
+              {
+                "fieldName": "ROLE",
+                "config": {
+                  "id": "equal",
+                  "options": {
+                    "value": "Other / not asserted"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "VLAN\\COLUMN": 0,
+              "INTERFACE": 1,
+              "ROLE": 2,
+              "ADMIN": 3,
+              "OPER": 4,
+              "SPEED": 5,
+              "RX_ERRORS": 6,
+              "TX_ERRORS": 7,
+              "RX_DISCARDS": 8,
+              "TX_DISCARDS": 9
+            },
+            "renameByName": {
+              "VLAN\\COLUMN": "ifIndex"
+            }
+          }
+        }
+      ],
+      "description": "Live Zabbix LLD values. Blank or missing information is UNKNOWN. Metadata is discovered every 5 minutes; live metrics and neighbors every 30 seconds."
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "L2 \u2014 DATA LINK",
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 1
+      },
+      "targets": [],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "VLAN | INTERFACE | ifIndex | OPER | ARP/NEIGHBOR | MAC",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "/^VLAN .* \\/ (ifIndex|OPER|ARP/NEIGHBOR)$/"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "2",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "/^VLAN .* \\/ (INTERFACE|MAC)$/"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OPER"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "1": {
+                        "text": "UP",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "2": {
+                        "text": "DOWN",
+                        "color": "red",
+                        "index": 1
+                      },
+                      "0": {
+                        "text": "UNKNOWN",
+                        "color": "gray",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ARP/NEIGHBOR"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "UNKNOWN",
+                        "color": "gray",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "COMPLETE",
+                        "color": "green",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "INCOMPLETE",
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "ABSENT",
+                        "color": "red",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "INTERFACE"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MAC"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          }
+        ]
+      },
+      "timeFrom": "10m",
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "sortBy": [
+          {
+            "displayName": "VLAN",
+            "desc": false
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "reduce",
+          "filter": {
+            "id": "byRefId",
+            "options": "A"
+          },
+          "options": {
+            "reducers": [
+              "last"
+            ],
+            "includeTimeField": false,
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "Last",
+                "destinationType": "string"
+              }
+            ]
+          }
+        },
+        {
+          "id": "reduce",
+          "filter": {
+            "id": "byRefId",
+            "options": "B"
+          },
+          "options": {
+            "reducers": [
+              "last"
+            ],
+            "includeTimeField": false,
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Field",
+            "format": "regexp",
+            "regExp": "/^VLAN (?<VLAN>[0-9]+) \\/ (?<COLUMN>.+)$/",
+            "replace": false
+          }
+        },
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "VLAN",
+            "columnField": "COLUMN",
+            "valueField": "Last"
+          }
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "VLAN\\COLUMN",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "ifIndex",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "OPER",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "ARP/NEIGHBOR",
+                "destinationType": "number"
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "VLAN\\COLUMN": 0,
+              "INTERFACE": 1,
+              "ifIndex": 2,
+              "OPER": 3,
+              "ARP/NEIGHBOR": 4,
+              "MAC": 5
+            },
+            "renameByName": {
+              "VLAN\\COLUMN": "VLAN"
+            }
+          }
+        }
+      ],
+      "description": "Live Zabbix LLD values. Blank or missing information is UNKNOWN. Metadata is discovered every 5 minutes; live metrics and neighbors every 30 seconds."
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "L3 \u2014 NETWORK",
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 24,
+        "h": 1
+      },
+      "targets": [],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "VLAN | NETWORK | GATEWAY | ENDPOINT | ARP | ICMP | LOSS | RTT",
+      "gridPos": {
+        "x": 0,
+        "y": 45,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "/^VLAN .* \\/ (ARP/NEIGHBOR|ICMP|LOSS|RTT)$/"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "queryType": "2",
+          "group": {
+            "filter": "Andy Runtime / Network"
+          },
+          "host": {
+            "filter": "MikroTik - Andy Runtime Network"
+          },
+          "item": {
+            "filter": "/^VLAN .* \\/ (NETWORK|GATEWAY|ENDPOINT)$/"
+          },
+          "application": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "functions": [],
+          "textFilter": "",
+          "resultFormat": "time_series",
+          "schema": 12,
+          "options": {
+            "useZabbixValueMapping": false,
+            "disableDataAlignment": true,
+            "useTrends": "false",
+            "showDisabledItems": false,
+            "skipEmptyValues": false
+          }
+        }
+      ],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ARP/NEIGHBOR"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "UNKNOWN",
+                        "color": "gray",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "COMPLETE",
+                        "color": "green",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "INCOMPLETE",
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "ABSENT",
+                        "color": "red",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ICMP"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "UNKNOWN",
+                        "color": "gray",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "UNREACHABLE",
+                        "color": "red",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "REACHABLE",
+                        "color": "green",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "LOSS"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RTT"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "NO RESPONSE",
+                        "color": "gray",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "NETWORK"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GATEWAY"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ENDPOINT"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          }
+        ]
+      },
+      "timeFrom": "10m",
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "sortBy": [
+          {
+            "displayName": "VLAN",
+            "desc": false
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "reduce",
+          "filter": {
+            "id": "byRefId",
+            "options": "A"
+          },
+          "options": {
+            "reducers": [
+              "last"
+            ],
+            "includeTimeField": false,
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "Last",
+                "destinationType": "string"
+              }
+            ]
+          }
+        },
+        {
+          "id": "reduce",
+          "filter": {
+            "id": "byRefId",
+            "options": "B"
+          },
+          "options": {
+            "reducers": [
+              "last"
+            ],
+            "includeTimeField": false,
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Field",
+            "format": "regexp",
+            "regExp": "/^VLAN (?<VLAN>[0-9]+) \\/ (?<COLUMN>.+)$/",
+            "replace": false
+          }
+        },
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "VLAN",
+            "columnField": "COLUMN",
+            "valueField": "Last"
+          }
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "VLAN\\COLUMN",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "ARP/NEIGHBOR",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "ICMP",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "LOSS",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "RTT",
+                "destinationType": "number"
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "VLAN\\COLUMN": 0,
+              "NETWORK": 1,
+              "GATEWAY": 2,
+              "ENDPOINT": 3,
+              "ARP/NEIGHBOR": 4,
+              "ICMP": 5,
+              "LOSS": 6,
+              "RTT": 7
+            },
+            "renameByName": {
+              "VLAN\\COLUMN": "VLAN"
+            }
+          }
+        }
+      ],
+      "description": "Live Zabbix LLD values. Blank or missing information is UNKNOWN. Metadata is discovered every 5 minutes; live metrics and neighbors every 30 seconds."
+    },
+    {
+      "id": 24,
+      "type": "text",
+      "title": "Evidence and causality",
+      "gridPos": {
+        "x": 0,
+        "y": 57,
+        "w": 24,
+        "h": 3
+      },
+      "targets": [],
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "roc-zabbix"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "UNKNOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "MikroTik \u2192 SNMPv3 authPriv \u2192 Zabbix ROC \u2192 Grafana ROC \u2192 Andy Ops / MGMT. Native ICMP: 10s, 3 packets per cycle, unavailability after 3 consecutive cycles. Trigger dependencies: L1_PARENT_DOWN \u2192 L2_DOMAIN_DOWN \u2192 L3_NEIGHBOR_INCOMPLETE \u2192 L3_ENDPOINT_UNREACHABLE. Downstream measurements remain visible when alerts are suppressed. UNKNOWN never means PASS. Browser refresh does not trigger SNMP polling."
+      }
+    }
+  ]
+}

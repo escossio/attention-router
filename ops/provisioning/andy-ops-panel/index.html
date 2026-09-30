@@ -25,6 +25,7 @@
     <button class="tab" data-tab="chat" type="button">CHAT / CONSOLE</button>
     <button class="tab" data-tab="goaccess" type="button">HTTP / GOACCESS</button>
     <button class="tab" data-tab="dozzle" type="button">CONTAINERS / DOZZLE</button>
+    <button class="tab" data-tab="network" type="button">NETWORK / OSI</button>
   </nav>
 
   <main>
@@ -128,6 +129,23 @@
       </section>
       <div class="observability-frame-shell">
         <iframe id="dozzle-frame" title="Dozzle Docker logs" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </section>
+
+    <section id="network-view" class="view observability-view">
+      <section class="observability-hero">
+        <div>
+          <span class="section-label">NETWORK HEALTH</span>
+          <h2>ROC-NETWORK / OSI</h2>
+          <p>Camadas física, enlace e rede dos domains ANDY210–217. Acesso pela sessão autenticada do Grafana ROC.</p>
+        </div>
+        <div class="observability-actions">
+          <span id="network-state" class="source-state">AGUARDANDO</span>
+          <a id="network-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+        </div>
+      </section>
+      <div class="observability-frame-shell">
+        <iframe id="network-frame" title="ROC-NETWORK / OSI" loading="lazy" referrerpolicy="no-referrer"></iframe>
       </div>
     </section>
 

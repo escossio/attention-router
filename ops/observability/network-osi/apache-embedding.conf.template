@@ -1,0 +1,6 @@
+# Install inside the existing authenticated Grafana vhost, after its proxy rules.
+# Substitute FRAME_ANCESTORS with exact, validated MGMT origins. No wildcard.
+# Both Apache Basic Auth and Grafana session authentication remain required.
+Header unset X-Frame-Options
+Header always unset X-Frame-Options
+Header always set Content-Security-Policy "frame-ancestors 'self' {{FRAME_ANCESTORS}}"
