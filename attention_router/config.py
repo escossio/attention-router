@@ -1,4 +1,6 @@
-from pydantic import Field, model_validator
+import math
+
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -165,6 +167,7 @@ class Settings(BaseSettings):
     otel_batch_max_export_batch_size: int = 512
     otel_batch_schedule_delay_millis: int = 500
     otel_export_timeout_millis: int = 5000
+    otel_flush_timeout_millis: int = 1000
 
     # Platform Evolution controls. Environment names are the upper-case field names.
     health_poll_interval: int = 10
@@ -200,6 +203,43 @@ class Settings(BaseSettings):
     disk_block_new_heavy_tests: int = 95
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator(
+        "otel_tracing_enabled", "otel_service_name", "otel_service_version",
+        "otel_exporter_otlp_endpoint", "otel_exporter_otlp_protocol",
+        "otel_resource_attributes", "otel_traces_sampler", "otel_traces_sampler_arg",
+        "otel_batch_max_queue_size", "otel_batch_max_export_batch_size",
+        "otel_batch_schedule_delay_millis", "otel_export_timeout_millis",
+        "otel_flush_timeout_millis", mode="wrap",
+    )
+    @classmethod
+    def best_effort_otel_setting(cls, value, handler, info):
+        """Malformed telemetry settings must not prevent application startup."""
+        try:
+            result = handler(value)
+            limits = {
+                "otel_batch_max_queue_size": (1, 8192),
+                "otel_batch_max_export_batch_size": (1, 1024),
+                "otel_batch_schedule_delay_millis": (10, 60000),
+                "otel_export_timeout_millis": (1, 10000),
+                "otel_flush_timeout_millis": (0, 10000),
+                "otel_traces_sampler_arg": (0, 1),
+            }
+            if info.field_name in limits:
+                low, high = limits[info.field_name]
+                if not math.isfinite(result) or not low <= result <= high:
+                    raise ValueError("Invalid telemetry limit")
+            if info.field_name == "otel_exporter_otlp_protocol" and result != "http/protobuf":
+                raise ValueError("Unsupported telemetry protocol")
+            if info.field_name == "otel_traces_sampler" and result not in {
+                "always_on", "always_off", "parentbased_traceidratio",
+            }:
+                raise ValueError("Unsupported telemetry sampler")
+            return result
+        except Exception:
+            # This field follows the enable flag; disable the whole telemetry setup.
+            info.data["otel_tracing_enabled"] = False
+            return cls.model_fields[info.field_name].default
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":

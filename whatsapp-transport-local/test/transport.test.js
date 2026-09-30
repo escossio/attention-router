@@ -93,7 +93,9 @@ async function transportAuthorityHarness(options = {}) {
 
     async getState() { return options.getState ? options.getState() : 'CONNECTED'; }
 
-    async initialize() {}
+    async initialize() {
+      if (options.initialize) return options.initialize();
+    }
   }
   const verificationCalls = [];
   const logs = [];
@@ -138,7 +140,7 @@ async function transportAuthorityHarness(options = {}) {
       broker: { consumed: () => true, restore() {} }, dispose() {},
     }),
     probeBrowserDebugUrl: async () => true,
-    recoverConnectedPage: async () => false,
+    recoverConnectedPage: options.recoverConnectedPage || (async () => false),
     verifyConfiguredOwner: verifyOwner,
     ownerAuthorityReverifyIntervalMs: options.ownerAuthorityReverifyIntervalMs,
     ownerAuthorityReverifyTimeoutMs: options.ownerAuthorityReverifyTimeoutMs,
@@ -152,8 +154,28 @@ async function transportAuthorityHarness(options = {}) {
     normalized,
     status: transport.status,
     verificationCalls,
+    initPromise: transport.initPromise,
   };
 }
+
+test('startTransport waits for attach initialization before connected-page recovery', async () => {
+  const initialization = deferred();
+  let recoveryCalls = 0;
+  const harness = await transportAuthorityHarness({
+    initialize: () => initialization.promise,
+    recoverConnectedPage: async () => {
+      recoveryCalls += 1;
+      return false;
+    },
+  });
+
+  await flushMicrotasks();
+  assert.equal(recoveryCalls, 0);
+
+  initialization.resolve();
+  await harness.initPromise;
+  assert.equal(recoveryCalls, 1);
+});
 
 async function classifyObservedMessage(harness, message) {
   const start = harness.logs.length;

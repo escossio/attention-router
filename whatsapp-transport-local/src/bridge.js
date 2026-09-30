@@ -1,6 +1,7 @@
 const { normalizeInboundMessage } = require('./inbound');
 const { enqueuePending, deliverPendingFile } = require('./spool');
 const { captureInboundMedia } = require('./media');
+const { createNoopTransportTracing } = require('./observability');
 
 function isLocalForwardTarget(url, allowedHosts = ['127.0.0.1', 'localhost', '::1']) {
   try {
@@ -11,11 +12,23 @@ function isLocalForwardTarget(url, allowedHosts = ['127.0.0.1', 'localhost', '::
   }
 }
 
+function tracingResult(result) {
+  if (result?.forwarded === true) return 'DELIVERED';
+  if (result?.status === 'auth_failed') return 'AUTH_FAILED';
+  if (result?.status === 'conflict') return 'CONFLICT';
+  if (result?.status === 'bad_payload') return 'BAD_PAYLOAD';
+  if (result?.status === 'retry') return 'RETRY';
+  if (result?.status === 'missing') return 'MISSING';
+  if (String(result?.status || '').startsWith('ignored')) return 'IGNORED';
+  return 'BLOCKED';
+}
+
 function createInboundBridge(config, logger = console, deps = {}) {
   const fetchImpl = deps.fetchImpl || fetch;
   const onCounters = deps.onCounters || (() => {});
+  const observability = deps.observability || createNoopTransportTracing();
 
-  async function handleMessage(message, options = {}) {
+  async function handleMessageOperation(message, options = {}, receiveSpan = null) {
     const receivedAt = new Date().toISOString();
     const fromMe = Boolean(message?.fromMe);
     const ownerSelfChat = Boolean(message?.__ownerSelfChat);
@@ -59,7 +72,13 @@ function createInboundBridge(config, logger = console, deps = {}) {
       Object.entries(normalized).filter(([key]) => key !== 'identity'),
     );
     const pending = enqueuePending(config, normalized, wirePayload);
-    const deliveryPromise = deliverPendingFile(config, pending.file, logger, fetchImpl);
+    const deliveryPromise = deliverPendingFile(
+      config,
+      pending.file,
+      logger,
+      fetchImpl,
+      { observability, parentContext: receiveSpan?.context || null },
+    );
     const isVoice = ['ptt', 'audio'].includes(
       String(normalized.message_type || '').toLowerCase(),
     );
@@ -78,6 +97,14 @@ function createInboundBridge(config, logger = console, deps = {}) {
       onCounters({ last_inbound_error_at: new Date().toISOString() });
     }
     return { status: delivery.status, normalized, forwarded: false, delivery, media };
+  }
+
+  async function handleMessage(message, options = {}) {
+    return observability.withSpan('transport.receive', null, async (receiveSpan) => {
+      const result = await handleMessageOperation(message, options, receiveSpan);
+      receiveSpan.setResult(tracingResult(result));
+      return result;
+    });
   }
 
   return {

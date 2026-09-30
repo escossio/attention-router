@@ -1,6 +1,22 @@
 # Project status
 
-Updated: 2026-09-22
+Updated: 2026-09-25
+
+## Native OpenTelemetry outbound — PR #197
+
+- Python sends only the active `traceparent` outside the unchanged signed body; Node continues it around the real send with the shared configured tracer.
+- Offline validation: 156 focused Python tests, 17 Node observability/server tests, compile and Ruff PASS. Integrated coverage proves remote parent, privacy, durable replay and no send span for rejected media. Physical outbound certification remains pending deployment of this candidate.
+
+## Native OpenTelemetry Transport → Ingress — runtime certified
+
+- PR #191 serialized recovery after existing-page attach; PR #192 fixed compatibility with Puppeteer's immutable ESM namespace while preserving canonical-page revalidation and fail-closed authority. Both merged through protected main with all required checks green; #192 passed 444 distributed PostgreSQL tests.
+- Runtime source `fedd841bb660f0ff820ae0ff218d55b18e7a3ec8` is READY with native OTel enabled. Internal Ingress remains READY with native OTel on its separately deployed release.
+- The initial attach failure was rolled back safely. The corrected rollout preserved the browser PID/session across both attempts and restored connected client and owner authority READY.
+- A real inbound canary was delivered and forwarded. Both components exported after the canary through the source-restricted host OTLP edge, and Tempo returned the native traces.
+- Direct span-ID checks proved the Transport receive → attempt → remote Ingress chain and the separate canonical message root with its exact Span Link. Andy correlation identity and OTel trace identity remain distinct.
+- Native attributes and the complete trace privacy audit PASS. The independent ROC reconstruction bridge remained healthy without restart and produced a recent trace.
+- Sampling remains `parentbased_traceidratio` at `1.0`; steady-state policy remains a separate operational decision. Raw evidence is retained privately; the public record is sanitized.
+- See [runtime certification, 2026-09-25](docs/observability/NATIVE_OTEL_RUNTIME_CERTIFICATION_20260925.md).
 
 ## Andy Ops Live Supervisor V1
 
@@ -231,3 +247,40 @@ poster beside it. It is synthetic-only and offline: no real names, phone
 numbers, messages, hostnames, private paths, secrets, or provider calls are
 used. The renderer is `scripts/render_public_demo.py` and the README links to
 the assets and `docs/demo.md`.
+
+## Native OpenTelemetry audit — 2026-09-24
+
+- Read-only native OpenTelemetry audit completed against the current runtime evidence and preserved in [docs/observability/AUDITORIA_OTEL_NATIVO_20260924.md](docs/observability/AUDITORIA_OTEL_NATIVO_20260924.md).
+- No native tracing implementation, runtime change, restart, migration, database mutation, push or PR was performed by the audit.
+- The audit found an existing partial native OpenTelemetry foundation and recommends hardening that foundation before enabling the Transport → Ingress boundary.
+- First hardening gate: attribute/resource allowlist, removal of full exception capture and duplicate capture, no-op fallback preserving functional exceptions, invalid-context isolation, and separate exporter/flush timeouts.
+- Native OpenTelemetry implementation must proceed from a clean GitHub-based worktree and be certified by pull request checks before runtime rollout.
+
+## Native OpenTelemetry first hardening gate — 2026-09-24
+
+- Gate 1 locally certified: explicit key/value allowlists for spans and Resources, sanitized/idempotent error metadata, fail-open no-op fallback, isolated context extraction/restoration and separate exporter/flush timeouts. No new functional instrumentation.
+- Working on `feat/native-opentelemetry-v1`; the pre-existing audit and status changes are preserved. Local ignored backups were made before editing.
+- Expanded `tests/test_tracing.py` with synthetic privacy checks across exported surfaces, original exception identity/chain preservation, failure injection, valid/invalid context, disabled/global-provider isolation, configuration parsing, bounded batch/flush and concurrent initialization cases.
+- Validation: targeted `compileall`, `git diff --check` and Ruff 0.6.3 PASS; offline `tests/test_tracing.py` 132/132 PASS after the known SQLite metadata preload. PR #185 was merged into `main` as `296eb86647578f7eef08973de569743654becfbd` after all required GitHub checks passed, including the repository Python suite and the distributed PostgreSQL gate (444 tests).
+- Residuals: allowlists intentionally drop unapproved values; SDK shutdown/retry total duration is not certified by the independent flush budget. No Collector/Tempo or E2E certification.
+- No dependency pins, runtime, containers, Generic Worker, database or Transport changes were part of Gate 1.
+
+## Native OpenTelemetry Internal Ingress admission — Etapa 1A — 2026-09-24
+
+- Candidate branch: `feat/native-otel-ingress-admission-v1`, based on merged Gate 1 at `296eb86647578f7eef08973de569743654becfbd`.
+- Internal Ingress now accepts optional W3C `traceparent` only after HMAC, payload and tenant validation, passes it explicitly across the dedicated executor, and creates `ingress.accept` as a child of a valid remote attempt.
+- Canonical `attention.message` starts from explicit empty context, receives a Link to the remote attempt, and records the Andy `roc.correlation_id` only after the functional receive path creates or recovers it. Replay keeps the same Andy correlation while distinct HTTP attempts may have distinct trace identities.
+- Invalid/absent carriers fail open to clean local traces; unauthenticated requests cannot create spans from a supplied trace header. Body, HMAC, payload, idempotency, database schema and functional correlation semantics are unchanged.
+- Local targeted validation: `tests/test_internal_ingress.py` + `tests/test_tracing.py` = 156 PASS with the known SQLite model preload; Ruff on the changed Python files = PASS. The normal targeted run still exposes the pre-existing `human_identities` fixture-registration defect before affected tests execute.
+- PR #186 was merged into `main` as `9d53b755be36986d9f46857bd1d7bd90368c4492` after all eight checks passed, including the full Python suite and distributed PostgreSQL gate (444 tests). No runtime rollout was performed by the merge.
+
+## Native OpenTelemetry Transport attempt — Etapa 1B — 2026-09-24
+
+- Candidate branch: `feat/native-otel-transport-attempt-v1`, based on merged Etapa 1A at `9d53b755be36986d9f46857bd1d7bd90368c4492`.
+- Transport uses manual OpenTelemetry only: `@opentelemetry/api` 1.9.1, core/resources/sdk-trace 2.11.0 and OTLP HTTP/protobuf exporter 0.222.0. No automatic instrumentation, global context manager, Puppeteer hook or whatsapp-web.js hook is added.
+- `transport.receive` wraps the bridge operation once. Immediate `transport.ingress_attempt` is an explicit child; background spool retries without transient context start a clean local attempt trace. Durable context across restart remains a later stage.
+- The persisted spool JSON and HMAC contract are unchanged. The exact body Buffer is signed and sent; W3C `traceparent` is injected only as a lateral HTTP header, with no `tracestate` or `baggage`.
+- Resource identity is fixed to `service.name=attention-router-transport`; span attributes are closed to finite operational values. Exception messages, payload, phone identifiers and secrets are not exported.
+- Tracing disabled, missing endpoint or invalid telemetry configuration degrades to no-op. Exporter failures are sanitized and cannot re-run or replace the functional operation. Batch export remains off the per-message functional path.
+- Local validation on the AGT: focused tracing/bridge/spool suite 17/17 PASS, including bounded flush and explicit Resource privacy checks; full local Transport suite 243/243 PASS; `node --check` on changed JavaScript and `git diff --check` PASS. The AGT shell is Node 20 while the package requires Node >=22.12, so GitHub Actions remains the authoritative runtime certification.
+- No production restart, Collector/Tempo rollout, database/migration, Generic Worker or frozen release change is part of this candidate.
