@@ -1,0 +1,11 @@
+apiVersion: 1
+datasources:
+  - name: Andy E2E Flow (Tempo projection)
+    type: yesoreyeram-infinity-datasource
+    uid: roc-flow
+    access: proxy
+    isDefault: false
+    editable: false
+    jsonData:
+      allowedHosts:
+        - http://roc-flow-reader:8080

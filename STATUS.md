@@ -2,6 +2,11 @@
 
 Updated: 2026-09-30
 
+## Grafana native OTel E2E flow
+
+- Dashboard `roc-e2e-operational` now has a versioned definition, native Tempo canonical/inbound trace views, causal stage status/latency, recent traces, gaps and explicit Span Links. Existing Zabbix panels are preserved.
+- A bounded read-only Tempo projection supplies native Grafana tables and automatic latest-trace selection. Physical reference validated: 19 canonical spans + 3 linked inbound spans; browser refresh PASS, WebSocket 101, zero console/DOM errors. No functional OTel component or authority gate changed.
+
 ## NETWORK / OSI — finalized with degraded runtime evidence
 
 - Read-only resumption confirmed existing evidence, unchanged ROC container identities/start times, template/host/dashboard and the available NETWORK / OSI tab. Current health and enabled trigger dependencies match the final checkpoint; diff check passes. No repeated discovery, tests, provisioning, runtime changes, commit or push.
