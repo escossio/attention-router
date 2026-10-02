@@ -109,7 +109,7 @@ probe_worker() {
   local target
   target="$(host_target "$worker")"
   if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-      'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null' \
+      'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null && flock -n /srv/andy-ci/worker.lock -c true' \
       >/dev/null 2>&1; then
     set_health "$worker" READY "worker_ready"
     return 0
@@ -152,15 +152,13 @@ wait_for_capacity() {
   done
 }
 
-choose_fastest() {
+ordered_workers() {
   python3 - "$CAPACITY" "$@" <<'PY'
 import json, pathlib, sys
 capacity=json.loads(pathlib.Path(sys.argv[1]).read_text())["pytest_full_seconds"]
-workers=sys.argv[2:]
-usable=[w for w in workers if w in capacity]
-if not usable:
-    raise SystemExit(1)
-print(min(usable, key=lambda w: (float(capacity[w]), w)))
+workers=[w for w in sys.argv[2:] if w in capacity]
+for worker in sorted(workers, key=lambda name: (float(capacity[name]), name)):
+    print(worker)
 PY
 }
 
@@ -170,23 +168,327 @@ discover_postgres_files() {
     if ! wait_for_capacity; then
       return 1
     fi
-    local worker
-    worker="$(choose_fastest "${READY_WORKERS[@]}")"
-    local target
+
+    local worker target raw
+    while IFS= read -r worker; do
+      [[ -n "$worker" ]] || continue
+      target="$(host_target "$worker")"
+      raw="$RUN_DIR/discovery-${worker}.txt"
+      if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+          "flock -n /srv/andy-ci/worker.lock bash -lc \"git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e '$SHA^{commit}'; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only '$SHA' -- tests/integration\"" \
+          >"$raw" 2>/dev/null; then
+        grep '^tests/integration/test_postgres.*\.py
+
+if ! discover_postgres_files; then
+  echo 'CI_DISTRIBUTED_STATUS=NO_DISCOVERY_CAPACITY'
+  exit 69
+fi
+
+PROFILE_KEY="$(sha256sum "$RUN_DIR/current-postgres-files.txt" | awk '{print $1}')"
+PROFILE="$PROFILE_ROOT/$PROFILE_KEY"
+echo "CI_DISTRIBUTED_PROFILE_KEY=$PROFILE_KEY"
+
+if [[ ! -d "$PROFILE" && -d "$LEGACY_PROFILE" \
+      && -f "$LEGACY_PROFILE/postgres-files.txt" ]] \
+  && cmp -s "$LEGACY_PROFILE/postgres-files.txt" \
+      "$RUN_DIR/current-postgres-files.txt"; then
+  cp -a "$LEGACY_PROFILE" "$PROFILE"
+fi
+
+if [[ ! -d "$PROFILE" ]]; then
+  echo 'CI_DISTRIBUTED_STATUS=REPROFILE_REQUIRED'
+  exit 66
+fi
+for required in postgres-files.txt manifest.json; do
+  [[ -f "$PROFILE/$required" ]] || {
+    echo 'CI_DISTRIBUTED_STATUS=PROFILE_CORRUPT'
+    exit 70
+  }
+done
+if ! cmp -s "$PROFILE/postgres-files.txt" \
+    "$RUN_DIR/current-postgres-files.txt"; then
+  echo 'CI_DISTRIBUTED_STATUS=PROFILE_CORRUPT'
+  exit 70
+fi
+
+PENDING="$RUN_DIR/pending.txt"
+cp "$RUN_DIR/current-postgres-files.txt" "$PENDING"
+ATTEMPTS="$RUN_DIR/attempts.tsv"
+printf 'wave\tworker\tclassification\trc\tduration\tpassed\tfiles\n' > "$ATTEMPTS"
+START_EPOCH=$(date +%s)
+WAVE=1
+REQUEUED_FILES=0
+DEGRADED=0
+TERMINAL_FAILURE=0
+
+classify_attempt() {
+  local rc="$1"
+  local log="$2"
+  if (( rc == 0 )) && grep -q '^CI_STATUS=PASS$' "$log"; then
+    echo PASS
+    return
+  fi
+  if grep -q '^CI_WORKER_BUSY$' "$log"; then
+    echo WORKER_BUSY
+    return
+  fi
+  if (( rc == 255 )) || grep -Eq \
+      'ssh:|Connection (timed out|refused|closed)|No route to host|Could not resolve hostname|Broken pipe|kex_exchange_identification' \
+      "$log"; then
+    echo WORKER_LOST
+    return
+  fi
+  if grep -q '^CI_STATUS=FAIL$' "$log"; then
+    local stage
+    stage="$(awk -F= '/^CI_POSTGRES_STAGE=/{v=$2} END{print v}' "$log")"
+    case "$stage" in
+      settings|alembic|pytest)
+        echo TEST_FAILURE
+        return
+        ;;
+      *)
+        echo INFRA_ERROR
+        return
+        ;;
+    esac
+  fi
+  echo INFRA_ERROR
+}
+
+subtract_completed() {
+  local pending="$1"
+  local completed="$2"
+  local output="$3"
+  python3 - "$pending" "$completed" "$output" <<'PY'
+import pathlib, sys
+pending=pathlib.Path(sys.argv[1]).read_text().splitlines()
+completed=set(pathlib.Path(sys.argv[2]).read_text().splitlines())
+remaining=[x for x in pending if x and x not in completed]
+pathlib.Path(sys.argv[3]).write_text(
+    "\n".join(remaining) + ("\n" if remaining else "")
+)
+PY
+}
+
+while [[ -s "$PENDING" ]]; do
+  if (( WAVE > MAX_WAVES )); then
+    echo 'CI_DISTRIBUTED_STATUS=INFRA_RETRY_EXHAUSTED'
+    TERMINAL_FAILURE=1
+    break
+  fi
+
+  if ! wait_for_capacity; then
+    echo 'CI_DISTRIBUTED_STATUS=NO_CAPACITY'
+    TERMINAL_FAILURE=1
+    break
+  fi
+
+  if ((${#READY_WORKERS[@]} < ${#CONFIGURED_WORKERS[@]})); then
+    DEGRADED=1
+  fi
+
+  WAVE_DIR="$RUN_DIR/wave-$WAVE"
+  mkdir -p "$WAVE_DIR"
+  workers_csv="$(IFS=,; echo "${READY_WORKERS[*]}")"
+
+  python3 "$REPLAN" \
+    --profile-manifest "$PROFILE/manifest.json" \
+    --capacity "$CAPACITY" \
+    --workers "$workers_csv" \
+    --files "$PENDING" \
+    --output-dir "$WAVE_DIR" \
+    --wave "$WAVE" > "$WAVE_DIR/replan.json"
+
+  declare -A PIDS=()
+  declare -A WAVE_LOGS=()
+  declare -A WAVE_SHARDS=()
+  COMPLETED="$WAVE_DIR/completed.txt"
+  : > "$COMPLETED"
+
+  for worker in "${READY_WORKERS[@]}"; do
+    shard="$WAVE_DIR/postgres-${worker}.txt"
+    [[ -s "$shard" ]] || continue
+    files="$(wc -l < "$shard")"
     target="$(host_target "$worker")"
-    local raw="$RUN_DIR/discovery-${worker}.txt"
-    if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-        "git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; \
-         git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e '$SHA^{commit}'; \
-         git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only '$SHA' -- tests/integration" \
-        >"$raw" 2>/dev/null; then
-      grep '^tests/integration/test_postgres.*\.py$' "$raw" \
-        | LC_ALL=C sort > "$RUN_DIR/current-postgres-files.txt"
-      [[ -s "$RUN_DIR/current-postgres-files.txt" ]] || return 1
-      echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
-      return 0
+    remote="/srv/andy-ci/shards/${RUN_ID}-wave${WAVE}-${worker}.txt"
+    log="$WAVE_DIR/${worker}.log"
+    WAVE_LOGS[$worker]="$log"
+    WAVE_SHARDS[$worker]="$shard"
+
+    if ! "$SCP_BIN" -q -o BatchMode=yes -o ConnectTimeout=5 \
+        "$shard" "$target:$remote" >/dev/null 2>&1; then
+      set_health "$worker" UNAVAILABLE "shard_copy_failed"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$WAVE" "$worker" WORKER_LOST 255 0 0 "$files" >> "$ATTEMPTS"
+      REQUEUED_FILES=$((REQUEUED_FILES + files))
+      DEGRADED=1
+      continue
     fi
-    set_health "$worker" UNAVAILABLE "discovery_failed"
+
+    (
+      set +e
+      "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+        "ANDY_CI_PYTEST_TARGETS_FILE='$remote' \
+         /srv/andy-ci/bin/andy-ci-run '$SHA' postgres" \
+        >"$log" 2>&1
+      rc=$?
+      echo "$rc" > "$WAVE_DIR/${worker}.rc"
+      "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+        "rm -f '$remote'" >/dev/null 2>&1 || true
+      exit "$rc"
+    ) &
+    PIDS[$worker]=$!
+  done
+
+  for worker in "${!PIDS[@]}"; do
+    set +e
+    wait "${PIDS[$worker]}"
+    rc=$?
+    set -e
+    log="${WAVE_LOGS[$worker]}"
+    shard="${WAVE_SHARDS[$worker]}"
+    files="$(wc -l < "$shard")"
+    classification="$(classify_attempt "$rc" "$log")"
+    duration="$(awk -F= '/^CI_DURATION_SECONDS=/{v=$2} END{print v}' "$log")"
+    duration="${duration:-0}"
+    passed="$(awk '/^[0-9]+ passed([, ]|$)/{v=$1} END{print v}' "$log")"
+    passed="${passed:-0}"
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$WAVE" "$worker" "$classification" "$rc" \
+      "$duration" "$passed" "$files" >> "$ATTEMPTS"
+
+    case "$classification" in
+      PASS)
+        cat "$shard" >> "$COMPLETED"
+        set_health "$worker" READY "wave_pass"
+        ;;
+      WORKER_BUSY)
+        set_health "$worker" DEGRADED "worker_busy"
+        REQUEUED_FILES=$((REQUEUED_FILES + files))
+        DEGRADED=1
+        ;;
+      WORKER_LOST|INFRA_ERROR)
+        set_health "$worker" UNAVAILABLE "${classification,,}"
+        REQUEUED_FILES=$((REQUEUED_FILES + files))
+        DEGRADED=1
+        ;;
+      TEST_FAILURE)
+        set_health "$worker" READY "test_failure"
+        TERMINAL_FAILURE=1
+        ;;
+    esac
+  done
+
+  NEXT="$WAVE_DIR/pending-next.txt"
+  subtract_completed "$PENDING" "$COMPLETED" "$NEXT"
+  cp "$NEXT" "$PENDING"
+
+  if (( TERMINAL_FAILURE != 0 )); then
+    break
+  fi
+  if [[ -s "$PENDING" ]]; then
+    echo "CI_DISTRIBUTED_REQUEUE_FILES=$(wc -l < "$PENDING") wave=$WAVE"
+    sleep 3
+  fi
+  WAVE=$((WAVE + 1))
+done
+
+END_EPOCH=$(date +%s)
+WALL_SECONDS=$((END_EPOCH - START_EPOCH))
+registry snapshot --capability postgres-worker > "$RUN_DIR/registry-final.json"
+
+FINAL_STATUS=PASS
+if (( TERMINAL_FAILURE != 0 )) || [[ -s "$PENDING" ]]; then
+  FINAL_STATUS=FAIL
+fi
+
+python3 - "$RUN_DIR" "$SHA" "$WALL_SECONDS" "$PROFILE_KEY" \
+  "$ATTEMPTS" "$FINAL_STATUS" "$DEGRADED" "$REQUEUED_FILES" \
+  "${CONFIGURED_WORKERS[*]}" <<'PY'
+import csv, json, pathlib, sys
+run_dir=pathlib.Path(sys.argv[1])
+sha=sys.argv[2]
+wall=int(sys.argv[3])
+profile_key=sys.argv[4]
+attempts_path=pathlib.Path(sys.argv[5])
+status=sys.argv[6]
+degraded=bool(int(sys.argv[7]))
+requeued=int(sys.argv[8])
+configured=sys.argv[9].split()
+
+rows=list(csv.DictReader(attempts_path.open(), delimiter="\t"))
+snapshot=json.loads((run_dir/"registry-final.json").read_text())
+health={
+    h["host_id"]:{
+        "state":h.get("health_state") or "UNKNOWN",
+        "reason":h.get("health_reason") or "",
+    }
+    for h in snapshot.get("hosts", [])
+}
+workers={}
+
+for name in configured:
+    wr=[row for row in rows if row["worker"] == name]
+    pass_rows=[row for row in wr if row["classification"] == "PASS"]
+    latest=wr[-1]["classification"] if wr else health.get(name,{}).get("state","UNKNOWN")
+    worker_status="PASS" if pass_rows and latest == "PASS" else latest
+    if not wr and health.get(name,{}).get("state") == "UNAVAILABLE":
+        worker_status="UNAVAILABLE"
+    workers[name]={
+        "rc":0 if worker_status == "PASS" else 255 if worker_status in {"WORKER_LOST","UNAVAILABLE"} else 1,
+        "status":worker_status,
+        "duration_seconds":sum(int(r["duration"]) for r in wr),
+        "passed_tests":sum(int(r["passed"]) for r in pass_rows),
+        "target_files":sum(int(r["files"]) for r in pass_rows),
+        "attempts":len(wr),
+        "health_reason":health.get(name,{}).get("reason",""),
+    }
+
+summary={
+    "schema_version":3,
+    "sha":sha,
+    "suite":"postgres",
+    "profile_key":profile_key,
+    "wall_seconds":wall,
+    "status":status,
+    "degraded":degraded,
+    "configured_workers":configured,
+    "waves":max([int(r["wave"]) for r in rows], default=0),
+    "requeued_files":requeued,
+    "workers":workers,
+    "total_passed_tests":sum(v["passed_tests"] for v in workers.values()),
+}
+(run_dir/"summary.json").write_text(json.dumps(summary,indent=2)+"\n")
+print(json.dumps(summary,indent=2))
+PY
+
+echo "CI_DISTRIBUTED_SUMMARY=$RUN_DIR/summary.json"
+if [[ "$FINAL_STATUS" == PASS ]]; then
+  echo 'CI_DISTRIBUTED_STATUS=PASS'
+  echo "CI_DISTRIBUTED_DEGRADED=$DEGRADED"
+  echo "CI_DISTRIBUTED_WALL_SECONDS=$WALL_SECONDS"
+  exit 0
+fi
+
+echo 'CI_DISTRIBUTED_STATUS=FAIL'
+for log in "$RUN_DIR"/wave-*/*.log; do
+  [[ -f "$log" ]] || continue
+  if grep -q '^CI_STATUS=FAIL$' "$log"; then
+    echo "--- $(basename "$(dirname "$log")")/$(basename "$log") tail ---"
+    tail -n 80 "$log"
+  fi
+done
+exit 1
+ "$raw" \
+          | LC_ALL=C sort > "$RUN_DIR/current-postgres-files.txt"
+        [[ -s "$RUN_DIR/current-postgres-files.txt" ]] || return 1
+        echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
+        return 0
+      fi
+      set_health "$worker" DEGRADED "discovery_busy_or_failed"
+    done < <(ordered_workers "${READY_WORKERS[@]}")
+
     attempts=$((attempts + 1))
     sleep 2
   done
