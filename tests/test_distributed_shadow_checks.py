@@ -212,3 +212,20 @@ def test_all_distributed_scheduler_scripts_are_valid_bash():
             text=True,
         )
         assert result.returncode == 0, f"{script}: {result.stderr}"
+
+
+def test_postgres_discovery_uses_correct_python_regex_and_deadline():
+    postgres = POSTGRES_SCHEDULER.read_text()
+    reprofile = POSTGRES_REPROFILE.read_text()
+    expected = r"test_postgres.*\.py$"
+    broken = r"test_postgres.*\\.py$"
+
+    for content in (postgres, reprofile):
+        assert expected in content
+        assert broken not in content
+        assert 'ANDY_CI_CAPACITY_WAIT_SECONDS:-300' in content
+
+    assert "local attempts=0" not in postgres
+    assert "while (( attempts < 8 ))" not in postgres
+    assert "local deadline=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))" in postgres
+    assert "DISCOVERY_DEADLINE=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))" in reprofile
