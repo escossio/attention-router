@@ -66,7 +66,7 @@ probe_worker() {
   done < <(registry dependencies --host-id "$worker")
   local target; target="$(host_target "$worker")"
   if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-      'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null' >/dev/null 2>&1; then
+      'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null && flock -n /srv/andy-ci/worker.lock -c true' >/dev/null 2>&1; then
     set_health "$worker" READY worker_ready
     return 0
   fi
@@ -119,10 +119,114 @@ while IFS= read -r worker; do
   [[ -n "$worker" ]] || continue
   target="$(host_target "$worker")"
   if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-      "git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; \
-       git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e '$SHA^{commit}'; \
-       git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only '$SHA' -- tests/integration" \
-      2>/dev/null | grep '^tests/integration/test_postgres.*\.py$' | LC_ALL=C sort > "$RUN_DIR/postgres-files.txt"; then
+      "flock -n /srv/andy-ci/worker.lock bash -lc \"git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e '$SHA^{commit}'; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only '$SHA' -- tests/integration\"" \
+      2>/dev/null | grep '^tests/integration/test_postgres.*\.py
+    if [[ -s "$RUN_DIR/postgres-files.txt" ]]; then
+      DISCOVERY_DONE=1
+      echo "CI_REPROFILE_DISCOVERY_WORKER=$worker"
+      break
+    fi
+  fi
+  set_health "$worker" DEGRADED discovery_busy_or_failed
+done < <(ordered_workers "${READY_WORKERS[@]}")
+(( DISCOVERY_DONE == 1 )) || { echo 'CI_REPROFILE_STATUS=NO_DISCOVERY_CAPACITY'; exit 69; }
+PROFILE_KEY="$(sha256sum "$RUN_DIR/postgres-files.txt" | awk '{print $1}')"
+PROFILE="$PROFILE_ROOT/$PROFILE_KEY"
+echo "CI_REPROFILE_SHA=$SHA"
+echo "CI_REPROFILE_PROFILE_KEY=$PROFILE_KEY"
+
+if [[ -d "$PROFILE" && -f "$PROFILE/postgres-files.txt" ]] \
+  && cmp -s "$PROFILE/postgres-files.txt" "$RUN_DIR/postgres-files.txt"; then
+  echo 'CI_REPROFILE_STATUS=CACHED'
+  echo "CI_REPROFILE_MANIFEST=$PROFILE/manifest.json"
+  exit 0
+fi
+
+PROFILE_OK=0
+while IFS= read -r worker; do
+  [[ -n "$worker" ]] || continue
+  target="$(host_target "$worker")"
+  stdout="$RUN_DIR/${worker}-profile.stdout.log"
+  set +e
+  "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+    "ANDY_CI_PROFILE_DURATIONS=1 /srv/andy-ci/bin/andy-ci-run '$SHA' postgres" \
+    > "$stdout" 2>&1
+  rc=$?
+  set -e
+
+  if (( rc != 0 )); then
+    if grep -q '^CI_STATUS=FAIL$' "$stdout" \
+      && grep -Eq '^CI_POSTGRES_STAGE=(settings|alembic|pytest)$' "$stdout"; then
+      echo 'CI_REPROFILE_STATUS=TEST_FAILURE'
+      tail -n 100 "$stdout"
+      exit "$rc"
+    fi
+    set_health "$worker" UNAVAILABLE profiling_worker_failed
+    continue
+  fi
+
+  RESULT_PATH="$(awk -F= '/^CI_RESULT=/{v=$2} END{print v}' "$stdout")"
+  if [[ -z "$RESULT_PATH" ]]; then
+    set_health "$worker" UNAVAILABLE missing_result
+    continue
+  fi
+
+  RESULT_LOCAL="$RUN_DIR/${worker}-result.json"
+  if ! "$SCP_BIN" -q -o BatchMode=yes -o ConnectTimeout=5 \
+      "$target:$RESULT_PATH" "$RESULT_LOCAL"; then
+    set_health "$worker" UNAVAILABLE result_copy_failed
+    continue
+  fi
+
+  REMOTE_LOG="$(python3 - "$RESULT_LOCAL" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1]))['log'])
+PY
+)"
+  if [[ -z "$REMOTE_LOG" ]]; then
+    set_health "$worker" UNAVAILABLE missing_profile_log
+    continue
+  fi
+
+  if ! "$SCP_BIN" -q -o BatchMode=yes -o ConnectTimeout=5 \
+      "$target:$REMOTE_LOG" "$RUN_DIR/profile.log"; then
+    set_health "$worker" UNAVAILABLE profile_log_copy_failed
+    continue
+  fi
+
+  set_health "$worker" READY profile_pass
+  PROFILE_OK=1
+  echo "CI_REPROFILE_WORKER=$worker"
+  break
+done < <(ordered_workers "${READY_WORKERS[@]}")
+
+(( PROFILE_OK == 1 )) || {
+  echo 'CI_REPROFILE_STATUS=NO_PROFILE_CAPACITY'
+  exit 69
+}
+
+NEW_PROFILE="$PROFILE_ROOT/.${PROFILE_KEY}.new-$RUN_ID"
+rm -rf "$NEW_PROFILE"
+mkdir -p "$NEW_PROFILE"
+"$BASE/bin/plan-postgres.py" \
+  --log "$RUN_DIR/profile.log" \
+  --capacity "$CAPACITY" \
+  --output-dir "$NEW_PROFILE" \
+  --source-sha "$SHA"
+
+if ! cmp -s "$NEW_PROFILE/postgres-files.txt" "$RUN_DIR/postgres-files.txt"; then
+  echo 'profile file-set mismatch' >&2
+  rm -rf "$NEW_PROFILE"
+  exit 70
+fi
+
+rm -rf "$PROFILE"
+mv "$NEW_PROFILE" "$PROFILE"
+
+echo 'CI_REPROFILE_STATUS=PASS'
+echo "CI_REPROFILE_PROFILE_KEY=$PROFILE_KEY"
+echo "CI_REPROFILE_MANIFEST=$PROFILE/manifest.json"
+ | LC_ALL=C sort > "$RUN_DIR/postgres-files.txt"; then
     if [[ -s "$RUN_DIR/postgres-files.txt" ]]; then
       DISCOVERY_DONE=1
       echo "CI_REPROFILE_DISCOVERY_WORKER=$worker"
