@@ -77,19 +77,44 @@ andy-ci-reprofile <40-char-sha>
 andy-ci-distributed <40-char-sha> postgres
 ```
 
-`andy-ci-reprofile` executes one full duration-instrumented run on the primary compute worker only when the exact PostgreSQL test-file set has no cached profile. Profiles are keyed by a deterministic SHA-256 of the C-locale-sorted file list, so switching between branches with different test sets does not thrash one global profile.
+`andy-ci-reprofile` asks the local host registry for READY hosts with the `postgres-worker` capability and runs duration profiling on the fastest eligible worker. If that worker becomes unavailable, profiling falls through to the remaining eligible pool. Profiles are keyed by a deterministic SHA-256 of the C-locale-sorted file list, so switching between branches with different test sets does not thrash one global profile.
 
-`andy-ci-distributed` resolves the exact-SHA test-file set, selects its cached profile, verifies worker readiness, copies generated shard manifests, starts all workers concurrently, waits for every result and writes a structured JSON summary.
+`andy-ci-distributed` resolves the exact-SHA test-file set, selects its cached profile, derives the active worker pool from the host registry, verifies required dependencies, dispatches shards concurrently and requeues work when infrastructure disappears mid-run. A real test failure remains terminal and is never converted into infrastructure failover.
 
 ## Package contents
 
 - `worker/andy-ci-run`: exact-SHA worker executor with disposable worktrees, dependency caching and PostgreSQL shard support.
-- `control-plane/andy-ci-distributed`: distributed orchestrator.
-- `control-plane/andy-ci-reprofile`: safe profile refresh.
+- `control-plane/andy-ci-distributed`: capability-based distributed orchestrator with infrastructure requeue.
+- `control-plane/andy-ci-reprofile`: failover-safe profile refresh.
+- `control-plane/host-registry.py`: local SQLite source of host identity, capabilities, dependencies and reconciled health.
+- `control-plane/replan-postgres.py`: redistributes pending PostgreSQL files across the currently eligible pool.
 - `control-plane/plan-postgres.py`: duration-aware heterogeneous bin-packing planner.
 - `examples/worker-capacity.benchmark.json`: benchmarked capacity model without network addressing.
 - `examples/ssh-config.example`: alias pattern; real addresses and credentials stay outside Git.
 - `benchmark-20260919.json`: machine-readable benchmark evidence.
+
+
+## Shadow generic suites
+
+The worker executor already supports `python`, `transport` and `docker` suites in addition to PostgreSQL. The generic shadow scheduler exposes those existing worker capabilities without replacing the proven sharded PostgreSQL scheduler:
+
+```bash
+andy-ci-distributed-suite <40-char-sha> python
+andy-ci-distributed-suite <40-char-sha> transport
+andy-ci-distributed-suite <40-char-sha> docker
+```
+
+The scheduler asks the Host Registry for the generic `ci-worker` capability. During the migration window it may explicitly fall back to the existing `postgres-worker` pool, which is logged as `CI_DISTRIBUTED_CAPABILITY_FALLBACK`. This fallback is safe for the current lab because the same installed worker executor implements all three generic suites; the intended steady state is to grant `ci-worker` explicitly.
+
+Generic suites are whole-suite jobs rather than test-file shards. Concurrent shadow checks deliberately use different stable starting offsets in the benchmark-ordered worker list, so `python`, `docker` and `transport` normally begin on different workers. The worker lock remains authoritative: a collision returns `CI_WORKER_BUSY`, and the scheduler tries the next eligible worker. Worker loss and SSH failures fail over; a real suite failure is terminal and is not retried on another machine.
+
+The GitHub App publishes these results as **non-required shadow checks**:
+
+- `distributed-python`;
+- `distributed-transport`;
+- `distributed-docker`.
+
+The existing GitHub-hosted `python-tests`, `transport-tests` and `docker-build` required checks remain unchanged during certification. Only after repeated exact-SHA equivalence has been demonstrated should the repository ruleset be migrated to the distributed checks. `distributed-postgres` remains independent and unchanged.
 
 ## Security boundary
 

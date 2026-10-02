@@ -93,6 +93,31 @@ SQLite stores only bounded routing/status metadata:
 Raw webhook bodies, private keys, signatures, tokens, conversations and provider credentials are not persisted.
 
 
+
+## Distributed shadow CI
+
+The GitHub App can also publish non-required shadow checks that execute existing CI suites on the self-managed worker pool instead of on a persistent GitHub self-hosted runner:
+
+- `distributed-python`;
+- `distributed-transport`;
+- `distributed-docker`.
+
+The daemon consumes the same signed Pull Request deliveries already stored by the webhook receiver, binds every job to the exact PR head SHA, and creates one independent check-run per suite. It does not alter the current required GitHub Actions checks and does not change the `distributed-postgres` gate.
+
+For each new PR head, the daemon enqueues the three suites and claims up to three jobs concurrently. The generic scheduler then selects an eligible Host Registry worker and invokes the already-installed `andy-ci-run <sha> <suite>` executor. Worker lock contention causes a retry on another eligible host; a real suite failure is terminal.
+
+Install the generic scheduler and shadow publisher only after the branch has passed repository CI:
+
+```bash
+install -m 0755 andy-ci-distributed-suite /usr/local/lib/andy-ci/bin/andy-ci-distributed-suite
+install -m 0755 distributed_shadow_checks.py /usr/local/lib/andy-github-app/distributed_shadow_checks.py
+install -m 0644 andy-github-distributed-shadow-ci.service /etc/systemd/system/andy-github-distributed-shadow-ci.service
+systemctl daemon-reload
+systemctl enable --now andy-github-distributed-shadow-ci.service
+```
+
+The migration is intentionally two-phase. Shadow checks must first demonstrate repeated exact-SHA equivalence with `python-tests`, `transport-tests` and `docker-build`. Updating the repository ruleset to make distributed checks required is a separate administrative change and is not performed by this package.
+
 ## Event-driven continuation stages
 
 A controller may pre-register a bounded stage that it is waiting for. Correlation is exact across:
