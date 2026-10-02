@@ -161,6 +161,19 @@ def test_generic_scheduler_is_valid_bash_and_rejects_postgres():
     assert "python, transport, docker" in invalid.stderr
 
 
+def test_ci_service_units_allow_host_registry_state_writes():
+    service_root = ROOT / "ops/provisioning/github-app-control-plane"
+    for name in (
+        "andy-github-distributed-postgres.service",
+        "andy-github-distributed-shadow-ci.service",
+    ):
+        content = (service_root / name).read_text()
+        line = next(
+            item
+            for item in content.splitlines()
+            if item.startswith("ReadWritePaths=")
+        )
+        assert "/var/lib/andy-ci" in line.split("=")[1].split()
 def test_generic_scheduler_treats_worker_lock_as_capacity():
     content = SCHEDULER.read_text()
     assert 'ANDY_CI_CAPACITY_WAIT_SECONDS:-300' in content
