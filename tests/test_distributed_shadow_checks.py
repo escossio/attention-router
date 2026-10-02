@@ -159,3 +159,19 @@ def test_generic_scheduler_is_valid_bash_and_rejects_postgres():
     )
     assert invalid.returncode == 64
     assert "python, transport, docker" in invalid.stderr
+
+
+def test_generic_scheduler_treats_worker_lock_as_capacity():
+    content = SCHEDULER.read_text()
+    assert 'ANDY_CI_CAPACITY_WAIT_SECONDS:-300' in content
+    assert "flock -n /srv/andy-ci/worker.lock -c true" in content
+    assert "WORKER_BUSY|MIRROR_BUSY" in content
+
+
+def test_generic_scheduler_classifies_git_ref_lock_as_retryable_infra():
+    content = SCHEDULER.read_text()
+    assert "cannot lock ref" in content
+    assert "unable to update local ref" in content
+    mirror_index = content.index("echo MIRROR_BUSY")
+    test_failure_index = content.index("echo TEST_FAILURE")
+    assert mirror_index < test_failure_index
