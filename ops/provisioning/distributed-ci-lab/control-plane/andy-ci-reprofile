@@ -9,7 +9,7 @@ REGISTRY_DB="${ANDY_CI_HOST_REGISTRY_DB:-/var/lib/andy-ci/host-registry.sqlite3}
 CAPACITY="${ANDY_CI_CAPACITY_FILE:-$BASE/worker-capacity.json}"
 SSH_BIN="${ANDY_CI_SSH_BIN:-ssh}"
 SCP_BIN="${ANDY_CI_SCP_BIN:-scp}"
-CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-180}"
+CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
 
 SHA="${1:-}"
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || {
@@ -116,28 +116,46 @@ for w in sorted(workers,key=lambda n:(float(cap[n]),n)): print(w)
 PY
 }
 
-if ! wait_for_capacity; then
-  echo 'CI_REPROFILE_STATUS=NO_CAPACITY'
-  exit 69
-fi
-
 DISCOVERY_DONE=0
+DISCOVERY_DEADLINE=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))
 DISCOVERY_COMMAND="git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e ${SHA}^{commit}; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only ${SHA} -- tests/integration"
-while IFS= read -r worker; do
-  [[ -n "$worker" ]] || continue
-  target="$(host_target "$worker")"
-  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-      "flock -n /srv/andy-ci/worker.lock -c '$DISCOVERY_COMMAND'" \
-      2>/dev/null | grep '^tests/integration/test_postgres.*\\.py$' | LC_ALL=C sort > "$RUN_DIR/postgres-files.txt"; then
-    if [[ -s "$RUN_DIR/postgres-files.txt" ]]; then
-      DISCOVERY_DONE=1
-      echo "CI_REPROFILE_DISCOVERY_WORKER=$worker"
+
+while (( $(date +%s) < DISCOVERY_DEADLINE )); do
+  refresh_pool
+  if ((${#READY_WORKERS[@]} == 0)); then
+    echo 'CI_REPROFILE_STATUS=WAITING_FOR_DISCOVERY_CAPACITY'
+    sleep 3
+    continue
+  fi
+
+  while IFS= read -r worker; do
+    [[ -n "$worker" ]] || continue
+    target="$(host_target "$worker")"
+    raw="$RUN_DIR/discovery-${worker}.txt"
+    if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+        "flock -n /srv/andy-ci/worker.lock -c '$DISCOVERY_COMMAND'" \
+        >"$raw" 2>/dev/null; then
+      grep '^tests/integration/test_postgres.*\.py$' "$raw" \
+        | LC_ALL=C sort > "$RUN_DIR/postgres-files.txt"
+      if [[ -s "$RUN_DIR/postgres-files.txt" ]]; then
+        DISCOVERY_DONE=1
+        echo "CI_REPROFILE_DISCOVERY_WORKER=$worker"
+        break
+      fi
+      echo "CI_REPROFILE_DISCOVERY_EMPTY worker=$worker"
       break
     fi
-  fi
-  set_health "$worker" DEGRADED discovery_busy_or_failed
-done < <(ordered_workers "${READY_WORKERS[@]}")
-(( DISCOVERY_DONE == 1 )) || { echo 'CI_REPROFILE_STATUS=NO_DISCOVERY_CAPACITY'; exit 69; }
+    set_health "$worker" DEGRADED discovery_busy_or_failed
+  done < <(ordered_workers "${READY_WORKERS[@]}")
+
+  (( DISCOVERY_DONE == 1 )) && break
+  sleep 3
+done
+
+(( DISCOVERY_DONE == 1 )) || {
+  echo 'CI_REPROFILE_STATUS=NO_DISCOVERY_CAPACITY'
+  exit 69
+}
 PROFILE_KEY="$(sha256sum "$RUN_DIR/postgres-files.txt" | awk '{print $1}')"
 PROFILE="$PROFILE_ROOT/$PROFILE_KEY"
 echo "CI_REPROFILE_SHA=$SHA"
