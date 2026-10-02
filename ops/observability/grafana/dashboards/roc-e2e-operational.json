@@ -1,0 +1,5565 @@
+{
+  "uid": "roc-e2e-operational",
+  "title": "ROC-E2E / Operational Flow",
+  "tags": [
+    "andy",
+    "e2e-flow",
+    "native-otel",
+    "operational",
+    "roc-e2e"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 42,
+  "version": 2,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 100,
+      "type": "table",
+      "title": "Andy E2E Flow",
+      "description": "Ordem causal; INBOUND é um trace separado ligado por SPAN_LINK. NOT_REACHED = ausência no trace consultado, nunca falha inferida. UNSET = span sem status explícito. trace_id=latest acompanha o último canônico no intervalo.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 16
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-flow"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://roc-flow-reader:8080/view?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+          "root_selector": "stages",
+          "columns": [
+            {
+              "selector": "order",
+              "text": "order",
+              "type": "number"
+            },
+            {
+              "selector": "stage",
+              "text": "stage",
+              "type": "string"
+            },
+            {
+              "selector": "span",
+              "text": "span",
+              "type": "string"
+            },
+            {
+              "selector": "reached",
+              "text": "reached",
+              "type": "string"
+            },
+            {
+              "selector": "status",
+              "text": "status",
+              "type": "string"
+            },
+            {
+              "selector": "duration_ms",
+              "text": "duration_ms",
+              "type": "number"
+            },
+            {
+              "selector": "service",
+              "text": "service",
+              "type": "string"
+            },
+            {
+              "selector": "outcome",
+              "text": "outcome",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "stage": 0,
+              "reached": 1,
+              "status": 2,
+              "duration_ms": 3,
+              "service": 4,
+              "span": 5,
+              "outcome": 6,
+              "order": 7
+            },
+            "excludeByName": {
+              "order": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "order"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "order"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "stage"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Etapa"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "span"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Span"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reached"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Presença"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "OTel status"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Duração"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "service"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Service"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outcome"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Resultado observado"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "stage"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 145
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reached"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 135
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 95
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "service"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 280
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "span"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outcome"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 145
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 101,
+      "type": "table",
+      "title": "Último trace canônico / trace selecionado",
+      "description": "Início/fim em UTC; duração total inclui espera assíncrona. IDs completos para copiar.",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 14,
+        "h": 12
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-flow"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://roc-flow-reader:8080/view?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+          "root_selector": "metadata_rows",
+          "columns": [
+            {
+              "selector": "label",
+              "text": "label",
+              "type": "string"
+            },
+            {
+              "selector": "value",
+              "text": "value",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "label": 0,
+              "value": 1
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "label"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Campo"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Valor"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "label"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 155
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 102,
+      "type": "table",
+      "title": "Inbound ↔ Canonical · SPAN_LINK",
+      "description": "Árvores separadas. Clique em cada Trace ID para abrir o Tempo. VERIFIED confirma o span alvo transport.ingress_attempt.",
+      "gridPos": {
+        "x": 14,
+        "y": 16,
+        "w": 10,
+        "h": 6
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-flow"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://roc-flow-reader:8080/view?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+          "root_selector": "links",
+          "columns": [
+            {
+              "selector": "label",
+              "text": "label",
+              "type": "string"
+            },
+            {
+              "selector": "trace_id",
+              "text": "trace_id",
+              "type": "string"
+            },
+            {
+              "selector": "relationship",
+              "text": "relationship",
+              "type": "string"
+            },
+            {
+              "selector": "link_target_status",
+              "text": "link_target_status",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "label": 0,
+              "trace_id": 1,
+              "relationship": 2,
+              "link_target_status": 3
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "label"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Campo"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trace ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "ABRIR TRACE NO TEMPO / EXPLORE",
+                    "url": "/explore?schemaVersion=1&orgId=1&panes=%7B%22a%22%3A%7B%22datasource%22%3A%22roc-tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22roc-tempo%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22${__value.raw}%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-24h%22%2C%22to%22%3A%22now%22%7D%7D%7D",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "relationship"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Relação"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "link_target_status"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Link"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "label"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 95
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 103,
+      "type": "traces",
+      "title": "Trace completo · canonical",
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 18
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "roc-tempo"
+      },
+      "description": "Árvore nativa do Tempo. Expanda spans para ver duração, serviço, status e parent. Um Span Link não é parent/child.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "roc-tempo"
+          },
+          "queryType": "traceql",
+          "query": "${resolved_trace_id}"
+        }
+      ],
+      "options": {
+        "spanBar": {
+          "type": "Duration"
+        },
+        "spanFilters": {
+          "filters": []
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 104,
+      "type": "table",
+      "title": "Latência por estágio · ordem causal",
+      "description": "Inclui spans canônicos e inbound vinculado. Durações de spans aninhados se sobrepõem; não devem ser somadas como duração total. A espera de Grace é visível no intervalo entre spans da árvore.",
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 17,
+        "h": 15
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-flow"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://roc-flow-reader:8080/view?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+          "root_selector": "latency",
+          "columns": [
+            {
+              "selector": "name",
+              "text": "name",
+              "type": "string"
+            },
+            {
+              "selector": "service",
+              "text": "service",
+              "type": "string"
+            },
+            {
+              "selector": "duration_ms",
+              "text": "duration_ms",
+              "type": "number"
+            },
+            {
+              "selector": "status",
+              "text": "status",
+              "type": "string"
+            },
+            {
+              "selector": "outcome",
+              "text": "outcome",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "name": 0,
+              "service": 1,
+              "duration_ms": 2,
+              "status": 3,
+              "outcome": 4
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Span"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "service"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Service"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Duração"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "OTel status"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outcome"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Resultado observado"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 105,
+      "type": "table",
+      "title": "Serviços observados no trace canônico",
+      "description": "Processos reais. Service Graph agregado indisponível: este Tempo não tem metrics-generator/Prometheus configurado. Grace, Queue e Decision continuam spans, nunca serviços fictícios.",
+      "gridPos": {
+        "x": 17,
+        "y": 46,
+        "w": 7,
+        "h": 7
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-flow"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://roc-flow-reader:8080/view?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+          "root_selector": "services",
+          "columns": [
+            {
+              "selector": "service",
+              "text": "service",
+              "type": "string"
+            },
+            {
+              "selector": "span_count",
+              "text": "span_count",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "service": 0,
+              "span_count": 1
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "service"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Service"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "span_count"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Spans"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 106,
+      "type": "table",
+      "title": "Recent E2E Traces · native",
+      "description": "Até 12 traces nativos mais recentes; busca limitada a 24 h e cache de 10 s. Clique no Trace ID para selecionar ou abrir no Tempo. Nenhum conteúdo de mensagem é consultado na Andy.",
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-flow"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://roc-flow-reader:8080/recent?start=${__from}&end=${__to}",
+          "root_selector": "traces",
+          "columns": [
+            {
+              "selector": "start_ms",
+              "text": "start_ms",
+              "type": "number"
+            },
+            {
+              "selector": "trace_id",
+              "text": "trace_id",
+              "type": "string"
+            },
+            {
+              "selector": "correlation_id",
+              "text": "correlation_id",
+              "type": "string"
+            },
+            {
+              "selector": "root_span",
+              "text": "root_span",
+              "type": "string"
+            },
+            {
+              "selector": "duration_ms",
+              "text": "duration_ms",
+              "type": "number"
+            },
+            {
+              "selector": "span_count",
+              "text": "span_count",
+              "type": "number"
+            },
+            {
+              "selector": "outcome",
+              "text": "outcome",
+              "type": "string"
+            },
+            {
+              "selector": "inbound_trace_id",
+              "text": "inbound_trace_id",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "start_ms": 0,
+              "trace_id": 1,
+              "correlation_id": 2,
+              "root_span": 3,
+              "duration_ms": 4,
+              "span_count": 5,
+              "outcome": 6,
+              "inbound_trace_id": 7
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "start_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Início"
+              },
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "custom.width",
+                "value": 185
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trace ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Selecionar trace neste dashboard",
+                    "url": "/d/roc-e2e-operational/roc-e2e-operational-flow?var-trace_id=${__value.raw}&from=${__from}&to=${__to}"
+                  },
+                  {
+                    "title": "ABRIR TRACE NO TEMPO / EXPLORE",
+                    "url": "/explore?schemaVersion=1&orgId=1&panes=%7B%22a%22%3A%7B%22datasource%22%3A%22roc-tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22roc-tempo%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22${__value.raw}%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-24h%22%2C%22to%22%3A%22now%22%7D%7D%7D",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "correlation_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Correlation ID"
+              },
+              {
+                "id": "custom.width",
+                "value": 285
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "root_span"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Root span"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Duração"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "span_count"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Spans"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outcome"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Resultado observado"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inbound_trace_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Inbound trace"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "ABRIR TRACE NO TEMPO / EXPLORE",
+                    "url": "/explore?schemaVersion=1&orgId=1&panes=%7B%22a%22%3A%7B%22datasource%22%3A%22roc-tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22roc-tempo%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22${__value.raw}%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-24h%22%2C%22to%22%3A%22now%22%7D%7D%7D",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 107,
+      "type": "table",
+      "title": "Flow gaps · REACHED / NOT_REACHED / ERROR",
+      "description": "Ausências não são erros. IMMEDIATE indica queue.enqueue filho direto de attention.message, sem Grace. Bloqueio, aprovação e execução desabilitada podem terminar legitimamente antes do Outbox.",
+      "gridPos": {
+        "x": 0,
+        "y": 71,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-flow"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://roc-flow-reader:8080/recent?start=${__from}&end=${__to}",
+          "root_selector": "gaps",
+          "columns": [
+            {
+              "selector": "start_ms",
+              "text": "start_ms",
+              "type": "number"
+            },
+            {
+              "selector": "trace_id",
+              "text": "trace_id",
+              "type": "string"
+            },
+            {
+              "selector": "outcome",
+              "text": "outcome",
+              "type": "string"
+            },
+            {
+              "selector": "grace_path",
+              "text": "grace_path",
+              "type": "string"
+            },
+            {
+              "selector": "attention_message",
+              "text": "attention_message",
+              "type": "string"
+            },
+            {
+              "selector": "grace_release",
+              "text": "grace_release",
+              "type": "string"
+            },
+            {
+              "selector": "queue_enqueue",
+              "text": "queue_enqueue",
+              "type": "string"
+            },
+            {
+              "selector": "worker_dispatch",
+              "text": "worker_dispatch",
+              "type": "string"
+            },
+            {
+              "selector": "decision_evaluate",
+              "text": "decision_evaluate",
+              "type": "string"
+            },
+            {
+              "selector": "autonomy_evaluate",
+              "text": "autonomy_evaluate",
+              "type": "string"
+            },
+            {
+              "selector": "execution_intent",
+              "text": "execution_intent",
+              "type": "string"
+            },
+            {
+              "selector": "outbox_enqueue",
+              "text": "outbox_enqueue",
+              "type": "string"
+            },
+            {
+              "selector": "transport_send",
+              "text": "transport_send",
+              "type": "string"
+            },
+            {
+              "selector": "transport_outbound_send",
+              "text": "transport_outbound_send",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "start_ms": 0,
+              "trace_id": 1,
+              "outcome": 2,
+              "grace_path": 3,
+              "attention_message": 4,
+              "grace_release": 5,
+              "queue_enqueue": 6,
+              "worker_dispatch": 7,
+              "decision_evaluate": 8,
+              "autonomy_evaluate": 9,
+              "execution_intent": 10,
+              "outbox_enqueue": 11,
+              "transport_send": 12,
+              "transport_outbound_send": 13
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "start_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Início"
+              },
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "custom.width",
+                "value": 185
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trace ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Selecionar trace neste dashboard",
+                    "url": "/d/roc-e2e-operational/roc-e2e-operational-flow?var-trace_id=${__value.raw}&from=${__from}&to=${__to}"
+                  },
+                  {
+                    "title": "ABRIR TRACE NO TEMPO / EXPLORE",
+                    "url": "/explore?schemaVersion=1&orgId=1&panes=%7B%22a%22%3A%7B%22datasource%22%3A%22roc-tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22roc-tempo%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22${__value.raw}%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-24h%22%2C%22to%22%3A%22now%22%7D%7D%7D",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outcome"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Resultado observado"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "grace_path"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Caminho"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "attention_message"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "attention_message"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "grace_release"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "grace_release"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "queue_enqueue"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "queue_enqueue"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "worker_dispatch"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "worker_dispatch"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "decision_evaluate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "decision_evaluate"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "autonomy_evaluate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "autonomy_evaluate"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "execution_intent"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "execution_intent"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outbox_enqueue"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "outbox_enqueue"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "transport_send"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "transport_send"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "transport_outbound_send"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "transport_outbound_send"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "REACHED": {
+                        "text": "REACHED",
+                        "color": "green"
+                      },
+                      "DELIVERED": {
+                        "text": "DELIVERED",
+                        "color": "green"
+                      },
+                      "VERIFIED": {
+                        "text": "VERIFIED",
+                        "color": "green"
+                      },
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red"
+                      },
+                      "FAILED": {
+                        "text": "FAILED",
+                        "color": "red"
+                      },
+                      "BLOCKED": {
+                        "text": "BLOCKED",
+                        "color": "orange"
+                      },
+                      "SUPPRESSED": {
+                        "text": "SUPPRESSED",
+                        "color": "orange"
+                      },
+                      "NOT_REACHED": {
+                        "text": "NOT_REACHED",
+                        "color": "gray"
+                      },
+                      "UNSET": {
+                        "text": "UNSET",
+                        "color": "blue"
+                      },
+                      "NO_RESPONSE": {
+                        "text": "NO_RESPONSE",
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 108,
+      "type": "traces",
+      "title": "Trace completo · inbound (árvore separada)",
+      "gridPos": {
+        "x": 0,
+        "y": 81,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "roc-tempo"
+      },
+      "description": "Árvore nativa do Tempo. Expanda spans para ver duração, serviço, status e parent. Um Span Link não é parent/child.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "roc-tempo"
+          },
+          "queryType": "traceql",
+          "query": "${inbound_trace_id}"
+        }
+      ],
+      "options": {
+        "spanBar": {
+          "type": "Duration"
+        },
+        "spanFilters": {
+          "filters": []
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 109,
+      "type": "row",
+      "title": "Infraestrutura Zabbix e traces reconstruídos · preservados",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 91,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "canvas",
+          "title": "ROC-E2E · Fluxo Operacional",
+          "gridPos": {
+            "x": 0,
+            "y": 92,
+            "w": 24,
+            "h": 36
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "inlineEditing": false,
+            "showAdvancedTypes": true,
+            "panZoom": true,
+            "infinitePan": false,
+            "root": {
+              "type": "frame",
+              "name": "ROC-E2E",
+              "placement": {
+                "top": 0,
+                "left": 0,
+                "width": 1200,
+                "height": 1060,
+                "rotation": 0
+              },
+              "constraint": {
+                "horizontal": "left",
+                "vertical": "top"
+              },
+              "background": {
+                "color": {
+                  "fixed": "transparent"
+                }
+              },
+              "border": {
+                "color": {
+                  "fixed": "transparent"
+                }
+              },
+              "elements": [
+                {
+                  "type": "text",
+                  "name": "WhatsApp IN",
+                  "placement": {
+                    "top": 20,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "WhatsApp IN"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "fixed": "#163329"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#4ADE80"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Browser IN",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Browser IN",
+                  "placement": {
+                    "top": 100,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "BROWSER\n10.77.10.2:9223"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC browser: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Transport IN",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Transport IN",
+                  "placement": {
+                    "top": 180,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "TRANSPORT IN\n10.77.10.10:18103"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC transport: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Ingress",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Ingress",
+                  "placement": {
+                    "top": 260,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "INGRESS\n10.77.10.18:18102"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC ingress: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Control / Grace",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    },
+                    {
+                      "source": {
+                        "x": -1,
+                        "y": 0
+                      },
+                      "target": {
+                        "x": 1,
+                        "y": 0
+                      },
+                      "targetName": "PostgreSQL",
+                      "color": {
+                        "fixed": "#71717A"
+                      },
+                      "size": {
+                        "fixed": 1,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    },
+                    {
+                      "source": {
+                        "x": -1,
+                        "y": 0
+                      },
+                      "target": {
+                        "x": 1,
+                        "y": 0
+                      },
+                      "targetName": "Artifact",
+                      "color": {
+                        "fixed": "#71717A"
+                      },
+                      "size": {
+                        "fixed": 1,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Control / Grace",
+                  "placement": {
+                    "top": 340,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "CONTROL / GRACE"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "fixed": "#27272A"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#71717A"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Queue",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Queue",
+                  "placement": {
+                    "top": 420,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "QUEUE"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "fixed": "#27272A"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#71717A"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Worker",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Worker",
+                  "placement": {
+                    "top": 500,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "WORKER\n10.77.10.26"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC worker: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Decision",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    },
+                    {
+                      "source": {
+                        "x": -1,
+                        "y": 0
+                      },
+                      "target": {
+                        "x": 1,
+                        "y": 0
+                      },
+                      "targetName": "PostgreSQL",
+                      "color": {
+                        "fixed": "#71717A"
+                      },
+                      "size": {
+                        "fixed": 1,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    },
+                    {
+                      "source": {
+                        "x": 1,
+                        "y": 0
+                      },
+                      "target": {
+                        "x": -1,
+                        "y": 0
+                      },
+                      "targetName": "Voice",
+                      "color": {
+                        "fixed": "#71717A"
+                      },
+                      "size": {
+                        "fixed": 1,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Decision",
+                  "placement": {
+                    "top": 580,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "DECISION"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "fixed": "#27272A"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#71717A"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Execution",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Execution",
+                  "placement": {
+                    "top": 660,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "EXECUTION"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "fixed": "#27272A"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#71717A"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Outbox",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Outbox",
+                  "placement": {
+                    "top": 740,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "OUTBOX"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "fixed": "#27272A"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#71717A"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Transport OUT",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Transport OUT",
+                  "placement": {
+                    "top": 820,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "TRANSPORT OUT\n10.77.10.10:18103"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC transport: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "Browser OUT",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Browser OUT",
+                  "placement": {
+                    "top": 900,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "BROWSER OUT\n10.77.10.2:9223"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC browser: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "target": {
+                        "x": 0,
+                        "y": -1
+                      },
+                      "targetName": "WhatsApp OUT",
+                      "color": {
+                        "fixed": "#6E9FFF"
+                      },
+                      "size": {
+                        "fixed": 2,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "WhatsApp OUT",
+                  "placement": {
+                    "top": 980,
+                    "left": 450,
+                    "width": 300,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "WhatsApp OUT"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "fixed": "#163329"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#4ADE80"
+                    },
+                    "width": 2
+                  }
+                },
+                {
+                  "type": "text",
+                  "name": "PostgreSQL",
+                  "placement": {
+                    "top": 470,
+                    "left": 40,
+                    "width": 270,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "POSTGRESQL\n10.77.10.42:5432"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC postgres: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  }
+                },
+                {
+                  "type": "text",
+                  "name": "Core API",
+                  "placement": {
+                    "top": 470,
+                    "left": 860,
+                    "width": 270,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "CORE API\n10.77.10.34:18100"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC api: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  },
+                  "connections": [
+                    {
+                      "source": {
+                        "x": -1,
+                        "y": 0
+                      },
+                      "target": {
+                        "x": 1,
+                        "y": 0
+                      },
+                      "targetName": "PostgreSQL",
+                      "color": {
+                        "fixed": "#71717A"
+                      },
+                      "size": {
+                        "fixed": 1,
+                        "min": 1,
+                        "max": 10
+                      },
+                      "path": "straight"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "name": "Artifact",
+                  "placement": {
+                    "top": 700,
+                    "left": 40,
+                    "width": 270,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "ARTIFACT\n10.77.10.50"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC artifact: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  }
+                },
+                {
+                  "type": "text",
+                  "name": "Voice",
+                  "placement": {
+                    "top": 700,
+                    "left": 860,
+                    "width": 270,
+                    "height": 56,
+                    "rotation": 0
+                  },
+                  "constraint": {
+                    "horizontal": "left",
+                    "vertical": "top"
+                  },
+                  "config": {
+                    "align": "center",
+                    "valign": "middle",
+                    "color": {
+                      "fixed": "#FFFFFF"
+                    },
+                    "size": 16,
+                    "text": {
+                      "fixed": "TTS / STT\n10.77.10.58:8090"
+                    }
+                  },
+                  "background": {
+                    "color": {
+                      "field": "ROC voice: Service state",
+                      "fixed": "#172554"
+                    }
+                  },
+                  "border": {
+                    "color": {
+                      "fixed": "#60A5FA"
+                    },
+                    "width": 2
+                  }
+                }
+              ]
+            }
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC browser: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            },
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC transport: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "B",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            },
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC ingress: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "C",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            },
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC worker: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "D",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            },
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC api: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "E",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            },
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC postgres: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "F",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            },
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC artifact: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "G",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            },
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC voice: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "H",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "stat",
+          "title": "BROWSER",
+          "gridPos": {
+            "x": 0,
+            "y": 128,
+            "w": 6,
+            "h": 5
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC browser: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "RUNNING",
+                      "color": "green"
+                    },
+                    "2": {
+                      "text": "STOPPED",
+                      "color": "red"
+                    },
+                    "3": {
+                      "text": "FAILED",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "STARTING",
+                      "color": "yellow"
+                    },
+                    "5": {
+                      "text": "UNKNOWN",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "wideLayout": true,
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 11,
+          "type": "stat",
+          "title": "TRANSPORT",
+          "gridPos": {
+            "x": 6,
+            "y": 128,
+            "w": 6,
+            "h": 5
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC transport: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "RUNNING",
+                      "color": "green"
+                    },
+                    "2": {
+                      "text": "STOPPED",
+                      "color": "red"
+                    },
+                    "3": {
+                      "text": "FAILED",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "STARTING",
+                      "color": "yellow"
+                    },
+                    "5": {
+                      "text": "UNKNOWN",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "wideLayout": true,
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 12,
+          "type": "stat",
+          "title": "INGRESS",
+          "gridPos": {
+            "x": 12,
+            "y": 128,
+            "w": 6,
+            "h": 5
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC ingress: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "RUNNING",
+                      "color": "green"
+                    },
+                    "2": {
+                      "text": "STOPPED",
+                      "color": "red"
+                    },
+                    "3": {
+                      "text": "FAILED",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "STARTING",
+                      "color": "yellow"
+                    },
+                    "5": {
+                      "text": "UNKNOWN",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "wideLayout": true,
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 13,
+          "type": "stat",
+          "title": "WORKER",
+          "gridPos": {
+            "x": 18,
+            "y": 128,
+            "w": 6,
+            "h": 5
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC worker: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "RUNNING",
+                      "color": "green"
+                    },
+                    "2": {
+                      "text": "STOPPED",
+                      "color": "red"
+                    },
+                    "3": {
+                      "text": "FAILED",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "STARTING",
+                      "color": "yellow"
+                    },
+                    "5": {
+                      "text": "UNKNOWN",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "wideLayout": true,
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 14,
+          "type": "stat",
+          "title": "API",
+          "gridPos": {
+            "x": 0,
+            "y": 133,
+            "w": 6,
+            "h": 5
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC api: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "RUNNING",
+                      "color": "green"
+                    },
+                    "2": {
+                      "text": "STOPPED",
+                      "color": "red"
+                    },
+                    "3": {
+                      "text": "FAILED",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "STARTING",
+                      "color": "yellow"
+                    },
+                    "5": {
+                      "text": "UNKNOWN",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "wideLayout": true,
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 15,
+          "type": "stat",
+          "title": "POSTGRES",
+          "gridPos": {
+            "x": 6,
+            "y": 133,
+            "w": 6,
+            "h": 5
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC postgres: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "RUNNING",
+                      "color": "green"
+                    },
+                    "2": {
+                      "text": "STOPPED",
+                      "color": "red"
+                    },
+                    "3": {
+                      "text": "FAILED",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "STARTING",
+                      "color": "yellow"
+                    },
+                    "5": {
+                      "text": "UNKNOWN",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "wideLayout": true,
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 16,
+          "type": "stat",
+          "title": "ARTIFACT",
+          "gridPos": {
+            "x": 12,
+            "y": 133,
+            "w": 6,
+            "h": 5
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC artifact: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "RUNNING",
+                      "color": "green"
+                    },
+                    "2": {
+                      "text": "STOPPED",
+                      "color": "red"
+                    },
+                    "3": {
+                      "text": "FAILED",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "STARTING",
+                      "color": "yellow"
+                    },
+                    "5": {
+                      "text": "UNKNOWN",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "wideLayout": true,
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 17,
+          "type": "stat",
+          "title": "VOICE",
+          "gridPos": {
+            "x": 18,
+            "y": 133,
+            "w": 6,
+            "h": 5
+          },
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "roc-zabbix"
+          },
+          "targets": [
+            {
+              "application": {
+                "filter": ""
+              },
+              "countTriggers": true,
+              "countTriggersBy": "",
+              "datasource": {
+                "type": "alexanderzobnin-zabbix-datasource",
+                "uid": "roc-zabbix"
+              },
+              "evaltype": "0",
+              "functions": [],
+              "group": {
+                "filter": "Andy / ROC-E2E"
+              },
+              "host": {
+                "filter": "Andy ROC-E2E"
+              },
+              "item": {
+                "filter": "ROC voice: Service state"
+              },
+              "itemTag": {
+                "filter": ""
+              },
+              "macro": {
+                "filter": ""
+              },
+              "minSeverity": 0,
+              "mode": 0,
+              "options": {
+                "count": false,
+                "disableDataAlignment": false,
+                "showDisabledItems": false,
+                "skipEmptyValues": false,
+                "useTrends": "default",
+                "useZabbixValueMapping": false
+              },
+              "proxy": {
+                "filter": ""
+              },
+              "queryType": "0",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "schema": 12,
+              "table": {
+                "skipEmptyValues": false
+              },
+              "tags": {
+                "filter": ""
+              },
+              "textFilter": "",
+              "trigger": {
+                "filter": ""
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "RUNNING",
+                      "color": "green"
+                    },
+                    "2": {
+                      "text": "STOPPED",
+                      "color": "red"
+                    },
+                    "3": {
+                      "text": "FAILED",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "STARTING",
+                      "color": "yellow"
+                    },
+                    "5": {
+                      "text": "UNKNOWN",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 2
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "wideLayout": true,
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 30,
+          "type": "table",
+          "title": "Recent Operational Traces",
+          "description": "Reconstructed ROC-E2E traces from persisted Andy correlation events. Synthetic evidence only; native engine spans will replace this bridge progressively.",
+          "gridPos": {
+            "x": 0,
+            "y": 138,
+            "w": 24,
+            "h": 12
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "roc-tempo"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "tempo",
+                "uid": "roc-tempo"
+              },
+              "limit": 20,
+              "metricsQueryType": "range",
+              "query": "{ resource.service.name = \"andy.roc.reconstruction\" }",
+              "queryType": "traceql",
+              "refId": "A",
+              "tableType": "traces"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false,
+                "filterable": true
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false,
+              "reducer": [
+                "sum"
+              ],
+              "countRows": false,
+              "fields": ""
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "trace_id",
+        "label": "Trace ID · latest = automático",
+        "type": "textbox",
+        "current": {
+          "text": "latest",
+          "value": "latest"
+        },
+        "query": "latest",
+        "options": [
+          {
+            "text": "latest",
+            "value": "latest",
+            "selected": true
+          }
+        ],
+        "hide": 0
+      },
+      {
+        "name": "resolved_trace_id",
+        "type": "query",
+        "hide": 2,
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "roc-flow"
+        },
+        "refresh": 2,
+        "sort": 0,
+        "multi": false,
+        "includeAll": false,
+        "query": {
+          "queryType": "infinity",
+          "refId": "variable",
+          "infinityQuery": {
+            "refId": "A",
+            "datasource": {
+              "type": "yesoreyeram-infinity-datasource",
+              "uid": "roc-flow"
+            },
+            "type": "json",
+            "source": "url",
+            "format": "table",
+            "parser": "backend",
+            "url": "http://roc-flow-reader:8080/view?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+            "root_selector": "metadata",
+            "columns": [
+              {
+                "selector": "trace_id",
+                "text": "trace_id",
+                "type": "string"
+              }
+            ],
+            "url_options": {
+              "method": "GET"
+            },
+            "filters": []
+          },
+          "meta": {
+            "textField": "trace_id",
+            "valueField": "trace_id"
+          }
+        },
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": [],
+        "skipUrlSync": true
+      },
+      {
+        "name": "inbound_trace_id",
+        "type": "query",
+        "hide": 2,
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "roc-flow"
+        },
+        "refresh": 2,
+        "sort": 0,
+        "multi": false,
+        "includeAll": false,
+        "query": {
+          "queryType": "infinity",
+          "refId": "variable",
+          "infinityQuery": {
+            "refId": "A",
+            "datasource": {
+              "type": "yesoreyeram-infinity-datasource",
+              "uid": "roc-flow"
+            },
+            "type": "json",
+            "source": "url",
+            "format": "table",
+            "parser": "backend",
+            "url": "http://roc-flow-reader:8080/view?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+            "root_selector": "metadata",
+            "columns": [
+              {
+                "selector": "inbound_trace_id",
+                "text": "inbound_trace_id",
+                "type": "string"
+              }
+            ],
+            "url_options": {
+              "method": "GET"
+            },
+            "filters": []
+          },
+          "meta": {
+            "textField": "inbound_trace_id",
+            "valueField": "inbound_trace_id"
+          }
+        },
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": [],
+        "skipUrlSync": true
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "type": "link",
+      "title": "Último trace (automático)",
+      "url": "/d/roc-e2e-operational/roc-e2e-operational-flow?var-trace_id=latest&refresh=10s"
+    },
+    {
+      "type": "link",
+      "title": "Canário E2E certificado",
+      "url": "/d/roc-e2e-operational/roc-e2e-operational-flow?var-trace_id=1bb1ad92b493e7dc58d429ce8d260172&refresh=10s"
+    },
+    {
+      "type": "link",
+      "title": "TraceQL / Tempo",
+      "url": "/explore?schemaVersion=1&orgId=1&panes=%7B%22a%22%3A%7B%22datasource%22%3A%22roc-tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22roc-tempo%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22${resolved_trace_id}%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-24h%22%2C%22to%22%3A%22now%22%7D%7D%7D"
+    },
+    {
+      "type": "link",
+      "title": "Ajuda: traces nativos",
+      "url": "https://grafana.com/docs/grafana/latest/visualizations/panels-visualizations/visualizations/traces/",
+      "targetBlank": true
+    }
+  ]
+}
