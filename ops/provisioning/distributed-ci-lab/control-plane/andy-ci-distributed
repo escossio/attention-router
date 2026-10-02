@@ -108,13 +108,20 @@ probe_worker() {
 
   local target
   target="$(host_target "$worker")"
-  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+  if ! "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
       'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null' \
       >/dev/null 2>&1; then
+    set_health "$worker" UNAVAILABLE "worker_preflight_failed"
+    return 1
+  fi
+
+  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+      'flock -n /srv/andy-ci/worker.lock -c true' >/dev/null 2>&1; then
     set_health "$worker" READY "worker_ready"
     return 0
   fi
-  set_health "$worker" UNAVAILABLE "worker_preflight_failed"
+
+  set_health "$worker" DEGRADED "worker_busy"
   return 1
 }
 
@@ -152,41 +159,43 @@ wait_for_capacity() {
   done
 }
 
-choose_fastest() {
+ordered_workers() {
   python3 - "$CAPACITY" "$@" <<'PY'
 import json, pathlib, sys
 capacity=json.loads(pathlib.Path(sys.argv[1]).read_text())["pytest_full_seconds"]
-workers=sys.argv[2:]
-usable=[w for w in workers if w in capacity]
-if not usable:
-    raise SystemExit(1)
-print(min(usable, key=lambda w: (float(capacity[w]), w)))
+workers=[w for w in sys.argv[2:] if w in capacity]
+for worker in sorted(workers, key=lambda name: (float(capacity[name]), name)):
+    print(worker)
 PY
 }
 
 discover_postgres_files() {
   local attempts=0
+  local remote_cmd
+  remote_cmd="git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e ${SHA}^{commit}; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only ${SHA} -- tests/integration"
+
   while (( attempts < 8 )); do
     if ! wait_for_capacity; then
       return 1
     fi
-    local worker
-    worker="$(choose_fastest "${READY_WORKERS[@]}")"
-    local target
-    target="$(host_target "$worker")"
-    local raw="$RUN_DIR/discovery-${worker}.txt"
-    if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-        "git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; \
-         git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e '$SHA^{commit}'; \
-         git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only '$SHA' -- tests/integration" \
-        >"$raw" 2>/dev/null; then
-      grep '^tests/integration/test_postgres.*\.py$' "$raw" \
-        | LC_ALL=C sort > "$RUN_DIR/current-postgres-files.txt"
-      [[ -s "$RUN_DIR/current-postgres-files.txt" ]] || return 1
-      echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
-      return 0
-    fi
-    set_health "$worker" UNAVAILABLE "discovery_failed"
+
+    local worker target raw
+    while IFS= read -r worker; do
+      [[ -n "$worker" ]] || continue
+      target="$(host_target "$worker")"
+      raw="$RUN_DIR/discovery-${worker}.txt"
+      if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+          "flock -n /srv/andy-ci/worker.lock -c '$remote_cmd'" \
+          >"$raw" 2>/dev/null; then
+        grep '^tests/integration/test_postgres.*\\.py$' "$raw" \
+          | LC_ALL=C sort > "$RUN_DIR/current-postgres-files.txt"
+        [[ -s "$RUN_DIR/current-postgres-files.txt" ]] || return 1
+        echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
+        return 0
+      fi
+      set_health "$worker" DEGRADED "discovery_busy_or_failed"
+    done < <(ordered_workers "${READY_WORKERS[@]}")
+
     attempts=$((attempts + 1))
     sleep 2
   done

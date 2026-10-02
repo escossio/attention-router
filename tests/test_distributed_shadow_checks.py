@@ -17,6 +17,14 @@ SCHEDULER = (
     ROOT
     / "ops/provisioning/distributed-ci-lab/control-plane/andy-ci-distributed-suite"
 )
+POSTGRES_SCHEDULER = (
+    ROOT
+    / "ops/provisioning/distributed-ci-lab/control-plane/andy-ci-distributed"
+)
+POSTGRES_REPROFILE = (
+    ROOT
+    / "ops/provisioning/distributed-ci-lab/control-plane/andy-ci-reprofile"
+)
 
 
 def load_publisher():
@@ -174,3 +182,33 @@ def test_ci_service_units_allow_host_registry_state_writes():
             if item.startswith("ReadWritePaths=")
         )
         assert "/var/lib/andy-ci" in line.split("=")[1].split()
+
+
+def test_distributed_schedulers_coordinate_worker_mirror_lock():
+    generic = SCHEDULER.read_text()
+    postgres = POSTGRES_SCHEDULER.read_text()
+    reprofile = POSTGRES_REPROFILE.read_text()
+
+    assert "flock -n /srv/andy-ci/worker.lock -c true" in generic
+    assert "flock -n /srv/andy-ci/worker.lock -c true" in postgres
+    assert "flock -n /srv/andy-ci/worker.lock -c true" in reprofile
+
+    assert postgres.count("flock -n /srv/andy-ci/worker.lock") >= 2
+    assert reprofile.count("flock -n /srv/andy-ci/worker.lock") >= 2
+
+    assert 'ANDY_CI_CAPACITY_WAIT_SECONDS:-300' in generic
+    assert "cannot lock ref" in generic
+    assert "unable to update local ref" in generic
+    assert "echo MIRROR_BUSY" in generic
+    assert "WORKER_BUSY|MIRROR_BUSY" in generic
+
+
+def test_all_distributed_scheduler_scripts_are_valid_bash():
+    for script in (SCHEDULER, POSTGRES_SCHEDULER, POSTGRES_REPROFILE):
+        result = subprocess.run(
+            ["bash", "-n", str(script)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"{script}: {result.stderr}"
