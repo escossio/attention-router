@@ -11,7 +11,7 @@ REPLAN="${ANDY_CI_REPLAN_POSTGRES:-$BASE/bin/replan-postgres.py}"
 CAPACITY="${ANDY_CI_CAPACITY_FILE:-$BASE/worker-capacity.json}"
 SSH_BIN="${ANDY_CI_SSH_BIN:-ssh}"
 SCP_BIN="${ANDY_CI_SCP_BIN:-scp}"
-CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-180}"
+CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
 MAX_WAVES="${ANDY_CI_MAX_WAVES:-8}"
 
 SHA="${1:-}"
@@ -170,13 +170,16 @@ PY
 }
 
 discover_postgres_files() {
-  local attempts=0
+  local deadline=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))
   local remote_cmd
   remote_cmd="git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e ${SHA}^{commit}; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only ${SHA} -- tests/integration"
 
-  while (( attempts < 8 )); do
-    if ! wait_for_capacity; then
-      return 1
+  while (( $(date +%s) < deadline )); do
+    refresh_pool
+    if ((${#READY_WORKERS[@]} == 0)); then
+      echo 'CI_DISTRIBUTED_STATUS=WAITING_FOR_DISCOVERY_CAPACITY'
+      sleep 3
+      continue
     fi
 
     local worker target raw
@@ -187,17 +190,19 @@ discover_postgres_files() {
       if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
           "flock -n /srv/andy-ci/worker.lock -c '$remote_cmd'" \
           >"$raw" 2>/dev/null; then
-        grep '^tests/integration/test_postgres.*\\.py$' "$raw" \
+        grep '^tests/integration/test_postgres.*\.py$' "$raw" \
           | LC_ALL=C sort > "$RUN_DIR/current-postgres-files.txt"
-        [[ -s "$RUN_DIR/current-postgres-files.txt" ]] || return 1
-        echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
-        return 0
+        if [[ -s "$RUN_DIR/current-postgres-files.txt" ]]; then
+          echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
+          return 0
+        fi
+        echo "CI_DISTRIBUTED_DISCOVERY_EMPTY worker=$worker"
+        return 1
       fi
       set_health "$worker" DEGRADED "discovery_busy_or_failed"
     done < <(ordered_workers "${READY_WORKERS[@]}")
 
-    attempts=$((attempts + 1))
-    sleep 2
+    sleep 3
   done
   return 1
 }
