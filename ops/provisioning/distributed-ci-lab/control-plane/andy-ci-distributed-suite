@@ -202,27 +202,27 @@ PY
 classify_attempt() {
   local rc="$1"
   local log="$2"
-  if (( rc == 0 )) && grep -q '^CI_STATUS=PASS$' "$log"; then
+  if (( rc == 0 )) && grep -q "^CI_STATUS=PASS$" "$log"; then
     echo PASS
     return
   fi
-  if grep -q '^CI_WORKER_BUSY$' "$log"; then
+  if grep -q "^CI_WORKER_BUSY$" "$log"; then
     echo WORKER_BUSY
     return
   fi
   if (( rc == 255 )) || grep -Eq \
-      'ssh:|Connection (timed out|refused|closed)|No route to host|Could not resolve hostname|Broken pipe|kex_exchange_identification' \
+      "ssh:|Connection (timed out|refused|closed)|No route to host|Could not resolve hostname|Broken pipe|kex_exchange_identification" \
       "$log"; then
     echo WORKER_LOST
     return
   fi
   if grep -Eqi \
-      'cannot lock ref|unable to update local ref|Unable to create .*\\.lock|another git process' \
+      "cannot lock ref|unable to update local ref|Unable to create .*\\.lock|another git process" \
       "$log"; then
     echo INFRA_ERROR
     return
   fi
-  if grep -q '^CI_STATUS=FAIL
+  if grep -q "^CI_STATUS=FAIL$" "$log"; then
     echo TEST_FAILURE
     return
   fi
