@@ -177,7 +177,20 @@ discover_postgres_files() {
       if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
           "flock -n /srv/andy-ci/worker.lock bash -lc \"git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e '$SHA^{commit}'; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only '$SHA' -- tests/integration\"" \
           >"$raw" 2>/dev/null; then
-        grep '^tests/integration/test_postgres.*\.py
+        grep '^tests/integration/test_postgres.*\.py$' "$raw" \
+          | LC_ALL=C sort > "$RUN_DIR/current-postgres-files.txt"
+        [[ -s "$RUN_DIR/current-postgres-files.txt" ]] || return 1
+        echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
+        return 0
+      fi
+      set_health "$worker" DEGRADED "discovery_busy_or_failed"
+    done < <(ordered_workers "${READY_WORKERS[@]}")
+
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+  return 1
+}
 
 if ! discover_postgres_files; then
   echo 'CI_DISTRIBUTED_STATUS=NO_DISCOVERY_CAPACITY'
