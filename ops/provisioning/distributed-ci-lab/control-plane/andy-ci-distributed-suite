@@ -217,7 +217,7 @@ classify_attempt() {
     return
   fi
   if grep -Eqi \
-      'cannot lock ref|unable to update local ref|Unable to create .*\.lock|another git process' \
+      'cannot lock ref|unable to update local ref|Unable to create .*\\.lock|another git process' \
       "$log"; then
     echo INFRA_ERROR
     return
