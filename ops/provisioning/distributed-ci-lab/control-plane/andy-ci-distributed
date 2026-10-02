@@ -33,6 +33,48 @@ RUN_ID="$(date +%Y%m%dT%H%M%S)-${SHA:0:12}-postgres-distributed"
 RUN_DIR="$LOG_ROOT/$RUN_ID"
 mkdir -p "$RUN_DIR" "$PROFILE_ROOT"
 
+RUN_STARTED_EPOCH=$(date +%s)
+TERMINAL_REASON=""
+
+finalize_on_exit() {
+  local rc=$?
+  trap - EXIT
+  set +e
+  if (( rc != 0 )) && [[ ! -f "$RUN_DIR/summary.json" ]]; then
+    local ended_epoch wall reason
+    ended_epoch=$(date +%s)
+    wall=$((ended_epoch - RUN_STARTED_EPOCH))
+    reason="${TERMINAL_REASON:-EARLY_EXIT}"
+    python3 - "$RUN_DIR" "$SHA" "$wall" "$reason" "$rc" <<'PY'
+import json
+import pathlib
+import sys
+
+run_dir = pathlib.Path(sys.argv[1])
+sha = sys.argv[2]
+wall = int(sys.argv[3])
+reason = sys.argv[4]
+rc = int(sys.argv[5])
+summary = {
+    "schema_version": 4,
+    "sha": sha,
+    "suite": "postgres",
+    "status": "FAIL",
+    "failure_class": reason,
+    "return_code": rc,
+    "wall_seconds": wall,
+    "degraded": True,
+    "workers": {},
+    "total_passed_tests": 0,
+}
+(run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+PY
+    echo "CI_DISTRIBUTED_SUMMARY=$RUN_DIR/summary.json"
+  fi
+  exit "$rc"
+}
+trap finalize_on_exit EXIT
+
 echo "CI_DISTRIBUTED_RUN_ID=$RUN_ID"
 echo "CI_DISTRIBUTED_SHA=$SHA"
 echo "CI_DISTRIBUTED_SCHEDULER_VERSION=2"
@@ -53,6 +95,7 @@ mapfile -t CONFIGURED_WORKERS < <(
   registry list-workers --capability postgres-worker
 )
 ((${#CONFIGURED_WORKERS[@]} > 0)) || {
+  TERMINAL_REASON=NO_CONFIGURED_WORKERS
   echo 'CI_DISTRIBUTED_STATUS=NO_CONFIGURED_WORKERS'
   exit 69
 }
@@ -208,6 +251,7 @@ discover_postgres_files() {
 }
 
 if ! discover_postgres_files; then
+  TERMINAL_REASON=NO_DISCOVERY_CAPACITY
   echo 'CI_DISTRIBUTED_STATUS=NO_DISCOVERY_CAPACITY'
   exit 69
 fi
@@ -224,17 +268,20 @@ if [[ ! -d "$PROFILE" && -d "$LEGACY_PROFILE" \
 fi
 
 if [[ ! -d "$PROFILE" ]]; then
+  TERMINAL_REASON=REPROFILE_REQUIRED
   echo 'CI_DISTRIBUTED_STATUS=REPROFILE_REQUIRED'
   exit 66
 fi
 for required in postgres-files.txt manifest.json; do
   [[ -f "$PROFILE/$required" ]] || {
+    TERMINAL_REASON=PROFILE_CORRUPT
     echo 'CI_DISTRIBUTED_STATUS=PROFILE_CORRUPT'
     exit 70
   }
 done
 if ! cmp -s "$PROFILE/postgres-files.txt" \
     "$RUN_DIR/current-postgres-files.txt"; then
+  TERMINAL_REASON=PROFILE_CORRUPT
   echo 'CI_DISTRIBUTED_STATUS=PROFILE_CORRUPT'
   exit 70
 fi
