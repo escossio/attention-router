@@ -193,11 +193,14 @@ def test_distributed_schedulers_coordinate_worker_mirror_lock():
     assert "flock -n /srv/andy-ci/worker.lock -c true" in postgres
     assert "flock -n /srv/andy-ci/worker.lock -c true" in reprofile
 
-    assert "flock -n /srv/andy-ci/worker.lock bash -lc" in postgres
-    assert "flock -n /srv/andy-ci/worker.lock bash -lc" in reprofile
+    assert postgres.count("flock -n /srv/andy-ci/worker.lock") >= 2
+    assert reprofile.count("flock -n /srv/andy-ci/worker.lock") >= 2
 
+    assert 'ANDY_CI_CAPACITY_WAIT_SECONDS:-300' in generic
     assert "cannot lock ref" in generic
     assert "unable to update local ref" in generic
+    assert "echo MIRROR_BUSY" in generic
+    assert "WORKER_BUSY|MIRROR_BUSY" in generic
 
 
 def test_all_distributed_scheduler_scripts_are_valid_bash():
