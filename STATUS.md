@@ -13,6 +13,11 @@ Updated: 2026-09-30
 - This checkpoint does not claim support for `voltar à vida`, executable one-shot reply delay, or closure of Android session/dual-stack resilience.
 - Canonical resume state: [Android Client Command Clarification + User Idiolect physical proof](docs/checkpoints/ANDROID_CLIENT_COMMAND_CLARIFICATION_IDIOLECT_E2E_20260923.md).
 
+## Grafana native OTel E2E flow
+
+- Dashboard `roc-e2e-operational` now has a versioned definition, native Tempo canonical/inbound trace views, causal stage status/latency, recent traces, gaps and explicit Span Links. Existing Zabbix panels are preserved.
+- A bounded read-only Tempo projection supplies native Grafana tables and automatic latest-trace selection. Physical reference validated: 19 canonical spans + 3 linked inbound spans; browser refresh PASS, WebSocket 101, zero console/DOM errors. No functional OTel component or authority gate changed.
+
 ## NETWORK / OSI — finalized with degraded runtime evidence
 
 - Read-only resumption confirmed existing evidence, unchanged ROC container identities/start times, template/host/dashboard and the available NETWORK / OSI tab. Current health and enabled trigger dependencies match the final checkpoint; diff check passes. No repeated discovery, tests, provisioning, runtime changes, commit or push.
@@ -44,6 +49,24 @@ Updated: 2026-09-30
 - Native attributes and the complete trace privacy audit PASS. The independent ROC reconstruction bridge remained healthy without restart and produced a recent trace.
 - Sampling remains `parentbased_traceidratio` at `1.0`; steady-state policy remains a separate operational decision. Raw evidence is retained privately; the public record is sanitized.
 - See [runtime certification, 2026-09-25](docs/observability/NATIVE_OTEL_RUNTIME_CERTIFICATION_20260925.md).
+
+## ClientSession idempotent challenge retry — branch candidate
+
+- A repeated challenge start for the same server-resolved device and exact
+  `requested_tenant_id` now returns the same unexpired `PENDING` challenge,
+  including its original expiry, instead of failing or invalidating it.
+- New `csc_r1_` challenge ids carry 256 bits of random entropy. Challenge bytes
+  are reconstructed with domain-separated SHA-256; persistence still keeps the
+  challenge digest, and completion still requires the enrolled P-256 signature
+  plus current device, Human Identity, membership and tenant authority.
+- Different tenant contexts, legacy unrederivable pending rows, digest tampering
+  and multiple unexpired rows fail closed. A legacy row becomes replaceable only
+  through the existing expiry cleanup.
+- Focused evidence: Ruff passed; 42 ClientSession service/core/contract/API tests
+  passed; six PostgreSQL tests collect successfully. PostgreSQL concurrency
+  execution remains delegated to the exact-SHA distributed gate after publication.
+- No API shape, migration, runtime flag, database, deployment or live service
+  was changed.
 
 ## Andy Ops Live Supervisor V1
 

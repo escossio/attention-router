@@ -290,7 +290,10 @@ def _sample_node(node_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-def _recent_dispatches(limit: int = 7) -> list[dict[str, Any]]:
+def _recent_dispatches(
+    limit: int = 7,
+    active_sha_shorts: set[str] | None = None,
+) -> list[dict[str, Any]]:
     if not LOG_ROOT.exists():
         return []
     paths = sorted(
@@ -315,20 +318,25 @@ def _recent_dispatches(limit: int = 7) -> list[dict[str, Any]]:
         except ValueError:
             started_at = None
         age = int(time.time() - path.stat().st_mtime)
+        active = active_sha_shorts or set()
+        status = (
+            summary.get("status")
+            if isinstance(summary, dict)
+            else ("RUNNING" if sha_short in active else "INCOMPLETE")
+        )
         result.append({
             "id": path.name,
             "sha_short": sha_short,
             "sha": summary.get("sha") if isinstance(summary, dict) else None,
             "suite": "postgres",
             "started_at": started_at,
-            "status": summary.get("status") if isinstance(summary, dict) else (
-                "RUNNING" if age < 180 else "INCOMPLETE"
-            ),
+            "status": status,
             "wall_seconds": (
                 summary.get("wall_seconds")
                 if isinstance(summary, dict)
                 else age
             ),
+            "failure_class": summary.get("failure_class") if isinstance(summary, dict) else None,
             "total_passed_tests": summary.get("total_passed_tests") if isinstance(summary, dict) else None,
             "workers": summary.get("workers", {}) if isinstance(summary, dict) else {},
         })
@@ -607,7 +615,12 @@ def _sample_loop() -> None:
                 }
 
         nodes = [nodes_by_id[node_id] for node_id in NODES]
-        recent = _recent_dispatches()
+        active_sha_shorts = {
+            task["sha_short"]
+            for node in nodes
+            if (task := node.get("task")) and task.get("sha_short")
+        }
+        recent = _recent_dispatches(active_sha_shorts=active_sha_shorts)
         payload = {
             "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
             "nodes": nodes,
