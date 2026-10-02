@@ -121,7 +121,7 @@ AGT is the control plane and CI01/CI02/CI03 are workers.
 
 Live process inspection recognizes `andy-ci-distributed`, `andy-ci-reprofile`, `andy-ci-run` and PostgreSQL pytest shards. Completed distributed jobs are loaded from the control-plane summaries.
 
-Stale log directories without a final summary are shown as `INCOMPLETE`, not as indefinitely running work.
+A dispatch is shown as `RUNNING` only when a live AGT/worker process reports that exact SHA. Directory age alone never implies active work. Early scheduler failures persist a terminal `summary.json` and therefore appear as `FAIL` with a failure class; a log directory without both a terminal summary and a live process is shown as `INCOMPLETE`.
 
 ## Security boundary
 
