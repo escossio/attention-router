@@ -93,6 +93,29 @@ andy-ci-distributed <40-char-sha> postgres
 - `examples/ssh-config.example`: alias pattern; real addresses and credentials stay outside Git.
 - `benchmark-20260919.json`: machine-readable benchmark evidence.
 
+
+## Shadow generic suites
+
+The worker executor already supports `python`, `transport` and `docker` suites in addition to PostgreSQL. The generic shadow scheduler exposes those existing worker capabilities without replacing the proven sharded PostgreSQL scheduler:
+
+```bash
+andy-ci-distributed-suite <40-char-sha> python
+andy-ci-distributed-suite <40-char-sha> transport
+andy-ci-distributed-suite <40-char-sha> docker
+```
+
+The scheduler asks the Host Registry for the generic `ci-worker` capability. During the migration window it may explicitly fall back to the existing `postgres-worker` pool, which is logged as `CI_DISTRIBUTED_CAPABILITY_FALLBACK`. This fallback is safe for the current lab because the same installed worker executor implements all three generic suites; the intended steady state is to grant `ci-worker` explicitly.
+
+Generic suites are whole-suite jobs rather than test-file shards. Concurrent shadow checks deliberately use different stable starting offsets in the benchmark-ordered worker list, so `python`, `docker` and `transport` normally begin on different workers. The worker lock remains authoritative: a collision returns `CI_WORKER_BUSY`, and the scheduler tries the next eligible worker. Worker loss and SSH failures fail over; a real suite failure is terminal and is not retried on another machine.
+
+The GitHub App publishes these results as **non-required shadow checks**:
+
+- `distributed-python`;
+- `distributed-transport`;
+- `distributed-docker`.
+
+The existing GitHub-hosted `python-tests`, `transport-tests` and `docker-build` required checks remain unchanged during certification. Only after repeated exact-SHA equivalence has been demonstrated should the repository ruleset be migrated to the distributed checks. `distributed-postgres` remains independent and unchanged.
+
 ## Security boundary
 
 This is deliberately **not** a persistent GitHub-hosted-to-LAN self-hosted runner path.
