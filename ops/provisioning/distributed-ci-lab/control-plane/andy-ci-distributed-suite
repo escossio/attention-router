@@ -7,7 +7,7 @@ REGISTRY_CLI="${ANDY_CI_HOST_REGISTRY_CLI:-$BASE/bin/host-registry.py}"
 REGISTRY_DB="${ANDY_CI_HOST_REGISTRY_DB:-/var/lib/andy-ci/host-registry.sqlite3}"
 CAPACITY="${ANDY_CI_CAPACITY_FILE:-$BASE/worker-capacity.json}"
 SSH_BIN="${ANDY_CI_SSH_BIN:-ssh}"
-CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-180}"
+CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
 GENERIC_CAPABILITY="${ANDY_CI_GENERIC_CAPABILITY:-ci-worker}"
 FALLBACK_CAPABILITY="${ANDY_CI_GENERIC_FALLBACK_CAPABILITY:-postgres-worker}"
 
@@ -122,16 +122,22 @@ probe_worker() {
 
   local target
   target="$(host_target "$worker")"
-  local preflight='test -x /srv/andy-ci/bin/andy-ci-run && flock -n /srv/andy-ci/worker.lock -c true'
+  local preflight='test -x /srv/andy-ci/bin/andy-ci-run'
   if [[ "$SUITE" == docker ]]; then
     preflight+=' && docker info >/dev/null'
   fi
-  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" "$preflight" >/dev/null 2>&1; then
+  if ! "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" "$preflight" >/dev/null 2>&1; then
+    set_health "$worker" UNAVAILABLE worker_preflight_failed
+    return 1
+  fi
+
+  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+      'flock -n /srv/andy-ci/worker.lock -c true' >/dev/null 2>&1; then
     set_health "$worker" READY worker_ready
     return 0
   fi
 
-  set_health "$worker" UNAVAILABLE worker_preflight_failed
+  set_health "$worker" DEGRADED worker_busy
   return 1
 }
 
@@ -202,89 +208,103 @@ PY
 classify_attempt() {
   local rc="$1"
   local log="$2"
-  if (( rc == 0 )) && grep -q "^CI_STATUS=PASS$" "$log"; then
+  if (( rc == 0 )) && grep -q '^CI_STATUS=PASS$' "$log"; then
     echo PASS
     return
   fi
-  if grep -q "^CI_WORKER_BUSY$" "$log"; then
+  if grep -q '^CI_WORKER_BUSY$' "$log"; then
     echo WORKER_BUSY
     return
   fi
+  if grep -Eq \
+      'cannot lock ref|unable to update local ref|Unable to create .*\\.lock|could not lock config file' \
+      "$log"; then
+    echo MIRROR_BUSY
+    return
+  fi
   if (( rc == 255 )) || grep -Eq \
-      "ssh:|Connection (timed out|refused|closed)|No route to host|Could not resolve hostname|Broken pipe|kex_exchange_identification" \
+      'ssh:|Connection (timed out|refused|closed)|No route to host|Could not resolve hostname|Broken pipe|kex_exchange_identification' \
       "$log"; then
     echo WORKER_LOST
     return
   fi
-  if grep -Eqi \
-      "cannot lock ref|unable to update local ref|Unable to create .*\\.lock|another git process" \
-      "$log"; then
-    echo INFRA_ERROR
-    return
-  fi
-  if grep -q "^CI_STATUS=FAIL$" "$log"; then
+  if grep -q '^CI_STATUS=FAIL$' "$log"; then
     echo TEST_FAILURE
     return
   fi
   echo INFRA_ERROR
 }
 
-if ! wait_for_capacity; then
-  echo 'CI_DISTRIBUTED_STATUS=NO_CAPACITY'
-  exit 69
-fi
-
 ATTEMPTS="$RUN_DIR/attempts.tsv"
 printf 'attempt\tworker\tclassification\trc\tduration\n' > "$ATTEMPTS"
 START_EPOCH=$(date +%s)
+DEADLINE=$((START_EPOCH + CAPACITY_WAIT_SECONDS))
 FINAL_STATUS=FAIL
 SELECTED_WORKER=""
 FAILURE_CLASS="INFRA_EXHAUSTED"
 attempt=0
+TERMINAL=0
 
-while IFS= read -r worker; do
-  [[ -n "$worker" ]] || continue
-  attempt=$((attempt + 1))
-  target="$(host_target "$worker")"
-  log="$RUN_DIR/${attempt}-${worker}.log"
+while (( $(date +%s) < DEADLINE )); do
+  if ! wait_for_capacity; then
+    FAILURE_CLASS=NO_CAPACITY
+    break
+  fi
 
-  set +e
-  "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-    "/srv/andy-ci/bin/andy-ci-run '$SHA' '$SUITE'" \
-    >"$log" 2>&1
-  rc=$?
-  set -e
+  RETRYABLE=0
+  while IFS= read -r worker; do
+    [[ -n "$worker" ]] || continue
+    attempt=$((attempt + 1))
+    target="$(host_target "$worker")"
+    log="$RUN_DIR/${attempt}-${worker}.log"
 
-  classification="$(classify_attempt "$rc" "$log")"
-  duration="$(awk -F= '/^CI_DURATION_SECONDS=/{v=$2} END{print v}' "$log")"
-  duration="${duration:-0}"
-  printf '%s\t%s\t%s\t%s\t%s\n' \
-    "$attempt" "$worker" "$classification" "$rc" "$duration" >> "$ATTEMPTS"
+    set +e
+    "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+      "/srv/andy-ci/bin/andy-ci-run '$SHA' '$SUITE'" \
+      >"$log" 2>&1
+    rc=$?
+    set -e
 
-  case "$classification" in
-    PASS)
-      set_health "$worker" READY "${SUITE}_pass"
-      FINAL_STATUS=PASS
-      SELECTED_WORKER="$worker"
-      FAILURE_CLASS=""
-      break
-      ;;
-    WORKER_BUSY)
-      set_health "$worker" DEGRADED worker_busy
-      FAILURE_CLASS=WORKER_BUSY
-      ;;
-    WORKER_LOST|INFRA_ERROR)
-      set_health "$worker" UNAVAILABLE "${classification,,}"
-      FAILURE_CLASS="$classification"
-      ;;
-    TEST_FAILURE)
-      set_health "$worker" READY "${SUITE}_test_failure"
-      SELECTED_WORKER="$worker"
-      FAILURE_CLASS=TEST_FAILURE
-      break
-      ;;
-  esac
-done < <(ordered_workers "${READY_WORKERS[@]}")
+    classification="$(classify_attempt "$rc" "$log")"
+    duration="$(awk -F= '/^CI_DURATION_SECONDS=/{v=$2} END{print v}' "$log")"
+    duration="${duration:-0}"
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+      "$attempt" "$worker" "$classification" "$rc" "$duration" >> "$ATTEMPTS"
+
+    case "$classification" in
+      PASS)
+        set_health "$worker" READY "${SUITE}_pass"
+        FINAL_STATUS=PASS
+        SELECTED_WORKER="$worker"
+        FAILURE_CLASS=""
+        TERMINAL=1
+        break
+        ;;
+      WORKER_BUSY|MIRROR_BUSY)
+        set_health "$worker" DEGRADED "${classification,,}"
+        FAILURE_CLASS="$classification"
+        RETRYABLE=1
+        ;;
+      WORKER_LOST|INFRA_ERROR)
+        set_health "$worker" UNAVAILABLE "${classification,,}"
+        FAILURE_CLASS="$classification"
+        RETRYABLE=1
+        ;;
+      TEST_FAILURE)
+        set_health "$worker" READY "${SUITE}_test_failure"
+        SELECTED_WORKER="$worker"
+        FAILURE_CLASS=TEST_FAILURE
+        TERMINAL=1
+        break
+        ;;
+    esac
+  done < <(ordered_workers "${READY_WORKERS[@]}")
+
+  (( TERMINAL == 1 )) && break
+  (( RETRYABLE == 1 )) || break
+  (( $(date +%s) < DEADLINE )) || break
+  sleep 2
+done
 
 END_EPOCH=$(date +%s)
 WALL_SECONDS=$((END_EPOCH - START_EPOCH))
