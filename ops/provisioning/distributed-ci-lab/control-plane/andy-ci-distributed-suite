@@ -122,7 +122,7 @@ probe_worker() {
 
   local target
   target="$(host_target "$worker")"
-  local preflight='test -x /srv/andy-ci/bin/andy-ci-run'
+  local preflight='test -x /srv/andy-ci/bin/andy-ci-run && flock -n /srv/andy-ci/worker.lock -c true'
   if [[ "$SUITE" == docker ]]; then
     preflight+=' && docker info >/dev/null'
   fi
@@ -216,7 +216,139 @@ classify_attempt() {
     echo WORKER_LOST
     return
   fi
+  if grep -Eqi \
+      'cannot lock ref|unable to update local ref|Unable to create .*\.lock|another git process' \
+      "$log"; then
+    echo INFRA_ERROR
+    return
+  fi
+  if grep -q '^CI_STATUS=FAIL
+    echo TEST_FAILURE
+    return
+  fi
+  echo INFRA_ERROR
+}
+
+if ! wait_for_capacity; then
+  echo 'CI_DISTRIBUTED_STATUS=NO_CAPACITY'
+  exit 69
+fi
+
+ATTEMPTS="$RUN_DIR/attempts.tsv"
+printf 'attempt\tworker\tclassification\trc\tduration\n' > "$ATTEMPTS"
+START_EPOCH=$(date +%s)
+FINAL_STATUS=FAIL
+SELECTED_WORKER=""
+FAILURE_CLASS="INFRA_EXHAUSTED"
+attempt=0
+
+while IFS= read -r worker; do
+  [[ -n "$worker" ]] || continue
+  attempt=$((attempt + 1))
+  target="$(host_target "$worker")"
+  log="$RUN_DIR/${attempt}-${worker}.log"
+
+  set +e
+  "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+    "/srv/andy-ci/bin/andy-ci-run '$SHA' '$SUITE'" \
+    >"$log" 2>&1
+  rc=$?
+  set -e
+
+  classification="$(classify_attempt "$rc" "$log")"
+  duration="$(awk -F= '/^CI_DURATION_SECONDS=/{v=$2} END{print v}' "$log")"
+  duration="${duration:-0}"
+  printf '%s\t%s\t%s\t%s\t%s\n' \
+    "$attempt" "$worker" "$classification" "$rc" "$duration" >> "$ATTEMPTS"
+
+  case "$classification" in
+    PASS)
+      set_health "$worker" READY "${SUITE}_pass"
+      FINAL_STATUS=PASS
+      SELECTED_WORKER="$worker"
+      FAILURE_CLASS=""
+      break
+      ;;
+    WORKER_BUSY)
+      set_health "$worker" DEGRADED worker_busy
+      FAILURE_CLASS=WORKER_BUSY
+      ;;
+    WORKER_LOST|INFRA_ERROR)
+      set_health "$worker" UNAVAILABLE "${classification,,}"
+      FAILURE_CLASS="$classification"
+      ;;
+    TEST_FAILURE)
+      set_health "$worker" READY "${SUITE}_test_failure"
+      SELECTED_WORKER="$worker"
+      FAILURE_CLASS=TEST_FAILURE
+      break
+      ;;
+  esac
+done < <(ordered_workers "${READY_WORKERS[@]}")
+
+END_EPOCH=$(date +%s)
+WALL_SECONDS=$((END_EPOCH - START_EPOCH))
+registry snapshot --capability "$ACTIVE_CAPABILITY" > "$RUN_DIR/registry-final.json"
+
+python3 - "$RUN_DIR" "$SHA" "$SUITE" "$WALL_SECONDS" "$ATTEMPTS" \
+  "$FINAL_STATUS" "$SELECTED_WORKER" "$FAILURE_CLASS" "$ACTIVE_CAPABILITY" <<'PY'
+import csv
+import json
+import pathlib
+import sys
+
+run_dir = pathlib.Path(sys.argv[1])
+sha = sys.argv[2]
+suite = sys.argv[3]
+wall = int(sys.argv[4])
+attempts_path = pathlib.Path(sys.argv[5])
+status = sys.argv[6]
+selected_worker = sys.argv[7] or None
+failure_class = sys.argv[8] or None
+capability = sys.argv[9]
+attempts = list(csv.DictReader(attempts_path.open(), delimiter="\t"))
+
+summary = {
+    "schema_version": 1,
+    "sha": sha,
+    "suite": suite,
+    "status": status,
+    "wall_seconds": wall,
+    "selected_worker": selected_worker,
+    "failure_class": failure_class,
+    "capability": capability,
+    "attempts": [
+        {
+            "attempt": int(row["attempt"]),
+            "worker": row["worker"],
+            "classification": row["classification"],
+            "rc": int(row["rc"]),
+            "duration_seconds": int(row["duration"]),
+        }
+        for row in attempts
+    ],
+}
+(run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+print(json.dumps(summary, indent=2))
+PY
+
+echo "CI_DISTRIBUTED_SUMMARY=$RUN_DIR/summary.json"
+echo "CI_DISTRIBUTED_WALL_SECONDS=$WALL_SECONDS"
+if [[ "$FINAL_STATUS" == PASS ]]; then
+  echo 'CI_DISTRIBUTED_STATUS=PASS'
+  exit 0
+fi
+
+echo 'CI_DISTRIBUTED_STATUS=FAIL'
+for log in "$RUN_DIR"/*.log; do
+  [[ -f "$log" ]] || continue
   if grep -q '^CI_STATUS=FAIL$' "$log"; then
+    echo "--- $(basename "$log") tail ---"
+    tail -n 100 "$log"
+  fi
+done
+exit 1
+ "$log"; then
     echo TEST_FAILURE
     return
   fi
