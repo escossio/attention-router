@@ -108,13 +108,20 @@ probe_worker() {
 
   local target
   target="$(host_target "$worker")"
-  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-      'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null && flock -n /srv/andy-ci/worker.lock -c true' \
+  if ! "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+      'test -x /srv/andy-ci/bin/andy-ci-run && docker info >/dev/null' \
       >/dev/null 2>&1; then
+    set_health "$worker" UNAVAILABLE "worker_preflight_failed"
+    return 1
+  fi
+
+  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+      'flock -n /srv/andy-ci/worker.lock -c true' >/dev/null 2>&1; then
     set_health "$worker" READY "worker_ready"
     return 0
   fi
-  set_health "$worker" UNAVAILABLE "worker_preflight_failed"
+
+  set_health "$worker" DEGRADED "worker_busy"
   return 1
 }
 
