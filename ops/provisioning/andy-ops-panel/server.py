@@ -11,20 +11,16 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 import threading
 import time
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
-PROJECT_DIR = Path(__file__).resolve().parent
-if str(PROJECT_DIR) not in sys.path:
-    sys.path.insert(0, str(PROJECT_DIR))
-
 from message_tracing import sample_message_traces
 from transport_observability import sample_transport_observability
 
 
+PROJECT_DIR = Path(__file__).resolve().parent
 LOG_ROOT = Path(os.environ.get("ANDY_OPS_CI_LOG_ROOT", "/var/log/andy-ci"))
 TOOL_HISTORY = Path(os.environ.get("ANDY_OPS_TOOL_HISTORY", str(Path.home() / ".claude-server-commander" / "tool-history.jsonl")))
 LISTEN_ADDRESS = os.environ.get("ANDY_OPS_LISTEN_ADDRESS", "127.0.0.1")
