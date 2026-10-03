@@ -322,6 +322,7 @@ Required fields:
 
 V2A node kinds are deliberately small:
 - PERSON;
+- ENTITY;
 - RESOURCE;
 - RELATIONSHIP;
 - EVENT;
