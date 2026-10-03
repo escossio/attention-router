@@ -6,7 +6,7 @@ The first version answers two questions quickly:
 
 1. Are AGT / CI01 / CI02 / CI03 actually using CPU, and what job did AGT assign?
 2. Is the Chat -> Remote Desktop Commander -> AGT tool channel still producing observable work even when the ChatGPT UI appears stalled?
-3. What HTTP traffic is entering the Client API, and what do the Docker services log for the same runtime activity?
+3. What HTTP traffic is entering the Client API, and what do the Docker services log for the same runtime activity?\n4. Are Browser / WhatsApp transport / owner authority / observer states coherent, and where is the latest message in the inbound-to-outbound pipeline?
 
 ## Scope
 
@@ -64,7 +64,11 @@ The server samples:
 - the same sources over SSH aliases for CI01/CI02/CI03;
 - `/var/log/andy-ci/*-postgres-distributed/summary.json`;
 - the Remote Desktop Commander JSONL tool history;
-- local descendant processes of the Desktop Commander server.
+- local descendant processes of the Desktop Commander server;
+- bounded read-only WhatsApp transport/browser/observer probes;
+- a bounded metadata-only message trace projection from the configured runtime database container.
+
+The message tracer issues SELECT-only queries and deliberately excludes message bodies, outbox destinations, full correlation ids and full inbound-event ids from the browser payload. The database container is host configuration; no runtime container name or credential is committed.
 
 No Attention Router production database is queried.
 ## Configuration
@@ -128,7 +132,7 @@ A dispatch is shown as `RUNNING` only when a live AGT/worker process reports tha
 - LAN-only by design.
 - Read-only observers; no controls or execution buttons in V1.
 - No provider credentials or GitHub tokens are required by the web server.
-- No production database access.
+- No database mutation. The optional message tracer performs bounded SELECT-only metadata projection when explicitly configured; message bodies, destinations and full event/correlation identifiers are excluded from its browser payload.
 - Command summaries are redacted, but the UI must still be treated as operationally sensitive.
 - Public repository files contain no private host addresses or credentials.
 

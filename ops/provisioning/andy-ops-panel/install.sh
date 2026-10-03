@@ -13,6 +13,8 @@ ENV_PATH="/etc/default/andy-ops-panel"
 
 install -d -m 0755 "$INSTALL_DIR"
 install -m 0755 "$ROOT_DIR/server.py" "$INSTALL_DIR/server.py"
+install -m 0644 "$ROOT_DIR/transport_observability.py" "$INSTALL_DIR/transport_observability.py"
+install -m 0644 "$ROOT_DIR/message_tracing.py" "$INSTALL_DIR/message_tracing.py"
 install -m 0644 "$ROOT_DIR/index.html" "$INSTALL_DIR/index.html"
 install -m 0644 "$ROOT_DIR/app.js" "$INSTALL_DIR/app.js"
 install -m 0644 "$ROOT_DIR/styles.css" "$INSTALL_DIR/styles.css"
@@ -24,7 +26,10 @@ if [[ ! -e "$ENV_PATH" ]]; then
   echo "Created $ENV_PATH from the safe example; set the private LAN bind before remote use."
 fi
 
-python3 -m py_compile "$INSTALL_DIR/server.py"
+python3 -m py_compile \
+  "$INSTALL_DIR/server.py" \
+  "$INSTALL_DIR/transport_observability.py" \
+  "$INSTALL_DIR/message_tracing.py"
 node --check "$INSTALL_DIR/app.js" >/dev/null
 
 systemctl daemon-reload
