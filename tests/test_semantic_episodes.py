@@ -371,6 +371,55 @@ def test_v2d_lineage_merge_preserves_source_memberships(session):
     ) == before_memberships
 
 
+
+def test_v2d_lineage_propagates_secret_sensitivity_to_target(session):
+    stamp = now_utc()
+    results = []
+    for index, visibility in enumerate(("SECRET", "PRIVATE", "PRIVATE")):
+        resource = _resource(session, f"secret-lineage-{index}")
+        event = _event(
+            session,
+            tenant_id=DEFAULT_TENANT_ID,
+            suffix=f"secret-lineage-{index}",
+            occurred_at=stamp + timedelta(days=index),
+            resource_id=resource.id,
+            visibility=visibility,
+        )
+        results.append(
+            assign_timeline_event_to_episode(
+                session,
+                tenant_id=DEFAULT_TENANT_ID,
+                event_id=event.id,
+                episode_type="PROPERTY_MATTER",
+                scope_type="RESOURCE",
+            )
+        )
+
+    target = record_episode_lineage(
+        session,
+        target_episode_id=results[2].episode.id,
+        source_episode_ids=[
+            results[0].episode.id,
+            results[1].episode.id,
+        ],
+        lineage_kind="MERGE",
+    )
+
+    assert target.sensitivity_class == "SECRET"
+
+    default_graph = build_cognitive_graph_slice(
+        session,
+        DEFAULT_TENANT_ID,
+    )
+    assert f"episode:{target.id}" not in default_graph.node_index()
+
+    privileged_graph = build_cognitive_graph_slice(
+        session,
+        DEFAULT_TENANT_ID,
+        include_secret=True,
+    )
+    assert f"episode:{target.id}" in privileged_graph.node_index()
+
 def test_v2d_episode_builder_creates_zero_execution_or_outbound_authority(session):
     resource = _resource(session, "safe")
     event = _event(

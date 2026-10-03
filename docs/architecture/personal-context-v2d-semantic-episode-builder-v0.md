@@ -150,6 +150,9 @@ grouped into an episode.
 
 The Cognitive Graph excludes SECRET episodes by default.
 
+Lineage is sensitivity-monotonic: a SUPERSEDE, SPLIT or MERGE target inherits
+at least the most restrictive sensitivity of every lineage source.
+
 ## 8. Ambiguity
 
 V0 deterministic builders create non-ambiguous memberships only when exact

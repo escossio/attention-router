@@ -401,6 +401,14 @@ def record_episode_lineage(
         sources.append(source)
 
     stamp = _utc(now or now_utc())
+    target_sensitivity = target.sensitivity_class
+    for source in sources:
+        target_sensitivity = _max_sensitivity(
+            target_sensitivity,
+            source.sensitivity_class,
+        )
+    target.sensitivity_class = target_sensitivity
+
     if kind == "SUPERSEDE":
         target.supersedes_episode_id = sources[0].id
         sources[0].state = "SUPERSEDED"
