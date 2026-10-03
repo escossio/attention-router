@@ -230,6 +230,7 @@ def test_decision_pipeline_passes_represented_owner_presence_to_andy(session, mo
         "id": "owner-a",
         "reference_name": "Leonardo",
     }
+    assert context.assistant_introduced is False
     assert context.current_operational_state == []  # No disclosure authority in this fixture.
     built = session.scalar(
         select(AuditEventRow).where(
@@ -239,7 +240,10 @@ def test_decision_pipeline_passes_represented_owner_presence_to_andy(session, mo
     )
     assert built is not None
     assert built.payload["presence_effective"] is False
-    assert decision.proposed_response == "Andy: posso ajudar."
+    assert decision.proposed_response == (
+        "Eu sou a Andy, assistente virtual de Leonardo. Andy: posso ajudar."
+    )
+    assert decision.response_introduction_included is True
 
 
 def test_decision_pipeline_falls_back_without_agent_or_policy(session):
