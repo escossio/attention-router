@@ -627,8 +627,6 @@ def reconcile_obligation_event(
         raise ObligationError("OBLIGATION_TENANT_MISMATCH")
     if event.visibility == "SECRET":
         raise ObligationError("OBLIGATION_SECRET_EVENT_NOT_RECONCILABLE")
-    if instance.state in {"SATISFIED", "WAIVED", "SUPERSEDED"}:
-        raise ObligationError("OBLIGATION_INSTANCE_TERMINAL")
 
     definition = _definition_for_instance(session, instance)
     if not _event_matches_definition(definition=definition, event=event):
@@ -653,6 +651,9 @@ def reconcile_obligation_event(
     )
     if existing is not None:
         return existing, False
+
+    if instance.state in {"SATISFIED", "WAIVED", "SUPERSEDED"}:
+        raise ObligationError("OBLIGATION_INSTANCE_TERMINAL")
 
     other_links = list(
         session.scalars(
