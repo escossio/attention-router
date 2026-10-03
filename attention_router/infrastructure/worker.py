@@ -45,6 +45,7 @@ from attention_router.application.artifact_understanding import (
 )
 from attention_router.integrations.dispatch import process_integration_inbox
 from attention_router.integrations.whatsapp_history import WhatsAppHistoryAdapter
+from attention_router.application.gmail_bootstrap import GmailBootstrapSource
 from attention_router.application.voice_tts import process_tts_derivations
 from attention_router.application.voice_media import cleanup_expired_media
 from attention_router.application.platform.capability_pack import process_due_scheduled_events
@@ -281,7 +282,7 @@ def process_personal_context_bootstrap_runtime_if_due(
     ):
         return None, last_run_monotonic
 
-    adapter = WhatsAppHistoryAdapter(
+    whatsapp_adapter = WhatsAppHistoryAdapter(
         base_url=settings.whatsapp_history_url,
         hmac_secret=(
             settings.local_history_hmac_secret
@@ -290,10 +291,24 @@ def process_personal_context_bootstrap_runtime_if_due(
         timeout_seconds=settings.whatsapp_history_timeout_seconds,
         snapshot_limit=settings.whatsapp_history_snapshot_limit,
     )
+    gmail_source = GmailBootstrapSource(settings=settings)
+
+    def adapter_factory(row):
+        if row.source_kind == "WHATSAPP_TEXT":
+            return whatsapp_adapter
+        if row.source_kind == "GMAIL_TEXT":
+            return gmail_source.adapter_for_run(session, row)
+        raise ValueError("PERSONAL_CONTEXT_BOOTSTRAP_SOURCE_UNSUPPORTED")
+
+    enabled_sources = {"WHATSAPP_TEXT"}
+    if settings.gmail_bootstrap_enabled:
+        enabled_sources.add("GMAIL_TEXT")
+
     with start_span("personal_context.bootstrap.runtime") as runtime_span:
         result = run_personal_context_bootstrap_runtime_cycle(
             session,
-            adapter=adapter,
+            adapter_factory=adapter_factory,
+            source_kinds=enabled_sources,
             run_limit=settings.personal_context_bootstrap_run_limit,
             canary_tenant_id=(
                 settings.personal_context_bootstrap_canary_tenant_id

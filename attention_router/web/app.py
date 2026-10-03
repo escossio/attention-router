@@ -20,6 +20,7 @@ from attention_router.application.client_location import ClientLocationService
 from attention_router.application.client_approval import ClientApprovalService
 from attention_router.application.client_command import ClientCommandService
 from attention_router.application.gmail_connection import GmailConnectionService
+from attention_router.application.gmail_bootstrap import GmailBootstrapProductService
 from attention_router.application.personal_context_bootstrap_product import (
     PersonalContextBootstrapProductService,
 )
@@ -124,6 +125,10 @@ personal_context_bootstrap_service = PersonalContextBootstrapProductService(
     settings=settings,
     client_sessions=client_session_service,
     adapter=whatsapp_history_adapter,
+)
+gmail_bootstrap_service = GmailBootstrapProductService(
+    settings=settings,
+    client_sessions=client_session_service,
 )
 
 
@@ -249,6 +254,7 @@ app.include_router(build_gmail_connection_router(
 app.include_router(build_personal_context_bootstrap_router(
     get_session=get_session,
     service=personal_context_bootstrap_service,
+    gmail_service=gmail_bootstrap_service,
 ))
 
 

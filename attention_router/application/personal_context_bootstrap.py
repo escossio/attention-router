@@ -25,8 +25,11 @@ from attention_router.infrastructure.personal_context_bootstrap_models import (
 )
 
 
-SUPPORTED_BOOTSTRAP_SOURCES = frozenset({"WHATSAPP_TEXT"})
-_ARCHIVE_SOURCE_BY_KIND = {"WHATSAPP_TEXT": "whatsapp"}
+SUPPORTED_BOOTSTRAP_SOURCES = frozenset({"WHATSAPP_TEXT", "GMAIL_TEXT"})
+_ARCHIVE_SOURCE_BY_KIND = {
+    "WHATSAPP_TEXT": "whatsapp",
+    "GMAIL_TEXT": "gmail",
+}
 BOOTSTRAP_MODE = "HISTORICAL_BOOTSTRAP"
 _TERMINAL_STATES = frozenset({"COMPLETED", "CANCELLED", "FAILED"})
 _STABLE_DISCOVERY_METRICS = frozenset(

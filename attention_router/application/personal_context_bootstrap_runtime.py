@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from typing import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.memory import HistoryAdapter
 from attention_router.application.personal_context_bootstrap import (
+    SUPPORTED_BOOTSTRAP_SOURCES,
     process_next_bootstrap_batch,
 )
 from attention_router.infrastructure.personal_context_bootstrap_models import (
     PersonalContextBootstrapRunRow,
 )
-from attention_router.integrations.whatsapp_history import WhatsAppHistoryAdapter
 
 
 logger = logging.getLogger(__name__)
@@ -32,17 +34,44 @@ class PersonalContextBootstrapRuntimeResult:
 def run_personal_context_bootstrap_runtime_cycle(
     session: Session,
     *,
-    adapter: WhatsAppHistoryAdapter,
+    adapter: HistoryAdapter | None = None,
+    adapter_factory: Callable[
+        [PersonalContextBootstrapRunRow], HistoryAdapter
+    ] | None = None,
+    source_kinds: set[str] | frozenset[str] | None = None,
     run_limit: int = 5,
     canary_tenant_id: str | None = None,
 ) -> PersonalContextBootstrapRuntimeResult:
     """Advance at most one durable batch per selected QUEUED run."""
     if run_limit < 1 or run_limit > 100:
         raise ValueError("PERSONAL_CONTEXT_BOOTSTRAP_RUN_LIMIT_OUT_OF_RANGE")
+    if (adapter is None) == (adapter_factory is None):
+        raise ValueError(
+            "PERSONAL_CONTEXT_BOOTSTRAP_ADAPTER_SELECTION_INVALID"
+        )
+
+    selected_sources = frozenset(
+        source_kinds
+        if source_kinds is not None
+        else (
+            {"WHATSAPP_TEXT"}
+            if adapter is not None
+            else SUPPORTED_BOOTSTRAP_SOURCES
+        )
+    )
+    if (
+        not selected_sources
+        or not selected_sources.issubset(SUPPORTED_BOOTSTRAP_SOURCES)
+    ):
+        raise ValueError(
+            "PERSONAL_CONTEXT_BOOTSTRAP_SOURCE_SELECTION_INVALID"
+        )
 
     query = select(PersonalContextBootstrapRunRow).where(
         PersonalContextBootstrapRunRow.state == "QUEUED",
-        PersonalContextBootstrapRunRow.source_kind == "WHATSAPP_TEXT",
+        PersonalContextBootstrapRunRow.source_kind.in_(
+            sorted(selected_sources)
+        ),
     )
     if canary_tenant_id is not None:
         query = query.where(
@@ -66,11 +95,20 @@ def run_personal_context_bootstrap_runtime_cycle(
 
     for row in rows:
         try:
+            selected_adapter = (
+                adapter_factory(row)
+                if adapter_factory is not None
+                else adapter
+            )
+            if selected_adapter is None:
+                raise ValueError(
+                    "PERSONAL_CONTEXT_BOOTSTRAP_ADAPTER_UNAVAILABLE"
+                )
             with session.begin_nested():
                 result = process_next_bootstrap_batch(
                     session,
                     row.id,
-                    adapter=adapter,
+                    adapter=selected_adapter,
                 )
             if result.batch_id is not None and result.state != "FAILED":
                 batches_completed += 1

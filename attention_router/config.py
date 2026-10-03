@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     personal_context_bootstrap_canary_tenant_id: str | None = None
     personal_context_bootstrap_interval_seconds: int = 10
     personal_context_bootstrap_run_limit: int = 5
+    gmail_bootstrap_enabled: bool = False
+    gmail_bootstrap_snapshot_limit: int = 100
+    gmail_bootstrap_max_body_bytes: int = 256 * 1024
+    gmail_bootstrap_max_mime_depth: int = 12
+    gmail_bootstrap_timeout_seconds: float = 10.0
     attention_recent_window_seconds: int = 10 * 60
     attention_rapid_repeat_seconds: int = 90
     attention_persistent_message_count: int = 3
@@ -582,6 +587,54 @@ class Settings(BaseSettings):
                 "PERSONAL_CONTEXT_BOOTSTRAP_ENABLED requires "
                 "CLIENT_SESSION_ENABLED=true"
             )
+        if not 1 <= self.gmail_bootstrap_snapshot_limit <= 100:
+            raise ValueError(
+                "GMAIL_BOOTSTRAP_SNAPSHOT_LIMIT must be between 1 and 100"
+            )
+        if not 1 <= self.gmail_bootstrap_max_body_bytes <= 2 * 1024 * 1024:
+            raise ValueError(
+                "GMAIL_BOOTSTRAP_MAX_BODY_BYTES must be between 1 and 2097152"
+            )
+        if not 1 <= self.gmail_bootstrap_max_mime_depth <= 32:
+            raise ValueError(
+                "GMAIL_BOOTSTRAP_MAX_MIME_DEPTH must be between 1 and 32"
+            )
+        if not 0 < self.gmail_bootstrap_timeout_seconds <= 30:
+            raise ValueError(
+                "GMAIL_BOOTSTRAP_TIMEOUT_SECONDS must be between 0 and 30"
+            )
+        if self.gmail_bootstrap_enabled:
+            if not self.personal_context_bootstrap_enabled:
+                raise ValueError(
+                    "GMAIL_BOOTSTRAP_ENABLED requires "
+                    "PERSONAL_CONTEXT_BOOTSTRAP_ENABLED=true"
+                )
+            if not self.google_workspace_oauth_client_id:
+                raise ValueError(
+                    "GOOGLE_WORKSPACE_OAUTH_CLIENT_ID is required when "
+                    "GMAIL_BOOTSTRAP_ENABLED=true"
+                )
+            if not self.google_workspace_oauth_client_secret:
+                raise ValueError(
+                    "GOOGLE_WORKSPACE_OAUTH_CLIENT_SECRET is required when "
+                    "GMAIL_BOOTSTRAP_ENABLED=true"
+                )
+            key = self.provider_authorization_key_b64url or ""
+            if (
+                len(key) != 43
+                or any(
+                    character not in (
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                        "abcdefghijklmnopqrstuvwxyz"
+                        "0123456789-_"
+                    )
+                    for character in key
+                )
+            ):
+                raise ValueError(
+                    "PROVIDER_AUTHORIZATION_KEY_B64URL must be 32-byte "
+                    "unpadded base64url when Gmail bootstrap is enabled"
+                )
         if self.attention_recent_window_seconds <= 0:
             raise ValueError("ATTENTION_RECENT_WINDOW_SECONDS must be positive")
         if self.attention_rapid_repeat_seconds <= 0:
