@@ -26,6 +26,27 @@ class HumanIdentityRow(Base):
     __table_args__ = (PrimaryKeyConstraint("id", name="pk_human_identities"),)
 
 
+class HumanProfileRow(Base):
+    __tablename__ = "human_profiles"
+
+    human_identity_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("human_identities.id", name="fk_human_profile_human_identity"),
+        primary_key=True,
+    )
+    assistant_reference_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("human_identity_id", name="pk_human_profiles"),
+        CheckConstraint(
+            "assistant_reference_name is null or length(trim(assistant_reference_name)) > 0",
+            name="ck_human_profile_reference_name_nonempty",
+        ),
+    )
+
+
 class ExternalIdentityBindingRow(Base):
     __tablename__ = "external_identity_bindings"
 

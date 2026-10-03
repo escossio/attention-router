@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     client_session_ttl_seconds: int = 900
     client_location_enabled: bool = False
     client_approval_enabled: bool = False
+    client_profile_enabled: bool = False
     client_command_enabled: bool = False
     client_command_voice_enabled: bool = False
     client_command_voice_max_bytes: int = 5 * 1024 * 1024
@@ -427,6 +428,10 @@ class Settings(BaseSettings):
         if self.client_approval_enabled and not self.client_session_enabled:
             raise ValueError(
                 "CLIENT_APPROVAL_ENABLED requires CLIENT_SESSION_ENABLED=true"
+            )
+        if self.client_profile_enabled and not self.client_session_enabled:
+            raise ValueError(
+                "CLIENT_PROFILE_ENABLED requires CLIENT_SESSION_ENABLED=true"
             )
         if self.client_command_enabled and not self.client_session_enabled:
             raise ValueError(
