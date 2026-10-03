@@ -1,0 +1,14 @@
+[Unit]
+Description=Attention Router live runtime invariant reconciliation
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/attention-router-live-runtime
+ExecStart=/usr/local/sbin/attention-router-live-runtime-reconcile
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
