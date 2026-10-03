@@ -3,6 +3,7 @@ from alembic.script import ScriptDirectory
 
 from attention_router.infrastructure.db import Base
 from attention_router.infrastructure import artifact_models  # noqa: F401
+from attention_router.infrastructure import entity_resolution_models  # noqa: F401
 from attention_router.infrastructure import models  # noqa: F401
 from attention_router.infrastructure import personal_context_bootstrap_models  # noqa: F401
 
@@ -99,9 +100,25 @@ def test_personal_context_bootstrap_tables_are_registered():
         in _constraint_names("personal_context_bootstrap_batches")
     )
 
+
+def test_entity_resolution_tables_are_registered():
+    assert {
+        "entity_resolution_candidates",
+        "entity_resolution_evidence",
+        "entity_alias_resolutions",
+    } <= set(Base.metadata.tables)
+    assert (
+        "uq_entity_resolution_candidate_idempotency"
+        in _constraint_names("entity_resolution_candidates")
+    )
+    assert (
+        "uq_entity_alias_resolution_candidate"
+        in _constraint_names("entity_alias_resolutions")
+    )
+
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0051_personal_context_bootstrap"]
+    assert scripts.get_heads() == ["0052_entity_resolution_v0"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -133,6 +150,9 @@ def test_platform_evolution_migration_waves_form_one_chain():
     )
     assert revisions["0051_personal_context_bootstrap"].down_revision == (
         "0050_client_pending_source"
+    )
+    assert revisions["0052_entity_resolution_v0"].down_revision == (
+        "0051_personal_context_bootstrap"
     )
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"
