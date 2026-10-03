@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Security, status
+from fastapi import APIRouter, Body, Depends, Header, Query, Security, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,6 +16,9 @@ from attention_router.application.client_command import (
     ClientCommandConflict,
     ClientCommandDisabled,
     ClientCommandInvalid,
+    ClientCommandVoiceDisabled,
+    ClientCommandVoiceInvalid,
+    ClientCommandVoiceUnavailable,
     ClientCommandService,
     ClientCommandView as ServiceCommandView,
 )
@@ -71,6 +74,9 @@ ClientCommandErrorCode = Literal[
     "CLIENT_COMMAND_AUTHORITY_REJECTED",
     "CLIENT_COMMAND_CONFLICT",
     "CLIENT_COMMAND_INVALID",
+    "CLIENT_COMMAND_VOICE_DISABLED",
+    "CLIENT_COMMAND_VOICE_INVALID",
+    "CLIENT_COMMAND_VOICE_UNAVAILABLE",
     "CLIENT_COMMAND_UNAVAILABLE",
     "CLIENT_SESSION_UNAUTHENTICATED",
     "CLIENT_SESSION_AUTHORITY_REJECTED",
@@ -98,6 +104,9 @@ _ERROR_STATUS = {
     ClientCommandAuthorityRejected: status.HTTP_403_FORBIDDEN,
     ClientCommandConflict: status.HTTP_409_CONFLICT,
     ClientCommandInvalid: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ClientCommandVoiceDisabled: status.HTTP_503_SERVICE_UNAVAILABLE,
+    ClientCommandVoiceInvalid: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ClientCommandVoiceUnavailable: status.HTTP_503_SERVICE_UNAVAILABLE,
     ClientSessionUnauthenticated: status.HTTP_401_UNAUTHORIZED,
     ClientSessionAuthorityRejected: status.HTTP_403_FORBIDDEN,
     ClientSessionDisabled: status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -169,6 +178,54 @@ def build_client_command_router(
                 session_token=token(credentials),
                 client_request_id=payload.client_request_id,
                 text=payload.text,
+            )
+        except tuple(_ERROR_STATUS) as error:
+            return _error_response(error)
+        return _view(result)
+
+    @router.post(
+        "/api/v1/client/commands/voice",
+        response_model=ClientCommandView,
+        responses={
+            401: {"model": ClientCommandErrorResponse},
+            403: {"model": ClientCommandErrorResponse},
+            409: {"model": ClientCommandErrorResponse},
+            422: {"model": ClientCommandErrorResponse},
+            503: {"model": ClientCommandErrorResponse},
+        },
+        operation_id="submitClientVoiceCommand",
+    )
+    def submit_voice_command(
+        audio: Annotated[
+            bytes,
+            Body(media_type="audio/mp4", max_length=5 * 1024 * 1024),
+        ],
+        client_request_id: Annotated[
+            str,
+            Header(
+                alias="X-Client-Request-Id",
+                min_length=1,
+                max_length=80,
+                pattern=r"^[A-Za-z0-9_.:-]+$",
+            ),
+        ],
+        content_type: Annotated[
+            str,
+            Header(alias="Content-Type", min_length=1, max_length=80),
+        ],
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Security(_BEARER),
+        ],
+        session: Session = Depends(get_session),
+    ) -> ClientCommandView | JSONResponse:
+        try:
+            result = service.submit_voice(
+                session,
+                session_token=token(credentials),
+                client_request_id=client_request_id,
+                audio=audio,
+                mime_type=content_type,
             )
         except tuple(_ERROR_STATUS) as error:
             return _error_response(error)
