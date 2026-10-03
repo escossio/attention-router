@@ -117,6 +117,14 @@ def tts_container_ip(container: str) -> str:
 
 def source_paragraphs(content: dict[str, object]) -> list[str]:
     paragraphs: list[str] = []
+    thesis = content.get("thesis")
+    if isinstance(thesis, str) and thesis.strip():
+        paragraphs.append(thesis.strip())
+    passage = content.get("passage")
+    if isinstance(passage, list):
+        paragraphs.extend(
+            str(item).strip() for item in passage if str(item).strip()
+        )
     sections = content.get("sections")
     if not isinstance(sections, list):
         raise ValueError("content.sections must be a list")
