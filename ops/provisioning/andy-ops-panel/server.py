@@ -16,6 +16,9 @@ import time
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from message_tracing import sample_message_traces
+from transport_observability import sample_transport_observability
+
 
 PROJECT_DIR = Path(__file__).resolve().parent
 LOG_ROOT = Path(os.environ.get("ANDY_OPS_CI_LOG_ROOT", "/var/log/andy-ci"))
@@ -587,9 +590,11 @@ def _chat_status() -> dict[str, Any]:
 
 
 def _sample_loop() -> None:
-    executor = ThreadPoolExecutor(max_workers=len(NODES))
+    executor = ThreadPoolExecutor(max_workers=len(NODES) + 2)
     while True:
         cycle = time.monotonic()
+        transport_future = executor.submit(sample_transport_observability)
+        trace_future = executor.submit(sample_message_traces)
         futures = {
             executor.submit(_sample_node, node_id, cfg): node_id
             for node_id, cfg in NODES.items()
@@ -614,6 +619,37 @@ def _sample_loop() -> None:
                     "task": None,
                 }
 
+        try:
+            transport_observability = transport_future.result()
+        except Exception as error:
+            transport_observability = {
+                "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+                "derived": {
+                    "severity": "CRITICAL",
+                    "divergence": True,
+                    "divergences": [{
+                        "code": "OBSERVABILITY_PROBE_FAILED",
+                        "severity": "CRITICAL",
+                        "detail": type(error).__name__,
+                    }],
+                    "recovery_gate": {
+                        "state": "UNKNOWN",
+                        "reason": "probe failed",
+                    },
+                },
+                "timeline": [],
+            }
+
+        try:
+            message_traces = trace_future.result()
+        except Exception as error:
+            message_traces = {
+                "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+                "ok": False,
+                "error": type(error).__name__,
+                "traces": [],
+            }
+
         nodes = [nodes_by_id[node_id] for node_id in NODES]
         active_sha_shorts = {
             task["sha_short"]
@@ -627,6 +663,8 @@ def _sample_loop() -> None:
             "dispatch": _dispatch(nodes, recent),
             "recent": recent,
             "chat": _chat_status(),
+            "transport_observability": transport_observability,
+            "message_traces": message_traces,
         }
         with _state_lock:
             _state.clear()
