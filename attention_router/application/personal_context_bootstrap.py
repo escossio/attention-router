@@ -162,18 +162,24 @@ def _require_owner_scope(
             "BOOTSTRAP_OWNER_MEMBERSHIP_REQUIRED"
         )
 
-    binding = session.scalar(
-        select(ActorBindingRow).where(
-            ActorBindingRow.tenant_id == tenant_id,
-            ActorBindingRow.actor_key == represented_owner_actor_key,
-            ActorBindingRow.is_active.is_(True),
-            or_(
-                ActorBindingRow.actor_category == "owner",
-                ActorBindingRow.binding_metadata["owner"].as_boolean().is_(True),
-            ),
-        )
+    bindings = list(
+        session.scalars(
+            select(ActorBindingRow).where(
+                ActorBindingRow.tenant_id == tenant_id,
+                ActorBindingRow.is_active.is_(True),
+                or_(
+                    ActorBindingRow.actor_category == "owner",
+                    ActorBindingRow.binding_metadata["owner"].as_boolean().is_(True),
+                ),
+            )
+        ).all()
     )
-    if binding is None:
+    owner_actor_keys = {binding.actor_key for binding in bindings}
+    if len(owner_actor_keys) != 1:
+        raise PersonalContextBootstrapError(
+            "BOOTSTRAP_REPRESENTED_OWNER_AMBIGUOUS"
+        )
+    if represented_owner_actor_key not in owner_actor_keys:
         raise PersonalContextBootstrapError(
             "BOOTSTRAP_REPRESENTED_OWNER_UNRESOLVED"
         )
