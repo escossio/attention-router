@@ -4,6 +4,7 @@ from alembic.script import ScriptDirectory
 from attention_router.infrastructure.db import Base
 from attention_router.infrastructure import artifact_models  # noqa: F401
 from attention_router.infrastructure import models  # noqa: F401
+from attention_router.infrastructure import personal_context_bootstrap_models  # noqa: F401
 
 
 PLATFORM_TABLES = {
@@ -83,6 +84,21 @@ def test_scenario_and_budget_tightening_constraints_are_registered():
     assert "ck_execution_lease_claim_count" in _constraint_names("execution_leases")
 
 
+
+def test_personal_context_bootstrap_tables_are_registered():
+    assert {
+        "personal_context_bootstrap_runs",
+        "personal_context_bootstrap_batches",
+    } <= set(Base.metadata.tables)
+    assert (
+        "uq_personal_context_bootstrap_run_idempotency"
+        in _constraint_names("personal_context_bootstrap_runs")
+    )
+    assert (
+        "uq_personal_context_bootstrap_batch_ordinal"
+        in _constraint_names("personal_context_bootstrap_batches")
+    )
+
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
     assert scripts.get_heads() == ["0051_personal_context_bootstrap"]
@@ -112,8 +128,11 @@ def test_platform_evolution_migration_waves_form_one_chain():
     assert revisions["0045_provider_authorization_v1"].down_revision == (
         "0044_integration_dispatch_v1"
     )
-    assert revisions["0051_personal_context_bootstrap"].down_revision == (
+    assert revisions["0050_client_pending_source"].down_revision == (
         "0049_client_command_channel_v1"
+    )
+    assert revisions["0051_personal_context_bootstrap"].down_revision == (
+        "0050_client_pending_source"
     )
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"
