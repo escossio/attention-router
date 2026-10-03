@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 
@@ -14,11 +15,19 @@ SCHEDULER = (
 
 
 def load_panel():
-    spec = importlib.util.spec_from_file_location("andy_ops_panel_test", PANEL)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    panel_dir = str(PANEL.parent)
+    inserted = panel_dir not in sys.path
+    if inserted:
+        sys.path.insert(0, panel_dir)
+    try:
+        spec = importlib.util.spec_from_file_location("andy_ops_panel_test", PANEL)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if inserted:
+            sys.path.remove(panel_dir)
 
 
 def make_run(root: Path, sha_short: str = "c11b0ef7a1f3") -> Path:
