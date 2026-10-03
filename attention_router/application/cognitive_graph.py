@@ -11,6 +11,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.personal_context_controls import (
+    CONTEXT_CONTROL_PREDICATE,
+    claim_is_owner_private,
+)
 from attention_router.domain.cognitive_graph import (
     CognitiveEdge,
     CognitiveGraphSlice,
@@ -352,14 +356,17 @@ def build_cognitive_graph_slice(
         )
         put_edge(direct)
 
-    timeline_events = list(
-        session.scalars(
-            select(TimelineEventRow)
-            .where(TimelineEventRow.tenant_id == tenant_id)
-            .order_by(TimelineEventRow.occurred_at.desc(), TimelineEventRow.id)
-            .limit(limit_per_kind)
-        ).all()
+    timeline_query = (
+        select(TimelineEventRow)
+        .where(TimelineEventRow.tenant_id == tenant_id)
+        .order_by(TimelineEventRow.occurred_at.desc(), TimelineEventRow.id)
+        .limit(limit_per_kind)
     )
+    if not include_secret:
+        timeline_query = timeline_query.where(
+            TimelineEventRow.visibility != "SECRET"
+        )
+    timeline_events = list(session.scalars(timeline_query).all())
     for row in timeline_events:
         event_node_id = _event_node_id(row.id)
         put_node(
@@ -451,7 +458,12 @@ def build_cognitive_graph_slice(
         claim_query = claim_query.where(
             MemoryClaimRow.sensitivity_class != "SECRET"
         )
-    claims = list(session.scalars(claim_query).all())
+    claims = [
+        row
+        for row in session.scalars(claim_query).all()
+        if row.predicate != CONTEXT_CONTROL_PREDICATE
+        and not claim_is_owner_private(session, claim=row)
+    ]
 
     for row in claims:
         claim_node_id = _claim_node_id(row.id)
@@ -818,6 +830,8 @@ def build_cognitive_graph_slice(
             if target_node_id not in nodes:
                 event = session.get(TimelineEventRow, row.member_ref)
                 if event is None or event.tenant_id != tenant_id:
+                    continue
+                if not include_secret and event.visibility == "SECRET":
                     continue
                 put_node(
                     CognitiveNode(
