@@ -21,6 +21,10 @@ from attention_router.application.personal_context_runtime import (
     PersonalContextRuntimeCycleResult,
     run_personal_context_runtime_cycle,
 )
+from attention_router.application.personal_context_bootstrap_runtime import (
+    PersonalContextBootstrapRuntimeResult,
+    run_personal_context_bootstrap_runtime_cycle,
+)
 from attention_router.application.personal_context_authority_runtime import (
     PersonalContextAuthorityRuntimeResult,
     run_personal_context_authority_cycle,
@@ -40,6 +44,7 @@ from attention_router.application.artifact_understanding import (
     process_artifact_understandings,
 )
 from attention_router.integrations.dispatch import process_integration_inbox
+from attention_router.integrations.whatsapp_history import WhatsAppHistoryAdapter
 from attention_router.application.voice_tts import process_tts_derivations
 from attention_router.application.voice_media import cleanup_expired_media
 from attention_router.application.platform.capability_pack import process_due_scheduled_events
@@ -261,6 +266,71 @@ def process_scheduled_events_if_available(session) -> int:
     return process_due_scheduled_events(session)
 
 
+def process_personal_context_bootstrap_runtime_if_due(
+    session,
+    *,
+    now_monotonic: float,
+    last_run_monotonic: float | None,
+) -> tuple[PersonalContextBootstrapRuntimeResult | None, float | None]:
+    if not settings.personal_context_bootstrap_enabled:
+        return None, last_run_monotonic
+    if (
+        last_run_monotonic is not None
+        and now_monotonic - last_run_monotonic
+        < settings.personal_context_bootstrap_interval_seconds
+    ):
+        return None, last_run_monotonic
+
+    adapter = WhatsAppHistoryAdapter(
+        base_url=settings.whatsapp_history_url,
+        hmac_secret=(
+            settings.local_history_hmac_secret
+            or settings.internal_ingress_hmac_secret
+        ),
+        timeout_seconds=settings.whatsapp_history_timeout_seconds,
+        snapshot_limit=settings.whatsapp_history_snapshot_limit,
+    )
+    with start_span("personal_context.bootstrap.runtime") as runtime_span:
+        result = run_personal_context_bootstrap_runtime_cycle(
+            session,
+            adapter=adapter,
+            run_limit=settings.personal_context_bootstrap_run_limit,
+            canary_tenant_id=(
+                settings.personal_context_bootstrap_canary_tenant_id
+            ),
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.bootstrap.runs_considered",
+            result.runs_considered,
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.bootstrap.batches_completed",
+            result.batches_completed,
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.bootstrap.runs_completed",
+            result.runs_completed,
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.bootstrap.runs_requeued",
+            result.runs_requeued,
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.bootstrap.runs_failed",
+            result.runs_failed,
+        )
+        set_outcome(
+            runtime_span,
+            "PARTIAL" if result.runs_failed else "PROCESSED",
+        )
+    return result, now_monotonic
+
+
 def process_cognitive_runtime_if_due(
     session,
     *,
@@ -390,6 +460,7 @@ def process_personal_context_materialization_runtime_if_due(
 
 def run_forever() -> None:
     identity = f"{socket.gethostname()}:{new_id()}"
+    last_personal_context_bootstrap_run_monotonic: float | None = None
     last_cognitive_runtime_run_monotonic: float | None = None
     last_personal_context_run_monotonic: float | None = None
     last_personal_context_authority_run_monotonic: float | None = None
@@ -440,6 +511,30 @@ def run_forever() -> None:
             else:
                 memory_count = 0
             session.commit()
+
+            personal_context_bootstrap_result = None
+            personal_context_bootstrap_now = time.monotonic()
+            try:
+                (
+                    personal_context_bootstrap_result,
+                    last_personal_context_bootstrap_run_monotonic,
+                ) = process_personal_context_bootstrap_runtime_if_due(
+                    session,
+                    now_monotonic=personal_context_bootstrap_now,
+                    last_run_monotonic=(
+                        last_personal_context_bootstrap_run_monotonic
+                    ),
+                )
+                if personal_context_bootstrap_result is not None:
+                    session.commit()
+            except Exception as exc:
+                session.rollback()
+                logger.exception(
+                    "personal context bootstrap runtime cycle failed "
+                    "worker_id=%s error=%s",
+                    identity,
+                    exc,
+                )
 
             cognitive_runtime_result = None
             cognitive_runtime_now = time.monotonic()
@@ -573,6 +668,13 @@ def run_forever() -> None:
                 )
             )
             or (
+                personal_context_bootstrap_result is not None
+                and (
+                    personal_context_bootstrap_result.batches_completed
+                    or personal_context_bootstrap_result.runs_failed
+                )
+            )
+            or (
                 personal_context_result is not None
                 and (
                     personal_context_result.hypotheses_persisted
@@ -610,6 +712,8 @@ def run_forever() -> None:
                 "timer_count=%s scheduled_event_count=%s "
                 "integration_dispatch_processed=%s "
                 "integration_dispatch_blocked=%s "
+                "personal_context_bootstrap_batches=%s "
+                "personal_context_bootstrap_failed=%s "
                 "personal_context_hypotheses=%s "
                 "personal_context_recommendations=%s "
                 "personal_context_enqueued=%s "
@@ -634,6 +738,16 @@ def run_forever() -> None:
                 (
                     integration_dispatch_result.blocked
                     if integration_dispatch_result is not None
+                    else 0
+                ),
+                (
+                    personal_context_bootstrap_result.batches_completed
+                    if personal_context_bootstrap_result is not None
+                    else 0
+                ),
+                (
+                    personal_context_bootstrap_result.runs_failed
+                    if personal_context_bootstrap_result is not None
                     else 0
                 ),
                 (

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 
-const { capabilities, fetchHistoryMessages, listHistoryChats, signHistoryRequest, verifyHistoryHmac } = require('../src/history');
+const { capabilities, fetchHistoryMessages, listHistoryChats, mapMessage, signHistoryRequest, verifyHistoryHmac } = require('../src/history');
 const { createServer } = require('../src/server');
 
 function fakeClient(calls) {
@@ -99,4 +99,50 @@ test('history endpoint is authenticated, bounded, and read-only', async () => {
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+
+test('history mapping preserves direct sender identity and fromMe owner identity', () => {
+  const client = { info: { wid: { _serialized: 'owner@c.us' } } };
+  const chat = {
+    id: { _serialized: 'contact@c.us' },
+    isGroup: false,
+    name: 'Direct',
+  };
+
+  const inbound = mapMessage(
+    {
+      id: { _serialized: 'direct-in' },
+      fromMe: false,
+      from: 'contact@c.us',
+      timestamp: 1700000000,
+      body: 'hello',
+      type: 'chat',
+      hasMedia: false,
+      hasQuotedMsg: false,
+    },
+    chat,
+    client,
+  );
+  const outbound = mapMessage(
+    {
+      id: { _serialized: 'direct-out' },
+      fromMe: true,
+      from: 'owner@c.us',
+      timestamp: 1700000001,
+      body: 'hi',
+      type: 'chat',
+      hasMedia: false,
+      hasQuotedMsg: false,
+    },
+    chat,
+    client,
+  );
+
+  assert.equal(inbound.external_sender_key, 'contact@c.us');
+  assert.equal(inbound.from_me, false);
+  assert.equal(inbound.source_message_id, 'direct-in');
+  assert.equal(outbound.external_sender_key, 'owner@c.us');
+  assert.equal(outbound.from_me, true);
+  assert.equal(outbound.source_message_id, 'direct-out');
 });
