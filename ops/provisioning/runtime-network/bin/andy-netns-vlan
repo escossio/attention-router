@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -eq 6 ] || {
+  echo "usage: $0 up|down NS VLAN CIDR GW PARENT" >&2
+  exit 2
+}
+
+ACTION="$1"
+NS="$2"
+VLAN="$3"
+ADDR="$4"
+GW="$5"
+PARENT="$6"
+
+case "$ACTION" in
+  up)
+    ip netns add "$NS" 2>/dev/null || true
+    if ! ip -n "$NS" link show eth0 >/dev/null 2>&1; then
+      ip link del "andy-vlan$VLAN" 2>/dev/null || true
+      ip link add link "$PARENT" name "andy-vlan$VLAN" type vlan id "$VLAN"
+      ip link set "andy-vlan$VLAN" netns "$NS"
+      ip -n "$NS" link set "andy-vlan$VLAN" name eth0
+    fi
+    ip -n "$NS" link set lo up
+    ip -n "$NS" addr replace "$ADDR" dev eth0
+    ip -n "$NS" link set eth0 up
+    ip -n "$NS" route replace default via "$GW"
+    ;;
+  down)
+    ip -n "$NS" link del eth0 2>/dev/null || true
+    ip netns del "$NS" 2>/dev/null || true
+    ;;
+  *)
+    echo "usage: $0 up|down NS VLAN CIDR GW PARENT" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,17 @@
+[Unit]
+Description=ANDY Transport local CDP proxy
+Requires=andy-transport-netns.service andy-browser-cdp-edge.service
+After=andy-transport-netns.service andy-browser-cdp-edge.service
+Before=attention-whatsapp-transport.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/attention-router/agt-network-namespace.env
+NetworkNamespacePath=/run/netns/andy-transport
+ExecStart=/usr/local/sbin/andy-tcp-proxy.py 127.0.0.1 $ANDY_TRANSPORT_CDP_LISTEN_PORT $ANDY_BROWSER_CDP_BIND_HOST $ANDY_BROWSER_CDP_BIND_PORT
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

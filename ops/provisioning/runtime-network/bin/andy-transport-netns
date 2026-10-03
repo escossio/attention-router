@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -eq 7 ] || {
+  echo "usage: $0 up|down PARENT BASE VLAN CIDR GW DISABLE_TX_OFFLOADS" >&2
+  exit 2
+}
+
+ACTION="$1"
+PARENT="$2"
+BASE="$3"
+VLAN="$4"
+ADDR="$5"
+GW="$6"
+DISABLE_TX_OFFLOADS="$7"
+NS="andy-transport"
+
+case "$ACTION" in
+  up)
+    ip netns add "$NS" 2>/dev/null || true
+    if ! ip -n "$NS" link show eth0 >/dev/null 2>&1; then
+      ip link del "$BASE" 2>/dev/null || true
+      ip link add link "$PARENT" name "$BASE" type macvlan mode bridge
+      ip link set "$BASE" netns "$NS"
+      ip -n "$NS" link set "$BASE" up
+      ip -n "$NS" link add link "$BASE" name eth0 type vlan id "$VLAN"
+    fi
+    ip -n "$NS" link set lo up
+    ip -n "$NS" addr replace "$ADDR" dev eth0
+    ip -n "$NS" link set eth0 up
+    case "$DISABLE_TX_OFFLOADS" in
+      1|true|TRUE|yes|YES|on|ON)
+        # Host-specific workaround for validated paths that emit bad wire checksums.
+        ip netns exec "$NS" ethtool -K eth0 tx off tso off gso off
+        ;;
+      0|false|FALSE|no|NO|off|OFF)
+        ;;
+      *)
+        echo "invalid DISABLE_TX_OFFLOADS value: $DISABLE_TX_OFFLOADS" >&2
+        exit 2
+        ;;
+    esac
+    ip -n "$NS" route replace default via "$GW"
+    ;;
+  down)
+    ip -n "$NS" link del eth0 2>/dev/null || true
+    ip -n "$NS" link del "$BASE" 2>/dev/null || true
+    ip netns del "$NS" 2>/dev/null || true
+    ;;
+  *)
+    echo "usage: $0 up|down PARENT BASE VLAN CIDR GW DISABLE_TX_OFFLOADS" >&2
+    exit 2
+    ;;
+esac
