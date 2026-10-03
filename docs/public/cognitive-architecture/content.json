@@ -206,7 +206,7 @@
   "references": [
     {
       "name": "Soar Cognitive Architecture",
-      "url": "https://soar.eecs.umich.edu/"
+      "url": "https://soar.eecs.umich.edu/soar_manual/01_Introduction/"
     },
     {
       "name": "ACT-R Cognitive Architecture",
@@ -214,7 +214,7 @@
     },
     {
       "name": "Schank & Abelson — Scripts, Plans, Goals and Understanding",
-      "url": "https://en.wikipedia.org/wiki/Scripts,_Plans,_Goals,_and_Understanding"
+      "url": "https://mlanthology.org/ijcai/1975/schank1975ijcai-scripts/"
     },
     {
       "name": "Generative Agents: Interactive Simulacra of Human Behavior",

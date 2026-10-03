@@ -210,9 +210,9 @@ A Andy não precisa lembrar de tudo no pensamento atual. Ela precisa ter vivido 
 
 ## Referências acadêmicas e técnicas
 
-- [Soar Cognitive Architecture](https://soar.eecs.umich.edu/)
+- [Soar Cognitive Architecture](https://soar.eecs.umich.edu/soar_manual/01_Introduction/)
 - [ACT-R Cognitive Architecture](https://act-r.psy.cmu.edu/)
-- [Schank & Abelson — Scripts, Plans, Goals and Understanding](https://en.wikipedia.org/wiki/Scripts,_Plans,_Goals,_and_Understanding)
+- [Schank & Abelson — Scripts, Plans, Goals and Understanding](https://mlanthology.org/ijcai/1975/schank1975ijcai-scripts/)
 - [Generative Agents: Interactive Simulacra of Human Behavior](https://arxiv.org/abs/2304.03442)
 - [MemGPT: Towards LLMs as Operating Systems](https://arxiv.org/abs/2310.08560)
 - [Personal Knowledge Graphs: A Survey](https://arxiv.org/abs/2304.09572)
