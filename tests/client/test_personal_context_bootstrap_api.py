@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 from attention_router.api.v1.personal_context_bootstrap import (
     build_personal_context_bootstrap_router,
 )
+from attention_router.application.personal_context_bootstrap import (
+    PersonalContextBootstrapError,
+)
 
 
 TOKEN = "cst_" + "b" * 43
@@ -163,3 +166,25 @@ def test_bootstrap_status_pause_resume_cancel_use_same_client_session(session):
         ("resume", TOKEN, "pcb_test"),
         ("cancel", TOKEN, "pcb_test"),
     ]
+
+
+def test_bootstrap_lifecycle_error_detail_is_never_echoed(session, monkeypatch):
+    client, service = _client(session)
+    provider_detail = "provider-detail-must-not-cross-api-boundary"
+
+    def fail_status(session, *, session_token, run_id):
+        raise PersonalContextBootstrapError(provider_detail)
+
+    monkeypatch.setattr(service, "status", fail_status)
+
+    response = client.get(
+        "/api/v1/personal-context/bootstrap/pcb_test",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "PERSONAL_CONTEXT_BOOTSTRAP_INVALID"
+    }
+    assert provider_detail not in response.text
+    assert TOKEN not in response.text

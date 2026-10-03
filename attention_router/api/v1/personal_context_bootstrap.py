@@ -177,8 +177,24 @@ def build_personal_context_bootstrap_router(
             code = error.code
             http_status = _product_status(error)
         elif isinstance(error, PersonalContextBootstrapError):
-            code = str(error) or "PERSONAL_CONTEXT_BOOTSTRAP_INVALID"
             http_status = _lifecycle_status(error)
+            code = {
+                status.HTTP_400_BAD_REQUEST: (
+                    "PERSONAL_CONTEXT_BOOTSTRAP_INVALID"
+                ),
+                status.HTTP_403_FORBIDDEN: (
+                    "PERSONAL_CONTEXT_BOOTSTRAP_FORBIDDEN"
+                ),
+                status.HTTP_404_NOT_FOUND: (
+                    "PERSONAL_CONTEXT_BOOTSTRAP_RUN_NOT_FOUND"
+                ),
+                status.HTTP_409_CONFLICT: (
+                    "PERSONAL_CONTEXT_BOOTSTRAP_CONFLICT"
+                ),
+            }.get(
+                http_status,
+                "PERSONAL_CONTEXT_BOOTSTRAP_INVALID",
+            )
         elif isinstance(error, WhatsAppHistoryError):
             code = error.code
             http_status = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -257,6 +273,7 @@ def build_personal_context_bootstrap_router(
         except (
             ClientSessionError,
             PersonalContextBootstrapProductError,
+            PersonalContextBootstrapError,
         ) as error:
             return _error(error)
 
