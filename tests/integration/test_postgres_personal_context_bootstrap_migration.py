@@ -1,6 +1,9 @@
 """Inspect Personal Context V2B semantic bootstrap schema."""
 
 import os
+import subprocess
+import sys
+import uuid
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
@@ -171,3 +174,145 @@ def test_personal_context_bootstrap_migration_schema():
             } <= batch_indexes
     finally:
         engine.dispose()
+
+
+@pytest.fixture
+def bootstrap_migration_db(pg_url):
+    name = "pc_bootstrap_migration_" + uuid.uuid4().hex[:12]
+    admin = create_engine(
+        pg_url.rsplit("/", 1)[0] + "/postgres",
+        isolation_level="AUTOCOMMIT",
+    )
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    url = pg_url.rsplit("/", 1)[0] + "/" + name
+    engine = create_engine(url)
+
+    def migrate(direction, target, check=True):
+        return subprocess.run(
+            [sys.executable, "-m", "alembic", direction, target],
+            env={**os.environ, "DATABASE_URL": url},
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
+    try:
+        migrate("upgrade", "head")
+        yield engine, migrate
+    finally:
+        engine.dispose()
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
+        admin.dispose()
+
+
+def test_personal_context_bootstrap_refuses_destructive_downgrade(
+    bootstrap_migration_db,
+):
+    engine, migrate = bootstrap_migration_db
+    tenant_id = "00000000-0000-4000-8000-00000000b051"
+    human_id = "hid-bootstrap-migration"
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO tenants
+                    (id, slug, name, status, created_at, updated_at)
+                VALUES
+                    (:id, :slug, :name, 'ACTIVE', now(), now())
+                """
+            ),
+            {
+                "id": tenant_id,
+                "slug": "bootstrap-migration",
+                "name": "Bootstrap Migration",
+            },
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO human_identities (id, created_at)
+                VALUES (:id, now())
+                """
+            ),
+            {"id": human_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO personal_context_bootstrap_runs (
+                    id,
+                    tenant_id,
+                    owner_human_identity_id,
+                    represented_owner_actor_key,
+                    source_kind,
+                    source_account,
+                    source_revision,
+                    source_selection,
+                    consent_ref,
+                    idempotency_key,
+                    mode,
+                    state,
+                    requested_control,
+                    resume_cursor,
+                    processing_budget,
+                    progress,
+                    failure_summary,
+                    created_at,
+                    updated_at,
+                    started_at,
+                    paused_at,
+                    completed_at,
+                    cancelled_at,
+                    failed_at
+                )
+                VALUES (
+                    'bootstrap-run',
+                    :tenant_id,
+                    :human_id,
+                    'owner-bootstrap',
+                    'WHATSAPP_TEXT',
+                    'primary',
+                    NULL,
+                    '{}'::jsonb,
+                    'consent-migration',
+                    'bootstrap-migration-idempotency',
+                    'HISTORICAL_BOOTSTRAP',
+                    'CREATED',
+                    'NONE',
+                    NULL,
+                    '{"page_size": 50, "max_messages_per_chat": 100, "max_total_messages": 500}'::jsonb,
+                    '{}'::jsonb,
+                    NULL,
+                    now(),
+                    now(),
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
+                )
+                """
+            ),
+            {"tenant_id": tenant_id, "human_id": human_id},
+        )
+
+    result = migrate(
+        "downgrade",
+        "0050_client_pending_source",
+        check=False,
+    )
+    assert result.returncode != 0
+    assert (
+        "PERSONAL_CONTEXT_BOOTSTRAP_DOWNGRADE_REQUIRES_DATA_EXPORT"
+        in result.stderr
+    )
+    with engine.connect() as connection:
+        assert connection.scalar(
+            text("SELECT version_num FROM alembic_version")
+        ) == "0051_personal_context_bootstrap"
+        assert connection.scalar(
+            text("SELECT count(*) FROM personal_context_bootstrap_runs")
+        ) == 1
