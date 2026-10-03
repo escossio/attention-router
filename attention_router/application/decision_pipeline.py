@@ -535,6 +535,20 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
     )
     agent_output = None
     agent_result = None
+    represented_identity = resolve_represented_subject_identity(
+        session,
+        interaction.tenant_id,
+    )
+    represented_subject = (
+        represented_identity.actor
+        if represented_identity is not None
+        else resolve_represented_subject(session, interaction.tenant_id)
+    )
+    assistant_introduced = _assistant_introduced(
+        session,
+        interaction.tenant_id,
+        interaction.contact_id,
+    )
     capability_resolutions: list[dict[str, Any]] = []
     owner_authenticated = (
         event.payload.get("event_origin") == "OWNER_COMMAND"
@@ -545,20 +559,6 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         event=event, blueprint_configured=version is not None,
     )
     if agent_path_enabled:
-        represented_identity = resolve_represented_subject_identity(
-            session,
-            interaction.tenant_id,
-        )
-        represented_subject = (
-            represented_identity.actor
-            if represented_identity is not None
-            else resolve_represented_subject(session, interaction.tenant_id)
-        )
-        assistant_introduced = _assistant_introduced(
-            session,
-            interaction.tenant_id,
-            interaction.contact_id,
-        )
         platform_context = build_context_snapshot(
             session,
             canonical_event,
@@ -962,6 +962,11 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                 missing_information=result.missing_information,
                 known_slots=known_slots,
                 memory_context=actor_memory,
+                represented_reference_name=(
+                    represented_identity.reference_name
+                    if represented_identity is not None
+                    else None
+                ),
             )
             proposed_response = candidate.text if candidate else None
             safe_set_attribute(behavior_span, "attention.response_source", "andy_behavior")
