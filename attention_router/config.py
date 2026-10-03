@@ -215,6 +215,20 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator(
+        "personal_context_runtime_canary_tenant_id",
+        "cognitive_runtime_canary_tenant_id",
+        mode="before",
+    )
+    @classmethod
+    def empty_canary_tenant_id_to_none(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+    @field_validator(
         "otel_tracing_enabled", "otel_service_name", "otel_service_version",
         "otel_exporter_otlp_endpoint", "otel_exporter_otlp_protocol",
         "otel_resource_attributes", "otel_traces_sampler", "otel_traces_sampler_arg",

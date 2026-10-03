@@ -353,3 +353,13 @@ def test_cognitive_runtime_exact_canary_tenant_skips_other_active_tenants(
     assert session.scalar(
         select(func.count()).select_from(CandidateInsightRow)
     ) == 0
+
+
+def test_cognitive_canary_empty_env_values_normalize_to_none():
+    configured = Settings(
+        _env_file=None,
+        cognitive_runtime_canary_tenant_id="",
+        personal_context_runtime_canary_tenant_id="   ",
+    )
+    assert configured.cognitive_runtime_canary_tenant_id is None
+    assert configured.personal_context_runtime_canary_tenant_id is None
