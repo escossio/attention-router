@@ -77,8 +77,8 @@ class BootstrapHistoryAdapter:
         ]
         self.messages = [
             {
-                "source": "whatsapp",
-                "source_account": "primary",
+                "source": "untrusted-payload-source",
+                "source_account": "untrusted-payload-account",
                 "source_message_id": f"rent-{index}",
                 "external_sender_key": "angelo",
                 "sender_display_name": "Ângelo",
