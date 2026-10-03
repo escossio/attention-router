@@ -11,6 +11,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.personal_context_controls import (
+    CONTEXT_CONTROL_PREDICATE,
+    claim_is_owner_private,
+)
 from attention_router.domain.cognitive_graph import (
     CognitiveEdge,
     CognitiveGraphSlice,
@@ -454,7 +458,12 @@ def build_cognitive_graph_slice(
         claim_query = claim_query.where(
             MemoryClaimRow.sensitivity_class != "SECRET"
         )
-    claims = list(session.scalars(claim_query).all())
+    claims = [
+        row
+        for row in session.scalars(claim_query).all()
+        if row.predicate != CONTEXT_CONTROL_PREDICATE
+        and not claim_is_owner_private(session, claim=row)
+    ]
 
     for row in claims:
         claim_node_id = _claim_node_id(row.id)

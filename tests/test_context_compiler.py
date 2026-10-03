@@ -10,6 +10,9 @@ from attention_router.application.context_compiler import (
     ContextCompilerError,
     compile_graph_context,
 )
+from attention_router.application.personal_context_controls import (
+    CONTEXT_CONTROL_PREDICATE,
+)
 from attention_router.application.semantic_episodes import (
     assign_timeline_event_to_episode,
 )
@@ -402,6 +405,87 @@ def test_v2f_secret_timeline_events_are_fail_closed(session):
         str(item.attributes.get("visibility", "")).upper() != "SECRET"
         for item in packet.items
     )
+
+
+def test_v2f_owner_private_claims_are_excluded_fail_closed(session):
+    world = _seed_world(session, suffix="owner-private")
+    stamp = now_utc()
+    private_claim = MemoryClaimRow(
+        id=new_id(),
+        subject_actor_id=world["owner_actor"].id,
+        subject_entity_id=None,
+        predicate="context.pattern.private_matter",
+        object_type="TEXT",
+        object_text="privatecontextmarker",
+        object_actor_id=None,
+        object_entity_id=None,
+        object_json=None,
+        context={"hypothesis_id": "v2f-private-hypothesis"},
+        confidence=0.91,
+        sensitivity_class="PRIVATE",
+        source_quality="DERIVED_PATTERN",
+        valid_from=stamp - timedelta(days=1),
+        valid_until=None,
+        status="ACTIVE",
+        staleness_class="STABLE",
+        supersedes_claim_id=None,
+        conflict_group_id=None,
+        first_observed_at=stamp,
+        last_observed_at=stamp,
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    control = MemoryClaimRow(
+        id=new_id(),
+        subject_actor_id=world["owner_actor"].id,
+        subject_entity_id=None,
+        predicate=CONTEXT_CONTROL_PREDICATE,
+        object_type="JSON",
+        object_text=None,
+        object_actor_id=None,
+        object_entity_id=None,
+        object_json={
+            "control_type": "OWNER_CONTEXT_POLICY",
+            "privacy": "PRIVATE",
+            "actionability": "DEFAULT",
+            "grants_authority": False,
+            "grants_disclosure_authority": False,
+        },
+        context={
+            "target_kind": "PATTERN_HYPOTHESIS",
+            "target_hypothesis_id": "v2f-private-hypothesis",
+        },
+        confidence=1.0,
+        sensitivity_class="PRIVATE",
+        source_quality="USER_DECLARED",
+        valid_from=stamp,
+        valid_until=None,
+        status="ACTIVE",
+        staleness_class="STABLE",
+        supersedes_claim_id=None,
+        conflict_group_id=None,
+        first_observed_at=stamp,
+        last_observed_at=stamp,
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    session.add_all([private_claim, control])
+    session.flush()
+
+    graph = build_cognitive_graph_slice(session, DEFAULT_TENANT_ID)
+    projected_source_ids = {node.source_id for node in graph.nodes}
+    assert private_claim.id not in projected_source_ids
+    assert control.id not in projected_source_ids
+
+    packet = compile_graph_context(
+        session,
+        DEFAULT_TENANT_ID,
+        "privatecontextmarker",
+        max_hops=2,
+        item_budget=12,
+        token_budget=3000,
+    )
+    assert packet.items == ()
 
 
 def test_v2f_falls_back_to_lexical_v0_when_graph_has_no_seed(session):
