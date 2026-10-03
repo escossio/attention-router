@@ -301,7 +301,7 @@ def _recent_dispatches(
         return []
 
     run_pattern = re.compile(
-        r"^(?P<stamp>\\d{8}T\\d{6})-"
+        r"^(?P<stamp>\d{8}T\d{6})-"
         r"(?P<sha>[0-9a-f]{12})-"
         r"(?P<suite>[a-z0-9_-]+)-distributed$"
     )
