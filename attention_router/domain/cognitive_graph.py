@@ -35,6 +35,7 @@ class CognitiveRelationKind(StrEnum):
     CLAIM_OBJECT = "CLAIM_OBJECT"
     FACT_SUBJECT = "FACT_SUBJECT"
     STATE_SUBJECT = "STATE_SUBJECT"
+    IDENTITY_ALIAS = "IDENTITY_ALIAS"
 
 
 class CognitiveInferenceClass(StrEnum):
