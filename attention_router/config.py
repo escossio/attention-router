@@ -94,6 +94,15 @@ class Settings(BaseSettings):
     wwebjs_outbound_url: str = "http://192.0.2.6:18103/internal/send"
     wwebjs_outbound_hmac_secret: str | None = None
     wwebjs_outbound_timeout_seconds: float = 5.0
+    whatsapp_history_url: str = "http://192.0.2.6:18103/internal/history/chats"
+    local_history_hmac_secret: str | None = Field(default=None, repr=False)
+    whatsapp_history_timeout_seconds: float = 5.0
+    whatsapp_history_snapshot_limit: int = 100
+    local_source_account: str = "default"
+    personal_context_bootstrap_enabled: bool = False
+    personal_context_bootstrap_canary_tenant_id: str | None = None
+    personal_context_bootstrap_interval_seconds: int = 10
+    personal_context_bootstrap_run_limit: int = 5
     attention_recent_window_seconds: int = 10 * 60
     attention_rapid_repeat_seconds: int = 90
     attention_persistent_message_count: int = 3
@@ -216,6 +225,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "personal_context_runtime_canary_tenant_id",
+        "personal_context_bootstrap_canary_tenant_id",
         "cognitive_runtime_canary_tenant_id",
         mode="before",
     )
@@ -532,6 +542,46 @@ class Settings(BaseSettings):
             raise ValueError("WWEBJS_OUTBOUND_HMAC_SECRET must have at least 32 characters")
         if self.wwebjs_outbound_timeout_seconds <= 0:
             raise ValueError("WWEBJS_OUTBOUND_TIMEOUT_SECONDS must be positive")
+        if (
+            self.local_history_hmac_secret
+            and len(self.local_history_hmac_secret) < 32
+        ):
+            raise ValueError(
+                "LOCAL_HISTORY_HMAC_SECRET must have at least 32 characters"
+            )
+        if self.whatsapp_history_timeout_seconds <= 0:
+            raise ValueError(
+                "WHATSAPP_HISTORY_TIMEOUT_SECONDS must be positive"
+            )
+        if not 1 <= self.whatsapp_history_snapshot_limit <= 100:
+            raise ValueError(
+                "WHATSAPP_HISTORY_SNAPSHOT_LIMIT must be between 1 and 100"
+            )
+        if (
+            not self.local_source_account.strip()
+            or len(self.local_source_account.strip()) > 180
+        ):
+            raise ValueError(
+                "LOCAL_SOURCE_ACCOUNT must be non-empty and <= 180"
+            )
+        if not self.whatsapp_history_url.startswith("http://"):
+            raise ValueError("WHATSAPP_HISTORY_URL must use http://")
+        if self.personal_context_bootstrap_interval_seconds <= 0:
+            raise ValueError(
+                "PERSONAL_CONTEXT_BOOTSTRAP_INTERVAL_SECONDS must be positive"
+            )
+        if not 1 <= self.personal_context_bootstrap_run_limit <= 100:
+            raise ValueError(
+                "PERSONAL_CONTEXT_BOOTSTRAP_RUN_LIMIT must be between 1 and 100"
+            )
+        if (
+            self.personal_context_bootstrap_enabled
+            and not self.client_session_enabled
+        ):
+            raise ValueError(
+                "PERSONAL_CONTEXT_BOOTSTRAP_ENABLED requires "
+                "CLIENT_SESSION_ENABLED=true"
+            )
         if self.attention_recent_window_seconds <= 0:
             raise ValueError("ATTENTION_RECENT_WINDOW_SECONDS must be positive")
         if self.attention_rapid_repeat_seconds <= 0:

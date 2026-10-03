@@ -23,6 +23,7 @@ from attention_router.infrastructure.models import (
     ConversationMessageRow,
     ExecutionIntentRow,
     OutboxMessageRow,
+    RelationshipRow,
     TenantRow,
 )
 from attention_router.infrastructure.personal_context_bootstrap_models import (
@@ -230,6 +231,9 @@ def test_v2b_bootstrap_advances_in_bounded_resumable_batches(session):
     assert session.scalar(
         select(func.count()).select_from(OutboxMessageRow)
     ) == 0
+    assert session.scalar(
+        select(func.count()).select_from(RelationshipRow)
+    ) == 0
 
 
 
@@ -405,3 +409,126 @@ def test_v2b_failed_batch_rolls_back_partial_history_work(session):
     assert session.scalar(
         select(func.count()).select_from(ConversationMessageRow)
     ) == 0
+
+
+def test_product_runtime_freezes_real_chat_selection_and_owner_controls(session):
+    from types import SimpleNamespace
+
+    from attention_router.application.personal_context_bootstrap_product import (
+        PersonalContextBootstrapProductService,
+    )
+    from attention_router.config import Settings
+
+    class ClientSessions:
+        def authenticated_bootstrap(self, session, *, session_token):
+            assert session_token == "session-token"
+            return SimpleNamespace(
+                active_tenant_id=DEFAULT_TENANT_ID,
+                human_identity_id=OWNER_HUMAN_ID,
+            )
+
+    class Adapter:
+        snapshot_limit = 3
+
+        def list_chats(self):
+            return [
+                {
+                    "external_thread_key": "chat-b",
+                    "thread_type": "DIRECT",
+                    "title": "B",
+                },
+                {
+                    "external_thread_key": "chat-a",
+                    "thread_type": "GROUP",
+                    "title": "A",
+                },
+            ]
+
+    _seed_owner(session)
+    configured = Settings(
+        _env_file=None,
+        app_env="test",
+        internal_ingress_hmac_secret="i" * 32,
+        client_session_enabled=True,
+        personal_context_bootstrap_enabled=True,
+        whatsapp_history_snapshot_limit=3,
+    )
+    service = PersonalContextBootstrapProductService(
+        settings=configured,
+        client_sessions=ClientSessions(),
+        adapter=Adapter(),
+    )
+
+    row = service.create_and_queue(
+        session,
+        session_token="session-token",
+        consent_ref="owner-consent-001",
+    )
+
+    assert row.state == "QUEUED"
+    assert row.source_selection == {"chat_keys": ["chat-a", "chat-b"]}
+    assert row.processing_budget == {
+        "page_size": 3,
+        "max_messages_per_chat": 3,
+        "max_total_messages": 6,
+    }
+
+    assert service.pause(
+        session,
+        session_token="session-token",
+        run_id=row.id,
+    ).state == "PAUSED"
+    assert service.resume(
+        session,
+        session_token="session-token",
+        run_id=row.id,
+    ).state == "QUEUED"
+    assert service.cancel(
+        session,
+        session_token="session-token",
+        run_id=row.id,
+    ).state == "CANCELLED"
+
+
+def test_bootstrap_runtime_canary_advances_only_exact_tenant(session):
+    from attention_router.application.personal_context_bootstrap_runtime import (
+        run_personal_context_bootstrap_runtime_cycle,
+    )
+
+    tenant_b = "00000000-0000-4000-8000-000000000199"
+    human_b = "hid-bootstrap-runtime-b"
+    actor_b = "owner-bootstrap-runtime-b"
+
+    _seed_owner(session)
+    _seed_owner(
+        session,
+        tenant_id=tenant_b,
+        human_id=human_b,
+        actor_key=actor_b,
+        external_actor_id="bootstrap-runtime-b-external",
+    )
+    run_a, _ = _create_run(session)
+    run_b, _ = _create_run(
+        session,
+        tenant_id=tenant_b,
+        owner_human_identity_id=human_b,
+        represented_owner_actor_key=actor_b,
+        consent_ref="consent-runtime-b",
+    )
+    queue_bootstrap_run(session, run_a.id)
+    queue_bootstrap_run(session, run_b.id)
+
+    result = run_personal_context_bootstrap_runtime_cycle(
+        session,
+        adapter=BootstrapHistoryAdapter(),
+        run_limit=5,
+        canary_tenant_id=DEFAULT_TENANT_ID,
+    )
+
+    assert result.runs_considered == 1
+    assert result.batches_completed == 1
+    assert result.runs_requeued == 1
+    assert session.get(PersonalContextBootstrapRunRow, run_a.id).progress[
+        "batches_completed"
+    ] == 1
+    assert session.get(PersonalContextBootstrapRunRow, run_b.id).progress == {}

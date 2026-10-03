@@ -20,6 +20,9 @@ from attention_router.application.client_location import ClientLocationService
 from attention_router.application.client_approval import ClientApprovalService
 from attention_router.application.client_command import ClientCommandService
 from attention_router.application.gmail_connection import GmailConnectionService
+from attention_router.application.personal_context_bootstrap_product import (
+    PersonalContextBootstrapProductService,
+)
 from attention_router.application.decision_pipeline import decision_to_dict
 from attention_router.application import response_review
 from attention_router.application import execution
@@ -35,6 +38,9 @@ from attention_router.api.v1.client_location import build_client_location_router
 from attention_router.api.v1.client_approval import build_client_approval_router
 from attention_router.api.v1.client_command import build_client_command_router
 from attention_router.api.v1.gmail_connection import build_gmail_connection_router
+from attention_router.api.v1.personal_context_bootstrap import (
+    build_personal_context_bootstrap_router,
+)
 from attention_router.core.human_identity import HumanAuthProviderUnavailable, VerifiedProviderIdentity
 from attention_router.core.devices import (
     DeviceCapabilityAnnouncement,
@@ -47,6 +53,7 @@ from attention_router.config import settings
 from attention_router.adapters.synthetic_inbound import SyntheticInboundAdapter
 from attention_router.infrastructure.db import SessionLocal
 from attention_router.integrations.google_identity import GoogleIdentityVerifier
+from attention_router.integrations.whatsapp_history import WhatsAppHistoryAdapter
 from attention_router.infrastructure.repository import (
     activate_policy_version,
     actor_binding_to_dict,
@@ -103,6 +110,20 @@ client_command_service = ClientCommandService(
 gmail_connection_service = GmailConnectionService(
     settings=settings,
     client_sessions=client_session_service,
+)
+whatsapp_history_adapter = WhatsAppHistoryAdapter(
+    base_url=settings.whatsapp_history_url,
+    hmac_secret=(
+        settings.local_history_hmac_secret
+        or settings.internal_ingress_hmac_secret
+    ),
+    timeout_seconds=settings.whatsapp_history_timeout_seconds,
+    snapshot_limit=settings.whatsapp_history_snapshot_limit,
+)
+personal_context_bootstrap_service = PersonalContextBootstrapProductService(
+    settings=settings,
+    client_sessions=client_session_service,
+    adapter=whatsapp_history_adapter,
 )
 
 
@@ -224,6 +245,10 @@ app.include_router(build_client_command_router(
 app.include_router(build_gmail_connection_router(
     get_session=get_session,
     service=gmail_connection_service,
+))
+app.include_router(build_personal_context_bootstrap_router(
+    get_session=get_session,
+    service=personal_context_bootstrap_service,
 ))
 
 
