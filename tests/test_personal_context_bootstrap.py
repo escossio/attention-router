@@ -243,6 +243,25 @@ def test_v2b_rejects_explicit_empty_source_selection(session):
             source_selection={"chat_keys": []},
         )
 
+
+def test_v2b_fails_closed_when_represented_owner_is_ambiguous(session):
+    _seed_owner(session)
+    upsert_actor_binding(
+        session,
+        source="test-ambiguous",
+        external_actor_id="bootstrap-owner-other",
+        actor_key="owner-bootstrap-other",
+        actor_category="owner",
+        display_name="Other Owner",
+        metadata={"owner": True},
+    )
+
+    with pytest.raises(
+        PersonalContextBootstrapError,
+        match="BOOTSTRAP_REPRESENTED_OWNER_AMBIGUOUS",
+    ):
+        _create_run(session)
+
 def test_v2b_requires_active_owner_membership_and_owner_binding(session):
     stamp = now_utc()
     session.add(
