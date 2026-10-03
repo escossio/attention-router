@@ -121,7 +121,7 @@ class SemanticEpisodeMembershipRow(Base):
     association_source: Mapped[str] = mapped_column(String(80), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     ambiguous: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
+        Boolean, nullable=False, default=False
     )
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     metadata_json: Mapped[dict] = mapped_column(
