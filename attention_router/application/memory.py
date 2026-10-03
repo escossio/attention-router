@@ -79,7 +79,15 @@ class HistoryBackfillService:
         resume_cursor: dict[str, Any] | None = None,
         page_size: int = 50,
         max_messages_per_chat: int = 100,
+        max_total_messages: int | None = None,
     ) -> HistoryBackfillResult:
+        if page_size < 1:
+            raise ValueError("HISTORY_BACKFILL_PAGE_SIZE_INVALID")
+        if max_messages_per_chat < 1:
+            raise ValueError("HISTORY_BACKFILL_CHAT_BUDGET_INVALID")
+        if max_total_messages is not None and max_total_messages < 1:
+            raise ValueError("HISTORY_BACKFILL_TOTAL_BUDGET_INVALID")
+
         chats = self.adapter.list_chats()
         selected = [chat for chat in chats if not chat_keys or chat.get("external_thread_key") in chat_keys]
         metrics: dict[str, Any] = {
@@ -98,17 +106,36 @@ class HistoryBackfillService:
             "errors": 0,
         }
         start_chat = int((resume_cursor or {}).get("chat_index", 0))
+        if start_chat < 0 or start_chat > len(selected):
+            raise ValueError("HISTORY_BACKFILL_RESUME_CURSOR_INVALID")
         next_cursor: dict[str, Any] | None = None
+        processed_total = 0
+
         for chat_index, chat in enumerate(selected[start_chat:], start=start_chat):
             chat_key = chat["external_thread_key"]
             cursor = (resume_cursor or {}).get("message_cursor") if chat_index == start_chat else None
             fetched = 0
+            page: dict[str, Any] = {"messages": [], "next_cursor": cursor}
+
             while fetched < max_messages_per_chat:
-                page = self.adapter.fetch_messages(chat_key, min(page_size, max_messages_per_chat - fetched), cursor)
+                request_limit = min(page_size, max_messages_per_chat - fetched)
+                if max_total_messages is not None:
+                    remaining_total = max_total_messages - processed_total
+                    if remaining_total <= 0:
+                        next_cursor = {
+                            "chat_index": chat_index,
+                            "message_cursor": cursor,
+                        }
+                        break
+                    request_limit = min(request_limit, remaining_total)
+
+                page = self.adapter.fetch_messages(chat_key, request_limit, cursor)
                 messages = page.get("messages", [])
                 metrics["total_messages_discovered"] += len(messages)
+
                 for payload in messages:
                     fetched += 1
+                    processed_total += 1
                     if dry_run:
                         metrics["total_messages_archived"] += 1
                         if payload.get("sensitivity_class") == "SECRET" or _redact(payload.get("text"))[1] == "SECRET":
@@ -139,23 +166,66 @@ class HistoryBackfillService:
                         metrics["secret_redactions"] += 1
                     claims = ingest_message(self.session, row.id, mode="BACKFILL")
                     metrics["memories_promoted"] += len(claims)
-                    candidates = self.session.scalars(select(MemoryCandidateRow).where(MemoryCandidateRow.message_id == row.id)).all()
+                    candidates = self.session.scalars(
+                        select(MemoryCandidateRow).where(
+                            MemoryCandidateRow.message_id == row.id
+                        )
+                    ).all()
                     metrics["memory_candidates"] += len(candidates)
-                    metrics["archive_only_candidates"] += sum(candidate.eligibility == "ARCHIVE_ONLY" for candidate in candidates)
-                    metrics["blocked_memory_candidates"] += sum(candidate.eligibility == "BLOCK" for candidate in candidates)
-                    metrics["low_confidence_candidates"] += sum(candidate.eligibility == "LOW_CONFIDENCE" for candidate in candidates)
+                    metrics["archive_only_candidates"] += sum(
+                        candidate.eligibility == "ARCHIVE_ONLY"
+                        for candidate in candidates
+                    )
+                    metrics["blocked_memory_candidates"] += sum(
+                        candidate.eligibility == "BLOCK"
+                        for candidate in candidates
+                    )
+                    metrics["low_confidence_candidates"] += sum(
+                        candidate.eligibility == "LOW_CONFIDENCE"
+                        for candidate in candidates
+                    )
+
                 next_page = page.get("next_cursor")
-                if not messages or not next_page or fetched >= max_messages_per_chat:
+                if not messages or not next_page:
                     break
+
                 cursor = next_page
-            if page.get("next_cursor") and fetched >= max_messages_per_chat:
-                next_cursor = {"chat_index": chat_index, "message_cursor": page["next_cursor"]}
+                if fetched >= max_messages_per_chat:
+                    next_cursor = {
+                        "chat_index": chat_index,
+                        "message_cursor": next_page,
+                    }
+                    break
+                if (
+                    max_total_messages is not None
+                    and processed_total >= max_total_messages
+                ):
+                    next_cursor = {
+                        "chat_index": chat_index,
+                        "message_cursor": next_page,
+                    }
+                    break
+
+            if next_cursor is not None:
+                break
+
+            if (
+                max_total_messages is not None
+                and processed_total >= max_total_messages
+                and chat_index + 1 < len(selected)
+            ):
+                next_cursor = {
+                    "chat_index": chat_index + 1,
+                    "message_cursor": None,
+                }
                 break
             resume_cursor = None
-        if not next_cursor and start_chat + len(selected[start_chat:]) < len(selected):
-            next_cursor = {"chat_index": start_chat + len(selected[start_chat:]), "message_cursor": None}
-        return HistoryBackfillResult(dry_run=dry_run, resume_cursor=next_cursor, metrics=metrics)
 
+        return HistoryBackfillResult(
+            dry_run=dry_run,
+            resume_cursor=next_cursor,
+            metrics=metrics,
+        )
 
 @dataclass(frozen=True)
 class ArchivedMessageInput:
