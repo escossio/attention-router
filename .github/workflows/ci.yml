@@ -56,6 +56,9 @@ jobs:
             whatsapp-transport-local/package-lock.json
             contracts/integration/conformance/package-lock.json
             sdks/typescript/package-lock.json
+      - name: Check cognitive public page JavaScript syntax
+        working-directory: .
+        run: node --check docs/public/cognitive-architecture/app.js
       - run: npm ci --ignore-scripts
       - run: node ../tests/fixtures/synthetic-identity-contract.cjs
       - run: npm test
