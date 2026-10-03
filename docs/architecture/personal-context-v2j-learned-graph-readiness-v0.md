@@ -50,22 +50,25 @@ and deterministic baselines exist.
 
 ### Link prediction
 
-V0 labels come only from V2E `RELATIONSHIP_PROPOSAL` Candidate Insights with
-an owner decision.
+V2J V0 deliberately does **not** treat V2E `ADMITTED` as a positive
+link-prediction label.
 
-Positive:
+`ADMITTED` means the owner accepted a Candidate Insight as eligible for
+future governed promotion. It does not materialize canonical relationship
+truth.
 
-- state = ADMITTED;
-- decision_kind = OWNER_ADMITTED.
+V0 therefore distinguishes:
 
-Negative:
+- OWNER_ADMITTED relationship proposals -> `admitted_noncanonical` inventory;
+- OWNER_REJECTED relationship proposals -> valid negative corrected labels;
+- PROPOSED / NEEDS_REVIEW -> inferred/unreviewed inventory;
+- SUPERSEDED -> correction lineage.
 
-- state = REJECTED;
-- decision_kind = OWNER_REJECTED.
+A positive LINK_PREDICTION label requires a future governed contract proving an
+owner-confirmed canonical relationship. V2J does not invent that contract.
 
-PROPOSED and NEEDS_REVIEW remain unreviewed hypotheses and are not labels.
-
-SUPERSEDED candidates remain correction lineage and are counted separately.
+Result: LINK_PREDICTION may correctly remain NOT_READY even when many admitted
+candidates exist.
 
 SECRET candidates are excluded from the readiness dataset.
 
@@ -125,6 +128,8 @@ The readiness report records:
 - positive labels;
 - negative labels;
 - organic labels;
+- organic positive labels;
+- organic negative labels;
 - synthetic labels;
 - historical-unknown labels;
 - corrected semantic groups;
@@ -132,6 +137,7 @@ The readiness report records:
 - owner-rejected labels;
 - superseded/correction count;
 - inferred/unreviewed count;
+- admitted-but-noncanonical CandidateInsight count;
 - explicit canonical RelationshipRow count;
 - organic corrected-label temporal span.
 
@@ -159,6 +165,7 @@ The manifest records:
 - validation cutoff;
 - test start;
 - deterministic split fingerprint;
+- train/validation/test positive and negative counts;
 - group leakage flag;
 - lineage leakage flag.
 
@@ -211,8 +218,8 @@ V0 ships with a conservative versioned engineering policy.
 Defaults:
 
 - minimum corrected labels: 200;
-- minimum positives: 50;
-- minimum negatives: 50;
+- minimum **organic** positives: 50;
+- minimum **organic** negatives: 50;
 - minimum organic labels: 150;
 - maximum unknown-lineage ratio: 5%;
 - minimum organic temporal span: 30 days;
@@ -239,8 +246,8 @@ Core reason codes include:
 
 - TASK_LABEL_ADAPTER_SUPPORTED;
 - MINIMUM_TOTAL_LABELS;
-- MINIMUM_POSITIVE_LABELS;
-- MINIMUM_NEGATIVE_LABELS;
+- MINIMUM_ORGANIC_POSITIVE_LABELS;
+- MINIMUM_ORGANIC_NEGATIVE_LABELS;
 - MINIMUM_ORGANIC_LABELS;
 - UNKNOWN_LINEAGE_RATIO;
 - MINIMUM_TEMPORAL_SPAN;
@@ -248,6 +255,9 @@ Core reason codes include:
 - TEMPORAL_ORDER_STRICT;
 - GROUP_LEAKAGE_PREVENTED;
 - LINEAGE_LEAKAGE_PREVENTED;
+- TRAIN_CLASS_BALANCE;
+- VALIDATION_CLASS_BALANCE;
+- TEST_CLASS_BALANCE;
 - BASELINE_METRICS_PRESENT;
 - DETERMINISTIC_BASELINE_MATCHES_TASK;
 - LEARNED_METRICS_PRESENT;
@@ -292,6 +302,12 @@ Default:
 
 `OFF`
 
+The Settings contract also exposes:
+
+`learned_graph_shadow_enabled: bool = False`
+
+Readiness alone never activates learned runtime.
+
 `authorize_learned_graph_runtime_mode` behaves as follows:
 
 OFF:
@@ -300,7 +316,8 @@ always allowed.
 
 SHADOW:
 
-allowed only when the exact readiness report passes.
+allowed only when the exact readiness report passes **and** the explicit
+`learned_graph_shadow_enabled` feature flag is enabled.
 
 ACTIVE:
 
@@ -381,7 +398,11 @@ V2J may legitimately return NOT_READY in production today.
 
 That is a successful result when the repository does not yet contain enough
 organic owner-corrected labels or a reproducible learned-model evaluation that
-beats the deterministic V2I baseline.
+beats the deterministic baseline.
+
+In particular, LINK_PREDICTION remains correctly blocked until a governed
+positive-label contract exists for owner-confirmed canonical relationships.
+V2E `ADMITTED` is explicitly insufficient.
 
 The objective is to know exactly what is missing.
 
@@ -416,7 +437,8 @@ V2J is complete when:
 - readiness returns explicit reason-coded gates;
 - invalid readiness policies fail closed;
 - OFF is default;
-- only readiness-gated SHADOW can be authorized;
+- learned_graph_shadow_enabled exists and defaults false;
+- SHADOW requires both the feature flag and a passing readiness report;
 - ACTIVE remains forbidden;
 - CandidateInsight GNN source remains gated;
 - zero canonical/execution side effects occur;

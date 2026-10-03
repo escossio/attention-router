@@ -144,6 +144,7 @@ class Settings(BaseSettings):
     personal_context_suggestion_delivery_enabled: bool = False
     personal_context_authority_runtime_enabled: bool = False
     personal_context_materialization_runtime_enabled: bool = False
+    learned_graph_shadow_enabled: bool = False
     personal_context_materialization_intent_limit: int = 50
     personal_context_runtime_owner_limit: int = 50
     conversation_repetition_window_seconds: int = 24 * 60 * 60
