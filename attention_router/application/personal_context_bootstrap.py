@@ -480,6 +480,7 @@ def process_next_bootstrap_batch(
                 max_total_messages=budget["max_total_messages"],
                 source_override=_ARCHIVE_SOURCE_BY_KIND[row.source_kind],
                 source_account_override=row.source_account,
+                tenant_id=row.tenant_id,
             )
     except Exception as exc:
         failed_at = _utc()
