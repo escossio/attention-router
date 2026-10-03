@@ -528,6 +528,8 @@ def confirm_entity_resolution(
         state="ACTIVE",
         decision_actor_key=owner_actor_key,
         decision_ref=reference,
+        revoked_by_actor_key=None,
+        revocation_ref=None,
         created_at=stamp,
         updated_at=stamp,
         revoked_at=None,
@@ -565,8 +567,8 @@ def revoke_entity_alias(
     )
     stamp = _utc(now)
     row.state = "REVOKED"
-    row.decision_actor_key = owner_actor_key
-    row.decision_ref = reference
+    row.revoked_by_actor_key = owner_actor_key
+    row.revocation_ref = reference
     row.updated_at = stamp
     row.revoked_at = stamp
     session.flush()
