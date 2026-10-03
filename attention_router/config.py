@@ -191,6 +191,8 @@ class Settings(BaseSettings):
     max_concurrent_external_effect_scenarios: int = 1
     max_concurrent_read_only_scenarios: int = 4
     synthetic_test_driver_enabled: bool = False
+    learned_graph_intelligence_enabled: bool = False
+    learned_graph_shadow_mode: bool = True
     max_response_chain_depth: int = 1
     min_synthetic_stimulus_interval: int = 5
     max_synthetic_external_runs_per_minute: int = 2
@@ -619,6 +621,14 @@ class Settings(BaseSettings):
             raise ValueError("TIME_BASED_FINDING_AUTO_RESOLUTION must remain false in V1")
         if self.default_external_effect_budget != 0:
             raise ValueError("DEFAULT_EXTERNAL_EFFECT_BUDGET must be zero in V1")
+        if (
+            self.learned_graph_intelligence_enabled
+            and not self.learned_graph_shadow_mode
+        ):
+            raise ValueError(
+                "LEARNED_GRAPH_INTELLIGENCE_ENABLED requires "
+                "LEARNED_GRAPH_SHADOW_MODE=true"
+            )
         if not 0 < self.disk_warning < self.disk_critical < self.disk_block_new_heavy_tests <= 100:
             raise ValueError(
                 "DISK_WARNING, DISK_CRITICAL and DISK_BLOCK_NEW_HEAVY_TESTS "

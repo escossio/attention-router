@@ -72,6 +72,28 @@ def test_platform_safety_defaults_cannot_be_weakened(field, value):
         _settings(**{field: value})
 
 
+def test_learned_graph_defaults_are_disabled_and_shadow_only():
+    configured = _settings()
+    assert configured.learned_graph_intelligence_enabled is False
+    assert configured.learned_graph_shadow_mode is True
+
+    enabled = _settings(learned_graph_intelligence_enabled=True)
+    assert enabled.learned_graph_intelligence_enabled is True
+    assert enabled.learned_graph_shadow_mode is True
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "LEARNED_GRAPH_INTELLIGENCE_ENABLED requires "
+            "LEARNED_GRAPH_SHADOW_MODE=true"
+        ),
+    ):
+        _settings(
+            learned_graph_intelligence_enabled=True,
+            learned_graph_shadow_mode=False,
+        )
+
+
 def test_platform_timeout_and_disk_boundaries_are_validated():
     with pytest.raises(ValidationError):
         _settings(default_step_timeout=181)
