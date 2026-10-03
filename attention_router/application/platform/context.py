@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session
 from attention_router.application.platform.events import event_to_envelope
 from attention_router.core.context import ContextCoreBuilder, ContextSnapshot
 from attention_router.core.entities import EntityReference
+from attention_router.infrastructure.client_bootstrap_models import ClientTenantMembershipRow
+from attention_router.infrastructure.human_identity_models import HumanProfileRow
 from attention_router.infrastructure.models import (
     AgentDecisionRow,
     CanonicalEventRow,
@@ -253,6 +256,20 @@ def build_context_snapshot(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class RepresentedSubjectIdentity:
+    actor: EntityReference
+    human_identity_id: str
+    reference_name: str | None
+
+    def prompt_payload(self) -> dict[str, str | None]:
+        return {
+            "type": self.actor.entity_type,
+            "id": self.actor.entity_id,
+            "reference_name": self.reference_name,
+        }
+
+
 def resolve_represented_subject(session: Session, tenant_id: str) -> EntityReference | None:
     """Resolve the single active tenant owner without using transport identifiers."""
     bindings = session.scalars(
@@ -268,3 +285,34 @@ def resolve_represented_subject(session: Session, tenant_id: str) -> EntityRefer
     if len(bindings) != 1:
         return None
     return EntityReference(entity_type="ACTOR", entity_id=bindings[0].actor_key)
+
+
+def resolve_represented_subject_identity(
+    session: Session,
+    tenant_id: str,
+) -> RepresentedSubjectIdentity | None:
+    """Resolve owner actor + authenticated Human Identity + public Andy reference name."""
+    actor = resolve_represented_subject(session, tenant_id)
+    if actor is None:
+        return None
+    memberships = session.scalars(
+        select(ClientTenantMembershipRow).where(
+            ClientTenantMembershipRow.tenant_id == tenant_id,
+            ClientTenantMembershipRow.role == "OWNER",
+            ClientTenantMembershipRow.status == "ACTIVE",
+        )
+    ).all()
+    if len(memberships) != 1:
+        return None
+    membership = memberships[0]
+    profile = session.get(HumanProfileRow, membership.human_identity_id)
+    reference_name = (
+        profile.assistant_reference_name.strip()
+        if profile is not None and profile.assistant_reference_name
+        else None
+    )
+    return RepresentedSubjectIdentity(
+        actor=actor,
+        human_identity_id=membership.human_identity_id,
+        reference_name=reference_name,
+    )

@@ -21,8 +21,8 @@ class AllowedAgentContext:
     audience: str
     policy_summary: str
     allowed_disclosures: list[str] = field(default_factory=list)
-    interaction_actor: dict[str, str] | None = None
-    represented_subject: dict[str, str] | None = None
+    interaction_actor: dict[str, str | None] | None = None
+    represented_subject: dict[str, str | None] | None = None
     allowed_facts: list[str] = field(default_factory=list)
     recent_turns: list[dict[str, str]] = field(default_factory=list)
     available_action_capabilities: list[str] = field(default_factory=list)

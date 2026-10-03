@@ -34,7 +34,11 @@ from attention_router.application.agents.readiness import get_andy_readiness
 from attention_router.application.agents.context import ActionCapability, AllowedAgentContext
 from attention_router.application.lab_conversation import claim_inbound
 from attention_router.application.platform.capability_pack import execute_owner_capability
-from attention_router.application.platform.context import build_context_snapshot, resolve_represented_subject
+from attention_router.application.platform.context import (
+    build_context_snapshot,
+    resolve_represented_subject,
+    resolve_represented_subject_identity,
+)
 from attention_router.application.platform.entities import (
     EffectiveRelationship,
     resolve_effective_audience,
@@ -509,7 +513,15 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         event=event, blueprint_configured=version is not None,
     )
     if agent_path_enabled:
-        represented_subject = resolve_represented_subject(session, interaction.tenant_id)
+        represented_identity = resolve_represented_subject_identity(
+            session,
+            interaction.tenant_id,
+        )
+        represented_subject = (
+            represented_identity.actor
+            if represented_identity is not None
+            else resolve_represented_subject(session, interaction.tenant_id)
+        )
         platform_context = build_context_snapshot(
             session,
             canonical_event,
@@ -562,11 +574,34 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             "private_state_exposed": bool(private_state),
             "disclosure_reason_code": disclosure_authority.reason_code,
         })
+        interaction_actor = {
+            "type": "ACTOR",
+            "id": identifier_hash(context.actor_id),
+            "display_name": binding.display_name if binding is not None else None,
+            "relationship": (
+                (binding.binding_metadata or {}).get("relationship")
+                if binding is not None
+                else interaction.relationship_category
+            ),
+        }
+        represented_prompt = (
+            represented_identity.prompt_payload()
+            if represented_identity is not None
+            else (
+                {
+                    "type": represented_subject.entity_type,
+                    "id": represented_subject.entity_id,
+                    "reference_name": None,
+                }
+                if represented_subject is not None
+                else None
+            )
+        )
         agent_context = AllowedAgentContext(
             actor_id=identifier_hash(context.actor_id),
             binding_id=identifier_hash(context.actor_binding_id) if context.actor_binding_id else None,
-            interaction_actor={"type": "ACTOR", "id": identifier_hash(context.actor_id)},
-            represented_subject=represented_subject.model_dump() if represented_subject else None,
+            interaction_actor=interaction_actor,
+            represented_subject=represented_prompt,
             audience=audience,
             policy_summary=f"policy={policy_version.policy_id if policy_version else 'none'}; "
             f"conversation_contract={DIRECT_TEXT_CONVERSATION_CONTRACT_VERSION}; capabilities_require_separate_authority",
@@ -575,7 +610,7 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             recent_turns=_recent_agent_turns(
                 session, interaction.tenant_id, interaction.contact_id, interaction.id
             ),
-            available_action_capabilities=["leave_message", "request_callback", "notify_alex"],
+            available_action_capabilities=["leave_message", "request_callback", "notify_owner"],
             current_message=effective_text,
             relationship=interaction.relationship_category,
             contact_return_channel_available=direct.return_channel_available,
@@ -595,7 +630,7 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                     description="propose a callback request; no phone call is executed by Andy",
                 ),
                 ActionCapability(
-                    action_type="notify_alex",
+                    action_type="notify_owner",
                     available=False,
                     description="no direct notification capability is exposed to this run",
                 ),
