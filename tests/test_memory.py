@@ -181,6 +181,75 @@ def test_backfill_resume_cursor_completes_next_page(session):
     assert session.scalar(select(func.count()).select_from(ConversationMessageRow)) == 2
 
 
+
+def test_backfill_total_budget_stops_and_resumes_without_skipping(session):
+    class BudgetedAdapter(FakeHistoryAdapter):
+        def __init__(self):
+            super().__init__()
+            self.chats = [
+                {
+                    "external_thread_key": "known",
+                    "thread_type": "DIRECT",
+                    "title": "Known",
+                }
+            ]
+            self.messages["known"] = [
+                {
+                    "source_message_id": f"known-{index}",
+                    "external_sender_key": "actor-a",
+                    "sent_at": datetime(2026, 1, index),
+                    "text": f"Mensagem {index}.",
+                    "type": "TEXT",
+                }
+                for index in range(1, 5)
+            ]
+
+        def fetch_messages(self, chat_key, limit, cursor=None):
+            messages = self.messages[chat_key]
+            offset = int(cursor or 0)
+            page = messages[offset:offset + limit]
+            next_cursor = (
+                str(offset + len(page))
+                if offset + len(page) < len(messages)
+                else None
+            )
+            return {"messages": page, "next_cursor": next_cursor}
+
+    adapter = BudgetedAdapter()
+    first = HistoryBackfillService(session, adapter).run(
+        dry_run=False,
+        page_size=1,
+        max_messages_per_chat=10,
+        max_total_messages=2,
+    )
+    assert first.metrics["total_messages_discovered"] == 2
+    assert first.resume_cursor == {
+        "chat_index": 0,
+        "message_cursor": "2",
+    }
+    session.commit()
+
+    second = HistoryBackfillService(session, adapter).run(
+        dry_run=False,
+        page_size=1,
+        max_messages_per_chat=10,
+        max_total_messages=2,
+        resume_cursor=first.resume_cursor,
+    )
+    assert second.metrics["total_messages_discovered"] == 2
+    assert second.resume_cursor is None
+    assert session.scalar(select(func.count()).select_from(ConversationMessageRow)) == 4
+
+
+def test_backfill_rejects_invalid_total_budget(session):
+    with pytest.raises(
+        ValueError,
+        match="HISTORY_BACKFILL_TOTAL_BUDGET_INVALID",
+    ):
+        HistoryBackfillService(session, FakeHistoryAdapter()).run(
+            max_total_messages=0,
+        )
+
 def test_incremental_entrypoint_archives_and_enqueues_once(session, monkeypatch):
     monkeypatch.setattr(settings, "persistent_memory_enabled", True)
     monkeypatch.setattr(settings, "memory_ingestion_enabled", True)
