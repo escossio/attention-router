@@ -304,6 +304,18 @@ def test_v2c_confirmation_creates_reversible_alias_and_graph_edge(session):
         for edge in graph_after.edges
     )
 
+    with pytest.raises(
+        EntityResolutionError,
+        match="ENTITY_RESOLUTION_CONFIRMED_ALIAS_INACTIVE",
+    ):
+        confirm_entity_resolution(
+            session,
+            candidate_id=candidate.id,
+            canonical_actor_key=ANGELO_WHATSAPP,
+            decision_actor_key=OWNER,
+            decision_ref="owner-command:confirm-replay",
+        )
+
 
 def test_v2c_owner_decision_fails_closed_when_owner_is_ambiguous(session):
     _seed_default_world(session)
