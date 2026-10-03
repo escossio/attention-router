@@ -22,6 +22,8 @@ class CognitiveNodeKind(StrEnum):
     CLAIM = "CLAIM"
     FACT = "FACT"
     STATE = "STATE"
+    EPISODE = "EPISODE"
+    MESSAGE = "MESSAGE"
 
 
 class CognitiveRelationKind(StrEnum):
@@ -36,6 +38,9 @@ class CognitiveRelationKind(StrEnum):
     FACT_SUBJECT = "FACT_SUBJECT"
     STATE_SUBJECT = "STATE_SUBJECT"
     IDENTITY_ALIAS = "IDENTITY_ALIAS"
+    EPISODE_MEMBER = "EPISODE_MEMBER"
+    EPISODE_RESOURCE = "EPISODE_RESOURCE"
+    EPISODE_RELATIONSHIP = "EPISODE_RELATIONSHIP"
 
 
 class CognitiveInferenceClass(StrEnum):

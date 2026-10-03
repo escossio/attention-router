@@ -23,8 +23,13 @@ from attention_router.infrastructure.entity_resolution_models import (
     EntityAliasResolutionRow,
 )
 from attention_router.infrastructure.hashing import stable_hash
+from attention_router.infrastructure.semantic_episode_models import (
+    SemanticEpisodeMembershipRow,
+    SemanticEpisodeRow,
+)
 from attention_router.infrastructure.models import (
     ActorBindingRow,
+    ConversationMessageRow,
     EntityStateRow,
     FactRow,
     MemoryActorRow,
@@ -74,6 +79,14 @@ def _fact_node_id(fact_id: str) -> str:
 
 def _state_node_id(state_id: str) -> str:
     return f"state:{state_id}"
+
+
+def _episode_node_id(episode_id: str) -> str:
+    return f"episode:{episode_id}"
+
+
+def _message_node_id(message_id: str) -> str:
+    return f"message:{message_id}"
 
 
 def _entity_node_id(entity_type: str, entity_id: str) -> tuple[str, CognitiveNodeKind]:
@@ -682,6 +695,193 @@ def build_cognitive_graph_slice(
                     "candidate_id": row.candidate_id,
                     "decision_actor_key": row.decision_actor_key,
                     "decision_ref": row.decision_ref,
+                },
+            )
+        )
+
+
+    episode_query = (
+        select(SemanticEpisodeRow)
+        .where(SemanticEpisodeRow.tenant_id == tenant_id)
+        .order_by(
+            SemanticEpisodeRow.last_activity_at.desc(),
+            SemanticEpisodeRow.id,
+        )
+        .limit(limit_per_kind)
+    )
+    if not include_secret:
+        episode_query = episode_query.where(
+            SemanticEpisodeRow.sensitivity_class != "SECRET"
+        )
+    episodes = list(session.scalars(episode_query).all())
+    episode_ids = {row.id for row in episodes}
+
+    for row in episodes:
+        episode_node_id = _episode_node_id(row.id)
+        put_node(
+            CognitiveNode(
+                node_id=episode_node_id,
+                tenant_id=tenant_id,
+                kind=CognitiveNodeKind.EPISODE,
+                source_type="SEMANTIC_EPISODE",
+                source_id=row.id,
+                label=row.episode_type,
+                confidence=row.confidence,
+                valid_from=_utc(row.started_at),
+                valid_until=_utc(row.ended_at),
+                attributes={
+                    "episode_type": row.episode_type,
+                    "scope_type": row.scope_type,
+                    "scope_ref": row.scope_ref,
+                    "state": row.state,
+                    "sensitivity_class": row.sensitivity_class,
+                    "last_activity_at": _utc(row.last_activity_at),
+                },
+                provenance={
+                    "source_table": "semantic_episodes",
+                    "semantic_key": row.semantic_key,
+                    "supersedes_episode_id": row.supersedes_episode_id,
+                    "split_from_episode_id": row.split_from_episode_id,
+                    "merged_from_episode_ids": row.merged_from_episode_ids,
+                    "provenance": row.provenance,
+                },
+            )
+        )
+        if row.scope_type == "RESOURCE":
+            target_node_id = ensure_entity("RESOURCE", row.scope_ref)
+            relation_kind = CognitiveRelationKind.EPISODE_RESOURCE
+        elif row.scope_type == "RELATIONSHIP":
+            target_node_id = _relationship_node_id(row.scope_ref)
+            if target_node_id not in nodes:
+                put_node(
+                    CognitiveNode(
+                        node_id=target_node_id,
+                        tenant_id=tenant_id,
+                        kind=CognitiveNodeKind.RELATIONSHIP,
+                        source_type="RELATIONSHIP_REFERENCE",
+                        source_id=row.scope_ref,
+                        provenance={"projection": "V2D_REFERENCE"},
+                    )
+                )
+            relation_kind = CognitiveRelationKind.EPISODE_RELATIONSHIP
+        else:
+            target_node_id = None
+            relation_kind = None
+
+        if target_node_id is not None and relation_kind is not None:
+            put_edge(
+                CognitiveEdge(
+                    edge_id=_edge_id(
+                        tenant_id=tenant_id,
+                        source_node_id=episode_node_id,
+                        target_node_id=target_node_id,
+                        relation_kind=relation_kind,
+                        source_ref=row.id,
+                    ),
+                    tenant_id=tenant_id,
+                    source_node_id=episode_node_id,
+                    target_node_id=target_node_id,
+                    relation_kind=relation_kind,
+                    inference_class=CognitiveInferenceClass.STRUCTURAL_PROJECTION,
+                    confidence=row.confidence,
+                    provenance={"episode_id": row.id},
+                )
+            )
+
+    if episode_ids:
+        memberships = list(
+            session.scalars(
+                select(SemanticEpisodeMembershipRow)
+                .where(
+                    SemanticEpisodeMembershipRow.tenant_id == tenant_id,
+                    SemanticEpisodeMembershipRow.episode_id.in_(episode_ids),
+                    SemanticEpisodeMembershipRow.ambiguous.is_(False),
+                )
+                .order_by(
+                    SemanticEpisodeMembershipRow.observed_at.desc(),
+                    SemanticEpisodeMembershipRow.id,
+                )
+                .limit(limit_per_kind * 5)
+            ).all()
+        )
+    else:
+        memberships = []
+
+    for row in memberships:
+        episode_node_id = _episode_node_id(row.episode_id)
+        if episode_node_id not in nodes:
+            continue
+
+        target_node_id: str | None = None
+        if row.member_type == "TIMELINE_EVENT":
+            target_node_id = _event_node_id(row.member_ref)
+            if target_node_id not in nodes:
+                event = session.get(TimelineEventRow, row.member_ref)
+                if event is None or event.tenant_id != tenant_id:
+                    continue
+                put_node(
+                    CognitiveNode(
+                        node_id=target_node_id,
+                        tenant_id=tenant_id,
+                        kind=CognitiveNodeKind.EVENT,
+                        source_type="TIMELINE_EVENT_REFERENCE",
+                        source_id=event.id,
+                        label=event.event_type,
+                        valid_from=_utc(event.occurred_at),
+                        provenance={"projection": "V2D_REFERENCE"},
+                    )
+                )
+        elif row.member_type == "CONVERSATION_MESSAGE":
+            message = session.get(ConversationMessageRow, row.member_ref)
+            if message is None or message.tenant_id != tenant_id:
+                continue
+            if not include_secret and message.sensitivity_class == "SECRET":
+                continue
+            target_node_id = _message_node_id(message.id)
+            put_node(
+                CognitiveNode(
+                    node_id=target_node_id,
+                    tenant_id=tenant_id,
+                    kind=CognitiveNodeKind.MESSAGE,
+                    source_type="CONVERSATION_MESSAGE",
+                    source_id=message.id,
+                    valid_from=_utc(message.sent_at),
+                    attributes={
+                        "message_type": message.message_type,
+                        "direction": message.direction,
+                        "sensitivity_class": message.sensitivity_class,
+                    },
+                    provenance={
+                        "source": message.source,
+                        "source_account": message.source_account,
+                        "conversation_id": message.conversation_id,
+                    },
+                )
+            )
+
+        if target_node_id is None:
+            continue
+        put_edge(
+            CognitiveEdge(
+                edge_id=_edge_id(
+                    tenant_id=tenant_id,
+                    source_node_id=episode_node_id,
+                    target_node_id=target_node_id,
+                    relation_kind=CognitiveRelationKind.EPISODE_MEMBER,
+                    semantic_relation=row.association_reason,
+                    source_ref=row.id,
+                ),
+                tenant_id=tenant_id,
+                source_node_id=episode_node_id,
+                target_node_id=target_node_id,
+                relation_kind=CognitiveRelationKind.EPISODE_MEMBER,
+                semantic_relation=row.association_reason,
+                inference_class=CognitiveInferenceClass.EXPLICIT,
+                confidence=row.confidence,
+                provenance={
+                    "episode_membership_id": row.id,
+                    "association_source": row.association_source,
+                    "observed_at": _utc(row.observed_at),
                 },
             )
         )
