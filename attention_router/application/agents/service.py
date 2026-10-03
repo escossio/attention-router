@@ -14,15 +14,33 @@ class AndyAgentError(RuntimeError):
     pass
 
 
-_IDENTITY_CLAIM_RE = re.compile(
+_HUMAN_IDENTITY_CLAIM_RE = re.compile(
     r"\b(?:(?P<negated>(?:(?:eu)\s+)?(?:não|nao)\s+)|(?P<subject>eu\s+)?)"
-    r"sou\s+(?:o\s+alex|humana)\b"
+    r"sou\s+humana\b"
 )
 
 
-def _contains_forbidden_identity_claim(text: str) -> bool:
+def _contains_forbidden_identity_claim(
+    text: str,
+    represented_reference_name: str | None = None,
+) -> bool:
     normalized = " ".join(text.casefold().split())
-    return any(match.group("negated") is None for match in _IDENTITY_CLAIM_RE.finditer(normalized))
+    if any(
+        match.group("negated") is None
+        for match in _HUMAN_IDENTITY_CLAIM_RE.finditer(normalized)
+    ):
+        return True
+    if represented_reference_name:
+        escaped = re.escape(represented_reference_name.casefold())
+        owner_claim = re.compile(
+            rf"\b(?:(?P<negated>(?:(?:eu)\s+)?(?:não|nao)\s+)"
+            rf"|(?:eu\s+)?)sou\s+(?:o\s+|a\s+)?{escaped}\b"
+        )
+        return any(
+            match.group("negated") is None
+            for match in owner_claim.finditer(normalized)
+        )
+    return False
 
 
 @dataclass(frozen=True)
@@ -33,13 +51,29 @@ class AndyAgentResult:
     tool_call_count: int
 
 
-def validate_output(output: AndyAgentOutput) -> AndyAgentOutput:
+def validate_output(
+    output: AndyAgentOutput,
+    *,
+    represented_reference_name: str | None = None,
+) -> AndyAgentOutput:
     if output.conversation_state == "answer" and not output.response_text.strip():
         raise AndyAgentError("AGENT_OUTPUT_EMPTY_RESPONSE")
     lowered = output.response_text.casefold()
-    if _contains_forbidden_identity_claim(output.response_text):
+    if _contains_forbidden_identity_claim(
+        output.response_text,
+        represented_reference_name,
+    ):
         raise AndyAgentError("AGENT_OUTPUT_IDENTITY_VIOLATION")
-    if any(marker in lowered for marker in ("já avisei", "já enviei", "já registrei", "já pedi para o alex")):
+    if any(
+        marker in lowered
+        for marker in (
+            "já avisei",
+            "já enviei",
+            "já registrei",
+            "já pedi para",
+            "já solicitei",
+        )
+    ):
         raise AndyAgentError("AGENT_OUTPUT_UNEXECUTED_ACTION_CLAIM")
     if output.conversation_state == "hold" and output.response_text.strip():
         raise AndyAgentError("AGENT_OUTPUT_HOLD_WITH_RESPONSE")
@@ -56,7 +90,12 @@ def run_andy(context: AllowedAgentContext) -> AndyAgentResult:
             input=[{"role": "user", "content": str(context.prompt_payload())}],
             max_turns=settings.andy_agent_max_turns,
         )
-        output = validate_output(result.final_output)
+        output = validate_output(
+            result.final_output,
+            represented_reference_name=(
+                (context.represented_subject or {}).get("reference_name")
+            ),
+        )
     except (AndyAgentError, ValidationError) as exc:
         raise AndyAgentError(str(exc)) from exc
     except Exception as exc:
