@@ -294,6 +294,9 @@ def test_v2c_confirmation_creates_reversible_alias_and_graph_edge(session):
         decision_ref="owner-command:revoke-001",
     )
     assert revoked.state == "REVOKED"
+    assert revoked.decision_ref == "owner-command:confirm-001"
+    assert revoked.revoked_by_actor_key == OWNER
+    assert revoked.revocation_ref == "owner-command:revoke-001"
 
     graph_after = build_cognitive_graph_slice(session, DEFAULT_TENANT_ID)
     assert not any(
