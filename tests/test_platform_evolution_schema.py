@@ -9,6 +9,7 @@ from attention_router.infrastructure import personal_context_bootstrap_models  #
 from attention_router.infrastructure import semantic_episode_models  # noqa: F401
 from attention_router.infrastructure import candidate_insight_models  # noqa: F401
 from attention_router.infrastructure import obligation_models  # noqa: F401
+from attention_router.infrastructure import attention_models  # noqa: F401
 
 
 PLATFORM_TABLES = {
@@ -179,9 +180,22 @@ def test_obligation_expectation_tables_are_registered():
     ].unique
 
 
+def test_attention_salience_table_is_registered():
+    assert "attention_assessments" in Base.metadata.tables
+    assert (
+        "uq_attention_assessment_snapshot"
+        in _constraint_names("attention_assessments")
+    )
+    indexes = {
+        index.name: index
+        for index in Base.metadata.tables["attention_assessments"].indexes
+    }
+    assert indexes["uq_attention_assessment_active_signal"].unique
+
+
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0055_obligation_expectation_v0"]
+    assert scripts.get_heads() == ["0056_attention_salience_v0"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -225,6 +239,9 @@ def test_platform_evolution_migration_waves_form_one_chain():
     )
     assert revisions["0055_obligation_expectation_v0"].down_revision == (
         "0054_candidate_insight_v0"
+    )
+    assert revisions["0056_attention_salience_v0"].down_revision == (
+        "0055_obligation_expectation_v0"
     )
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"

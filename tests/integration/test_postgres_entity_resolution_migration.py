@@ -21,7 +21,7 @@ def test_entity_resolution_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0055_obligation_expectation_v0"]
+            ).scalars().all() == ["0056_attention_salience_v0"]
 
             schema = inspect(connection)
             tables = set(schema.get_table_names())
@@ -228,7 +228,7 @@ def test_entity_resolution_refuses_destructive_downgrade(
     with engine.connect() as connection:
         assert connection.scalar(
             text("SELECT version_num FROM alembic_version")
-        ) == "0055_obligation_expectation_v0"
+        ) == "0056_attention_salience_v0"
         assert connection.scalar(
             text("SELECT count(*) FROM entity_resolution_candidates")
         ) == 1

@@ -1,4 +1,4 @@
-"""Inspect Personal Context V2D semantic episode schema."""
+"""Inspect Personal Context V2H attention/salience schema."""
 
 import os
 import subprocess
@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, inspect, text
 pytestmark = pytest.mark.postgres
 
 
-def test_semantic_episode_migration_schema():
+def test_attention_salience_migration_schema():
     engine = create_engine(
         os.environ["PUBLIC_POSTGRES_TEST_URL"],
         hide_parameters=True,
@@ -24,60 +24,49 @@ def test_semantic_episode_migration_schema():
             ).scalars().all() == ["0056_attention_salience_v0"]
 
             schema = inspect(connection)
-            assert {
-                "semantic_episodes",
-                "semantic_episode_memberships",
-            } <= set(schema.get_table_names())
+            assert "attention_assessments" in set(schema.get_table_names())
 
-            episode_uniques = {
-                item["name"]: item["column_names"]
-                for item in schema.get_unique_constraints("semantic_episodes")
-            }
-            assert episode_uniques["uq_semantic_episode_tenant_key"] == [
-                "tenant_id",
-                "semantic_key",
-            ]
-
-            membership_uniques = {
+            uniques = {
                 item["name"]: item["column_names"]
                 for item in schema.get_unique_constraints(
-                    "semantic_episode_memberships"
+                    "attention_assessments"
                 )
             }
-            assert membership_uniques[
-                "uq_semantic_episode_membership_member"
-            ] == ["episode_id", "member_type", "member_ref"]
+            assert uniques["uq_attention_assessment_snapshot"] == [
+                "tenant_id",
+                "signal_key",
+                "snapshot_fingerprint",
+            ]
 
-            episode_checks = {
-                item["name"]
-                for item in schema.get_check_constraints("semantic_episodes")
+            indexes = {
+                item["name"]: item
+                for item in schema.get_indexes("attention_assessments")
             }
-            assert {
-                "ck_semantic_episode_scope_type",
-                "ck_semantic_episode_state",
-                "ck_semantic_episode_confidence",
-                "ck_semantic_episode_sensitivity",
-                "ck_semantic_episode_activity_order",
-            } <= episode_checks
+            assert indexes[
+                "uq_attention_assessment_active_signal"
+            ]["unique"] is True
 
-            membership_checks = {
+            checks = {
                 item["name"]
                 for item in schema.get_check_constraints(
-                    "semantic_episode_memberships"
+                    "attention_assessments"
                 )
             }
             assert {
-                "ck_semantic_episode_membership_type",
-                "ck_semantic_episode_membership_reason",
-                "ck_semantic_episode_membership_confidence",
-            } <= membership_checks
+                "ck_attention_assessment_source_type",
+                "ck_attention_assessment_score",
+                "ck_attention_assessment_score_class",
+                "ck_attention_assessment_effective_class",
+                "ck_attention_assessment_sensitivity",
+                "ck_attention_assessment_status",
+            } <= checks
     finally:
         engine.dispose()
 
 
 @pytest.fixture
-def semantic_episode_migration_db(pg_url):
-    name = "semantic_episode_migration_" + uuid.uuid4().hex[:12]
+def attention_migration_db(pg_url):
+    name = "attention_migration_" + uuid.uuid4().hex[:12]
     admin = create_engine(
         pg_url.rsplit("/", 1)[0] + "/postgres",
         isolation_level="AUTOCOMMIT",
@@ -107,11 +96,11 @@ def semantic_episode_migration_db(pg_url):
         admin.dispose()
 
 
-def test_semantic_episode_refuses_destructive_downgrade(
-    semantic_episode_migration_db,
+def test_attention_salience_refuses_destructive_downgrade(
+    attention_migration_db,
 ):
-    engine, migrate = semantic_episode_migration_db
-    tenant_id = "00000000-0000-4000-8000-00000000d053"
+    engine, migrate = attention_migration_db
+    tenant_id = "00000000-0000-4000-8000-00000000d056"
 
     with engine.begin() as connection:
         connection.execute(
@@ -125,50 +114,64 @@ def test_semantic_episode_refuses_destructive_downgrade(
             ),
             {
                 "id": tenant_id,
-                "slug": "semantic-episode-migration",
-                "name": "Semantic Episode Migration",
+                "slug": "attention-migration",
+                "name": "Attention Migration",
             },
         )
         connection.execute(
             text(
                 """
-                INSERT INTO semantic_episodes (
+                INSERT INTO attention_assessments (
                     id,
                     tenant_id,
-                    episode_type,
-                    semantic_key,
-                    scope_type,
-                    scope_ref,
-                    state,
-                    confidence,
+                    signal_key,
+                    snapshot_fingerprint,
+                    source_type,
+                    source_ref,
+                    source_state,
+                    score,
+                    score_class,
+                    effective_class,
+                    components,
+                    reason_codes,
                     sensitivity_class,
-                    started_at,
-                    last_activity_at,
-                    ended_at,
-                    supersedes_episode_id,
-                    split_from_episode_id,
-                    merged_from_episode_ids,
+                    cooldown_until,
+                    owner_suppressed_until,
+                    owner_suppression_reason,
+                    owner_suppressed_by,
+                    acknowledged_at,
+                    acknowledged_by,
+                    owner_decision_ref,
+                    status,
+                    supersedes_assessment_id,
                     provenance,
                     created_at,
                     updated_at
                 )
                 VALUES (
-                    'episode-migration',
+                    'attention-migration',
                     :tenant_id,
-                    'PROPERTY_MATTER',
-                    'episode-key',
-                    'RESOURCE',
-                    'resource-1',
-                    'ACTIVE',
-                    1.0,
+                    'signal-1',
+                    'fingerprint-1',
+                    'OBLIGATION_INSTANCE',
+                    'instance-1',
+                    'UNCONFIRMED_AFTER_DUE',
+                    0.9,
+                    'OWNER_SUGGESTION_CANDIDATE',
+                    'OWNER_SUGGESTION_CANDIDATE',
+                    '{"impact": 1.0}'::jsonb,
+                    '["HIGH_IMPACT"]'::jsonb,
                     'PRIVATE',
-                    now(),
-                    now(),
                     NULL,
                     NULL,
                     NULL,
-                    '[]'::jsonb,
-                    '{}'::jsonb,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    'ACTIVE',
+                    NULL,
+                    '{"grants_authority": false}'::jsonb,
                     now(),
                     now()
                 )
@@ -179,16 +182,16 @@ def test_semantic_episode_refuses_destructive_downgrade(
 
     result = migrate(
         "downgrade",
-        "0052_entity_resolution_v0",
+        "0055_obligation_expectation_v0",
         check=False,
     )
     assert result.returncode != 0
-    assert "SEMANTIC_EPISODE_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
+    assert "ATTENTION_SALIENCE_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
 
     with engine.connect() as connection:
         assert connection.scalar(
             text("SELECT version_num FROM alembic_version")
         ) == "0056_attention_salience_v0"
         assert connection.scalar(
-            text("SELECT count(*) FROM semantic_episodes")
+            text("SELECT count(*) FROM attention_assessments")
         ) == 1
