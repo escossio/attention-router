@@ -104,7 +104,7 @@ def _normalized_selection(value: dict[str, Any] | None) -> dict[str, Any]:
         raise PersonalContextBootstrapError(
             "BOOTSTRAP_SOURCE_SELECTION_INVALID"
         )
-    deduplicated = list(dict.fromkeys(item.strip() for item in chat_keys))
+    deduplicated = sorted({item.strip() for item in chat_keys})
     return {"chat_keys": deduplicated}
 
 
