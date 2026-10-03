@@ -11,6 +11,8 @@ from attention_router.infrastructure.worker import process_agent_decisions
 from attention_router.config import settings
 from attention_router.domain.models import new_id
 from attention_router.domain.policies import resolve_policy
+from attention_router.infrastructure.client_bootstrap_models import ClientTenantMembershipRow
+from attention_router.infrastructure.human_identity_models import HumanIdentityRow, HumanProfileRow
 from attention_router.infrastructure.models import (
     AgentBlueprintRow,
     AgentBlueprintVersionRow,
@@ -125,6 +127,26 @@ def test_decision_pipeline_passes_represented_owner_presence_to_andy(session, mo
             is_immutable=True,
         )
     )
+    session.add(HumanIdentityRow(id="hid-owner-a", created_at=now))
+    session.add(
+        ClientTenantMembershipRow(
+            id="ctm-owner-a",
+            human_identity_id="hid-owner-a",
+            tenant_id="00000000-0000-4000-8000-000000000001",
+            role="OWNER",
+            status="ACTIVE",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.add(
+        HumanProfileRow(
+            human_identity_id="hid-owner-a",
+            assistant_reference_name="Leonardo",
+            created_at=now,
+            updated_at=now,
+        )
+    )
     upsert_actor_binding(
         session,
         source="test",
@@ -197,8 +219,17 @@ def test_decision_pipeline_passes_represented_owner_presence_to_andy(session, mo
 
     context = captured["context"]
     from attention_router.observability.tracing import identifier_hash
-    assert context.interaction_actor == {"type": "ACTOR", "id": identifier_hash("morgan-a")}
-    assert context.represented_subject == {"entity_type": "ACTOR", "entity_id": "owner-a"}
+    assert context.interaction_actor == {
+        "type": "ACTOR",
+        "id": identifier_hash("morgan-a"),
+        "display_name": "Sr. Morgan",
+        "relationship": None,
+    }
+    assert context.represented_subject == {
+        "type": "ACTOR",
+        "id": "owner-a",
+        "reference_name": "Leonardo",
+    }
     assert context.current_operational_state == []  # No disclosure authority in this fixture.
     built = session.scalar(
         select(AuditEventRow).where(
