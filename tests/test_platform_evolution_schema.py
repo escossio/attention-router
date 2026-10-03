@@ -8,6 +8,7 @@ from attention_router.infrastructure import models  # noqa: F401
 from attention_router.infrastructure import personal_context_bootstrap_models  # noqa: F401
 from attention_router.infrastructure import semantic_episode_models  # noqa: F401
 from attention_router.infrastructure import candidate_insight_models  # noqa: F401
+from attention_router.infrastructure import obligation_models  # noqa: F401
 
 
 PLATFORM_TABLES = {
@@ -148,9 +149,39 @@ def test_candidate_insight_tables_are_registered():
     )
 
 
+def test_obligation_expectation_tables_are_registered():
+    assert {
+        "recurring_obligation_definitions",
+        "obligation_instances",
+        "obligation_fulfillments",
+        "obligation_transitions",
+    } <= set(Base.metadata.tables)
+    assert (
+        "uq_obligation_definition_tenant_idempotency"
+        in _constraint_names("recurring_obligation_definitions")
+    )
+    assert (
+        "uq_obligation_instance_definition_period"
+        in _constraint_names("obligation_instances")
+    )
+    assert (
+        "uq_obligation_fulfillment_instance_event"
+        in _constraint_names("obligation_fulfillments")
+    )
+    definition_indexes = {
+        index.name: index
+        for index in Base.metadata.tables[
+            "recurring_obligation_definitions"
+        ].indexes
+    }
+    assert definition_indexes[
+        "uq_obligation_definition_active_semantic"
+    ].unique
+
+
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0054_candidate_insight_v0"]
+    assert scripts.get_heads() == ["0055_obligation_expectation_v0"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -191,6 +222,9 @@ def test_platform_evolution_migration_waves_form_one_chain():
     )
     assert revisions["0054_candidate_insight_v0"].down_revision == (
         "0053_semantic_episode_v0"
+    )
+    assert revisions["0055_obligation_expectation_v0"].down_revision == (
+        "0054_candidate_insight_v0"
     )
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"
