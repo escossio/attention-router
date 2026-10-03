@@ -16,7 +16,7 @@ from attention_router.domain.cognitive_graph import (
     CognitiveNodeKind,
     CognitiveRelationKind,
 )
-from attention_router.domain.models import new_id, now_utc
+from attention_router.domain.models import now_utc
 from attention_router.infrastructure.models import (
     ExecutionIntentRow,
     OutboxMessageRow,
