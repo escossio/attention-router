@@ -23,6 +23,7 @@ from attention_router.infrastructure.models import (
     ConversationMessageRow,
     ExecutionIntentRow,
     OutboxMessageRow,
+    TenantRow,
 )
 from attention_router.infrastructure.personal_context_bootstrap_models import (
     PersonalContextBootstrapBatchRow,
@@ -35,19 +36,37 @@ OWNER_HUMAN_ID = "hid-bootstrap-owner"
 OWNER_ACTOR_KEY = "owner-bootstrap"
 
 
-def _seed_owner(session) -> None:
+def _seed_owner(
+    session,
+    *,
+    tenant_id: str = DEFAULT_TENANT_ID,
+    human_id: str = OWNER_HUMAN_ID,
+    actor_key: str = OWNER_ACTOR_KEY,
+    external_actor_id: str = "bootstrap-owner-external",
+) -> None:
     stamp = now_utc()
+    if session.get(TenantRow, tenant_id) is None:
+        session.add(
+            TenantRow(
+                id=tenant_id,
+                slug=f"bootstrap-{tenant_id[-8:]}",
+                name=f"Bootstrap {tenant_id[-8:]}",
+                status="ACTIVE",
+                created_at=stamp,
+                updated_at=stamp,
+            )
+        )
     session.add(
         HumanIdentityRow(
-            id=OWNER_HUMAN_ID,
+            id=human_id,
             created_at=stamp,
         )
     )
     session.add(
         ClientTenantMembershipRow(
             id=new_id(),
-            human_identity_id=OWNER_HUMAN_ID,
-            tenant_id=DEFAULT_TENANT_ID,
+            human_identity_id=human_id,
+            tenant_id=tenant_id,
             role="OWNER",
             status="ACTIVE",
             created_at=stamp,
@@ -57,11 +76,12 @@ def _seed_owner(session) -> None:
     upsert_actor_binding(
         session,
         source="test",
-        external_actor_id="bootstrap-owner-external",
-        actor_key=OWNER_ACTOR_KEY,
+        external_actor_id=external_actor_id,
+        actor_key=actor_key,
         actor_category="owner",
         display_name="Nilvanda",
         metadata={"owner": True},
+        tenant_id=tenant_id,
     )
     session.flush()
 
@@ -194,6 +214,45 @@ def test_v2b_bootstrap_advances_in_bounded_resumable_batches(session):
         select(func.count()).select_from(OutboxMessageRow)
     ) == 0
 
+
+
+def test_v2b_historical_ingestion_stays_inside_run_tenant(session):
+    tenant_b = "00000000-0000-4000-8000-000000000099"
+    human_b = "hid-bootstrap-owner-b"
+    actor_b = "owner-bootstrap-b"
+    _seed_owner(
+        session,
+        tenant_id=tenant_b,
+        human_id=human_b,
+        actor_key=actor_b,
+        external_actor_id="bootstrap-owner-b-external",
+    )
+    run, _ = _create_run(
+        session,
+        tenant_id=tenant_b,
+        owner_human_identity_id=human_b,
+        represented_owner_actor_key=actor_b,
+        consent_ref="consent-bootstrap-tenant-b",
+        source_account="tenant-b-account",
+    )
+    queue_bootstrap_run(session, run.id)
+
+    first = process_next_bootstrap_batch(
+        session,
+        run.id,
+        adapter=BootstrapHistoryAdapter(),
+    )
+    assert first.state == "QUEUED"
+
+    archived = session.scalars(select(ConversationMessageRow)).all()
+    assert archived
+    assert {item.tenant_id for item in archived} == {tenant_b}
+    assert {item.source_account for item in archived} == {"tenant-b-account"}
+    assert session.scalar(
+        select(func.count())
+        .select_from(ConversationMessageRow)
+        .where(ConversationMessageRow.tenant_id == DEFAULT_TENANT_ID)
+    ) == 0
 
 def test_v2b_pause_resume_and_cancel_apply_at_durable_boundaries(session):
     _seed_owner(session)
