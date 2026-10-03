@@ -51,7 +51,7 @@ def test_message_trace_builds_stage_metadata_without_message_payload():
 
     trace = module._build_trace(row)
 
-    assert trace["correlation_short"] == "corr_123456"
+    assert trace["correlation_short"] == "corr_1234567"
     assert [stage["key"] for stage in trace["stages"]] == [
         "inbound",
         "ingress",
