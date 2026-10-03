@@ -494,6 +494,8 @@ def enqueue_ready_intents(
             audit(session, interaction.id, "tts.derivation_enqueued", {"intent_id": intent.id})
             count += 1
             continue
+        from attention_router.application.assistant_provenance import label_automated_text
+        response = label_automated_text(response)
         stamp = _now()
         queue = session.get(QueueRow, f"decision:{decision.event_id}")
         queue_observability = (

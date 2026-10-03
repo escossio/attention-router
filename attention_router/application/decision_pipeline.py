@@ -32,6 +32,7 @@ from attention_router.domain.decision import DecisionResult, DecisionType
 from attention_router.application.agents import AndyAgentError, run_andy
 from attention_router.application.agents.readiness import get_andy_readiness
 from attention_router.application.agents.context import ActionCapability, AllowedAgentContext
+from attention_router.application.assistant_provenance import ensure_introduction
 from attention_router.application.lab_conversation import claim_inbound
 from attention_router.application.platform.capability_pack import execute_owner_capability
 from attention_router.application.platform.context import (
@@ -362,6 +363,33 @@ def _recent_agent_turns(
     return turns
 
 
+def _assistant_introduced(
+    session: Session,
+    tenant_id: str,
+    contact_id: str,
+) -> bool:
+    return session.scalar(
+        select(AgentDecisionRow.id)
+        .join(InteractionRow, InteractionRow.id == AgentDecisionRow.interaction_id)
+        .join(
+            AgentExecutionIntentRow,
+            AgentExecutionIntentRow.agent_decision_id == AgentDecisionRow.id,
+        )
+        .join(
+            OutboxMessageRow,
+            OutboxMessageRow.execution_intent_id == AgentExecutionIntentRow.id,
+        )
+        .where(
+            InteractionRow.tenant_id == tenant_id,
+            InteractionRow.contact_id == contact_id,
+            AgentDecisionRow.response_introduction_included.is_(True),
+            OutboxMessageRow.status == "DONE",
+            OutboxMessageRow.destination == "local_transport",
+        )
+        .limit(1)
+    ) is not None
+
+
 def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow | None:
     existing = session.scalars(
         select(AgentDecisionRow).where(
@@ -522,6 +550,11 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             if represented_identity is not None
             else resolve_represented_subject(session, interaction.tenant_id)
         )
+        assistant_introduced = _assistant_introduced(
+            session,
+            interaction.tenant_id,
+            interaction.contact_id,
+        )
         platform_context = build_context_snapshot(
             session,
             canonical_event,
@@ -602,6 +635,7 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             binding_id=identifier_hash(context.actor_binding_id) if context.actor_binding_id else None,
             interaction_actor=interaction_actor,
             represented_subject=represented_prompt,
+            assistant_introduced=assistant_introduced,
             audience=audience,
             policy_summary=f"policy={policy_version.policy_id if policy_version else 'none'}; "
             f"conversation_contract={DIRECT_TEXT_CONVERSATION_CONTRACT_VERSION}; capabilities_require_separate_authority",
@@ -798,9 +832,20 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         set_outcome(decision_span, "EVALUATED")
     behavior = None if agent_path_enabled else _live_behavior_profile(binding)
     candidate = None
+    agent_introduction_included = False
     with start_span("behavior.generate") as behavior_span:
         if agent_output is not None:
             proposed_response = agent_output.response_text if agent_output.conversation_state != "hold" and agent_output.response_text.strip() else None
+            if proposed_response:
+                proposed_response, agent_introduction_included = ensure_introduction(
+                    proposed_response,
+                    introduced=assistant_introduced,
+                    represented_reference_name=(
+                        represented_identity.reference_name
+                        if represented_identity is not None
+                        else None
+                    ),
+                )
             safe_set_attribute(behavior_span, "attention.response_source", "OPENAI_AGENTS_SDK")
             safe_set_attribute(behavior_span, "attention.behavior_branch", agent_output.conversation_state.upper())
             safe_set_attribute(behavior_span, "attention.response_objective", agent_output.objective)
@@ -880,7 +925,11 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         response_message_family=candidate.message_family if candidate else None,
         response_variant_id=candidate.variant_id if candidate else None,
         response_spoken_text=candidate.spoken_text if candidate else None,
-        response_introduction_included=candidate.introduction_included if candidate else None,
+        response_introduction_included=(
+            candidate.introduction_included
+            if candidate
+            else (agent_introduction_included if agent_output is not None else None)
+        ),
         escalation_required=result.escalation_required,
         escalation_reason=result.escalation_reason,
         confidence=result.confidence,
