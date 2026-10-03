@@ -6,7 +6,8 @@ The first version answers two questions quickly:
 
 1. Are AGT / CI01 / CI02 / CI03 actually using CPU, and what job did AGT assign?
 2. Is the Chat -> Remote Desktop Commander -> AGT tool channel still producing observable work even when the ChatGPT UI appears stalled?
-3. What HTTP traffic is entering the Client API, and what do the Docker services log for the same runtime activity?\n4. Are Browser / WhatsApp transport / owner authority / observer states coherent, and where is the latest message in the inbound-to-outbound pipeline?
+3. What HTTP traffic is entering the Client API, and what do the Docker services log for the same runtime activity?
+4. Are Browser / WhatsApp transport / owner authority / observer states coherent, and where is the latest message in the inbound-to-outbound pipeline?
 
 ## Scope
 
@@ -70,7 +71,7 @@ The server samples:
 
 Message tracing is default-off and must be explicitly enabled on the host. When enabled, it issues bounded SELECT-only queries and deliberately excludes message bodies, outbox destinations, full correlation ids and full inbound-event ids from the browser payload. The database container is host configuration; no runtime container name or credential is committed.
 
-No Attention Router production database is queried.
+The default configuration does not query the Attention Router database. Message tracing is separately gated, bounded, SELECT-only and LAN-only.
 ## Configuration
 
 The public package contains no LAN addresses. Host-specific values stay outside Git.
@@ -86,6 +87,9 @@ Environment variables:
 - `ANDY_OPS_TOOL_HISTORY` - defaults to the current user's Desktop Commander JSONL history path.
 - ANDY_OPS_GOACCESS_URL - optional LAN URL for the GoAccess UI;
 - ANDY_OPS_DOZZLE_URL - optional LAN URL for the Dozzle UI.
+- `ANDY_OPS_TRANSPORT_OBSERVABILITY_ENABLED` - defaults to `false`; enables the read-only AGENT / TRANSPORT probes;
+- `ANDY_OPS_MESSAGE_TRACING_ENABLED` - defaults to `false`; enables bounded message-lifecycle tracing;
+- `ANDY_OPS_TRACE_DB_CONTAINER` - host-private container name required when message tracing is enabled.
 - `ANDY_OPS_NETWORK_OSI_URL` - optional URL of the authenticated Grafana ROC
   `roc-network-osi` dashboard. The NETWORK / OSI tab loads its iframe only when
   selected. The browser uses its existing Grafana session; no Zabbix API call,
