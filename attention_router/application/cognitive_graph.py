@@ -38,6 +38,7 @@ from attention_router.infrastructure.obligation_models import (
 )
 from attention_router.infrastructure.models import (
     ActorBindingRow,
+    CanonicalEventRow,
     ConversationMessageRow,
     EntityStateRow,
     FactRow,
@@ -161,6 +162,7 @@ def build_cognitive_graph_slice(
     *,
     limit_per_kind: int = 200,
     include_secret: bool = False,
+    timeline_lineage: str | None = None,
     now: datetime | None = None,
 ) -> CognitiveGraphSlice:
     """Project one bounded tenant graph without mutating source-of-truth rows."""
@@ -373,12 +375,34 @@ def build_cognitive_graph_slice(
         select(TimelineEventRow)
         .where(TimelineEventRow.tenant_id == tenant_id)
         .order_by(TimelineEventRow.occurred_at.desc(), TimelineEventRow.id)
-        .limit(limit_per_kind)
     )
+    if timeline_lineage is not None:
+        normalized_lineage = timeline_lineage.strip().upper()
+        if normalized_lineage not in {
+            "ORGANIC",
+            "SYNTHETIC",
+            "HISTORICAL_UNKNOWN",
+            "UNKNOWN",
+        }:
+            raise ValueError(
+                "COGNITIVE_GRAPH_TIMELINE_LINEAGE_UNSUPPORTED"
+            )
+        timeline_query = (
+            timeline_query.join(
+                CanonicalEventRow,
+                CanonicalEventRow.id == TimelineEventRow.canonical_event_id,
+            )
+            .where(
+                CanonicalEventRow.tenant_id == tenant_id,
+                CanonicalEventRow.lineage_classification
+                == normalized_lineage,
+            )
+        )
     if not include_secret:
         timeline_query = timeline_query.where(
             TimelineEventRow.visibility != "SECRET"
         )
+    timeline_query = timeline_query.limit(limit_per_kind)
     timeline_events = list(session.scalars(timeline_query).all())
     for row in timeline_events:
         event_node_id = _event_node_id(row.id)
