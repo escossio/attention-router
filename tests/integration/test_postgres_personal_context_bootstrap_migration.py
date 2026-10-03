@@ -9,7 +9,9 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 
 
-@pytest.mark.postgres
+pytestmark = pytest.mark.postgres
+
+
 def test_personal_context_bootstrap_migration_schema():
     engine = create_engine(
         os.environ["PUBLIC_POSTGRES_TEST_URL"],
