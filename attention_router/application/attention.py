@@ -494,6 +494,8 @@ def assess_obligation_attention(
         or definition.tenant_id != instance.tenant_id
     ):
         raise AttentionError("ATTENTION_OBLIGATION_DEFINITION_INVALID")
+    if definition.state != "ACTIVE":
+        raise AttentionError("ATTENTION_OBLIGATION_DEFINITION_INACTIVE")
     if instance.sensitivity_class == "SECRET" or definition.sensitivity_class == "SECRET":
         raise AttentionError("ATTENTION_SECRET_SOURCE_EXCLUDED")
 
@@ -804,6 +806,16 @@ def build_owner_suggestion_candidate(
     if row.source_type == "OBLIGATION_INSTANCE":
         instance = session.get(ObligationInstanceRow, row.source_ref)
         if instance is None or instance.sensitivity_class == "SECRET":
+            return None
+        definition = session.get(
+            RecurringObligationDefinitionRow,
+            instance.definition_id,
+        )
+        if (
+            definition is None
+            or definition.state != "ACTIVE"
+            or definition.sensitivity_class == "SECRET"
+        ):
             return None
         current_state = ":".join(
             [
