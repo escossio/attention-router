@@ -141,6 +141,10 @@ class Settings(BaseSettings):
     personal_context_runtime_enabled: bool = False
     personal_context_runtime_interval_seconds: int = 300
     personal_context_runtime_canary_tenant_id: str | None = None
+    personal_context_bootstrap_runtime_enabled: bool = False
+    personal_context_bootstrap_runtime_interval_seconds: int = 30
+    personal_context_bootstrap_runtime_run_limit: int = 2
+    personal_context_bootstrap_runtime_canary_tenant_id: str | None = None
     personal_context_recommendation_delivery_enabled: bool = False
     personal_context_suggestion_delivery_enabled: bool = False
     personal_context_authority_runtime_enabled: bool = False
@@ -223,6 +227,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "personal_context_runtime_canary_tenant_id",
+        "personal_context_bootstrap_runtime_canary_tenant_id",
         "cognitive_runtime_canary_tenant_id",
         mode="before",
     )
@@ -619,6 +624,22 @@ class Settings(BaseSettings):
         if not 1 <= self.personal_context_runtime_owner_limit <= 500:
             raise ValueError(
                 "PERSONAL_CONTEXT_RUNTIME_OWNER_LIMIT must be between 1 and 500"
+            )
+        if self.personal_context_bootstrap_runtime_interval_seconds <= 0:
+            raise ValueError(
+                "PERSONAL_CONTEXT_BOOTSTRAP_RUNTIME_INTERVAL_SECONDS must be positive"
+            )
+        if not 1 <= self.personal_context_bootstrap_runtime_run_limit <= 20:
+            raise ValueError(
+                "PERSONAL_CONTEXT_BOOTSTRAP_RUNTIME_RUN_LIMIT must be between 1 and 20"
+            )
+        if (
+            self.personal_context_bootstrap_runtime_enabled
+            and not self.whatsapp_history_hmac_secret
+        ):
+            raise ValueError(
+                "PERSONAL_CONTEXT_BOOTSTRAP_RUNTIME_ENABLED requires "
+                "WHATSAPP_HISTORY_HMAC_SECRET"
             )
         if not 1 <= self.personal_context_materialization_intent_limit <= 500:
             raise ValueError(

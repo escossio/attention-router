@@ -21,6 +21,10 @@ from attention_router.application.personal_context_runtime import (
     PersonalContextRuntimeCycleResult,
     run_personal_context_runtime_cycle,
 )
+from attention_router.application.personal_context_bootstrap_runtime import (
+    PersonalContextBootstrapRuntimeResult,
+    run_personal_context_bootstrap_cycle,
+)
 from attention_router.application.personal_context_authority_runtime import (
     PersonalContextAuthorityRuntimeResult,
     run_personal_context_authority_cycle,
@@ -40,6 +44,9 @@ from attention_router.application.artifact_understanding import (
     process_artifact_understandings,
 )
 from attention_router.integrations.dispatch import process_integration_inbox
+from attention_router.integrations.whatsapp_history import (
+    LocalWhatsAppHistoryAdapter,
+)
 from attention_router.application.voice_tts import process_tts_derivations
 from attention_router.application.voice_media import cleanup_expired_media
 from attention_router.application.platform.capability_pack import process_due_scheduled_events
@@ -261,6 +268,59 @@ def process_scheduled_events_if_available(session) -> int:
     return process_due_scheduled_events(session)
 
 
+def process_personal_context_bootstrap_runtime_if_due(
+    session,
+    *,
+    now_monotonic: float,
+    last_run_monotonic: float | None,
+) -> tuple[PersonalContextBootstrapRuntimeResult | None, float | None]:
+    if not settings.personal_context_bootstrap_runtime_enabled:
+        return None, last_run_monotonic
+    if (
+        last_run_monotonic is not None
+        and now_monotonic - last_run_monotonic
+        < settings.personal_context_bootstrap_runtime_interval_seconds
+    ):
+        return None, last_run_monotonic
+
+    adapter = LocalWhatsAppHistoryAdapter(
+        base_url=settings.whatsapp_history_read_url,
+        hmac_secret=settings.whatsapp_history_hmac_secret or "",
+        timeout_seconds=settings.whatsapp_history_timeout_seconds,
+        max_response_bytes=settings.whatsapp_history_max_response_bytes,
+    )
+    with start_span("personal_context.bootstrap") as bootstrap_span:
+        result = run_personal_context_bootstrap_cycle(
+            session,
+            adapter=adapter,
+            source_account=settings.whatsapp_history_source_account,
+            run_limit=settings.personal_context_bootstrap_runtime_run_limit,
+            canary_tenant_id=(
+                settings.personal_context_bootstrap_runtime_canary_tenant_id
+            ),
+        )
+        safe_set_attribute(
+            bootstrap_span,
+            "attention.bootstrap.runs_considered",
+            result.runs_considered,
+        )
+        safe_set_attribute(
+            bootstrap_span,
+            "attention.bootstrap.runs_failed",
+            result.runs_failed,
+        )
+        safe_set_attribute(
+            bootstrap_span,
+            "attention.bootstrap.messages_archived",
+            result.messages_archived,
+        )
+        set_outcome(
+            bootstrap_span,
+            "PARTIAL" if result.runs_failed else "PROCESSED",
+        )
+    return result, now_monotonic
+
+
 def process_cognitive_runtime_if_due(
     session,
     *,
@@ -390,6 +450,7 @@ def process_personal_context_materialization_runtime_if_due(
 
 def run_forever() -> None:
     identity = f"{socket.gethostname()}:{new_id()}"
+    last_personal_context_bootstrap_run_monotonic: float | None = None
     last_cognitive_runtime_run_monotonic: float | None = None
     last_personal_context_run_monotonic: float | None = None
     last_personal_context_authority_run_monotonic: float | None = None
@@ -440,6 +501,30 @@ def run_forever() -> None:
             else:
                 memory_count = 0
             session.commit()
+
+            bootstrap_runtime_result = None
+            bootstrap_runtime_now = time.monotonic()
+            try:
+                (
+                    bootstrap_runtime_result,
+                    last_personal_context_bootstrap_run_monotonic,
+                ) = process_personal_context_bootstrap_runtime_if_due(
+                    session,
+                    now_monotonic=bootstrap_runtime_now,
+                    last_run_monotonic=(
+                        last_personal_context_bootstrap_run_monotonic
+                    ),
+                )
+                if bootstrap_runtime_result is not None:
+                    session.commit()
+            except Exception as exc:
+                session.rollback()
+                logger.exception(
+                    "personal context bootstrap runtime cycle failed "
+                    "worker_id=%s error=%s",
+                    identity,
+                    exc,
+                )
 
             cognitive_runtime_result = None
             cognitive_runtime_now = time.monotonic()
