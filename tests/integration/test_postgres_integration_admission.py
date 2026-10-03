@@ -294,6 +294,10 @@ def wait_for_waiter(Session, blocker):
             if observer.scalar(text("SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
                                     "WHERE :pid = ANY(pg_blocking_pids(pid)))"), {"pid": blocker}):
                 return
+            # PostgreSQL statistics views can retain a transaction-local snapshot.
+            # End this read transaction so the next poll can observe a waiter that
+            # appeared after the previous pg_stat_activity query.
+            observer.rollback()
             time.sleep(0.01)
     pytest.fail("Admission did not reach the real PostgreSQL lock")
 
