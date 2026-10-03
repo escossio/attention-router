@@ -180,6 +180,11 @@ def test_v2b_bootstrap_advances_in_bounded_resumable_batches(session):
     assert session.scalar(
         select(func.count()).select_from(ConversationMessageRow)
     ) == 3
+    archived = session.scalars(
+        select(ConversationMessageRow).order_by(ConversationMessageRow.sent_at)
+    ).all()
+    assert {item.source for item in archived} == {"whatsapp"}
+    assert {item.source_account for item in archived} == {"primary"}
 
     # Bootstrap ingestion is knowledge-only.
     assert session.scalar(
@@ -225,6 +230,18 @@ def test_v2b_pause_resume_and_cancel_apply_at_durable_boundaries(session):
         select(func.count()).select_from(PersonalContextBootstrapBatchRow)
     ) == 0
 
+
+
+def test_v2b_rejects_explicit_empty_source_selection(session):
+    _seed_owner(session)
+    with pytest.raises(
+        PersonalContextBootstrapError,
+        match="BOOTSTRAP_SOURCE_SELECTION_INVALID",
+    ):
+        _create_run(
+            session,
+            source_selection={"chat_keys": []},
+        )
 
 def test_v2b_requires_active_owner_membership_and_owner_binding(session):
     stamp = now_utc()
