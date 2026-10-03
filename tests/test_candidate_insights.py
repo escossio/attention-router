@@ -438,6 +438,79 @@ def test_v2e_owner_rejection_is_durable_on_idempotent_replay(session):
     assert replay.state == "REJECTED"
 
 
+def test_v2e_supersession_rejects_terminal_replacement(session):
+    _owner(session)
+    resource = _resource(session, "terminal-replacement")
+    old_event = _event(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        suffix="terminal-old",
+        resource_id=resource.id,
+    )
+    replacement_event = _event(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        suffix="terminal-new",
+        resource_id=resource.id,
+    )
+    previous, _ = propose_candidate_insight(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        insight_type="CLAIM_PROPOSAL",
+        subject_type="RESOURCE",
+        subject_id=resource.id,
+        predicate="context.property_role",
+        proposed_value={"role": "OLD"},
+        source_engine="RULE",
+        confidence=0.7,
+        evidence=[
+            CandidateEvidenceInput(
+                evidence_type="TIMELINE_EVENT",
+                source_ref=old_event.id,
+                independence_key=f"event:{old_event.id}",
+                confidence=0.7,
+            )
+        ],
+    )
+    replacement, _ = propose_candidate_insight(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        insight_type="CLAIM_PROPOSAL",
+        subject_type="RESOURCE",
+        subject_id=resource.id,
+        predicate="context.property_role",
+        proposed_value={"role": "REJECTED"},
+        source_engine="RULE",
+        confidence=0.8,
+        evidence=[
+            CandidateEvidenceInput(
+                evidence_type="TIMELINE_EVENT",
+                source_ref=replacement_event.id,
+                independence_key=f"event:{replacement_event.id}",
+                confidence=0.8,
+            )
+        ],
+    )
+    reject_candidate_insight(
+        session,
+        candidate_id=replacement.id,
+        decision_actor_key=OWNER,
+        decision_ref="owner-command:reject-replacement",
+    )
+
+    with pytest.raises(
+        CandidateInsightError,
+        match="CANDIDATE_INSIGHT_REPLACEMENT_TERMINAL",
+    ):
+        supersede_candidate_insight(
+            session,
+            candidate_id=previous.id,
+            replacement_id=replacement.id,
+            decision_actor_key=OWNER,
+            decision_ref="owner-command:bad-supersede",
+        )
+
+
 def test_v2e_supersession_preserves_history_and_secret_sensitivity(session):
     _owner(session)
     resource = _resource(session, "supersede")

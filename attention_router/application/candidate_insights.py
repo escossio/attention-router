@@ -718,6 +718,10 @@ def supersede_candidate_insight(
         raise CandidateInsightError(
             "CANDIDATE_INSIGHT_REJECTED_NOT_SUPERSEDEABLE"
         )
+    if replacement.state in {"REJECTED", "SUPERSEDED"}:
+        raise CandidateInsightError(
+            "CANDIDATE_INSIGHT_REPLACEMENT_TERMINAL"
+        )
 
     owner = _require_owner_decision(
         session,
