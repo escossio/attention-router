@@ -142,6 +142,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    for table in (
+        "personal_context_bootstrap_batches",
+        "personal_context_bootstrap_runs",
+    ):
+        if bind.execute(sa.text(f"SELECT 1 FROM {table} LIMIT 1")).first():
+            raise RuntimeError(
+                "PERSONAL_CONTEXT_BOOTSTRAP_DOWNGRADE_REQUIRES_DATA_EXPORT"
+            )
+
     op.drop_index(
         "ix_personal_context_bootstrap_batch_run_state",
         table_name="personal_context_bootstrap_batches",
