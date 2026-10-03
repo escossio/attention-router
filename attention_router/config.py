@@ -163,6 +163,12 @@ class Settings(BaseSettings):
     autonomous_decision_max_age_seconds: int = 300
     local_transport_outbound_url: str = "http://192.0.2.6:18103/internal/send"
     local_transport_outbound_timeout_seconds: float = 5.0
+    whatsapp_history_read_url: str = (
+        "http://127.0.0.1:18103/internal/history/chats"
+    )
+    whatsapp_history_hmac_secret: str | None = Field(default=None, repr=False)
+    whatsapp_history_timeout_seconds: float = 10.0
+    whatsapp_history_max_response_bytes: int = 4 * 1024 * 1024
     synthetic_transport_status_url: str | None = None
     synthetic_transport_status_timeout_seconds: float = 5.0
     otel_tracing_enabled: bool = False
@@ -582,6 +588,16 @@ class Settings(BaseSettings):
             raise ValueError("AUTONOMOUS_DECISION_MAX_AGE_SECONDS must be positive")
         if self.conversation_repetition_window_seconds <= 0:
             raise ValueError("CONVERSATION_REPETITION_WINDOW_SECONDS must be positive")
+        if not self.whatsapp_history_read_url.startswith(("http://", "https://")):
+            raise ValueError("WHATSAPP_HISTORY_READ_URL must be http(s)")
+        if not 1 <= self.whatsapp_history_timeout_seconds <= 60:
+            raise ValueError(
+                "WHATSAPP_HISTORY_TIMEOUT_SECONDS must be between 1 and 60"
+            )
+        if not 1024 <= self.whatsapp_history_max_response_bytes <= 16 * 1024 * 1024:
+            raise ValueError(
+                "WHATSAPP_HISTORY_MAX_RESPONSE_BYTES must be between 1024 and 16777216"
+            )
         if self.personal_context_runtime_interval_seconds <= 0:
             raise ValueError(
                 "PERSONAL_CONTEXT_RUNTIME_INTERVAL_SECONDS must be positive"
