@@ -80,6 +80,8 @@ def test_message_trace_browser_projection_excludes_direct_identifiers():
 
 def test_message_trace_requires_explicit_runtime_db_container():
     source = TRACING.read_text()
+    assert "ANDY_OPS_MESSAGE_TRACING_ENABLED" in source
+    assert '"false"' in source
     assert 'ANDY_OPS_TRACE_DB_CONTAINER", "").strip()' in source
     assert "TRACE_DB_CONTAINER_NOT_CONFIGURED" in source
     assert "'destination', o.destination" not in source
