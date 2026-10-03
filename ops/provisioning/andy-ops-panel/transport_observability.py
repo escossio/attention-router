@@ -17,6 +17,10 @@ except ImportError:  # pragma: no cover - runtime capability is reported
     websocket = None
 
 
+TRANSPORT_OBSERVABILITY_ENABLED = os.environ.get(
+    "ANDY_OPS_TRANSPORT_OBSERVABILITY_ENABLED", "false"
+).strip().casefold() in {"1", "true", "yes", "on"}
+
 TRANSPORT_STATUS_URL = os.environ.get("ANDY_OPS_WHATSAPP_TRANSPORT_STATUS_URL", "").strip()
 BROWSER_DEBUG_URL = os.environ.get(
     "ANDY_OPS_WHATSAPP_BROWSER_DEBUG_URL", "http://127.0.0.1:9223"
@@ -380,6 +384,26 @@ def _derive_state(
 
 
 def sample_transport_observability() -> dict[str, Any]:
+    if not TRANSPORT_OBSERVABILITY_ENABLED:
+        return {
+            "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+            "enabled": False,
+            "browser": {},
+            "transport": {},
+            "observer": {},
+            "api": {},
+            "derived": {
+                "severity": "DISABLED",
+                "divergence": False,
+                "divergences": [],
+                "recovery_gate": {
+                    "state": "UNKNOWN",
+                    "reason": "transport observability disabled",
+                },
+            },
+            "timeline": [],
+        }
+
     browser_unit = _systemd_unit(BROWSER_UNIT)
     transport_unit = _systemd_unit(TRANSPORT_UNIT)
     observer_unit = _systemd_unit(OBSERVER_UNIT)
@@ -412,6 +436,7 @@ def sample_transport_observability() -> dict[str, Any]:
 
     return {
         "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+        "enabled": True,
         "browser": {**browser_unit, **page},
         "transport": {
             **transport_unit,
