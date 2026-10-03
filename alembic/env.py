@@ -13,6 +13,7 @@ from attention_router.infrastructure import provider_authorization_models  # noq
 from attention_router.infrastructure import personal_context_bootstrap_models  # noqa: F401
 from attention_router.infrastructure import entity_resolution_models  # noqa: F401
 from attention_router.infrastructure import semantic_episode_models  # noqa: F401
+from attention_router.infrastructure import candidate_insight_models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", os.environ.get("DATABASE_URL", settings.database_url))

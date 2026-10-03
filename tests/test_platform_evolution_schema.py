@@ -7,6 +7,7 @@ from attention_router.infrastructure import entity_resolution_models  # noqa: F4
 from attention_router.infrastructure import models  # noqa: F401
 from attention_router.infrastructure import personal_context_bootstrap_models  # noqa: F401
 from attention_router.infrastructure import semantic_episode_models  # noqa: F401
+from attention_router.infrastructure import candidate_insight_models  # noqa: F401
 
 
 PLATFORM_TABLES = {
@@ -132,9 +133,24 @@ def test_semantic_episode_tables_are_registered():
         in _constraint_names("semantic_episode_memberships")
     )
 
+def test_candidate_insight_tables_are_registered():
+    assert {
+        "candidate_insights",
+        "candidate_insight_evidence",
+    } <= set(Base.metadata.tables)
+    assert (
+        "uq_candidate_insight_tenant_idempotency"
+        in _constraint_names("candidate_insights")
+    )
+    assert (
+        "uq_candidate_insight_evidence_source"
+        in _constraint_names("candidate_insight_evidence")
+    )
+
+
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0053_semantic_episode_v0"]
+    assert scripts.get_heads() == ["0054_candidate_insight_v0"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -172,6 +188,9 @@ def test_platform_evolution_migration_waves_form_one_chain():
     )
     assert revisions["0053_semantic_episode_v0"].down_revision == (
         "0052_entity_resolution_v0"
+    )
+    assert revisions["0054_candidate_insight_v0"].down_revision == (
+        "0053_semantic_episode_v0"
     )
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"
