@@ -280,6 +280,7 @@ def process_cognitive_runtime_if_due(
         result = run_cognitive_runtime_cycle(
             session,
             tenant_limit=settings.cognitive_runtime_tenant_limit,
+            canary_tenant_id=settings.cognitive_runtime_canary_tenant_id,
             graph_limit_per_kind=(
                 settings.cognitive_runtime_graph_limit_per_kind
             ),
@@ -336,6 +337,9 @@ def process_personal_context_runtime_if_due(
             settings.personal_context_suggestion_delivery_enabled
         ),
         owner_limit=settings.personal_context_runtime_owner_limit,
+        canary_tenant_id=(
+            settings.personal_context_runtime_canary_tenant_id
+        ),
     )
     return result, now_monotonic
 

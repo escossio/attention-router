@@ -1335,6 +1335,34 @@ def _handle_owner_control_command(
     return result
 
 
+def _persistent_memory_capture_enabled(
+    session: Session,
+    *,
+    source: str,
+    contact_id: str,
+    tenant_id: str,
+    actor_binding: ActorBindingRow | None,
+) -> bool:
+    if not settings.persistent_memory_enabled:
+        return False
+    canary_binding_id = settings.persistent_memory_canary_binding_id
+    if not canary_binding_id:
+        return True
+
+    binding = actor_binding or resolve_actor_binding(
+        session,
+        source,
+        contact_id,
+        tenant_id,
+    )
+    return bool(
+        binding is not None
+        and binding.is_active
+        and binding.tenant_id == tenant_id
+        and binding.id == canary_binding_id
+    )
+
+
 @message_trace
 def receive_inbound_event(
     session: Session,
@@ -1422,9 +1450,12 @@ def receive_inbound_event(
     # even though WhatsApp marks the transport message as from_me.
     if bool(metadata.get("from_me")) and not bool((payload or {}).get("owner_authenticated")):
         try:
-            if settings.persistent_memory_enabled and (
-                not settings.persistent_memory_canary_binding_id or
-                settings.persistent_memory_canary_binding_id == contact_id
+            if _persistent_memory_capture_enabled(
+                session,
+                source=source,
+                contact_id=contact_id,
+                tenant_id=tenant_id,
+                actor_binding=actor_binding,
             ):
                 with session.begin_nested():
                     sent_at = metadata.get("occurred_at") or metadata.get("sent_at") or now_utc()
@@ -1493,9 +1524,12 @@ def receive_inbound_event(
                         )
                     )
                     set_outcome(queue_span, "ENQUEUED")
-        if settings.persistent_memory_enabled and (
-            not settings.persistent_memory_canary_binding_id or
-            settings.persistent_memory_canary_binding_id == contact_id
+        if _persistent_memory_capture_enabled(
+            session,
+            source=source,
+            contact_id=contact_id,
+            tenant_id=tenant_id,
+            actor_binding=actor_binding,
         ):
             try:
                 with session.begin_nested():
