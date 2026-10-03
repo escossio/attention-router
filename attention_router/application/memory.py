@@ -82,6 +82,7 @@ class HistoryBackfillService:
         max_total_messages: int | None = None,
         source_override: str | None = None,
         source_account_override: str | None = None,
+        tenant_id: str = DEFAULT_TENANT_ID,
     ) -> HistoryBackfillResult:
         if page_size < 1:
             raise ValueError("HISTORY_BACKFILL_PAGE_SIZE_INVALID")
@@ -161,6 +162,7 @@ class HistoryBackfillService:
                         direction="OUTBOUND" if payload.get("from_me") else "INBOUND",
                         title=chat.get("title"),
                         metadata=payload.get("metadata", {}),
+                        tenant_id=tenant_id,
                     )
                     row, created = archive_message(self.session, item)
                     if not created:
