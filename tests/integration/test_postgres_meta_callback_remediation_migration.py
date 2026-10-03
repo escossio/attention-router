@@ -108,7 +108,7 @@ def test_0027_to_head_blocks_all_inflight_shapes_atomically_then_upgrades(pg_url
         _alembic(url, "head")
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-                "0050_client_pending_source"
+                "0051_personal_context_bootstrap"
             )
             indexes = set(
                 connection.scalars(
