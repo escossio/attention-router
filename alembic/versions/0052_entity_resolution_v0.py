@@ -154,6 +154,8 @@ def upgrade() -> None:
         sa.Column("state", sa.String(24), nullable=False),
         sa.Column("decision_actor_key", sa.String(120), nullable=False),
         sa.Column("decision_ref", sa.String(240), nullable=False),
+        sa.Column("revoked_by_actor_key", sa.String(120), nullable=True),
+        sa.Column("revocation_ref", sa.String(240), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
