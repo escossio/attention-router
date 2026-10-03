@@ -1,0 +1,8 @@
+--- grafana/provisioning/datasources/zabbix.yaml
++++ grafana/provisioning/datasources/zabbix.yaml
+@@ -16 +16 @@
+-      cacheTTL: 1h
++      cacheTTL: 1m
+@@ -23 +23 @@
+-    version: 1
++    version: 3

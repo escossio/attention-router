@@ -1,6 +1,43 @@
 # Project status
 
-Updated: 2026-09-25
+Updated: 2026-09-30
+
+## Android Client Command Clarification + User Idiolect — physical E2E complete
+
+- PR #176 connected the native Android Client Command channel to the existing Intent Clarification / PendingIntent / User Idiolect pipeline and generalized PendingIntent provenance for Client Command sources.
+- PR #181 closed the remaining semantic gap: when semantic owner-control is enabled, `NOT_CONTROL_COMMAND` receives one candidate-builder pass before falling through to `GENERAL_TASK_PENDING`.
+- Live backend proof ran at `6b2aa7325ef57e3e876b62705f5bff725eafbba0` with schema `0050_client_pending_source`.
+- Physical Android proof: `pare -> voltar a trabalhar -> clarification -> sim -> canonical resume -> pare -> voltar a trabalhar -> direct canonical resume`.
+- The first confirmation projected `USER_CONFIRMED_LANGUAGE / idiolect.pragmatic_mapping`; the repeated expression was reused without a second clarification.
+- No new hardcoded alias or executor was added for `voltar a trabalhar`; the existing closed semantic registry remained authoritative.
+- This checkpoint does not claim support for `voltar à vida`, executable one-shot reply delay, or closure of Android session/dual-stack resilience.
+- Canonical resume state: [Android Client Command Clarification + User Idiolect physical proof](docs/checkpoints/ANDROID_CLIENT_COMMAND_CLARIFICATION_IDIOLECT_E2E_20260923.md).
+
+## Grafana native OTel E2E flow
+
+- Dashboard `roc-e2e-operational` now has a versioned definition, native Tempo canonical/inbound trace views, causal stage status/latency, recent traces, gaps and explicit Span Links. Existing Zabbix panels are preserved.
+- A bounded read-only Tempo projection supplies native Grafana tables and automatic latest-trace selection. Physical reference validated: 19 canonical spans + 3 linked inbound spans; browser refresh PASS, WebSocket 101, zero console/DOM errors. No functional OTel component or authority gate changed.
+
+## NETWORK / OSI — finalized with degraded runtime evidence
+
+- Read-only resumption confirmed existing evidence, unchanged ROC container identities/start times, template/host/dashboard and the available NETWORK / OSI tab. Current health and enabled trigger dependencies match the final checkpoint; diff check passes. No repeated discovery, tests, provisioning, runtime changes, commit or push.
+
+- Clean worktree `feat/network-osi-roc` derives from current origin/main `ec215e07ee3f07c26eed0ad4ce4eb5259df92f00`; no commit or push.
+- Existing ROC Zabbix 7.4.14 / Grafana 13.2.2 and its Zabbix datasource reused. Native SNMPv3 authPriv, dependent interface/neighbor items and native ICMP checks discover all eight runtime domains. The host's legacy Zabbix was ignored.
+- The separately authorized edge attachment preserves the ROC Zabbix server's monitoring network/IP, container identity and start time. No ROC container was recreated or restarted.
+- The separate dashboard and authenticated, lazy NETWORK / OSI iframe show L1 UNKNOWN, L2 DEGRADED and L3 FAIL: eight incomplete neighbors, no resolved MAC and no reachable endpoint (100% loss). The declared trunk has carrier, but its association with the real VLAN parent is unverified; individual physical states remain visible.
+- Superseded partial definitions and a duplicate ROC network host were disabled with private backups/history preserved. Hierarchical dependencies and parent/topology guards leave one current L2_TOPOLOGY_MISMATCH problem while all downstream failing measurements remain visible.
+- Read-only topology snapshots refresh through a separate five-minute timer. No direct Zabbix calls are added to Andy Ops. Only Apache framing headers changed; authentication and existing cookies are preserved. The existing datasource metadata cache is one minute.
+- Two SNMP master walks poll counters/neighbors every 30s, plus discovery every 5m; the final capture measured approximately 14 outbound SNMP requests per counter cycle, including engine probes. ICMP and dashboard refresh are 10s; dependent items/browser refresh cause no extra SNMP polling.
+- Existing focused parser tests, four topology/panel URL tests, Ruff, compilation and diff checks pass. Final authenticated headless acceptance passes for lazy loading, iframe, both real eight-row tables, degraded state and absence of credential exposure. All dashboard queries returned HTTP 200. Existing E2E dashboard content/hash remains intact.
+- No application repair, recreation or manual restart was performed. External physical/bridge state changes and the pre-existing API automatic restart loop are distinguished from this implementation.
+- Private checkpoint, inventory, screenshots, credentials and raw evidence remain outside Git. New NETWORK / OSI artifacts contain configurable/synthetic data only.
+- Follow-ups only: investigate and recover the actual physical association/runtime in a separately authorized pass; optional cleanup of unused earlier panel files and pre-existing browser warnings/history. No further implementation or tests are planned in this pass.
+
+## Native OpenTelemetry outbound — PR #197
+
+- Python sends only the active `traceparent` outside the unchanged signed body; Node continues it around the real send with the shared configured tracer.
+- Offline validation: 156 focused Python tests, 17 Node observability/server tests, compile and Ruff PASS. Integrated coverage proves remote parent, privacy, durable replay and no send span for rejected media. Physical outbound certification remains pending deployment of this candidate.
 
 ## Native OpenTelemetry Transport → Ingress — runtime certified
 
@@ -12,6 +49,24 @@ Updated: 2026-09-25
 - Native attributes and the complete trace privacy audit PASS. The independent ROC reconstruction bridge remained healthy without restart and produced a recent trace.
 - Sampling remains `parentbased_traceidratio` at `1.0`; steady-state policy remains a separate operational decision. Raw evidence is retained privately; the public record is sanitized.
 - See [runtime certification, 2026-09-25](docs/observability/NATIVE_OTEL_RUNTIME_CERTIFICATION_20260925.md).
+
+## ClientSession idempotent challenge retry — branch candidate
+
+- A repeated challenge start for the same server-resolved device and exact
+  `requested_tenant_id` now returns the same unexpired `PENDING` challenge,
+  including its original expiry, instead of failing or invalidating it.
+- New `csc_r1_` challenge ids carry 256 bits of random entropy. Challenge bytes
+  are reconstructed with domain-separated SHA-256; persistence still keeps the
+  challenge digest, and completion still requires the enrolled P-256 signature
+  plus current device, Human Identity, membership and tenant authority.
+- Different tenant contexts, legacy unrederivable pending rows, digest tampering
+  and multiple unexpired rows fail closed. A legacy row becomes replaceable only
+  through the existing expiry cleanup.
+- Focused evidence: Ruff passed; 42 ClientSession service/core/contract/API tests
+  passed; six PostgreSQL tests collect successfully. PostgreSQL concurrency
+  execution remains delegated to the exact-SHA distributed gate after publication.
+- No API shape, migration, runtime flag, database, deployment or live service
+  was changed.
 
 ## Andy Ops Live Supervisor V1
 

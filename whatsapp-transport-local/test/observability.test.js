@@ -50,6 +50,38 @@ test('manual transport spans propagate only W3C traceparent', async () => {
   await tracing.shutdown();
 });
 
+test('outbound send extracts remote W3C parent and continues the same trace', async () => {
+  const { exporter, tracing } = testTracing();
+  const headers = {};
+  await tracing.withSpan('transport.receive', null, async (receive) => {
+    tracing.injectTraceparent(headers, receive.context);
+    receive.setResult('DELIVERED');
+  });
+
+  const parent = tracing.extractTraceparent({
+    traceparent: headers.traceparent,
+    tracestate: PRIVATE,
+    baggage: PRIVATE,
+  });
+  assert.ok(parent);
+
+  await tracing.withSpan('transport.outbound_send', parent, async (send) => {
+    send.setResult('DELIVERED');
+    send.setHttpStatus(200);
+  });
+
+  const spans = exporter.getFinishedSpans();
+  const receive = spans.find((span) => span.name === 'transport.receive');
+  const outbound = spans.find((span) => span.name === 'transport.outbound_send');
+  assert.equal(outbound.spanContext().traceId, receive.spanContext().traceId);
+  assert.equal(outbound.parentSpanContext.spanId, receive.spanContext().spanId);
+  assert.equal(outbound.parentSpanContext.isRemote, true);
+  assert.equal(outbound.attributes['roc.result'], 'DELIVERED');
+  assert.equal(outbound.attributes['http.response.status_code'], 200);
+  assert.equal(tracing.extractTraceparent({ traceparent: 'invalid' }), null);
+  await tracing.shutdown();
+});
+
 test('functional exception identity is preserved without exporting its message', async () => {
   const { exporter, tracing } = testTracing();
   const original = new TypeError(PRIVATE);
@@ -150,6 +182,7 @@ test('disabled tracing is a true no-op', async () => {
   const headers = {};
   tracing.injectTraceparent(headers, null);
   assert.deepEqual(headers, {});
+  assert.equal(tracing.extractTraceparent({ traceparent: 'invalid' }), null);
 });
 
 test('transport resource is explicit and ignores arbitrary OTel environment attributes', async () => {

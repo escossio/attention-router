@@ -33,7 +33,7 @@ _SPAN_NAMES = frozenset({
     "attention.message", "attention.operation", "inbound.receive", "actor.resolve",
     "policy.resolve", "decision.evaluate", "behavior.generate", "repetition_guard.evaluate",
     "memory.archive", "memory.extract", "autonomy.evaluate", "execution.intent",
-    "outbox.enqueue", "transport.send", "worker.dispatch", "andy.agent.context_build",
+    "outbox.enqueue", "transport.send", "worker.dispatch", "grace.release", "queue.enqueue", "andy.agent.context_build",
     "andy.agent.run", "andy.agent.validate", "authority.evaluate", "capability.execute",
     "capability.resolve", "event.normalize", "provider.resolve", "relationship.resolve",
     "ingress.accept", "scheduler.fire", "lab.delivery.consume", "lab.delivery.reserve",

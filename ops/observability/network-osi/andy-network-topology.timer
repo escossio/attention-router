@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh ROC network topology evidence every five minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5m
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

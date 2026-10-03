@@ -82,6 +82,11 @@ Environment variables:
 - `ANDY_OPS_TOOL_HISTORY` - defaults to the current user's Desktop Commander JSONL history path.
 - ANDY_OPS_GOACCESS_URL - optional LAN URL for the GoAccess UI;
 - ANDY_OPS_DOZZLE_URL - optional LAN URL for the Dozzle UI.
+- `ANDY_OPS_NETWORK_OSI_URL` - optional URL of the authenticated Grafana ROC
+  `roc-network-osi` dashboard. The NETWORK / OSI tab loads its iframe only when
+  selected. The browser uses its existing Grafana session; no Zabbix API call,
+  password or token is added to the panel. The CSP admits the configured origin.
+  See [NETWORK / OSI provisioning](../../observability/network-osi/README.md).
 
 Copy `andy-ops-panel.env.example` to `/etc/default/andy-ops-panel` and set the private LAN bind there.
 
@@ -116,7 +121,7 @@ AGT is the control plane and CI01/CI02/CI03 are workers.
 
 Live process inspection recognizes `andy-ci-distributed`, `andy-ci-reprofile`, `andy-ci-run` and PostgreSQL pytest shards. Completed distributed jobs are loaded from the control-plane summaries.
 
-Stale log directories without a final summary are shown as `INCOMPLETE`, not as indefinitely running work.
+A dispatch is shown as `RUNNING` only when a live AGT/worker process reports that exact SHA. Directory age alone never implies active work. Early scheduler failures persist a terminal `summary.json` and therefore appear as `FAIL` with a failure class; a log directory without both a terminal summary and a live process is shown as `INCOMPLETE`.
 
 ## Security boundary
 

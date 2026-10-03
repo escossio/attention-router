@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -31,16 +31,22 @@ def _observability_url(name: str) -> str | None:
     if not raw:
         return None
     parsed = urlsplit(raw)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if (parsed.scheme not in {"http", "https"} or not parsed.netloc
+            or parsed.username or parsed.password
+            or not re.fullmatch(r"[A-Za-z0-9.:-]+", parsed.hostname or "")
+            or any(re.search(r"(?i)(token|password|secret|api.key|authorization)", key)
+                   for key, _ in parse_qsl(parsed.query))):
         return None
-    return raw.rstrip("/") + "/"
+    return raw if parsed.query else raw.rstrip("/") + "/"
 
 
 GOACCESS_URL = _observability_url("ANDY_OPS_GOACCESS_URL")
 DOZZLE_URL = _observability_url("ANDY_OPS_DOZZLE_URL")
+NETWORK_OSI_URL = _observability_url("ANDY_OPS_NETWORK_OSI_URL")
 OBSERVABILITY_CONFIG = {
     "goaccess_url": GOACCESS_URL,
     "dozzle_url": DOZZLE_URL,
+    "network_osi_url": NETWORK_OSI_URL,
 }
 FRAME_SOURCES = sorted(
     {
@@ -284,7 +290,10 @@ def _sample_node(node_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-def _recent_dispatches(limit: int = 7) -> list[dict[str, Any]]:
+def _recent_dispatches(
+    limit: int = 7,
+    active_sha_shorts: set[str] | None = None,
+) -> list[dict[str, Any]]:
     if not LOG_ROOT.exists():
         return []
     paths = sorted(
@@ -309,20 +318,25 @@ def _recent_dispatches(limit: int = 7) -> list[dict[str, Any]]:
         except ValueError:
             started_at = None
         age = int(time.time() - path.stat().st_mtime)
+        active = active_sha_shorts or set()
+        status = (
+            summary.get("status")
+            if isinstance(summary, dict)
+            else ("RUNNING" if sha_short in active else "INCOMPLETE")
+        )
         result.append({
             "id": path.name,
             "sha_short": sha_short,
             "sha": summary.get("sha") if isinstance(summary, dict) else None,
             "suite": "postgres",
             "started_at": started_at,
-            "status": summary.get("status") if isinstance(summary, dict) else (
-                "RUNNING" if age < 180 else "INCOMPLETE"
-            ),
+            "status": status,
             "wall_seconds": (
                 summary.get("wall_seconds")
                 if isinstance(summary, dict)
                 else age
             ),
+            "failure_class": summary.get("failure_class") if isinstance(summary, dict) else None,
             "total_passed_tests": summary.get("total_passed_tests") if isinstance(summary, dict) else None,
             "workers": summary.get("workers", {}) if isinstance(summary, dict) else {},
         })
@@ -601,7 +615,12 @@ def _sample_loop() -> None:
                 }
 
         nodes = [nodes_by_id[node_id] for node_id in NODES]
-        recent = _recent_dispatches()
+        active_sha_shorts = {
+            task["sha_short"]
+            for node in nodes
+            if (task := node.get("task")) and task.get("sha_short")
+        }
+        recent = _recent_dispatches(active_sha_shorts=active_sha_shorts)
         payload = {
             "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
             "nodes": nodes,

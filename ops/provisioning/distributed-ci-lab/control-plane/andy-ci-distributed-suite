@@ -1,0 +1,370 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+BASE="${ANDY_CI_BASE:-/usr/local/lib/andy-ci}"
+LOG_ROOT="${ANDY_CI_LOG_ROOT:-/var/log/andy-ci}"
+REGISTRY_CLI="${ANDY_CI_HOST_REGISTRY_CLI:-$BASE/bin/host-registry.py}"
+REGISTRY_DB="${ANDY_CI_HOST_REGISTRY_DB:-/var/lib/andy-ci/host-registry.sqlite3}"
+CAPACITY="${ANDY_CI_CAPACITY_FILE:-$BASE/worker-capacity.json}"
+SSH_BIN="${ANDY_CI_SSH_BIN:-ssh}"
+CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
+GENERIC_CAPABILITY="${ANDY_CI_GENERIC_CAPABILITY:-ci-worker}"
+FALLBACK_CAPABILITY="${ANDY_CI_GENERIC_FALLBACK_CAPABILITY:-postgres-worker}"
+
+SHA="${1:-}"
+SUITE="${2:-}"
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'usage: andy-ci-distributed-suite <40-char-sha> <python|transport|docker>' >&2
+  exit 64
+}
+case "$SUITE" in
+  python|transport|docker) ;;
+  *)
+    echo 'suite must be one of: python, transport, docker' >&2
+    exit 64
+    ;;
+esac
+
+for required in "$REGISTRY_CLI" "$CAPACITY"; do
+  [[ -e "$required" ]] || {
+    echo "missing scheduler dependency: $required" >&2
+    exit 70
+  }
+done
+
+RUN_ID="$(date +%Y%m%dT%H%M%S)-${SHA:0:12}-$SUITE-distributed"
+RUN_DIR="$LOG_ROOT/$RUN_ID"
+mkdir -p "$RUN_DIR"
+
+echo "CI_DISTRIBUTED_RUN_ID=$RUN_ID"
+echo "CI_DISTRIBUTED_SHA=$SHA"
+echo "CI_DISTRIBUTED_SUITE=$SUITE"
+echo "CI_DISTRIBUTED_SCHEDULER_VERSION=1"
+
+registry() {
+  python3 "$REGISTRY_CLI" --db "$REGISTRY_DB" "$@"
+}
+
+host_target() {
+  registry field --host-id "$1" --name access_target
+}
+
+set_health() {
+  registry set-health --host-id "$1" --state "$2" --reason "$3"
+}
+
+load_workers() {
+  mapfile -t CONFIGURED_WORKERS < <(
+    registry list-workers --capability "$GENERIC_CAPABILITY"
+  )
+  ACTIVE_CAPABILITY="$GENERIC_CAPABILITY"
+  if ((${#CONFIGURED_WORKERS[@]} == 0)) && [[ -n "$FALLBACK_CAPABILITY" ]]; then
+    mapfile -t CONFIGURED_WORKERS < <(
+      registry list-workers --capability "$FALLBACK_CAPABILITY"
+    )
+    ACTIVE_CAPABILITY="$FALLBACK_CAPABILITY"
+    echo "CI_DISTRIBUTED_CAPABILITY_FALLBACK=$FALLBACK_CAPABILITY"
+  fi
+  ((${#CONFIGURED_WORKERS[@]} > 0)) || {
+    echo 'CI_DISTRIBUTED_STATUS=NO_CONFIGURED_WORKERS'
+    exit 69
+  }
+  echo "CI_DISTRIBUTED_CAPABILITY=$ACTIVE_CAPABILITY"
+}
+
+declare -a CONFIGURED_WORKERS=()
+declare -a READY_WORKERS=()
+declare -A PROBED_DEPENDENCIES=()
+ACTIVE_CAPABILITY=""
+load_workers
+
+probe_dependency() {
+  local host="$1"
+  local depth="${2:-0}"
+  (( depth < 8 )) || return 1
+
+  [[ "${PROBED_DEPENDENCIES[$host]:-}" == READY ]] && return 0
+  [[ "${PROBED_DEPENDENCIES[$host]:-}" == UNAVAILABLE ]] && return 1
+
+  local dependency
+  while IFS= read -r dependency; do
+    [[ -n "$dependency" ]] || continue
+    if ! probe_dependency "$dependency" $((depth + 1)); then
+      PROBED_DEPENDENCIES[$host]=UNAVAILABLE
+      set_health "$host" UNAVAILABLE "dependency_unavailable:$dependency"
+      return 1
+    fi
+  done < <(registry dependencies --host-id "$host")
+
+  local target
+  target="$(host_target "$host")"
+  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" true >/dev/null 2>&1; then
+    PROBED_DEPENDENCIES[$host]=READY
+    set_health "$host" READY ssh_ready
+    return 0
+  fi
+
+  PROBED_DEPENDENCIES[$host]=UNAVAILABLE
+  set_health "$host" UNAVAILABLE ssh_unreachable
+  return 1
+}
+
+probe_worker() {
+  local worker="$1"
+  local dependency
+  while IFS= read -r dependency; do
+    [[ -n "$dependency" ]] || continue
+    if ! probe_dependency "$dependency" 0; then
+      set_health "$worker" UNAVAILABLE "dependency_unavailable:$dependency"
+      return 1
+    fi
+  done < <(registry dependencies --host-id "$worker")
+
+  local target
+  target="$(host_target "$worker")"
+  local preflight='test -x /srv/andy-ci/bin/andy-ci-run'
+  if [[ "$SUITE" == docker ]]; then
+    preflight+=' && docker info >/dev/null'
+  fi
+  if ! "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" "$preflight" >/dev/null 2>&1; then
+    set_health "$worker" UNAVAILABLE worker_preflight_failed
+    return 1
+  fi
+
+  if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+      'flock -n /srv/andy-ci/worker.lock -c true' >/dev/null 2>&1; then
+    set_health "$worker" READY worker_ready
+    return 0
+  fi
+
+  set_health "$worker" DEGRADED worker_busy
+  return 1
+}
+
+refresh_pool() {
+  READY_WORKERS=()
+  PROBED_DEPENDENCIES=()
+  local worker
+  for worker in "${CONFIGURED_WORKERS[@]}"; do
+    if probe_worker "$worker"; then
+      READY_WORKERS+=("$worker")
+    fi
+  done
+  echo "CI_DISTRIBUTED_POOL_READY=${READY_WORKERS[*]:-none}"
+}
+
+wait_for_capacity() {
+  local waited=0
+  local delay=5
+  while true; do
+    refresh_pool
+    if ((${#READY_WORKERS[@]} > 0)); then
+      return 0
+    fi
+    if (( waited >= CAPACITY_WAIT_SECONDS )); then
+      return 1
+    fi
+    echo "CI_DISTRIBUTED_STATUS=WAITING_FOR_CAPACITY waited=${waited}s"
+    local remaining=$((CAPACITY_WAIT_SECONDS - waited))
+    local sleep_for=$delay
+    (( sleep_for > remaining )) && sleep_for=$remaining
+    sleep "$sleep_for"
+    waited=$((waited + sleep_for))
+    (( delay < 60 )) && delay=$((delay * 2))
+    (( delay > 60 )) && delay=60
+  done
+}
+
+ordered_workers() {
+  python3 - "$CAPACITY" "$SUITE" "$@" <<'PY'
+import json
+import pathlib
+import sys
+
+capacity = json.loads(pathlib.Path(sys.argv[1]).read_text())
+suite = sys.argv[2]
+workers = sys.argv[3:]
+
+suite_seconds = ((capacity.get("suite_seconds") or {}).get(suite) or {})
+fallback = capacity.get("pytest_full_seconds") or {}
+
+def score(worker):
+    if worker in suite_seconds:
+        return (0, float(suite_seconds[worker]), worker)
+    if worker in fallback:
+        return (1, float(fallback[worker]), worker)
+    return (2, 0.0, worker)
+
+ordered = sorted(workers, key=score)
+if ordered:
+    offsets = {"python": 0, "docker": 1, "transport": 2}
+    offset = offsets.get(suite, 0) % len(ordered)
+    ordered = ordered[offset:] + ordered[:offset]
+for worker in ordered:
+    print(worker)
+PY
+}
+
+classify_attempt() {
+  local rc="$1"
+  local log="$2"
+  if (( rc == 0 )) && grep -q '^CI_STATUS=PASS$' "$log"; then
+    echo PASS
+    return
+  fi
+  if grep -q '^CI_WORKER_BUSY$' "$log"; then
+    echo WORKER_BUSY
+    return
+  fi
+  if grep -Eq \
+      'cannot lock ref|unable to update local ref|Unable to create .*\\.lock|could not lock config file' \
+      "$log"; then
+    echo MIRROR_BUSY
+    return
+  fi
+  if (( rc == 255 )) || grep -Eq \
+      'ssh:|Connection (timed out|refused|closed)|No route to host|Could not resolve hostname|Broken pipe|kex_exchange_identification' \
+      "$log"; then
+    echo WORKER_LOST
+    return
+  fi
+  if grep -q '^CI_STATUS=FAIL$' "$log"; then
+    echo TEST_FAILURE
+    return
+  fi
+  echo INFRA_ERROR
+}
+
+ATTEMPTS="$RUN_DIR/attempts.tsv"
+printf 'attempt\tworker\tclassification\trc\tduration\n' > "$ATTEMPTS"
+START_EPOCH=$(date +%s)
+DEADLINE=$((START_EPOCH + CAPACITY_WAIT_SECONDS))
+FINAL_STATUS=FAIL
+SELECTED_WORKER=""
+FAILURE_CLASS="INFRA_EXHAUSTED"
+attempt=0
+TERMINAL=0
+
+while (( $(date +%s) < DEADLINE )); do
+  if ! wait_for_capacity; then
+    FAILURE_CLASS=NO_CAPACITY
+    break
+  fi
+
+  RETRYABLE=0
+  while IFS= read -r worker; do
+    [[ -n "$worker" ]] || continue
+    attempt=$((attempt + 1))
+    target="$(host_target "$worker")"
+    log="$RUN_DIR/${attempt}-${worker}.log"
+
+    set +e
+    "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+      "/srv/andy-ci/bin/andy-ci-run '$SHA' '$SUITE'" \
+      >"$log" 2>&1
+    rc=$?
+    set -e
+
+    classification="$(classify_attempt "$rc" "$log")"
+    duration="$(awk -F= '/^CI_DURATION_SECONDS=/{v=$2} END{print v}' "$log")"
+    duration="${duration:-0}"
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+      "$attempt" "$worker" "$classification" "$rc" "$duration" >> "$ATTEMPTS"
+
+    case "$classification" in
+      PASS)
+        set_health "$worker" READY "${SUITE}_pass"
+        FINAL_STATUS=PASS
+        SELECTED_WORKER="$worker"
+        FAILURE_CLASS=""
+        TERMINAL=1
+        break
+        ;;
+      WORKER_BUSY|MIRROR_BUSY)
+        set_health "$worker" DEGRADED "${classification,,}"
+        FAILURE_CLASS="$classification"
+        RETRYABLE=1
+        ;;
+      WORKER_LOST|INFRA_ERROR)
+        set_health "$worker" UNAVAILABLE "${classification,,}"
+        FAILURE_CLASS="$classification"
+        RETRYABLE=1
+        ;;
+      TEST_FAILURE)
+        set_health "$worker" READY "${SUITE}_test_failure"
+        SELECTED_WORKER="$worker"
+        FAILURE_CLASS=TEST_FAILURE
+        TERMINAL=1
+        break
+        ;;
+    esac
+  done < <(ordered_workers "${READY_WORKERS[@]}")
+
+  (( TERMINAL == 1 )) && break
+  (( RETRYABLE == 1 )) || break
+  (( $(date +%s) < DEADLINE )) || break
+  sleep 2
+done
+
+END_EPOCH=$(date +%s)
+WALL_SECONDS=$((END_EPOCH - START_EPOCH))
+registry snapshot --capability "$ACTIVE_CAPABILITY" > "$RUN_DIR/registry-final.json"
+
+python3 - "$RUN_DIR" "$SHA" "$SUITE" "$WALL_SECONDS" "$ATTEMPTS" \
+  "$FINAL_STATUS" "$SELECTED_WORKER" "$FAILURE_CLASS" "$ACTIVE_CAPABILITY" <<'PY'
+import csv
+import json
+import pathlib
+import sys
+
+run_dir = pathlib.Path(sys.argv[1])
+sha = sys.argv[2]
+suite = sys.argv[3]
+wall = int(sys.argv[4])
+attempts_path = pathlib.Path(sys.argv[5])
+status = sys.argv[6]
+selected_worker = sys.argv[7] or None
+failure_class = sys.argv[8] or None
+capability = sys.argv[9]
+attempts = list(csv.DictReader(attempts_path.open(), delimiter="\t"))
+
+summary = {
+    "schema_version": 1,
+    "sha": sha,
+    "suite": suite,
+    "status": status,
+    "wall_seconds": wall,
+    "selected_worker": selected_worker,
+    "failure_class": failure_class,
+    "capability": capability,
+    "attempts": [
+        {
+            "attempt": int(row["attempt"]),
+            "worker": row["worker"],
+            "classification": row["classification"],
+            "rc": int(row["rc"]),
+            "duration_seconds": int(row["duration"]),
+        }
+        for row in attempts
+    ],
+}
+(run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+print(json.dumps(summary, indent=2))
+PY
+
+echo "CI_DISTRIBUTED_SUMMARY=$RUN_DIR/summary.json"
+echo "CI_DISTRIBUTED_WALL_SECONDS=$WALL_SECONDS"
+if [[ "$FINAL_STATUS" == PASS ]]; then
+  echo 'CI_DISTRIBUTED_STATUS=PASS'
+  exit 0
+fi
+
+echo 'CI_DISTRIBUTED_STATUS=FAIL'
+for log in "$RUN_DIR"/*.log; do
+  [[ -f "$log" ]] || continue
+  if grep -q '^CI_STATUS=FAIL$' "$log"; then
+    echo "--- $(basename "$log") tail ---"
+    tail -n 100 "$log"
+  fi
+done
+exit 1

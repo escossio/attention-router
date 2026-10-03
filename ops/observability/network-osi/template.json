@@ -1,0 +1,1893 @@
+{
+  "zabbix_export": {
+    "version": "7.4",
+    "template_groups": [
+      {
+        "uuid": "8a00b55d8eeb4873b6af2046b908068c",
+        "name": "Templates/Andy Network"
+      }
+    ],
+    "templates": [
+      {
+        "uuid": "6b7045489f254612a035730e72d1b639",
+        "template": "Template Andy Runtime Network - MikroTik SNMPv3",
+        "name": "Template Andy Runtime Network - MikroTik SNMPv3",
+        "description": "Read-only OSI network telemetry. Host-local endpoints and parent mapping; no application checks. L1 suppression is gated on verified topology.",
+        "groups": [
+          {
+            "name": "Templates/Andy Network"
+          }
+        ],
+        "items": [
+          {
+            "uuid": "cf56c8c5e2b74b93aefb7ed41f90be03",
+            "name": "NETWORK: Interface and address discovery",
+            "type": "SNMP_AGENT",
+            "snmp_oid": "walk[1.3.6.1.2.1.2.2.1.1,1.3.6.1.2.1.2.2.1.2,1.3.6.1.2.1.2.2.1.3,1.3.6.1.2.1.31.1.1.1.1,1.3.6.1.2.1.31.1.1.1.18,1.3.6.1.2.1.4.20.1.2,1.3.6.1.2.1.4.20.1.3]",
+            "key": "andy.discovery.raw",
+            "delay": "5m",
+            "history": "1d",
+            "value_type": "TEXT",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "f6870e1d989941e69fb5965d0fdec71b",
+            "name": "NETWORK HEALTH: L1 PHYSICAL",
+            "type": "CALCULATED",
+            "key": "andy.health.l1",
+            "delay": "10s",
+            "history": "7d",
+            "trends": "30d",
+            "params": "(nodata(//andy.parent.oper,90s)=0 and nodata(//andy.parent.admin,90s)=0 and nodata(//andy.topology.evidence,1h)=0 and last(//andy.topology.consistent)=1)*(1+2*(last(//andy.parent.oper)<>1 or last(//andy.parent.admin)<>1)+(last(//andy.parent.oper)=1 and last(//andy.parent.admin)=1 and (last(//andy.parent.rx_errors)>0 or last(//andy.parent.tx_errors)>0 or last(//andy.parent.rx_discards)>0 or last(//andy.parent.tx_discards)>0)))",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "ef9a4259a2a841dcb5a0b8fab402737b",
+            "name": "NETWORK HEALTH: L2 DATA LINK",
+            "type": "CALCULATED",
+            "key": "andy.health.l2",
+            "delay": "10s",
+            "history": "7d",
+            "trends": "30d",
+            "params": "(count(count_foreach(//andy.domain.oper[*],90s),\"gt\",0)=8 and count(count_foreach(//andy.domain.arp[*],90s),\"gt\",0)=8 and count(last_foreach(//andy.domain.arp[*]),\"eq\",0)=0 and nodata(//andy.topology.evidence,1h)=0)*(1+(last(//andy.summary.domains)<>8 or last(//andy.topology.consistent)=0 or last(//andy.summary.complete)<>8 or count(last_foreach(//andy.domain.oper[*]),\"eq\",1)<>8)+(last(//andy.summary.domains)<>8 or count(last_foreach(//andy.domain.oper[*]),\"eq\",1)<>8))",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "2f870424ca844027a1e1b353e8e3e6b4",
+            "name": "NETWORK HEALTH: L3 NETWORK",
+            "type": "CALCULATED",
+            "key": "andy.health.l3",
+            "delay": "10s",
+            "history": "7d",
+            "trends": "30d",
+            "params": "(count(count_foreach(//andy.domain.arp[*],90s),\"gt\",0)=8 and count(count_foreach(//icmpping[*,3,100,56,300],40s),\"gt\",0)=8)*(1+(last(//andy.summary.reachable)<>8 or last(//andy.summary.complete)<>8)+(last(//andy.summary.reachable)=0))",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "eda0c74d43384f6eb5c27238f51e9f34",
+            "name": "NETWORK: Interface metrics master",
+            "type": "SNMP_AGENT",
+            "snmp_oid": "walk[1.3.6.1.2.1.31.1.1.1.1,1.3.6.1.2.1.2.2.1.7,1.3.6.1.2.1.2.2.1.8,1.3.6.1.2.1.31.1.1.1.15,1.3.6.1.2.1.31.1.1.1.6,1.3.6.1.2.1.31.1.1.1.10,1.3.6.1.2.1.2.2.1.14,1.3.6.1.2.1.2.2.1.20,1.3.6.1.2.1.2.2.1.13,1.3.6.1.2.1.2.2.1.19]",
+            "key": "andy.metrics.raw",
+            "delay": "30s",
+            "history": "1d",
+            "value_type": "TEXT",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "f5460229d5df40a18c843c2b6227b38a",
+            "name": "NETWORK: IPv4 neighbors master",
+            "type": "SNMP_AGENT",
+            "snmp_oid": "walk[1.3.6.1.2.1.4.22.1.2,1.3.6.1.2.1.4.22.1.4]",
+            "key": "andy.neighbors.raw",
+            "delay": "30s",
+            "history": "1d",
+            "value_type": "TEXT",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "4357615198a046709ce3f245746751c8",
+            "name": "L1 PHYSICAL: admin",
+            "type": "DEPENDENT",
+            "key": "andy.parent.admin",
+            "history": "7d",
+            "trends": "30d",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.2.2.1.7.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "9e317387ef9446e3aa25d319a72a7a7c",
+            "name": "L1 PHYSICAL: duplex",
+            "type": "DEPENDENT",
+            "key": "andy.parent.duplex",
+            "history": "7d",
+            "value_type": "TEXT",
+            "preprocessing": [
+              {
+                "type": "JAVASCRIPT",
+                "parameters": [
+                  "var p=JSON.parse(value).physical; return p && p['full-duplex']!==undefined ? (p['full-duplex'] ? 'FULL' : 'HALF') : 'UNKNOWN';"
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.topology.evidence"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "3b2c38b549ef48d7a499369bec2283a0",
+            "name": "L1 PHYSICAL: parent/trunk",
+            "type": "DEPENDENT",
+            "key": "andy.parent.name",
+            "history": "7d",
+            "value_type": "TEXT",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.31.1.1.1.1.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "e80d9e4fb8a94001a5a1c0770463a9b3",
+            "name": "L1 PHYSICAL: oper",
+            "type": "DEPENDENT",
+            "key": "andy.parent.oper",
+            "history": "7d",
+            "trends": "30d",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.2.2.1.8.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ],
+            "triggers": [
+              {
+                "uuid": "90bfde1871564055808377db3131afc6",
+                "expression": "min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)<>1",
+                "name": "L1_PARENT_DOWN",
+                "priority": "HIGH",
+                "dependencies": [
+                  {
+                    "name": "NETWORK_TELEMETRY_UNKNOWN",
+                    "expression": "nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,90s)=1 or nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.evidence,1h)=1"
+                  }
+                ],
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "uuid": "f2ba9ad3d0694b329e7508ad79195b8c",
+            "name": "L1 PHYSICAL: rx",
+            "type": "DEPENDENT",
+            "key": "andy.parent.rx",
+            "history": "7d",
+            "value_type": "FLOAT",
+            "trends": "30d",
+            "units": "Bps",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.31.1.1.1.6.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              },
+              {
+                "type": "CHANGE_PER_SECOND"
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "2555d1e2d12d46fe9278e22991d2fae5",
+            "name": "L1 PHYSICAL: rx_discards",
+            "type": "DEPENDENT",
+            "key": "andy.parent.rx_discards",
+            "history": "7d",
+            "value_type": "FLOAT",
+            "trends": "30d",
+            "units": "eps",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.2.2.1.13.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              },
+              {
+                "type": "CHANGE_PER_SECOND"
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "680d0134005647f5a5ba55e7c41f22e7",
+            "name": "L1 PHYSICAL: rx_errors",
+            "type": "DEPENDENT",
+            "key": "andy.parent.rx_errors",
+            "history": "7d",
+            "value_type": "FLOAT",
+            "trends": "30d",
+            "units": "eps",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.2.2.1.14.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              },
+              {
+                "type": "CHANGE_PER_SECOND"
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "17605321dc044462a0b31aa580da9cc7",
+            "name": "L1 PHYSICAL: speed",
+            "type": "DEPENDENT",
+            "key": "andy.parent.speed",
+            "history": "7d",
+            "trends": "30d",
+            "units": "Mbps",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.31.1.1.1.15.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "1cdce687c63847648751d3c146f7f0ad",
+            "name": "L1 PHYSICAL: tx",
+            "type": "DEPENDENT",
+            "key": "andy.parent.tx",
+            "history": "7d",
+            "value_type": "FLOAT",
+            "trends": "30d",
+            "units": "Bps",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.31.1.1.1.10.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              },
+              {
+                "type": "CHANGE_PER_SECOND"
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "c826714db15c4d63a478566f45f0d3ca",
+            "name": "L1 PHYSICAL: tx_discards",
+            "type": "DEPENDENT",
+            "key": "andy.parent.tx_discards",
+            "history": "7d",
+            "value_type": "FLOAT",
+            "trends": "30d",
+            "units": "eps",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.2.2.1.19.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              },
+              {
+                "type": "CHANGE_PER_SECOND"
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "3736389ad0e747e7b3652b80dcf132db",
+            "name": "L1 PHYSICAL: tx_errors",
+            "type": "DEPENDENT",
+            "key": "andy.parent.tx_errors",
+            "history": "7d",
+            "value_type": "FLOAT",
+            "trends": "30d",
+            "units": "eps",
+            "preprocessing": [
+              {
+                "type": "SNMP_WALK_VALUE",
+                "parameters": [
+                  "1.3.6.1.2.1.2.2.1.20.{$ANDY.PARENT.INDEX}",
+                  "0"
+                ]
+              },
+              {
+                "type": "CHANGE_PER_SECOND"
+              }
+            ],
+            "master_item": {
+              "key": "andy.metrics.raw"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "601c682865d44cab96eae64c4aa6058d",
+            "name": "NETWORK: complete",
+            "type": "CALCULATED",
+            "key": "andy.summary.complete",
+            "delay": "10s",
+            "history": "7d",
+            "trends": "30d",
+            "params": "count(last_foreach(//andy.domain.arp[*]),\"eq\",1)",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "80a75c89a387478fadd1fed4817e2edf",
+            "name": "NETWORK: domains",
+            "type": "CALCULATED",
+            "key": "andy.summary.domains",
+            "delay": "10s",
+            "history": "7d",
+            "trends": "30d",
+            "params": "sum(last_foreach(//andy.domain.present[*]))",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "cc7889b2d4da4d53b8f4ca338e7815c1",
+            "name": "NETWORK: incomplete",
+            "type": "CALCULATED",
+            "key": "andy.summary.incomplete",
+            "delay": "10s",
+            "history": "7d",
+            "trends": "30d",
+            "params": "count(last_foreach(//andy.domain.arp[*]),\"eq\",2)",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "4284f8f79aff4d7bbbc7adc6f24ca210",
+            "name": "NETWORK: reachable",
+            "type": "CALCULATED",
+            "key": "andy.summary.reachable",
+            "delay": "10s",
+            "history": "7d",
+            "trends": "30d",
+            "params": "count(last_foreach(//icmpping[*,3,100,56,300]),\"eq\",1)",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "33703323be6740e9a8414830411a89b2",
+            "name": "NETWORK: Trunk / VLAN parent association",
+            "type": "DEPENDENT",
+            "key": "andy.topology.consistent",
+            "history": "7d",
+            "trends": "30d",
+            "preprocessing": [
+              {
+                "type": "JAVASCRIPT",
+                "parameters": [
+                  "return JSON.parse(value).consistent ? 1 : 0;"
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.topology.evidence"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "59e9597a89564ceb9af37d45dd27f9ee",
+            "name": "NETWORK: RouterOS topology evidence",
+            "type": "TRAP",
+            "key": "andy.topology.evidence",
+            "history": "7d",
+            "value_type": "TEXT",
+            "description": "Read-only RouterOS snapshot; nodata after one hour makes topology UNKNOWN.",
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          },
+          {
+            "uuid": "54d72f6f81fb451bb9a13d2171c8c4ae",
+            "name": "NETWORK: Parent / trunk evidence",
+            "type": "DEPENDENT",
+            "key": "andy.topology.note",
+            "history": "7d",
+            "value_type": "TEXT",
+            "preprocessing": [
+              {
+                "type": "JAVASCRIPT",
+                "parameters": [
+                  "return JSON.parse(value).note;"
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.topology.evidence"
+            },
+            "tags": [
+              {
+                "tag": "component",
+                "value": "network-osi"
+              }
+            ]
+          }
+        ],
+        "discovery_rules": [
+          {
+            "uuid": "248f0202956f4cd39745c33ea9e03d24",
+            "name": "ANDY210\u2013217 interface discovery",
+            "type": "DEPENDENT",
+            "key": "andy.domains.discovery",
+            "filter": {
+              "conditions": [
+                {
+                  "macro": "{#ENDPOINT}",
+                  "value": "^([0-9]{1,3}\\.){3}[0-9]{1,3}$"
+                }
+              ]
+            },
+            "lifetime": "1h",
+            "enabled_lifetime_type": "DISABLE_AFTER",
+            "item_prototypes": [
+              {
+                "uuid": "abd759688cc948aa8fda63afa269f979",
+                "name": "VLAN {#VLAN} / VLAN ID",
+                "type": "DEPENDENT",
+                "key": "andy.domain.actual_vlan[{#VLAN}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "var v=JSON.parse(value).vlans.filter(function(v){return v.name==='{#IFNAME}';}); if(v.length!==1)throw 'Missing VLAN'; return v[0]['vlan-id'];"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.topology.evidence"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "82d87c640d6f47a78c2958846c279b84",
+                "name": "VLAN {#VLAN} / admin",
+                "type": "DEPENDENT",
+                "key": "andy.domain.admin[{#VLAN}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.7.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "50a7b63ff1e4472da3084e5c27271ef0",
+                "name": "VLAN {#VLAN} / alias",
+                "type": "DEPENDENT",
+                "key": "andy.domain.alias[{#VLAN}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.18.{#SNMPINDEX}",
+                      "0"
+                    ],
+                    "error_handler": "CUSTOM_VALUE",
+                    "error_handler_params": "UNKNOWN"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.discovery.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "8551efb6deae4406a7692f985db401d7",
+                "name": "VLAN {#VLAN} / ARP raw",
+                "type": "DEPENDENT",
+                "key": "andy.domain.arp[{#VLAN}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "// Parse the numeric OID output produced by Zabbix native walk[] / get[].\n// A missing OID remains missing; it is never translated into a healthy value.\nfunction snmp(raw) {\n  var out = {};\n  raw.split(/\\r?\\n/).forEach(function (line) {\n    var m = line.match(/^\\.?([0-9.]+)\\s*=\\s*(.*)$/);\n    if (!m || /No Such|endOfMib|End of MIB/i.test(m[2])) return;\n    var value = m[2].replace(/^[A-Za-z0-9_-]+:\\s*/, '').trim();\n    if (value.charAt(0) === '\"' && value.charAt(value.length - 1) === '\"') {\n      value = value.slice(1, -1);\n    }\n    out[m[1]] = value;\n  });\n  return out;\n}\n// Legacy ipNetToMedia: 0 UNKNOWN, 1 COMPLETE, 2 INCOMPLETE, 3 ABSENT.\nfunction neighbor(o, index, address) {\n  var key = index + '.' + address, base = '1.3.6.1.2.1.4.22.1.';\n  var mac = o[base + '2.' + key], type = o[base + '4.' + key];\n  if (mac === undefined && type === undefined) {\n    // No exported ARP table is missing telemetry, not proof of an absent neighbor.\n    var exported = Object.keys(o).some(function(k) {\n      return k.indexOf(base + '2.') === 0 || k.indexOf(base + '4.') === 0;\n    });\n    return {state: exported ? 3 : 0, mac: exported ? 'ABSENT' : 'UNKNOWN'};\n  }\n  if (mac === undefined || type === undefined) return {state: 0, mac: 'UNKNOWN'};\n  // RouterOS STRING octets may omit leading zeros; Hex-STRING uses padded octets.\n  var text = mac.trim(), hex = null;\n  if (/^[a-fA-F0-9]{1,2}(:[a-fA-F0-9]{1,2}){5}$/.test(text)) {\n    hex = text.split(':').map(function(octet) { return ('0' + octet).slice(-2); }).join('');\n  } else if (/^[a-fA-F0-9]{2}(\\s+[a-fA-F0-9]{2}){5}$/.test(text) || /^[a-fA-F0-9]{12}$/.test(text)) {\n    hex = text.replace(/\\s+/g, '');\n  }\n  var resolved = hex !== null && !/^0+$/.test(hex);\n  var state = text === '' || (hex !== null && /^0+$/.test(hex)) || type === '2' ? 2 :\n    (resolved && (type === '3' || type === '4') ? 1 : 0);\n  return {state: state, mac: resolved ? hex.toUpperCase().match(/../g).join(':') : (state === 0 ? 'UNKNOWN' : 'UNRESOLVED')};\n}\nvar n=neighbor(snmp(value),'{#SNMPINDEX}','{#ENDPOINT}');return n.state;"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.neighbors.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "23952909d0524ccd9ee62d351bd6b30f",
+                "name": "VLAN {#VLAN} / ARP/NEIGHBOR",
+                "type": "CALCULATED",
+                "key": "andy.domain.arp_state[{#VLAN}]",
+                "delay": "10s",
+                "history": "7d",
+                "trends": "30d",
+                "params": "(nodata(//andy.domain.arp[{#VLAN}],90s)=0)*(last(//andy.domain.arp[{#VLAN}]))",
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "5df4fb5d2fad40a58b252687b27a659d",
+                "name": "VLAN {#VLAN} / description",
+                "type": "DEPENDENT",
+                "key": "andy.domain.description[{#VLAN}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.2.{#SNMPINDEX}",
+                      "0"
+                    ],
+                    "error_handler": "CUSTOM_VALUE",
+                    "error_handler_params": "UNKNOWN"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.discovery.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "8a9b16fabb41456199846c354ece5f29",
+                "name": "VLAN {#VLAN} / ENDPOINT",
+                "type": "DEPENDENT",
+                "key": "andy.domain.endpoint[{#VLAN}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "return \"{#ENDPOINT}\";"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.discovery.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "fe3039922e2240ae8e8dec3600286a46",
+                "name": "VLAN {#VLAN} / GATEWAY",
+                "type": "DEPENDENT",
+                "key": "andy.domain.gateway[{#VLAN}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "return \"{#GATEWAY}\";"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.discovery.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "0c71052c4b2f4115b92293f50e4c9c00",
+                "name": "VLAN {#VLAN} / ICMP",
+                "type": "CALCULATED",
+                "key": "andy.domain.icmp_state[{#VLAN}]",
+                "delay": "10s",
+                "history": "7d",
+                "trends": "30d",
+                "params": "(nodata(//icmpping[{#ENDPOINT},3,100,56,300],40s)=0)*(last(//icmpping[{#ENDPOINT},3,100,56,300])+1)",
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "6c62ebbcf97645f18e84d6b29895e6b0",
+                "name": "VLAN {#VLAN} / ifIndex",
+                "type": "DEPENDENT",
+                "key": "andy.domain.index[{#VLAN}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "return \"{#SNMPINDEX}\";"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.discovery.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "fc6eb59b7c884e20b9e45eb0db9f7cd1",
+                "name": "VLAN {#VLAN} / INTERFACE",
+                "type": "DEPENDENT",
+                "key": "andy.domain.interface[{#VLAN}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.1.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "b3ad2cc7ccd449f4a3badc8a68304b97",
+                "name": "VLAN {#VLAN} / MAC",
+                "type": "DEPENDENT",
+                "key": "andy.domain.mac[{#VLAN}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "// Parse the numeric OID output produced by Zabbix native walk[] / get[].\n// A missing OID remains missing; it is never translated into a healthy value.\nfunction snmp(raw) {\n  var out = {};\n  raw.split(/\\r?\\n/).forEach(function (line) {\n    var m = line.match(/^\\.?([0-9.]+)\\s*=\\s*(.*)$/);\n    if (!m || /No Such|endOfMib|End of MIB/i.test(m[2])) return;\n    var value = m[2].replace(/^[A-Za-z0-9_-]+:\\s*/, '').trim();\n    if (value.charAt(0) === '\"' && value.charAt(value.length - 1) === '\"') {\n      value = value.slice(1, -1);\n    }\n    out[m[1]] = value;\n  });\n  return out;\n}\n// Legacy ipNetToMedia: 0 UNKNOWN, 1 COMPLETE, 2 INCOMPLETE, 3 ABSENT.\nfunction neighbor(o, index, address) {\n  var key = index + '.' + address, base = '1.3.6.1.2.1.4.22.1.';\n  var mac = o[base + '2.' + key], type = o[base + '4.' + key];\n  if (mac === undefined && type === undefined) {\n    // No exported ARP table is missing telemetry, not proof of an absent neighbor.\n    var exported = Object.keys(o).some(function(k) {\n      return k.indexOf(base + '2.') === 0 || k.indexOf(base + '4.') === 0;\n    });\n    return {state: exported ? 3 : 0, mac: exported ? 'ABSENT' : 'UNKNOWN'};\n  }\n  if (mac === undefined || type === undefined) return {state: 0, mac: 'UNKNOWN'};\n  // RouterOS STRING octets may omit leading zeros; Hex-STRING uses padded octets.\n  var text = mac.trim(), hex = null;\n  if (/^[a-fA-F0-9]{1,2}(:[a-fA-F0-9]{1,2}){5}$/.test(text)) {\n    hex = text.split(':').map(function(octet) { return ('0' + octet).slice(-2); }).join('');\n  } else if (/^[a-fA-F0-9]{2}(\\s+[a-fA-F0-9]{2}){5}$/.test(text) || /^[a-fA-F0-9]{12}$/.test(text)) {\n    hex = text.replace(/\\s+/g, '');\n  }\n  var resolved = hex !== null && !/^0+$/.test(hex);\n  var state = text === '' || (hex !== null && /^0+$/.test(hex)) || type === '2' ? 2 :\n    (resolved && (type === '3' || type === '4') ? 1 : 0);\n  return {state: state, mac: resolved ? hex.toUpperCase().match(/../g).join(':') : (state === 0 ? 'UNKNOWN' : 'UNRESOLVED')};\n}\nvar n=neighbor(snmp(value),'{#SNMPINDEX}','{#ENDPOINT}');return n.mac;"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.neighbors.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "6dd0f03db928417eacb6a9e933009f8c",
+                "name": "VLAN {#VLAN} / NETWORK",
+                "type": "DEPENDENT",
+                "key": "andy.domain.network[{#VLAN}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "return \"{#NETWORK}\";"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.discovery.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "e15b0e6e89444c849fe3945aac7c1d4b",
+                "name": "VLAN {#VLAN} / OPER raw",
+                "type": "DEPENDENT",
+                "key": "andy.domain.oper[{#VLAN}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.8.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "1e6754503a744c1d924f65b9a401dde8",
+                "name": "VLAN {#VLAN} / OPER",
+                "type": "CALCULATED",
+                "key": "andy.domain.oper_state[{#VLAN}]",
+                "delay": "10s",
+                "history": "7d",
+                "trends": "30d",
+                "params": "(nodata(//andy.domain.oper[{#VLAN}],90s)=0)*(last(//andy.domain.oper[{#VLAN}]))",
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "fb3c64978bf745f6be51ab97fe940304",
+                "name": "VLAN {#VLAN} / PARENT",
+                "type": "DEPENDENT",
+                "key": "andy.domain.parent[{#VLAN}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "var v=JSON.parse(value).vlans.filter(function(v){return v.name==='{#IFNAME}';}); return v.length===1 ? v[0].interface : 'UNKNOWN';"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.topology.evidence"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "51bd60d8de9049adb8d075fd5c2b33b1",
+                "name": "VLAN {#VLAN} / PRESENT",
+                "type": "DEPENDENT",
+                "key": "andy.domain.present[{#VLAN}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "// Parse the numeric OID output produced by Zabbix native walk[] / get[].\n// A missing OID remains missing; it is never translated into a healthy value.\nfunction snmp(raw) {\n  var out = {};\n  raw.split(/\\r?\\n/).forEach(function (line) {\n    var m = line.match(/^\\.?([0-9.]+)\\s*=\\s*(.*)$/);\n    if (!m || /No Such|endOfMib|End of MIB/i.test(m[2])) return;\n    var value = m[2].replace(/^[A-Za-z0-9_-]+:\\s*/, '').trim();\n    if (value.charAt(0) === '\"' && value.charAt(value.length - 1) === '\"') {\n      value = value.slice(1, -1);\n    }\n    out[m[1]] = value;\n  });\n  return out;\n}\nreturn snmp(value)['1.3.6.1.2.1.31.1.1.1.1.{#SNMPINDEX}'] === '{#IFNAME}' ? 1 : 0;"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "2861fbf63f2b42228546eb432383c922",
+                "name": "VLAN {#VLAN} / rx",
+                "type": "DEPENDENT",
+                "key": "andy.domain.rx[{#VLAN}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "Bps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.6.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "fb9281350c774946ae5bf37d9b02d717",
+                "name": "VLAN {#VLAN} / rx_discards",
+                "type": "DEPENDENT",
+                "key": "andy.domain.rx_discards[{#VLAN}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "eps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.13.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "545be8588d1448fb8319a295d9cfa100",
+                "name": "VLAN {#VLAN} / rx_errors",
+                "type": "DEPENDENT",
+                "key": "andy.domain.rx_errors[{#VLAN}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "eps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.14.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "fbe8e0474a1d41ee9cfce5053aaa6979",
+                "name": "VLAN {#VLAN} / speed",
+                "type": "DEPENDENT",
+                "key": "andy.domain.speed[{#VLAN}]",
+                "history": "7d",
+                "trends": "30d",
+                "units": "Mbps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.15.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "2c9b4f64eb844aefba188179f44ec9c9",
+                "name": "VLAN {#VLAN} / tx",
+                "type": "DEPENDENT",
+                "key": "andy.domain.tx[{#VLAN}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "Bps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.10.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "345bf9ac1b67441c85d0321277eb7e6a",
+                "name": "VLAN {#VLAN} / tx_discards",
+                "type": "DEPENDENT",
+                "key": "andy.domain.tx_discards[{#VLAN}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "eps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.19.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "a731676c1a2f4d5ba641177c0354db16",
+                "name": "VLAN {#VLAN} / tx_errors",
+                "type": "DEPENDENT",
+                "key": "andy.domain.tx_errors[{#VLAN}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "eps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.20.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "6118452c08ce4f21881a44fd69c9df19",
+                "name": "VLAN {#VLAN} / VLAN",
+                "type": "DEPENDENT",
+                "key": "andy.domain.vlan[{#VLAN}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "return \"{#VLAN}\";"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.discovery.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "2f2285dfb9bc45038cd14fa32f9f34b0",
+                "name": "VLAN {#VLAN} / LOSS",
+                "type": "SIMPLE",
+                "key": "icmppingloss[{#ENDPOINT},3,100,56,300]",
+                "delay": "10s",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "%",
+                "description": "Native ICMP from the ROC Zabbix server; 3 probes per cycle.",
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "a14bf5c39a264f1889c7b667366e68d1",
+                "name": "VLAN {#VLAN} / RTT",
+                "type": "SIMPLE",
+                "key": "icmppingsec[{#ENDPOINT},3,100,56,300]",
+                "delay": "10s",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "s",
+                "description": "Native ICMP from the ROC Zabbix server; 3 probes per cycle.",
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              },
+              {
+                "uuid": "b75137e1c2484181aa63435296e3684c",
+                "name": "VLAN {#VLAN} / ICMP raw",
+                "type": "SIMPLE",
+                "key": "icmpping[{#ENDPOINT},3,100,56,300]",
+                "delay": "10s",
+                "history": "7d",
+                "trends": "30d",
+                "description": "Native ICMP from the ROC Zabbix server; 3 probes per cycle.",
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  },
+                  {
+                    "tag": "vlan",
+                    "value": "{#VLAN}"
+                  }
+                ]
+              }
+            ],
+            "trigger_prototypes": [
+              {
+                "uuid": "fff4d793c16c4852823841b9161d9e68",
+                "expression": "(min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.domain.oper[{#VLAN}],#3)<>1 or max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.domain.present[{#VLAN}],#3)=0) and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0 and last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=1",
+                "name": "L2_DOMAIN_DOWN VLAN {#VLAN}",
+                "priority": "AVERAGE",
+                "dependencies": [
+                  {
+                    "name": "L1_PARENT_DOWN",
+                    "expression": "min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)<>1"
+                  },
+                  {
+                    "name": "L2_TOPOLOGY_MISMATCH",
+                    "expression": "last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=0 and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0"
+                  },
+                  {
+                    "name": "NETWORK_TELEMETRY_UNKNOWN",
+                    "expression": "nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,90s)=1 or nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.evidence,1h)=1"
+                  }
+                ],
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "a9ec6d1c8ea94ebe830b5fffc428ee6a",
+                "expression": "max(/Template Andy Runtime Network - MikroTik SNMPv3/icmpping[{#ENDPOINT},3,100,56,300],#3)=0 and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0 and last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=1",
+                "name": "L3_ENDPOINT_UNREACHABLE VLAN {#VLAN}",
+                "priority": "AVERAGE",
+                "dependencies": [
+                  {
+                    "name": "L1_PARENT_DOWN",
+                    "expression": "min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)<>1"
+                  },
+                  {
+                    "name": "L2_DOMAIN_DOWN VLAN {#VLAN}",
+                    "expression": "(min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.domain.oper[{#VLAN}],#3)<>1 or max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.domain.present[{#VLAN}],#3)=0) and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0 and last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=1"
+                  },
+                  {
+                    "name": "L2_TOPOLOGY_MISMATCH",
+                    "expression": "last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=0 and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0"
+                  },
+                  {
+                    "name": "L3_NEIGHBOR_INCOMPLETE VLAN {#VLAN}",
+                    "expression": "min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.domain.arp[{#VLAN}],#3)>1 and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0 and last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=1"
+                  },
+                  {
+                    "name": "NETWORK_TELEMETRY_UNKNOWN",
+                    "expression": "nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,90s)=1 or nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.evidence,1h)=1"
+                  }
+                ],
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "b420e84d2b194a849ada21a521221e57",
+                "expression": "min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.domain.arp[{#VLAN}],#3)>1 and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0 and last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=1",
+                "name": "L3_NEIGHBOR_INCOMPLETE VLAN {#VLAN}",
+                "priority": "AVERAGE",
+                "dependencies": [
+                  {
+                    "name": "L1_PARENT_DOWN",
+                    "expression": "min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)<>1"
+                  },
+                  {
+                    "name": "L2_DOMAIN_DOWN VLAN {#VLAN}",
+                    "expression": "(min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.domain.oper[{#VLAN}],#3)<>1 or max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.domain.present[{#VLAN}],#3)=0) and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0 and last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=1"
+                  },
+                  {
+                    "name": "L2_TOPOLOGY_MISMATCH",
+                    "expression": "last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=0 and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0"
+                  },
+                  {
+                    "name": "NETWORK_TELEMETRY_UNKNOWN",
+                    "expression": "nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,90s)=1 or nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.evidence,1h)=1"
+                  }
+                ],
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.discovery.raw"
+            },
+            "preprocessing": [
+              {
+                "type": "JAVASCRIPT",
+                "parameters": [
+                  "// Parse the numeric OID output produced by Zabbix native walk[] / get[].\n// A missing OID remains missing; it is never translated into a healthy value.\nfunction snmp(raw) {\n  var out = {};\n  raw.split(/\\r?\\n/).forEach(function (line) {\n    var m = line.match(/^\\.?([0-9.]+)\\s*=\\s*(.*)$/);\n    if (!m || /No Such|endOfMib|End of MIB/i.test(m[2])) return;\n    var value = m[2].replace(/^[A-Za-z0-9_-]+:\\s*/, '').trim();\n    if (value.charAt(0) === '\"' && value.charAt(value.length - 1) === '\"') {\n      value = value.slice(1, -1);\n    }\n    out[m[1]] = value;\n  });\n  return out;\n}\nvar o = snmp(value), rows = [];\nvar names = '1.3.6.1.2.1.31.1.1.1.1.';\nvar addressIndex = '1.3.6.1.2.1.4.20.1.2.';\nObject.keys(o).forEach(function (oid) {\n  if (oid.indexOf(names) !== 0 || !/^ANDY21[0-7]-GW$/.test(o[oid])) return;\n  var index = oid.slice(names.length), name = o[oid];\n  var row = {'{#SNMPINDEX}': index, '{#IFNAME}': name,\n    '{#VLAN}': name.match(/ANDY([0-9]+)-GW/)[1],\n    '{#GATEWAY}': '', '{#NETWORK}': '', '{#ENDPOINT}': ''};\n  Object.keys(o).forEach(function (ipOid) {\n    if (ipOid.indexOf(addressIndex) !== 0 || o[ipOid] !== index) return;\n    var ip = ipOid.slice(addressIndex.length);\n    if (o['1.3.6.1.2.1.4.20.1.3.' + ip] !== '255.255.255.248') return;\n    var parts = ip.split('.').map(Number), last = parts[3];\n    // This template admits /29 runtime gateways at the first usable address.\n    if (last % 8 !== 1) return;\n    row['{#GATEWAY}'] = ip;\n    parts[3] = last - 1; row['{#NETWORK}'] = parts.join('.') + '/29';\n    parts[3] = last + 1; row['{#ENDPOINT}'] = parts.join('.');\n  });\n  rows.push(row);\n});\nrows.sort(function (a, b) { return Number(a['{#VLAN}']) - Number(b['{#VLAN}']); });\nreturn JSON.stringify(rows);\n"
+                ]
+              }
+            ]
+          },
+          {
+            "uuid": "44db0812842a4f029d31ffbea1dcadfc",
+            "name": "Ethernet physical interfaces",
+            "type": "DEPENDENT",
+            "key": "andy.physical.discovery",
+            "lifetime": "1h",
+            "enabled_lifetime_type": "DISABLE_AFTER",
+            "item_prototypes": [
+              {
+                "uuid": "aa58789c677840499bf1e6997bdc097e",
+                "name": "PHYSICAL {#SNMPINDEX} / ADMIN",
+                "type": "DEPENDENT",
+                "key": "andy.physical.admin[{#SNMPINDEX}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.7.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "300ea4332d294c429e9a63280a51d208",
+                "name": "PHYSICAL {#SNMPINDEX} / INTERFACE",
+                "type": "DEPENDENT",
+                "key": "andy.physical.name[{#SNMPINDEX}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.1.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "3cfe78b257ab42118ed31e3f73788587",
+                "name": "PHYSICAL {#SNMPINDEX} / OPER",
+                "type": "DEPENDENT",
+                "key": "andy.physical.oper[{#SNMPINDEX}]",
+                "history": "7d",
+                "trends": "30d",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.8.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "f436b4d5eab24c5c8a98b055e0770194",
+                "name": "PHYSICAL {#SNMPINDEX} / ROLE",
+                "type": "DEPENDENT",
+                "key": "andy.physical.role[{#SNMPINDEX}]",
+                "history": "7d",
+                "value_type": "TEXT",
+                "preprocessing": [
+                  {
+                    "type": "JAVASCRIPT",
+                    "parameters": [
+                      "var s=JSON.parse(value), name='{#IFNAME}', parents=s.vlans.map(function(v){return v.interface;});var member=s.ports.some(function(p){return p.interface===name && parents.indexOf(p.bridge)>=0;});return member ? 'VLAN parent member' : (s.physical.name===name ? 'Declared trunk' : 'Other / not asserted');"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.topology.evidence"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "7f22b635f7314631af43fa601e2a251e",
+                "name": "PHYSICAL {#SNMPINDEX} / RX",
+                "type": "DEPENDENT",
+                "key": "andy.physical.rx[{#SNMPINDEX}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "Bps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.6.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "74f358a7a9ad4b9394bf535c7ec19713",
+                "name": "PHYSICAL {#SNMPINDEX} / RX_DISCARDS",
+                "type": "DEPENDENT",
+                "key": "andy.physical.rx_discards[{#SNMPINDEX}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "eps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.13.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "7926fc124d404c25955d142d60551949",
+                "name": "PHYSICAL {#SNMPINDEX} / RX_ERRORS",
+                "type": "DEPENDENT",
+                "key": "andy.physical.rx_errors[{#SNMPINDEX}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "eps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.14.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "e421b06bbfd449cd97560c7a692b8d55",
+                "name": "PHYSICAL {#SNMPINDEX} / SPEED",
+                "type": "DEPENDENT",
+                "key": "andy.physical.speed[{#SNMPINDEX}]",
+                "history": "7d",
+                "trends": "30d",
+                "units": "Mbps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.15.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "48b2b124dda94aa884203de8cedcce3c",
+                "name": "PHYSICAL {#SNMPINDEX} / TX",
+                "type": "DEPENDENT",
+                "key": "andy.physical.tx[{#SNMPINDEX}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "Bps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.31.1.1.1.10.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "8a96b51453344d258c22f773e6d879d9",
+                "name": "PHYSICAL {#SNMPINDEX} / TX_DISCARDS",
+                "type": "DEPENDENT",
+                "key": "andy.physical.tx_discards[{#SNMPINDEX}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "eps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.19.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              },
+              {
+                "uuid": "c789400d2ac1431db62d9df9d8bed010",
+                "name": "PHYSICAL {#SNMPINDEX} / TX_ERRORS",
+                "type": "DEPENDENT",
+                "key": "andy.physical.tx_errors[{#SNMPINDEX}]",
+                "history": "7d",
+                "value_type": "FLOAT",
+                "trends": "30d",
+                "units": "eps",
+                "preprocessing": [
+                  {
+                    "type": "SNMP_WALK_VALUE",
+                    "parameters": [
+                      "1.3.6.1.2.1.2.2.1.20.{#SNMPINDEX}",
+                      "0"
+                    ]
+                  },
+                  {
+                    "type": "CHANGE_PER_SECOND"
+                  }
+                ],
+                "master_item": {
+                  "key": "andy.metrics.raw"
+                },
+                "tags": [
+                  {
+                    "tag": "component",
+                    "value": "network-osi"
+                  }
+                ]
+              }
+            ],
+            "master_item": {
+              "key": "andy.discovery.raw"
+            },
+            "preprocessing": [
+              {
+                "type": "JAVASCRIPT",
+                "parameters": [
+                  "// Parse the numeric OID output produced by Zabbix native walk[] / get[].\n// A missing OID remains missing; it is never translated into a healthy value.\nfunction snmp(raw) {\n  var out = {};\n  raw.split(/\\r?\\n/).forEach(function (line) {\n    var m = line.match(/^\\.?([0-9.]+)\\s*=\\s*(.*)$/);\n    if (!m || /No Such|endOfMib|End of MIB/i.test(m[2])) return;\n    var value = m[2].replace(/^[A-Za-z0-9_-]+:\\s*/, '').trim();\n    if (value.charAt(0) === '\"' && value.charAt(value.length - 1) === '\"') {\n      value = value.slice(1, -1);\n    }\n    out[m[1]] = value;\n  });\n  return out;\n}\nvar o=snmp(value), rows=[]; Object.keys(o).forEach(function(k){var m=k.match(/^1\\.3\\.6\\.1\\.2\\.1\\.2\\.2\\.1\\.3\\.([0-9]+)$/);if(m && o[k]==='6'){var name=o['1.3.6.1.2.1.31.1.1.1.1.'+m[1]]; if(name)rows.push({'{#SNMPINDEX}':m[1],'{#IFNAME}':name});}}); return JSON.stringify(rows);"
+                ]
+              }
+            ],
+            "trigger_prototypes": []
+          }
+        ]
+      }
+    ],
+    "triggers": [
+      {
+        "uuid": "77719c40d4ab4a5dbb30e85e35277c8b",
+        "expression": "last(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.consistent)=0 and max(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)=1 and nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.metrics.raw,90s)=0",
+        "name": "L2_TOPOLOGY_MISMATCH",
+        "priority": "AVERAGE",
+        "dependencies": [
+          {
+            "name": "L1_PARENT_DOWN",
+            "expression": "min(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,#3)<>1"
+          },
+          {
+            "name": "NETWORK_TELEMETRY_UNKNOWN",
+            "expression": "nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,90s)=1 or nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.evidence,1h)=1"
+          }
+        ],
+        "tags": [
+          {
+            "tag": "component",
+            "value": "network-osi"
+          }
+        ]
+      },
+      {
+        "uuid": "20d281c92af145f5aeeca79b4c40a0b4",
+        "expression": "nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.parent.oper,90s)=1 or nodata(/Template Andy Runtime Network - MikroTik SNMPv3/andy.topology.evidence,1h)=1",
+        "name": "NETWORK_TELEMETRY_UNKNOWN",
+        "priority": "WARNING",
+        "tags": [
+          {
+            "tag": "component",
+            "value": "network-osi"
+          }
+        ]
+      }
+    ]
+  }
+}
