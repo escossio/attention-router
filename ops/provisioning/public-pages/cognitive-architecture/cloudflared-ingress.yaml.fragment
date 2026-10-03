@@ -1,0 +1,4 @@
+  - hostname: cognitive.escossio.com
+    service: http://127.0.0.1:80
+    originRequest:
+      httpHostHeader: cognitive.escossio.com
