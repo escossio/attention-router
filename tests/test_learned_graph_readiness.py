@@ -25,6 +25,7 @@ from attention_router.application.learned_graph_readiness import (
     collect_corrected_graph_labels,
     evaluate_learned_graph_readiness,
 )
+from attention_router.config import Settings
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.learned_graph_readiness import (
     CorrectedGraphLabel,
@@ -191,13 +192,71 @@ def _link_label(
     )
 
 
-def _organic_link_dataset(session, *, count: int = 10):
+def _entity_label(
+    session,
+    *,
+    index: int,
+    positive: bool,
+    lineage: str,
+    decided_at: datetime,
+):
+    left = f"actor-v2j-entity-{index}-a"
+    right = f"actor-v2j-entity-{index}-b"
+    for actor_key, suffix in ((left, "a"), (right, "b")):
+        upsert_actor_binding(
+            session,
+            source="test",
+            external_actor_id=f"external-v2j-entity-{index}-{suffix}",
+            actor_key=actor_key,
+            actor_category="contact",
+            display_name=f"Entity Actor {index} {suffix}",
+            metadata={},
+            tenant_id=DEFAULT_TENANT_ID,
+        )
+
+    candidate, created = propose_entity_resolution(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key_a=left,
+        actor_key_b=right,
+        evidence=[
+            IdentityEvidenceInput(
+                evidence_type="SOURCE_ALIAS",
+                source_ref=f"entity-label-{index}",
+                confidence=0.9,
+                independence_key=f"entity-label-{index}",
+                metadata={"lineage_classification": lineage},
+            )
+        ],
+        now=decided_at - timedelta(minutes=1),
+    )
+    assert created is True
+    if positive:
+        confirmed, _alias = confirm_entity_resolution(
+            session,
+            candidate_id=candidate.id,
+            canonical_actor_key=left,
+            decision_actor_key=OWNER,
+            decision_ref=f"owner-v2j-entity-confirm-{index}",
+            now=decided_at,
+        )
+        return confirmed
+    return reject_entity_resolution(
+        session,
+        candidate_id=candidate.id,
+        decision_actor_key=OWNER,
+        decision_ref=f"owner-v2j-entity-reject-{index}",
+        now=decided_at,
+    )
+
+
+def _organic_entity_dataset(session, *, count: int = 14):
     _owner(session)
     start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
     rows = []
     for index in range(count):
         rows.append(
-            _link_label(
+            _entity_label(
                 session,
                 index=index,
                 positive=index % 2 == 0,
@@ -210,13 +269,13 @@ def _organic_link_dataset(session, *, count: int = 10):
 
 def _policy_for_small_fixture() -> LearnedGraphReadinessPolicy:
     return LearnedGraphReadinessPolicy(
-        minimum_total_labels=10,
-        minimum_positive_labels=5,
-        minimum_negative_labels=5,
-        minimum_organic_labels=10,
+        minimum_total_labels=14,
+        minimum_positive_labels=7,
+        minimum_negative_labels=7,
+        minimum_organic_labels=14,
         maximum_unknown_lineage_ratio=0.0,
-        minimum_temporal_span_days=9,
-        minimum_test_examples=2,
+        minimum_temporal_span_days=13,
+        minimum_test_examples=3,
         minimum_precision_improvement=0.02,
         maximum_false_positive_rate=0.05,
         maximum_calibration_error=0.10,
@@ -227,36 +286,45 @@ def _policy_for_small_fixture() -> LearnedGraphReadinessPolicy:
 
 def _metrics(
     *,
+    task: LearnedGraphTask,
     learned: bool,
     split_fingerprint: str,
     false_positive_rate: float = 0.04,
 ) -> EvaluationMetrics:
+    baseline_names = {
+        LearnedGraphTask.LINK_PREDICTION: "DETERMINISTIC_RELATION_CANDIDATE",
+        LearnedGraphTask.ENTITY_RESOLUTION: "DETERMINISTIC_ENTITY_RESOLUTION_V0",
+    }
+    learned_names = {
+        LearnedGraphTask.LINK_PREDICTION: "RGCN_SHADOW_CANDIDATE",
+        LearnedGraphTask.ENTITY_RESOLUTION: "ENTITY_EMBEDDING_SHADOW_CANDIDATE",
+    }
     if learned:
         return EvaluationMetrics(
-            task=LearnedGraphTask.LINK_PREDICTION,
-            engine_name="RGCN_SHADOW_CANDIDATE",
+            task=task,
+            engine_name=learned_names[task],
             engine_version="candidate-v0",
             precision=0.85,
             recall=0.81,
             false_positive_rate=false_positive_rate,
             calibration_error=0.07,
             explainability_coverage=0.98,
-            test_examples=2,
+            test_examples=3,
             split_fingerprint=split_fingerprint,
-            reproducibility_ref="eval:v2j:learned:001",
+            reproducibility_ref=f"eval:v2j:{task.value}:learned:001",
         )
     return EvaluationMetrics(
-        task=LearnedGraphTask.LINK_PREDICTION,
-        engine_name="DETERMINISTIC_RELATION_CANDIDATE",
+        task=task,
+        engine_name=baseline_names[task],
         engine_version="V0",
         precision=0.80,
         recall=0.82,
         false_positive_rate=0.08,
         calibration_error=0.15,
         explainability_coverage=1.0,
-        test_examples=2,
+        test_examples=3,
         split_fingerprint=split_fingerprint,
-        reproducibility_ref="eval:v2j:baseline:001",
+        reproducibility_ref=f"eval:v2j:{task.value}:baseline:001",
     )
 
 
@@ -294,6 +362,7 @@ def test_v2j_empty_dataset_is_not_ready_and_runtime_defaults_off(session):
         authorize_learned_graph_runtime_mode(
             report,
             requested_mode=LearnedGraphRuntimeMode.SHADOW,
+            feature_flag_enabled=True,
         )
     assert authorize_learned_graph_runtime_mode(
         report,
@@ -322,35 +391,37 @@ def test_v2j_empty_dataset_is_not_ready_and_runtime_defaults_off(session):
     assert after == before
 
 
-def test_v2j_organic_corrected_dataset_and_better_model_allow_shadow_only(session):
-    _organic_link_dataset(session)
-    labels, _, _ = collect_corrected_graph_labels(
+def test_v2j_organic_corrected_dataset_and_better_model_allow_shadow_only(
+    session,
+    monkeypatch,
+):
+    _organic_entity_dataset(session)
+    labels, _, _, _ = collect_corrected_graph_labels(
         session,
         tenant_id=DEFAULT_TENANT_ID,
-        task=LearnedGraphTask.LINK_PREDICTION,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
     )
     split = build_temporal_holdout(
         labels,
-        task=LearnedGraphTask.LINK_PREDICTION,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
     )
     assert split is not None
     assert all(
-        item.source_quality
-        == "ENGINE:RULE|EVIDENCE:TIMELINE_EVENT"
+        item.source_quality == "EVIDENCE:SOURCE_ALIAS"
         for item in labels
     )
-    assert all(item.valid_from is not None for item in labels)
-    assert all(item.valid_until is not None for item in labels)
 
     report = evaluate_learned_graph_readiness(
         session,
         tenant_id=DEFAULT_TENANT_ID,
-        task=LearnedGraphTask.LINK_PREDICTION,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
         baseline=_metrics(
+            task=LearnedGraphTask.ENTITY_RESOLUTION,
             learned=False,
             split_fingerprint=split.fingerprint,
         ),
         learned=_metrics(
+            task=LearnedGraphTask.ENTITY_RESOLUTION,
             learned=True,
             split_fingerprint=split.fingerprint,
         ),
@@ -358,17 +429,26 @@ def test_v2j_organic_corrected_dataset_and_better_model_allow_shadow_only(sessio
         now=datetime(2026, 2, 1, tzinfo=UTC),
     )
 
-    assert report.dataset.total == 10
-    assert report.dataset.positive == 5
-    assert report.dataset.negative == 5
-    assert report.dataset.organic == 10
+    assert report.dataset.total == 14
+    assert report.dataset.positive == 7
+    assert report.dataset.negative == 7
+    assert report.dataset.organic == 14
+    assert report.dataset.organic_positive == 7
+    assert report.dataset.organic_negative == 7
     assert report.dataset.synthetic == 0
     assert report.dataset.historical_unknown == 0
-    assert report.dataset.temporal_span_days == pytest.approx(9.0)
+    assert report.dataset.admitted_noncanonical == 0
+    assert report.dataset.temporal_span_days == pytest.approx(13.0)
     assert report.split is not None
-    assert len(report.split.train_label_ids) == 7
-    assert len(report.split.validation_label_ids) == 1
-    assert len(report.split.test_label_ids) == 2
+    assert len(report.split.train_label_ids) == 9
+    assert len(report.split.validation_label_ids) == 2
+    assert len(report.split.test_label_ids) == 3
+    assert report.split.train_positive > 0
+    assert report.split.train_negative > 0
+    assert report.split.validation_positive > 0
+    assert report.split.validation_negative > 0
+    assert report.split.test_positive > 0
+    assert report.split.test_negative > 0
     assert report.split.group_leakage_detected is False
     assert report.split.lineage_leakage_detected is False
     assert (
@@ -379,9 +459,20 @@ def test_v2j_organic_corrected_dataset_and_better_model_allow_shadow_only(sessio
     assert report.ready_for_shadow is True
     assert report.failed_gate_codes == ()
 
+    monkeypatch.delenv("LEARNED_GRAPH_SHADOW_ENABLED", raising=False)
+    assert Settings(_env_file=None).learned_graph_shadow_enabled is False
+    with pytest.raises(
+        LearnedGraphReadinessError,
+        match="LEARNED_GRAPH_SHADOW_FEATURE_FLAG_REQUIRED",
+    ):
+        authorize_learned_graph_runtime_mode(
+            report,
+            requested_mode=LearnedGraphRuntimeMode.SHADOW,
+        )
     assert authorize_learned_graph_runtime_mode(
         report,
         requested_mode=LearnedGraphRuntimeMode.SHADOW,
+        feature_flag_enabled=True,
     ) == LearnedGraphRuntimeMode.SHADOW
     with pytest.raises(
         LearnedGraphReadinessError,
@@ -390,31 +481,117 @@ def test_v2j_organic_corrected_dataset_and_better_model_allow_shadow_only(sessio
         authorize_learned_graph_runtime_mode(
             report,
             requested_mode=LearnedGraphRuntimeMode.ACTIVE,
+            feature_flag_enabled=True,
         )
 
 
-def test_v2j_false_positive_budget_blocks_shadow_even_when_precision_improves(session):
-    _organic_link_dataset(session)
-    labels, _, _ = collect_corrected_graph_labels(
+def test_v2j_admitted_relationship_candidate_is_not_positive_label(session):
+    _owner(session)
+    start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    _link_label(
+        session,
+        index=100,
+        positive=True,
+        lineage="ORGANIC",
+        decided_at=start,
+    )
+    _link_label(
+        session,
+        index=101,
+        positive=False,
+        lineage="ORGANIC",
+        decided_at=start + timedelta(days=1),
+    )
+
+    labels, superseded, pending, admitted = collect_corrected_graph_labels(
         session,
         tenant_id=DEFAULT_TENANT_ID,
         task=LearnedGraphTask.LINK_PREDICTION,
     )
+
+    assert superseded == 0
+    assert pending == 0
+    assert admitted == 1
+    assert len(labels) == 1
+    assert labels[0].value == LabelValue.NEGATIVE
+    assert labels[0].source_quality == "ENGINE:RULE|EVIDENCE:TIMELINE_EVENT"
+    assert labels[0].valid_from is not None
+    assert labels[0].valid_until is not None
+
+    report = evaluate_learned_graph_readiness(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        task=LearnedGraphTask.LINK_PREDICTION,
+    )
+    assert report.dataset.positive == 0
+    assert report.dataset.admitted_noncanonical == 1
+    assert report.ready_for_shadow is False
+    assert (
+        "MINIMUM_ORGANIC_POSITIVE_LABELS"
+        in report.failed_gate_codes
+    )
+
+
+def test_v2j_synthetic_negatives_cannot_satisfy_organic_class_gate(session):
+    _owner(session)
+    start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    for index in range(14):
+        _entity_label(
+            session,
+            index=index,
+            positive=True,
+            lineage="ORGANIC",
+            decided_at=start + timedelta(days=index),
+        )
+    for index in range(14, 21):
+        _entity_label(
+            session,
+            index=index,
+            positive=False,
+            lineage="SYNTHETIC",
+            decided_at=start + timedelta(days=index),
+        )
+
+    report = evaluate_learned_graph_readiness(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
+        policy=_policy_for_small_fixture(),
+    )
+
+    assert report.dataset.negative == 7
+    assert report.dataset.organic_negative == 0
+    assert report.ready_for_shadow is False
+    assert (
+        "MINIMUM_ORGANIC_NEGATIVE_LABELS"
+        in report.failed_gate_codes
+    )
+
+
+def test_v2j_false_positive_budget_blocks_shadow_even_when_precision_improves(session):
+    _organic_entity_dataset(session)
+    labels, _, _, _ = collect_corrected_graph_labels(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
+    )
     split = build_temporal_holdout(
         labels,
-        task=LearnedGraphTask.LINK_PREDICTION,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
     )
     assert split is not None
 
     report = evaluate_learned_graph_readiness(
         session,
         tenant_id=DEFAULT_TENANT_ID,
-        task=LearnedGraphTask.LINK_PREDICTION,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
         baseline=_metrics(
+            task=LearnedGraphTask.ENTITY_RESOLUTION,
             learned=False,
             split_fingerprint=split.fingerprint,
         ),
         learned=_metrics(
+            task=LearnedGraphTask.ENTITY_RESOLUTION,
             learned=True,
             split_fingerprint=split.fingerprint,
             false_positive_rate=0.08,
@@ -423,33 +600,36 @@ def test_v2j_false_positive_budget_blocks_shadow_even_when_precision_improves(se
     )
 
     assert report.learned is not None
+    assert report.baseline is not None
     assert report.learned.precision > report.baseline.precision
     assert report.ready_for_shadow is False
     assert "FALSE_POSITIVE_BUDGET" in report.failed_gate_codes
 
 
 def test_v2j_same_test_count_with_wrong_split_fingerprint_fails(session):
-    _organic_link_dataset(session)
-    labels, _, _ = collect_corrected_graph_labels(
+    _organic_entity_dataset(session)
+    labels, _, _, _ = collect_corrected_graph_labels(
         session,
         tenant_id=DEFAULT_TENANT_ID,
-        task=LearnedGraphTask.LINK_PREDICTION,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
     )
     split = build_temporal_holdout(
         labels,
-        task=LearnedGraphTask.LINK_PREDICTION,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
     )
     assert split is not None
 
     report = evaluate_learned_graph_readiness(
         session,
         tenant_id=DEFAULT_TENANT_ID,
-        task=LearnedGraphTask.LINK_PREDICTION,
+        task=LearnedGraphTask.ENTITY_RESOLUTION,
         baseline=_metrics(
+            task=LearnedGraphTask.ENTITY_RESOLUTION,
             learned=False,
             split_fingerprint=split.fingerprint,
         ),
         learned=_metrics(
+            task=LearnedGraphTask.ENTITY_RESOLUTION,
             learned=True,
             split_fingerprint="different-split-fingerprint",
         ),
@@ -589,7 +769,7 @@ def test_v2j_entity_resolution_owner_decisions_become_task_specific_labels(sessi
         now=datetime(2026, 1, 4, tzinfo=UTC),
     )
 
-    labels, superseded, pending = collect_corrected_graph_labels(
+    labels, superseded, pending, admitted = collect_corrected_graph_labels(
         session,
         tenant_id=DEFAULT_TENANT_ID,
         task=LearnedGraphTask.ENTITY_RESOLUTION,
@@ -597,6 +777,7 @@ def test_v2j_entity_resolution_owner_decisions_become_task_specific_labels(sessi
 
     assert superseded == 0
     assert pending == 0
+    assert admitted == 0
     assert len(labels) == 2
     assert {item.value for item in labels} == {
         LabelValue.POSITIVE,

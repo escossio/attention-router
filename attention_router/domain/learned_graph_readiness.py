@@ -63,6 +63,8 @@ class DatasetLineageSummary:
     positive: int
     negative: int
     organic: int
+    organic_positive: int
+    organic_negative: int
     synthetic: int
     historical_unknown: int
     corrected_groups: int
@@ -70,6 +72,7 @@ class DatasetLineageSummary:
     owner_rejected_labels: int
     superseded_corrections: int
     inferred_unreviewed: int
+    admitted_noncanonical: int
     explicit_relationships: int
     temporal_span_days: float
 
@@ -85,6 +88,12 @@ class TemporalSplitManifest:
     validation_until: datetime
     test_from: datetime
     fingerprint: str
+    train_positive: int
+    train_negative: int
+    validation_positive: int
+    validation_negative: int
+    test_positive: int
+    test_negative: int
     group_leakage_detected: bool
     lineage_leakage_detected: bool
     schema_version: str = "TEMPORAL_HOLDOUT_V0"

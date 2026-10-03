@@ -201,7 +201,7 @@ def _link_prediction_labels(
     session: Session,
     *,
     tenant_id: str,
-) -> tuple[list[CorrectedGraphLabel], int, int]:
+) -> tuple[list[CorrectedGraphLabel], int, int, int]:
     rows = list(
         session.scalars(
             select(CandidateInsightRow)
@@ -219,6 +219,7 @@ def _link_prediction_labels(
     labels: list[CorrectedGraphLabel] = []
     superseded = 0
     inferred_unreviewed = 0
+    admitted_noncanonical = 0
 
     for row in rows:
         if row.state == "SUPERSEDED":
@@ -227,17 +228,18 @@ def _link_prediction_labels(
         if row.state in {"PROPOSED", "NEEDS_REVIEW"}:
             inferred_unreviewed += 1
             continue
+        if (
+            row.state == "ADMITTED"
+            and row.decision_kind == "OWNER_ADMITTED"
+        ):
+            admitted_noncanonical += 1
+            continue
         if row.sensitivity_class == "SECRET":
             continue
         if row.decided_at is None:
             continue
 
         if (
-            row.state == "ADMITTED"
-            and row.decision_kind == "OWNER_ADMITTED"
-        ):
-            value = LabelValue.POSITIVE
-        elif (
             row.state == "REJECTED"
             and row.decision_kind == "OWNER_REJECTED"
         ):
@@ -281,14 +283,19 @@ def _link_prediction_labels(
             )
         )
 
-    return labels, superseded, inferred_unreviewed
+    return (
+        labels,
+        superseded,
+        inferred_unreviewed,
+        admitted_noncanonical,
+    )
 
 
 def _entity_resolution_labels(
     session: Session,
     *,
     tenant_id: str,
-) -> tuple[list[CorrectedGraphLabel], int, int]:
+) -> tuple[list[CorrectedGraphLabel], int, int, int]:
     rows = list(
         session.scalars(
             select(EntityResolutionCandidateRow)
@@ -361,7 +368,7 @@ def _entity_resolution_labels(
             )
         )
 
-    return labels, superseded, inferred_unreviewed
+    return labels, superseded, inferred_unreviewed, 0
 
 
 def collect_corrected_graph_labels(
@@ -369,27 +376,27 @@ def collect_corrected_graph_labels(
     *,
     tenant_id: str,
     task: LearnedGraphTask,
-) -> tuple[tuple[CorrectedGraphLabel, ...], int, int]:
+) -> tuple[tuple[CorrectedGraphLabel, ...], int, int, int]:
     """Collect only owner-decided labels for one task."""
     if session.get(TenantRow, tenant_id) is None:
         raise LearnedGraphReadinessError(
             "LEARNED_GRAPH_TENANT_NOT_FOUND"
         )
     if task == LearnedGraphTask.LINK_PREDICTION:
-        labels, superseded, pending = _link_prediction_labels(
+        labels, superseded, pending, admitted = _link_prediction_labels(
             session,
             tenant_id=tenant_id,
         )
     elif task == LearnedGraphTask.ENTITY_RESOLUTION:
-        labels, superseded, pending = _entity_resolution_labels(
+        labels, superseded, pending, admitted = _entity_resolution_labels(
             session,
             tenant_id=tenant_id,
         )
     else:
-        return (), 0, 0
+        return (), 0, 0, 0
 
     labels.sort(key=lambda item: (item.decided_at, item.label_id))
-    return tuple(labels), superseded, pending
+    return tuple(labels), superseded, pending, admitted
 
 
 def summarize_dataset_lineage(
@@ -399,6 +406,7 @@ def summarize_dataset_lineage(
     labels: tuple[CorrectedGraphLabel, ...],
     superseded_corrections: int,
     inferred_unreviewed: int,
+    admitted_noncanonical: int,
 ) -> DatasetLineageSummary:
     counter = Counter(item.lineage for item in labels)
     positive = sum(
@@ -407,10 +415,22 @@ def summarize_dataset_lineage(
     negative = sum(
         item.value == LabelValue.NEGATIVE for item in labels
     )
-    organic_times = sorted(
-        item.decided_at
+    organic_labels = [
+        item
         for item in labels
         if item.lineage == DatasetLineageClass.ORGANIC
+    ]
+    organic_positive = sum(
+        item.value == LabelValue.POSITIVE
+        for item in organic_labels
+    )
+    organic_negative = sum(
+        item.value == LabelValue.NEGATIVE
+        for item in organic_labels
+    )
+    organic_times = sorted(
+        item.decided_at
+        for item in organic_labels
     )
     temporal_span_days = 0.0
     if len(organic_times) >= 2:
@@ -431,6 +451,8 @@ def summarize_dataset_lineage(
         positive=positive,
         negative=negative,
         organic=counter[DatasetLineageClass.ORGANIC],
+        organic_positive=organic_positive,
+        organic_negative=organic_negative,
         synthetic=counter[DatasetLineageClass.SYNTHETIC],
         historical_unknown=counter[
             DatasetLineageClass.HISTORICAL_UNKNOWN
@@ -440,6 +462,7 @@ def summarize_dataset_lineage(
         owner_rejected_labels=negative,
         superseded_corrections=superseded_corrections,
         inferred_unreviewed=inferred_unreviewed,
+        admitted_noncanonical=admitted_noncanonical,
         explicit_relationships=explicit_relationships,
         temporal_span_days=round(temporal_span_days, 6),
     )
@@ -502,6 +525,24 @@ def build_temporal_holdout(
     train_ids = tuple(item.label_id for item in train)
     validation_ids = tuple(item.label_id for item in validation)
     test_ids = tuple(item.label_id for item in test)
+    train_positive = sum(
+        item.value == LabelValue.POSITIVE for item in train
+    )
+    train_negative = sum(
+        item.value == LabelValue.NEGATIVE for item in train
+    )
+    validation_positive = sum(
+        item.value == LabelValue.POSITIVE for item in validation
+    )
+    validation_negative = sum(
+        item.value == LabelValue.NEGATIVE for item in validation
+    )
+    test_positive = sum(
+        item.value == LabelValue.POSITIVE for item in test
+    )
+    test_negative = sum(
+        item.value == LabelValue.NEGATIVE for item in test
+    )
     train_until = train[-1].decided_at
     validation_until = validation[-1].decided_at
     test_from = test[0].decided_at
@@ -516,6 +557,12 @@ def build_temporal_holdout(
             "train_until": train_until.isoformat(),
             "validation_until": validation_until.isoformat(),
             "test_from": test_from.isoformat(),
+            "train_positive": train_positive,
+            "train_negative": train_negative,
+            "validation_positive": validation_positive,
+            "validation_negative": validation_negative,
+            "test_positive": test_positive,
+            "test_negative": test_negative,
         }
     )
 
@@ -529,6 +576,12 @@ def build_temporal_holdout(
         validation_until=validation_until,
         test_from=test_from,
         fingerprint=fingerprint,
+        train_positive=train_positive,
+        train_negative=train_negative,
+        validation_positive=validation_positive,
+        validation_negative=validation_negative,
+        test_positive=test_positive,
+        test_negative=test_negative,
         group_leakage_detected=group_leakage,
         lineage_leakage_detected=lineage_leakage,
     )
@@ -565,6 +618,14 @@ def _validate_policy(
     if policy.minimum_organic_labels > policy.minimum_total_labels:
         raise LearnedGraphReadinessError(
             "LEARNED_GRAPH_READINESS_POLICY_ORGANIC_INVALID"
+        )
+    if (
+        policy.minimum_organic_labels
+        < policy.minimum_positive_labels
+        + policy.minimum_negative_labels
+    ):
+        raise LearnedGraphReadinessError(
+            "LEARNED_GRAPH_READINESS_POLICY_ORGANIC_CLASS_COUNTS_INVALID"
         )
 
     ratio_values = (
@@ -646,7 +707,7 @@ def evaluate_learned_graph_readiness(
     """Evaluate readiness for SHADOW mode; default runtime remains OFF."""
     current_policy = policy or LearnedGraphReadinessPolicy()
     _validate_policy(current_policy)
-    labels, superseded, pending = collect_corrected_graph_labels(
+    labels, superseded, pending, admitted = collect_corrected_graph_labels(
         session,
         tenant_id=tenant_id,
         task=task,
@@ -657,6 +718,7 @@ def evaluate_learned_graph_readiness(
         labels=labels,
         superseded_corrections=superseded,
         inferred_unreviewed=pending,
+        admitted_noncanonical=admitted,
     )
     split = build_temporal_holdout(labels, task=task)
 
@@ -681,17 +743,17 @@ def evaluate_learned_graph_readiness(
             current_policy.minimum_total_labels,
         ),
         _gate(
-            "MINIMUM_POSITIVE_LABELS",
-            dataset.positive
+            "MINIMUM_ORGANIC_POSITIVE_LABELS",
+            dataset.organic_positive
             >= current_policy.minimum_positive_labels,
-            dataset.positive,
+            dataset.organic_positive,
             current_policy.minimum_positive_labels,
         ),
         _gate(
-            "MINIMUM_NEGATIVE_LABELS",
-            dataset.negative
+            "MINIMUM_ORGANIC_NEGATIVE_LABELS",
+            dataset.organic_negative
             >= current_policy.minimum_negative_labels,
-            dataset.negative,
+            dataset.organic_negative,
             current_policy.minimum_negative_labels,
         ),
         _gate(
@@ -759,6 +821,42 @@ def evaluate_learned_graph_readiness(
                 else "NO_SPLIT"
             ),
             False,
+        ),
+        _gate(
+            "TRAIN_CLASS_BALANCE",
+            split is not None
+            and split.train_positive > 0
+            and split.train_negative > 0,
+            (
+                (split.train_positive, split.train_negative)
+                if split is not None
+                else "NO_SPLIT"
+            ),
+            "positive>0 and negative>0",
+        ),
+        _gate(
+            "VALIDATION_CLASS_BALANCE",
+            split is not None
+            and split.validation_positive > 0
+            and split.validation_negative > 0,
+            (
+                (split.validation_positive, split.validation_negative)
+                if split is not None
+                else "NO_SPLIT"
+            ),
+            "positive>0 and negative>0",
+        ),
+        _gate(
+            "TEST_CLASS_BALANCE",
+            split is not None
+            and split.test_positive > 0
+            and split.test_negative > 0,
+            (
+                (split.test_positive, split.test_negative)
+                if split is not None
+                else "NO_SPLIT"
+            ),
+            "positive>0 and negative>0",
         ),
         _gate(
             "BASELINE_METRICS_PRESENT",
@@ -935,6 +1033,7 @@ def authorize_learned_graph_runtime_mode(
     report: LearnedGraphReadinessReport,
     *,
     requested_mode: LearnedGraphRuntimeMode,
+    feature_flag_enabled: bool = False,
 ) -> LearnedGraphRuntimeMode:
     """V2J permits OFF or readiness-gated SHADOW only. ACTIVE is forbidden."""
     if requested_mode == LearnedGraphRuntimeMode.OFF:
@@ -942,6 +1041,10 @@ def authorize_learned_graph_runtime_mode(
     if requested_mode == LearnedGraphRuntimeMode.ACTIVE:
         raise LearnedGraphReadinessError(
             "LEARNED_GRAPH_ACTIVE_MODE_NOT_ALLOWED_V2J"
+        )
+    if not feature_flag_enabled:
+        raise LearnedGraphReadinessError(
+            "LEARNED_GRAPH_SHADOW_FEATURE_FLAG_REQUIRED"
         )
     if not report.ready_for_shadow:
         raise LearnedGraphReadinessError(
