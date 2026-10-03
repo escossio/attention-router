@@ -1,0 +1,3 @@
+# Host-owned resolver for the Transport namespace.
+# Example syntax:
+# nameserver <resolver-address>

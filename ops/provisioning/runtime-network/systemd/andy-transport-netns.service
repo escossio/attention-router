@@ -1,0 +1,15 @@
+[Unit]
+Description=ANDY Transport network namespace
+Wants=network-online.target
+After=network-online.target
+Before=attention-whatsapp-transport.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/attention-router/agt-network-namespace.env
+ExecStart=/usr/local/sbin/andy-transport-netns up $ANDY_RUNTIME_NETWORK_PARENT $ANDY_TRANSPORT_MACVLAN_BASE $ANDY_TRANSPORT_VLAN_ID $ANDY_TRANSPORT_ADDRESS_CIDR $ANDY_TRANSPORT_GATEWAY $ANDY_TRANSPORT_DISABLE_TX_OFFLOADS
+ExecStop=/usr/local/sbin/andy-transport-netns down $ANDY_RUNTIME_NETWORK_PARENT $ANDY_TRANSPORT_MACVLAN_BASE $ANDY_TRANSPORT_VLAN_ID $ANDY_TRANSPORT_ADDRESS_CIDR $ANDY_TRANSPORT_GATEWAY $ANDY_TRANSPORT_DISABLE_TX_OFFLOADS
+
+[Install]
+WantedBy=multi-user.target

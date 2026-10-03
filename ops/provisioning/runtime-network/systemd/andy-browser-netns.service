@@ -1,0 +1,15 @@
+[Unit]
+Description=ANDY Browser network namespace
+Wants=network-online.target
+After=network-online.target
+Before=attention-whatsapp-browser.service attention-whatsapp-observer.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/attention-router/agt-network-namespace.env
+ExecStart=/usr/local/sbin/andy-netns-vlan up andy-browser $ANDY_BROWSER_VLAN_ID $ANDY_BROWSER_ADDRESS_CIDR $ANDY_BROWSER_GATEWAY $ANDY_RUNTIME_NETWORK_PARENT
+ExecStop=/usr/local/sbin/andy-netns-vlan down andy-browser $ANDY_BROWSER_VLAN_ID $ANDY_BROWSER_ADDRESS_CIDR $ANDY_BROWSER_GATEWAY $ANDY_RUNTIME_NETWORK_PARENT
+
+[Install]
+WantedBy=multi-user.target
