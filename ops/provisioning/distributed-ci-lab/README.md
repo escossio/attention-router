@@ -68,6 +68,28 @@ The measured weighted run completed as follows:
 
 The similar completion times are the intended behavior: historical test cost and worker throughput, rather than equal test counts, determine the split.
 
+## Current PostgreSQL worker policy
+
+The benchmark section below is historical evidence from the earlier heterogeneous
+three-worker layout. It is **not** the current PostgreSQL scheduling policy.
+
+For the current lab allocation, heavy PostgreSQL validation is pinned to exactly
+one worker:
+
+- default PostgreSQL worker: `ci03`;
+- override: `ANDY_CI_POSTGRES_WORKER=<host-registry-id>`;
+- `ci01` and `ci02` are excluded from PostgreSQL discovery, profiling and
+  execution even if they still carry the legacy `postgres-worker` capability;
+- if the selected PostgreSQL worker is busy or unavailable, the gate waits only
+  for that worker within the existing bounded capacity timeout and then blocks;
+- there is no silent PostgreSQL fallback to another worker.
+
+The generic `python`, `transport` and `docker` shadow schedulers remain
+capability-based and may continue using CI01/CI02/CI03 independently.
+
+This keeps the physical-worker choice explicit and replaceable without encoding
+an IP address or local hostname in Git.
+
 ## Control-plane commands
 
 After host-specific SSH aliases and worker installation are configured:
@@ -77,9 +99,13 @@ andy-ci-reprofile <40-char-sha>
 andy-ci-distributed <40-char-sha> postgres
 ```
 
-`andy-ci-reprofile` asks the local host registry for READY hosts with the `postgres-worker` capability and runs duration profiling on the fastest eligible worker. If that worker becomes unavailable, profiling falls through to the remaining eligible pool. Profiles are keyed by a deterministic SHA-256 of the C-locale-sorted file list, so switching between branches with different test sets does not thrash one global profile.
+`andy-ci-reprofile` validates that the selected `ANDY_CI_POSTGRES_WORKER`
+(default `ci03`) still has the `postgres-worker` capability, waits for that
+exact worker, and profiles there. It never falls through to CI01/CI02.
 
-`andy-ci-distributed` resolves the exact-SHA test-file set, selects its cached profile, derives the active worker pool from the host registry, verifies required dependencies, dispatches shards concurrently and requeues work when infrastructure disappears mid-run. A real test failure remains terminal and is never converted into infrastructure failover.
+`andy-ci-distributed` resolves the exact-SHA test-file set and dispatches the
+PostgreSQL gate only to the selected PostgreSQL worker. Worker busy/loss remains
+a bounded infrastructure condition; a real test failure remains terminal.
 
 ## Package contents
 

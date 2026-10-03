@@ -171,7 +171,7 @@ def create_check(token: str, repo: str, sha: str, pr_number: int) -> int:
             "started_at": now_iso(),
             "output": {
                 "title": "Distributed PostgreSQL gate running",
-                "summary": f"PR #{pr_number} exact SHA {sha} CI01/CI02/CI03",
+                "summary": f"PR #{pr_number} exact SHA {sha} PostgreSQL worker policy: CI03",
             },
         },
     )
