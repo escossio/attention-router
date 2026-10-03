@@ -196,6 +196,8 @@ def _provenance_weight(node: CognitiveNode) -> float:
         "FACT",
         "ENTITY_STATE",
         "SEMANTIC_EPISODE",
+        "RECURRING_OBLIGATION",
+        "OBLIGATION_INSTANCE",
     }:
         return 1.0
     return 0.75

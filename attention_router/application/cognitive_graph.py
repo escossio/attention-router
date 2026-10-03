@@ -31,6 +31,11 @@ from attention_router.infrastructure.semantic_episode_models import (
     SemanticEpisodeMembershipRow,
     SemanticEpisodeRow,
 )
+from attention_router.infrastructure.obligation_models import (
+    ObligationFulfillmentRow,
+    ObligationInstanceRow,
+    RecurringObligationDefinitionRow,
+)
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     ConversationMessageRow,
@@ -91,6 +96,14 @@ def _episode_node_id(episode_id: str) -> str:
 
 def _message_node_id(message_id: str) -> str:
     return f"message:{message_id}"
+
+
+def _obligation_node_id(definition_id: str) -> str:
+    return f"obligation:{definition_id}"
+
+
+def _expectation_node_id(instance_id: str) -> str:
+    return f"expectation:{instance_id}"
 
 
 def _entity_node_id(entity_type: str, entity_id: str) -> tuple[str, CognitiveNodeKind]:
@@ -896,6 +909,265 @@ def build_cognitive_graph_slice(
                     "episode_membership_id": row.id,
                     "association_source": row.association_source,
                     "observed_at": _utc(row.observed_at),
+                },
+            )
+        )
+
+
+    obligation_query = (
+        select(RecurringObligationDefinitionRow)
+        .where(RecurringObligationDefinitionRow.tenant_id == tenant_id)
+        .order_by(
+            RecurringObligationDefinitionRow.updated_at.desc(),
+            RecurringObligationDefinitionRow.id,
+        )
+        .limit(limit_per_kind)
+    )
+    if not include_secret:
+        obligation_query = obligation_query.where(
+            RecurringObligationDefinitionRow.sensitivity_class != "SECRET"
+        )
+    obligation_definitions = list(session.scalars(obligation_query).all())
+    obligation_ids = {row.id for row in obligation_definitions}
+
+    for row in obligation_definitions:
+        obligation_node_id = _obligation_node_id(row.id)
+        put_node(
+            CognitiveNode(
+                node_id=obligation_node_id,
+                tenant_id=tenant_id,
+                kind=CognitiveNodeKind.OBLIGATION,
+                source_type="RECURRING_OBLIGATION",
+                source_id=row.id,
+                label=row.obligation_kind,
+                confidence=row.confidence,
+                valid_from=_utc(row.valid_from),
+                valid_until=_utc(row.valid_until),
+                attributes={
+                    "obligation_kind": row.obligation_kind,
+                    "expected_actor_key": row.expected_actor_key,
+                    "expected_event_type": row.expected_event_type,
+                    "cadence_kind": row.cadence_kind,
+                    "due_day": row.due_day,
+                    "due_timezone": row.due_timezone,
+                    "grace_seconds": row.grace_seconds,
+                    "state": row.state,
+                    "sensitivity_class": row.sensitivity_class,
+                    "value_constraints": row.value_constraints,
+                },
+                provenance={
+                    "source_table": "recurring_obligation_definitions",
+                    "semantic_key": row.semantic_key,
+                    "source_kind": row.source_kind,
+                    "source_ref": row.source_ref,
+                    "supersedes_definition_id": row.supersedes_definition_id,
+                    "provenance": row.provenance,
+                },
+            )
+        )
+
+        subject_node_id = ensure_entity(row.subject_type, row.subject_id)
+        put_edge(
+            CognitiveEdge(
+                edge_id=_edge_id(
+                    tenant_id=tenant_id,
+                    source_node_id=obligation_node_id,
+                    target_node_id=subject_node_id,
+                    relation_kind=CognitiveRelationKind.OBLIGATION_SUBJECT,
+                    source_ref=row.id,
+                ),
+                tenant_id=tenant_id,
+                source_node_id=obligation_node_id,
+                target_node_id=subject_node_id,
+                relation_kind=CognitiveRelationKind.OBLIGATION_SUBJECT,
+                semantic_relation=row.obligation_kind,
+                inference_class=CognitiveInferenceClass.EXPLICIT,
+                confidence=row.confidence,
+                valid_from=_utc(row.valid_from),
+                valid_until=_utc(row.valid_until),
+                provenance={"obligation_definition_id": row.id},
+            )
+        )
+
+        expected_actor_node_id = ensure_entity(
+            "ACTOR",
+            row.expected_actor_key,
+        )
+        put_edge(
+            CognitiveEdge(
+                edge_id=_edge_id(
+                    tenant_id=tenant_id,
+                    source_node_id=expected_actor_node_id,
+                    target_node_id=obligation_node_id,
+                    relation_kind=(
+                        CognitiveRelationKind.OBLIGATION_EXPECTED_ACTOR
+                    ),
+                    source_ref=row.id,
+                ),
+                tenant_id=tenant_id,
+                source_node_id=expected_actor_node_id,
+                target_node_id=obligation_node_id,
+                relation_kind=(
+                    CognitiveRelationKind.OBLIGATION_EXPECTED_ACTOR
+                ),
+                semantic_relation="EXPECTED_ACTOR",
+                inference_class=CognitiveInferenceClass.EXPLICIT,
+                confidence=row.confidence,
+                valid_from=_utc(row.valid_from),
+                valid_until=_utc(row.valid_until),
+                provenance={"obligation_definition_id": row.id},
+            )
+        )
+
+    if obligation_ids:
+        instance_query = (
+            select(ObligationInstanceRow)
+            .where(
+                ObligationInstanceRow.tenant_id == tenant_id,
+                ObligationInstanceRow.definition_id.in_(obligation_ids),
+            )
+            .order_by(
+                ObligationInstanceRow.expected_by.desc(),
+                ObligationInstanceRow.id,
+            )
+            .limit(limit_per_kind * 3)
+        )
+        if not include_secret:
+            instance_query = instance_query.where(
+                ObligationInstanceRow.sensitivity_class != "SECRET"
+            )
+        obligation_instances = list(session.scalars(instance_query).all())
+    else:
+        obligation_instances = []
+
+    instance_ids = {row.id for row in obligation_instances}
+    for row in obligation_instances:
+        expectation_node_id = _expectation_node_id(row.id)
+        put_node(
+            CognitiveNode(
+                node_id=expectation_node_id,
+                tenant_id=tenant_id,
+                kind=CognitiveNodeKind.EXPECTATION,
+                source_type="OBLIGATION_INSTANCE",
+                source_id=row.id,
+                label=row.state,
+                confidence=None,
+                valid_from=_utc(row.period_start),
+                valid_until=_utc(row.period_end),
+                attributes={
+                    "period_key": row.period_key,
+                    "expected_by": _utc(row.expected_by),
+                    "due_window_end": _utc(row.due_window_end),
+                    "state": row.state,
+                    "reconciliation_status": row.reconciliation_status,
+                    "uncertainty_code": row.uncertainty_code,
+                    "expected_value": row.expected_value,
+                    "satisfaction_ratio": row.satisfaction_ratio,
+                    "sensitivity_class": row.sensitivity_class,
+                    "extension_until": _utc(row.extension_until),
+                    "waived_at": _utc(row.waived_at),
+                },
+                provenance={
+                    "source_table": "obligation_instances",
+                    "definition_id": row.definition_id,
+                    "supersedes_instance_id": row.supersedes_instance_id,
+                    "provenance": row.provenance,
+                    "absence_is_fact": False,
+                },
+            )
+        )
+        obligation_node_id = _obligation_node_id(row.definition_id)
+        if obligation_node_id in nodes:
+            put_edge(
+                CognitiveEdge(
+                    edge_id=_edge_id(
+                        tenant_id=tenant_id,
+                        source_node_id=obligation_node_id,
+                        target_node_id=expectation_node_id,
+                        relation_kind=(
+                            CognitiveRelationKind.EXPECTATION_DEFINITION
+                        ),
+                        source_ref=row.id,
+                    ),
+                    tenant_id=tenant_id,
+                    source_node_id=obligation_node_id,
+                    target_node_id=expectation_node_id,
+                    relation_kind=(
+                        CognitiveRelationKind.EXPECTATION_DEFINITION
+                    ),
+                    semantic_relation="HAS_EXPECTATION_INSTANCE",
+                    inference_class=(
+                        CognitiveInferenceClass.STRUCTURAL_PROJECTION
+                    ),
+                    provenance={"obligation_instance_id": row.id},
+                )
+            )
+
+    if instance_ids:
+        fulfillments = list(
+            session.scalars(
+                select(ObligationFulfillmentRow)
+                .where(
+                    ObligationFulfillmentRow.tenant_id == tenant_id,
+                    ObligationFulfillmentRow.instance_id.in_(instance_ids),
+                )
+                .order_by(
+                    ObligationFulfillmentRow.created_at.desc(),
+                    ObligationFulfillmentRow.id,
+                )
+                .limit(limit_per_kind * 5)
+            ).all()
+        )
+    else:
+        fulfillments = []
+
+    for row in fulfillments:
+        event = session.get(TimelineEventRow, row.timeline_event_id)
+        if event is None or event.tenant_id != tenant_id:
+            continue
+        if not include_secret and event.visibility == "SECRET":
+            continue
+        event_node_id = _event_node_id(event.id)
+        if event_node_id not in nodes:
+            put_node(
+                CognitiveNode(
+                    node_id=event_node_id,
+                    tenant_id=tenant_id,
+                    kind=CognitiveNodeKind.EVENT,
+                    source_type="TIMELINE_EVENT_REFERENCE",
+                    source_id=event.id,
+                    label=event.event_type,
+                    valid_from=_utc(event.occurred_at),
+                    attributes={"visibility": event.visibility},
+                    provenance={"projection": "V2G_FULFILLMENT_REFERENCE"},
+                )
+            )
+        expectation_node_id = _expectation_node_id(row.instance_id)
+        if expectation_node_id not in nodes:
+            continue
+        put_edge(
+            CognitiveEdge(
+                edge_id=_edge_id(
+                    tenant_id=tenant_id,
+                    source_node_id=expectation_node_id,
+                    target_node_id=event_node_id,
+                    relation_kind=(
+                        CognitiveRelationKind.EXPECTATION_FULFILLMENT_EVENT
+                    ),
+                    source_ref=row.id,
+                ),
+                tenant_id=tenant_id,
+                source_node_id=expectation_node_id,
+                target_node_id=event_node_id,
+                relation_kind=(
+                    CognitiveRelationKind.EXPECTATION_FULFILLMENT_EVENT
+                ),
+                semantic_relation=row.reconciliation_kind,
+                inference_class=CognitiveInferenceClass.EXPLICIT,
+                confidence=row.fulfillment_fraction,
+                provenance={
+                    "obligation_fulfillment_id": row.id,
+                    "explicitly_shared": row.explicitly_shared,
                 },
             )
         )
