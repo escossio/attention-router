@@ -373,7 +373,7 @@ def test_v2f_recency_weights_related_events(session):
     packet = compile_graph_context(
         session,
         DEFAULT_TENANT_ID,
-        "Casa 07 recency",
+        "Casa 07",
         max_hops=1,
         item_budget=20,
         token_budget=6000,
