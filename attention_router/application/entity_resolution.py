@@ -445,6 +445,10 @@ def confirm_entity_resolution(
             raise EntityResolutionError(
                 "ENTITY_RESOLUTION_CANONICAL_ACTOR_MISMATCH"
             )
+        if alias.state != "ACTIVE":
+            raise EntityResolutionError(
+                "ENTITY_RESOLUTION_CONFIRMED_ALIAS_INACTIVE"
+            )
         return row, alias
 
     if row.state not in {"PROPOSED", "AMBIGUOUS"}:
