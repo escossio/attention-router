@@ -74,7 +74,18 @@ def explicit_intent(text: str, known_slots: ConversationSlots | None = None) -> 
         "é automática", "e automatica",
     ):
         return "ASSISTANT_NATURE_QUESTION"
-    if _text_has(text, "é o alex", "e o alex", "estou falando com o alex"):
+    if (
+        re.search(
+            r"^\s*(?:[ÉéEe])\s+(?:o|a)\s+"
+            r"[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][\wÀ-ÿ'-]{1,79}\s*[?.!]*\s*$",
+            text,
+        )
+        or re.search(
+            r"\b[Ee]stou\s+falando\s+com\s+(?:o|a)\s+"
+            r"[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][\wÀ-ÿ'-]{1,79}\b",
+            text,
+        )
+    ):
         return "OWNER_IDENTITY_QUESTION"
     if _text_has(
         text,

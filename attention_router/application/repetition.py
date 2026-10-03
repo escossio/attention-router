@@ -76,7 +76,18 @@ def _response_objective(text: str) -> str:
         return "identity/who"
     if "voce e uma ia" in folded or "voce e um robo" in folded:
         return "identity/ai"
-    if any(phrase in folded for phrase in ("o alex esta ai", "o alex esta aí")):
+    if (
+        re.search(r"\b(?:o|a)\s+[\w'-]+\s+esta\s+ai\b", folded)
+        or any(
+            phrase in folded
+            for phrase in (
+                "ele esta ai",
+                "ela esta ai",
+                "titular esta ai",
+                "responsavel esta ai",
+            )
+        )
+    ):
         return "ANSWER_AVAILABILITY"
     return behavior_response_objective(None, text, None)
 
@@ -114,7 +125,17 @@ def _useful_response(objective: str, text: str | None) -> bool:
     if objective in {"identity/name", "identity/who", "identity/ai"}:
         return any(marker in folded for marker in ("andy", "assistente", "meu nome", "sou uma ia"))
     if objective == "ANSWER_AVAILABILITY":
-        return "alex" in folded or "não" in folded or "nao" in folded
+        return any(
+            marker in folded
+            for marker in (
+                "nao",
+                "disponivel",
+                "indisponivel",
+                "responder",
+                "assistente",
+                "andy",
+            )
+        )
     return True
 
 
