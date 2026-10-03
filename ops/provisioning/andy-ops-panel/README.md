@@ -65,8 +65,8 @@ The server samples:
 - `/var/log/andy-ci/*-postgres-distributed/summary.json`;
 - the Remote Desktop Commander JSONL tool history;
 - local descendant processes of the Desktop Commander server;
-- bounded read-only WhatsApp transport/browser/observer probes;
-- a bounded metadata-only message trace projection from the configured runtime database container.
+- optional, default-off, bounded read-only WhatsApp transport/browser/observer probes;
+- optional, default-off, bounded metadata-only message trace projection from the configured runtime database container.
 
 Message tracing is default-off and must be explicitly enabled on the host. When enabled, it issues bounded SELECT-only queries and deliberately excludes message bodies, outbox destinations, full correlation ids and full inbound-event ids from the browser payload. The database container is host configuration; no runtime container name or credential is committed.
 
