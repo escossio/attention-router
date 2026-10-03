@@ -103,4 +103,5 @@ player.addEventListener('loadedmetadata',()=>statusEl.textContent='Zargan pronta
 player.addEventListener('ended',()=>{cancelAnimationFrame(state.raf);clearActive();statusEl.textContent='Leitura concluída.'});
 player.addEventListener('error',()=>statusEl.textContent='Narração ainda não publicada ou indisponível.');
 
-player.load();\nPromise.all([loadContent(),loadSegments()]).then(()=>decorateWords()).catch(()=>statusEl.textContent='Falha ao carregar o conteúdo.');
+player.load();
+Promise.all([loadContent(),loadSegments()]).then(()=>decorateWords()).catch(()=>statusEl.textContent='Falha ao carregar o conteúdo.');
