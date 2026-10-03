@@ -40,6 +40,9 @@ test('createConfig defaults are fail closed', () => {
   assert.equal(config.httpHost, '127.0.0.1');
   assert.equal(config.httpPort, 18103);
   assert.equal(config.browserDebugUrl, null);
+  assert.equal(config.historyReadOnlyEnabled, false);
+  assert.equal(config.historyMaxPageSize, 100);
+  assert.equal(config.historyMaxScanMessages, 2000);
 });
 
 test('startTransport blocks when browser debug url is unavailable', async () => {

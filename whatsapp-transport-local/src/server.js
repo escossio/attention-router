@@ -193,7 +193,23 @@ function createServer(config, status, client = null, deps = {}) {
       }
       const chatId = decodeURIComponent(url.pathname.slice(`${config.historyPath}/`.length));
       const limit = Math.min(Number(url.searchParams.get('limit') || 50), config.historyMaxPageSize);
-      fetchHistoryMessages(client, chatId, limit).then((result) => respondJson(res, 200, { status: 'ok', ...result })).catch((error) => respondJson(res, error.code === 'CHAT_NOT_FOUND' ? 404 : 503, { status: 'history_read_failed' }));
+      const cursor = url.searchParams.get('cursor');
+      fetchHistoryMessages(
+        client,
+        chatId,
+        limit,
+        cursor,
+        config.historyMaxScanMessages,
+      ).then((result) => respondJson(res, 200, { status: 'ok', ...result })).catch((error) => {
+        const statusCode = error.code === 'CHAT_NOT_FOUND'
+          ? 404
+          : ['HISTORY_CURSOR_INVALID', 'HISTORY_CURSOR_STALE'].includes(error.code)
+            ? 409
+            : error.code === 'HISTORY_SCAN_LIMIT_EXCEEDED'
+              ? 413
+              : 503;
+        respondJson(res, statusCode, { status: 'history_read_failed', code: error.code || 'HISTORY_READ_FAILED' });
+      });
       return;
     }
     if (url.pathname === config.livePath) {

@@ -2,7 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 
-const { capabilities, fetchHistoryMessages, listHistoryChats, signHistoryRequest, verifyHistoryHmac } = require('../src/history');
+const {
+  capabilities,
+  decodeHistoryCursor,
+  fetchHistoryMessages,
+  listHistoryChats,
+  signHistoryRequest,
+  verifyHistoryHmac,
+} = require('../src/history');
 const { createServer } = require('../src/server');
 
 function fakeClient(calls) {
@@ -45,8 +52,8 @@ test('history capabilities are explicit for whatsapp-web.js v1.34.7', () => {
     can_fetch_timestamps: true,
     can_fetch_reply_references: 'PARTIAL',
     can_fetch_captions: 'PARTIAL',
-    can_paginate_history: 'PARTIAL',
-    pagination_model: 'LIMIT_ONLY',
+    can_paginate_history: true,
+    pagination_model: 'OPAQUE_CURSOR_SNAPSHOT_V1',
     can_distinguish_from_me: true,
     can_distinguish_direct_vs_group: true,
     can_get_stable_source_message_id: true,
@@ -62,14 +69,15 @@ test('history adapter only calls read APIs and preserves group sender', async ()
   assert.equal(result.messages[0].external_sender_key, 'person-a@c.us');
   assert.equal(result.messages[0].source_message_id, 'message-1');
   assert.equal(result.messages[0].reply_reference, 'message-0');
-  assert.deepEqual(calls, [['getChats'], ['getChatById', 'contact024@example.com'], ['fetchMessages', 10]]);
+  assert.deepEqual(calls, [['getChats'], ['getChatById', 'contact024@example.com'], ['fetchMessages', 2001]]);
 });
 
-test('history HMAC is path-bound and read-only endpoint credentials are verifiable', () => {
-  const headers = signHistoryRequest('/internal/history/chats', 'test-history-secret');
-  const req = { url: '/internal/history/chats', headers: Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])) };
+test('history HMAC binds path and query parameters', () => {
+  const target = '/internal/history/chats/contact?limit=2&cursor=abc';
+  const headers = signHistoryRequest(target, 'test-history-secret');
+  const req = { url: target, headers: Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])) };
   assert.equal(verifyHistoryHmac(req, { historyHmacSecret: 'test-history-secret', historyMaxSkewSeconds: 300 }), true);
-  req.url = '/internal/history/chats/other';
+  req.url = '/internal/history/chats/contact?limit=2&cursor=other';
   assert.equal(verifyHistoryHmac(req, { historyHmacSecret: 'test-history-secret', historyMaxSkewSeconds: 300 }), false);
 });
 
@@ -99,4 +107,80 @@ test('history endpoint is authenticated, bounded, and read-only', async () => {
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+
+function historyMessages(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: { _serialized: `message-${index + 1}` },
+    fromMe: false,
+    author: 'person-a@c.us',
+    from: 'contact024@example.com',
+    timestamp: 1700000000 + index,
+    body: `message ${index + 1}`,
+    type: 'chat',
+    hasMedia: false,
+    hasQuotedMsg: false,
+    _data: {},
+  }));
+}
+
+function pagedClient(messages, calls = []) {
+  const chat = {
+    id: { _serialized: 'contact024@example.com' },
+    isGroup: true,
+    name: 'Family',
+    participants: [],
+    fetchMessages: async ({ limit }) => {
+      calls.push(['fetchMessages', limit]);
+      return messages.slice(Math.max(0, messages.length - limit));
+    },
+  };
+  return {
+    calls,
+    chat,
+    info: { wid: { _serialized: 'me@c.us' } },
+    getChats: async () => [chat],
+    getChatById: async () => chat,
+  };
+}
+
+test('history cursor freezes upper bound and pages oldest to newest', async () => {
+  const messages = historyMessages(6);
+  const client = pagedClient(messages);
+
+  const first = await fetchHistoryMessages(client, 'contact024@example.com', 2, null, 10);
+  assert.deepEqual(first.messages.map((item) => item.source_message_id), ['message-1', 'message-2']);
+  assert.ok(first.next_cursor);
+  assert.equal(decodeHistoryCursor(first.next_cursor).through, 'message-6');
+
+  messages.push(...historyMessages(1).map((item) => ({
+    ...item,
+    id: { _serialized: 'message-7' },
+    timestamp: 1700000006,
+    body: 'message 7',
+  })));
+
+  const second = await fetchHistoryMessages(client, 'contact024@example.com', 2, first.next_cursor, 10);
+  assert.deepEqual(second.messages.map((item) => item.source_message_id), ['message-3', 'message-4']);
+  const third = await fetchHistoryMessages(client, 'contact024@example.com', 2, second.next_cursor, 10);
+  assert.deepEqual(third.messages.map((item) => item.source_message_id), ['message-5', 'message-6']);
+  assert.equal(third.next_cursor, null);
+});
+
+test('history pagination fails closed on oversized or stale snapshots', async () => {
+  const oversized = pagedClient(historyMessages(4));
+  await assert.rejects(
+    fetchHistoryMessages(oversized, 'contact024@example.com', 2, null, 3),
+    /HISTORY_SCAN_LIMIT_EXCEEDED/,
+  );
+
+  const messages = historyMessages(4);
+  const client = pagedClient(messages);
+  const first = await fetchHistoryMessages(client, 'contact024@example.com', 2, null, 10);
+  messages.pop();
+  await assert.rejects(
+    fetchHistoryMessages(client, 'contact024@example.com', 2, first.next_cursor, 10),
+    /HISTORY_CURSOR_STALE/,
+  );
 });

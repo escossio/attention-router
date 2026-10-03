@@ -163,6 +163,7 @@ function createConfig(env = process.env) {
     historyHmacSecret: env.LOCAL_HISTORY_HMAC_SECRET || env.INTERNAL_INGRESS_HMAC_SECRET || '',
     historyMaxSkewSeconds: parseInteger(env.LOCAL_HISTORY_MAX_SKEW_SECONDS, 300),
     historyMaxPageSize: parseInteger(env.LOCAL_HISTORY_MAX_PAGE_SIZE, 100),
+    historyMaxScanMessages: parseInteger(env.LOCAL_HISTORY_MAX_SCAN_MESSAGES, 2000),
   };
 }
 
