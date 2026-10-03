@@ -101,7 +101,7 @@ class EntityResolutionEvidenceRow(Base):
     source_ref: Mapped[str] = mapped_column(String(240), nullable=False)
     independence_key: Mapped[str] = mapped_column(String(160), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
-    metadata_json: Mapped[dict] = mapped_column(JsonType, nullable=False, default=dict)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JsonType, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
