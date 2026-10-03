@@ -11,16 +11,20 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import threading
 import time
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+PROJECT_DIR = Path(__file__).resolve().parent
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
+
 from message_tracing import sample_message_traces
 from transport_observability import sample_transport_observability
 
 
-PROJECT_DIR = Path(__file__).resolve().parent
 LOG_ROOT = Path(os.environ.get("ANDY_OPS_CI_LOG_ROOT", "/var/log/andy-ci"))
 TOOL_HISTORY = Path(os.environ.get("ANDY_OPS_TOOL_HISTORY", str(Path.home() / ".claude-server-commander" / "tool-history.jsonl")))
 LISTEN_ADDRESS = os.environ.get("ANDY_OPS_LISTEN_ADDRESS", "127.0.0.1")
@@ -299,16 +303,27 @@ def _recent_dispatches(
 ) -> list[dict[str, Any]]:
     if not LOG_ROOT.exists():
         return []
-    paths = sorted(
-        (p for p in LOG_ROOT.iterdir() if p.is_dir() and p.name.endswith("-postgres-distributed")),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
+
+    run_pattern = re.compile(
+        r"^(?P<stamp>\\d{8}T\\d{6})-"
+        r"(?P<sha>[0-9a-f]{12})-"
+        r"(?P<suite>[a-z0-9_-]+)-distributed$"
     )
+    paths = []
+    for path in LOG_ROOT.iterdir():
+        if not path.is_dir() or run_pattern.fullmatch(path.name) is None:
+            continue
+        paths.append(path)
+    paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
     result: list[dict[str, Any]] = []
     for path in paths[:limit]:
-        bits = path.name.split("-")
-        stamp = bits[0] if bits else ""
-        sha_short = bits[1] if len(bits) > 1 else "unknown"
+        match = run_pattern.fullmatch(path.name)
+        assert match is not None
+        stamp = match.group("stamp")
+        sha_short = match.group("sha")
+        suite_from_name = match.group("suite")
+
         summary_file = path / "summary.json"
         summary = None
         if summary_file.is_file():
@@ -316,10 +331,14 @@ def _recent_dispatches(
                 summary = json.loads(summary_file.read_text())
             except (OSError, json.JSONDecodeError):
                 summary = None
+
         try:
-            started_at = datetime.strptime(stamp, "%Y%m%dT%H%M%S").astimezone().isoformat()
+            started_at = datetime.strptime(
+                stamp, "%Y%m%dT%H%M%S"
+            ).astimezone().isoformat()
         except ValueError:
             started_at = None
+
         age = int(time.time() - path.stat().st_mtime)
         active = active_sha_shorts or set()
         status = (
@@ -327,11 +346,34 @@ def _recent_dispatches(
             if isinstance(summary, dict)
             else ("RUNNING" if sha_short in active else "INCOMPLETE")
         )
+        suite = (
+            str(summary.get("suite") or suite_from_name)
+            if isinstance(summary, dict)
+            else suite_from_name
+        )
+
+        workers: dict[str, Any] = {}
+        if isinstance(summary, dict):
+            raw_workers = summary.get("workers")
+            if isinstance(raw_workers, dict):
+                workers = raw_workers
+            else:
+                for attempt in summary.get("attempts") or []:
+                    if not isinstance(attempt, dict):
+                        continue
+                    worker = str(attempt.get("worker") or "").strip()
+                    if not worker:
+                        continue
+                    workers[worker] = {
+                        "status": attempt.get("classification") or "UNKNOWN",
+                        "duration_seconds": attempt.get("duration_seconds") or 0,
+                    }
+
         result.append({
             "id": path.name,
             "sha_short": sha_short,
             "sha": summary.get("sha") if isinstance(summary, dict) else None,
-            "suite": "postgres",
+            "suite": suite,
             "started_at": started_at,
             "status": status,
             "wall_seconds": (
@@ -339,9 +381,17 @@ def _recent_dispatches(
                 if isinstance(summary, dict)
                 else age
             ),
-            "failure_class": summary.get("failure_class") if isinstance(summary, dict) else None,
-            "total_passed_tests": summary.get("total_passed_tests") if isinstance(summary, dict) else None,
-            "workers": summary.get("workers", {}) if isinstance(summary, dict) else {},
+            "failure_class": (
+                summary.get("failure_class")
+                if isinstance(summary, dict)
+                else None
+            ),
+            "total_passed_tests": (
+                summary.get("total_passed_tests")
+                if isinstance(summary, dict)
+                else None
+            ),
+            "workers": workers,
         })
     return result
 
