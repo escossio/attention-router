@@ -10,6 +10,7 @@ CAPACITY="${ANDY_CI_CAPACITY_FILE:-$BASE/worker-capacity.json}"
 SSH_BIN="${ANDY_CI_SSH_BIN:-ssh}"
 SCP_BIN="${ANDY_CI_SCP_BIN:-scp}"
 CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
+POSTGRES_WORKER="${ANDY_CI_POSTGRES_WORKER:-ci03}"
 
 SHA="${1:-}"
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || {
@@ -25,8 +26,18 @@ registry() { python3 "$REGISTRY_CLI" --db "$REGISTRY_DB" "$@"; }
 host_target() { registry field --host-id "$1" --name access_target; }
 set_health() { registry set-health --host-id "$1" --state "$2" --reason "$3"; }
 
-mapfile -t CONFIGURED_WORKERS < <(registry list-workers --capability postgres-worker)
-((${#CONFIGURED_WORKERS[@]} > 0)) || { echo 'CI_REPROFILE_STATUS=NO_CONFIGURED_WORKERS'; exit 69; }
+mapfile -t POSTGRES_CAPABLE_WORKERS < <(registry list-workers --capability postgres-worker)
+CONFIGURED_WORKERS=()
+for worker in "${POSTGRES_CAPABLE_WORKERS[@]}"; do
+  if [[ "$worker" == "$POSTGRES_WORKER" ]]; then
+    CONFIGURED_WORKERS+=("$worker")
+  fi
+done
+((${#CONFIGURED_WORKERS[@]} == 1)) || {
+  echo "CI_REPROFILE_STATUS=POSTGRES_WORKER_NOT_CONFIGURED worker=$POSTGRES_WORKER"
+  exit 69
+}
+echo "CI_REPROFILE_POSTGRES_WORKER=$POSTGRES_WORKER"
 
 declare -a READY_WORKERS=()
 declare -A PROBED_DEPENDENCIES=()

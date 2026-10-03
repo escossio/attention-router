@@ -229,3 +229,26 @@ def test_postgres_discovery_uses_correct_python_regex_and_deadline():
     assert "while (( attempts < 8 ))" not in postgres
     assert "local deadline=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))" in postgres
     assert "DISCOVERY_DEADLINE=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))" in reprofile
+
+
+def test_postgres_scheduler_is_exclusive_to_ci03_by_default():
+    postgres = POSTGRES_SCHEDULER.read_text()
+    reprofile = POSTGRES_REPROFILE.read_text()
+
+    for content in (postgres, reprofile):
+        assert 'ANDY_CI_POSTGRES_WORKER:-ci03' in content
+        assert "POSTGRES_CAPABLE_WORKERS" in content
+        assert '[[ "$worker" == "$POSTGRES_WORKER" ]]' in content
+        assert 'CONFIGURED_WORKERS+=("$worker")' in content
+
+    assert "CI_DISTRIBUTED_POSTGRES_WORKER=$POSTGRES_WORKER" in postgres
+    assert "POSTGRES_WORKER_NOT_CONFIGURED" in postgres
+    assert "CI_REPROFILE_POSTGRES_WORKER=$POSTGRES_WORKER" in reprofile
+    assert "POSTGRES_WORKER_NOT_CONFIGURED" in reprofile
+
+
+def test_postgres_check_ui_reports_exclusive_worker_policy():
+    publisher = PUBLISHER.parent / "distributed_postgres_check.py"
+    content = publisher.read_text()
+    assert "PostgreSQL worker policy: CI03" in content
+    assert "CI01/CI02/CI03" not in content
