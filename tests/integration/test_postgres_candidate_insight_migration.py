@@ -1,4 +1,4 @@
-"""Inspect Personal Context V2D semantic episode schema."""
+"""Inspect Personal Context V2E Candidate Insight schema."""
 
 import os
 import subprocess
@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, inspect, text
 pytestmark = pytest.mark.postgres
 
 
-def test_semantic_episode_migration_schema():
+def test_candidate_insight_migration_schema():
     engine = create_engine(
         os.environ["PUBLIC_POSTGRES_TEST_URL"],
         hide_parameters=True,
@@ -25,59 +25,66 @@ def test_semantic_episode_migration_schema():
 
             schema = inspect(connection)
             assert {
-                "semantic_episodes",
-                "semantic_episode_memberships",
+                "candidate_insights",
+                "candidate_insight_evidence",
             } <= set(schema.get_table_names())
 
-            episode_uniques = {
+            insight_uniques = {
                 item["name"]: item["column_names"]
-                for item in schema.get_unique_constraints("semantic_episodes")
+                for item in schema.get_unique_constraints("candidate_insights")
             }
-            assert episode_uniques["uq_semantic_episode_tenant_key"] == [
-                "tenant_id",
-                "semantic_key",
-            ]
+            assert insight_uniques[
+                "uq_candidate_insight_tenant_idempotency"
+            ] == ["tenant_id", "idempotency_key"]
 
-            membership_uniques = {
+            evidence_uniques = {
                 item["name"]: item["column_names"]
                 for item in schema.get_unique_constraints(
-                    "semantic_episode_memberships"
+                    "candidate_insight_evidence"
                 )
             }
-            assert membership_uniques[
-                "uq_semantic_episode_membership_member"
-            ] == ["episode_id", "member_type", "member_ref"]
+            assert evidence_uniques[
+                "uq_candidate_insight_evidence_source"
+            ] == [
+                "candidate_id",
+                "evidence_type",
+                "source_ref",
+                "evidence_role",
+            ]
 
-            episode_checks = {
+            insight_checks = {
                 item["name"]
-                for item in schema.get_check_constraints("semantic_episodes")
+                for item in schema.get_check_constraints("candidate_insights")
             }
             assert {
-                "ck_semantic_episode_scope_type",
-                "ck_semantic_episode_state",
-                "ck_semantic_episode_confidence",
-                "ck_semantic_episode_sensitivity",
-                "ck_semantic_episode_activity_order",
-            } <= episode_checks
+                "ck_candidate_insight_type",
+                "ck_candidate_insight_subject_type",
+                "ck_candidate_insight_source_engine",
+                "ck_candidate_insight_confidence",
+                "ck_candidate_insight_sensitivity",
+                "ck_candidate_insight_state",
+                "ck_candidate_insight_temporal_order",
+            } <= insight_checks
 
-            membership_checks = {
+            evidence_checks = {
                 item["name"]
                 for item in schema.get_check_constraints(
-                    "semantic_episode_memberships"
+                    "candidate_insight_evidence"
                 )
             }
             assert {
-                "ck_semantic_episode_membership_type",
-                "ck_semantic_episode_membership_reason",
-                "ck_semantic_episode_membership_confidence",
-            } <= membership_checks
+                "ck_candidate_insight_evidence_type",
+                "ck_candidate_insight_evidence_role",
+                "ck_candidate_insight_evidence_confidence",
+                "ck_candidate_insight_evidence_sensitivity",
+            } <= evidence_checks
     finally:
         engine.dispose()
 
 
 @pytest.fixture
-def semantic_episode_migration_db(pg_url):
-    name = "semantic_episode_migration_" + uuid.uuid4().hex[:12]
+def candidate_insight_migration_db(pg_url):
+    name = "candidate_insight_migration_" + uuid.uuid4().hex[:12]
     admin = create_engine(
         pg_url.rsplit("/", 1)[0] + "/postgres",
         isolation_level="AUTOCOMMIT",
@@ -107,11 +114,11 @@ def semantic_episode_migration_db(pg_url):
         admin.dispose()
 
 
-def test_semantic_episode_refuses_destructive_downgrade(
-    semantic_episode_migration_db,
+def test_candidate_insight_refuses_destructive_downgrade(
+    candidate_insight_migration_db,
 ):
-    engine, migrate = semantic_episode_migration_db
-    tenant_id = "00000000-0000-4000-8000-00000000d053"
+    engine, migrate = candidate_insight_migration_db
+    tenant_id = "00000000-0000-4000-8000-00000000d054"
 
     with engine.begin() as connection:
         connection.execute(
@@ -125,52 +132,64 @@ def test_semantic_episode_refuses_destructive_downgrade(
             ),
             {
                 "id": tenant_id,
-                "slug": "semantic-episode-migration",
-                "name": "Semantic Episode Migration",
+                "slug": "candidate-insight-migration",
+                "name": "Candidate Insight Migration",
             },
         )
         connection.execute(
             text(
                 """
-                INSERT INTO semantic_episodes (
+                INSERT INTO candidate_insights (
                     id,
                     tenant_id,
-                    episode_type,
                     semantic_key,
-                    scope_type,
-                    scope_ref,
-                    state,
+                    idempotency_key,
+                    insight_type,
+                    subject_type,
+                    subject_id,
+                    predicate,
+                    proposed_value,
+                    source_engine,
                     confidence,
                     sensitivity_class,
-                    started_at,
-                    last_activity_at,
-                    ended_at,
-                    supersedes_episode_id,
-                    split_from_episode_id,
-                    merged_from_episode_ids,
+                    valid_from,
+                    valid_until,
+                    contradiction_refs,
+                    state,
+                    supersedes_insight_id,
+                    decision_kind,
+                    decision_actor_key,
+                    decision_ref,
                     provenance,
                     created_at,
-                    updated_at
+                    updated_at,
+                    decided_at
                 )
                 VALUES (
-                    'episode-migration',
+                    'candidate-migration',
                     :tenant_id,
-                    'PROPERTY_MATTER',
-                    'episode-key',
+                    'candidate-semantic-key',
+                    'candidate-idempotency-key',
+                    'CLAIM_PROPOSAL',
                     'RESOURCE',
                     'resource-1',
-                    'ACTIVE',
+                    'context.test',
+                    '{"value": true}'::jsonb,
+                    'RULE',
                     1.0,
                     'PRIVATE',
                     now(),
-                    now(),
-                    NULL,
-                    NULL,
                     NULL,
                     '[]'::jsonb,
+                    'PROPOSED',
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
                     '{}'::jsonb,
                     now(),
-                    now()
+                    now(),
+                    NULL
                 )
                 """
             ),
@@ -179,16 +198,16 @@ def test_semantic_episode_refuses_destructive_downgrade(
 
     result = migrate(
         "downgrade",
-        "0052_entity_resolution_v0",
+        "0053_semantic_episode_v0",
         check=False,
     )
     assert result.returncode != 0
-    assert "SEMANTIC_EPISODE_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
+    assert "CANDIDATE_INSIGHT_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
 
     with engine.connect() as connection:
         assert connection.scalar(
             text("SELECT version_num FROM alembic_version")
         ) == "0054_candidate_insight_v0"
         assert connection.scalar(
-            text("SELECT count(*) FROM semantic_episodes")
+            text("SELECT count(*) FROM candidate_insights")
         ) == 1
