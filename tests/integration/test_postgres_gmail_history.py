@@ -85,6 +85,6 @@ def test_migration_roundtrip_and_populated_downgrade_guard(Session, monkeypatch,
     assert "GMAIL_HISTORY_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
     with Session() as session:
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0050_client_pending_source"
+            "0051_personal_context_bootstrap"
         )
         assert session.get(ProviderAuthorizationRow, installation).gmail_history_id == "10"
