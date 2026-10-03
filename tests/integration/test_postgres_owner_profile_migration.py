@@ -16,7 +16,7 @@ def test_owner_profile_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0051_owner_profile"]
+            ).scalars().all() == ["0052_sensitive_disclosure"]
 
             schema = inspect(connection)
             assert "human_profiles" in set(schema.get_table_names())
