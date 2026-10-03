@@ -156,6 +156,8 @@ class EntityAliasResolutionRow(Base):
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     decision_actor_key: Mapped[str] = mapped_column(String(120), nullable=False)
     decision_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    revoked_by_actor_key: Mapped[str | None] = mapped_column(String(120))
+    revocation_ref: Mapped[str | None] = mapped_column(String(240))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
