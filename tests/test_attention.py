@@ -392,7 +392,11 @@ def test_v2h_cooldown_deduplicates_repeated_high_salience_snapshot(session):
     assert second.score_class == "OWNER_SUGGESTION_CANDIDATE"
     assert second.effective_class == "REASONING_QUEUE"
     assert "DEDUP_SUPPRESSION_WINDOW" in second.reason_codes
-    assert second.cooldown_until == first.cooldown_until
+    assert second.cooldown_until is not None
+    assert first.cooldown_until is not None
+    assert second.cooldown_until.replace(tzinfo=UTC) == (
+        first.cooldown_until.replace(tzinfo=UTC)
+    )
 
 
 def test_v2h_owner_suppression_is_bounded_and_reversible(session):
