@@ -19,6 +19,9 @@ from attention_router.domain.cognitive_graph import (
     CognitiveNodeKind,
     CognitiveRelationKind,
 )
+from attention_router.infrastructure.entity_resolution_models import (
+    EntityAliasResolutionRow,
+)
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import (
     ActorBindingRow,
@@ -636,6 +639,50 @@ def build_cognitive_graph_slice(
                 relation_kind=CognitiveRelationKind.STATE_SUBJECT,
                 inference_class=CognitiveInferenceClass.STRUCTURAL_PROJECTION,
                 provenance={"state_id": row.id},
+            )
+        )
+
+
+    aliases = list(
+        session.scalars(
+            select(EntityAliasResolutionRow)
+            .where(
+                EntityAliasResolutionRow.tenant_id == tenant_id,
+                EntityAliasResolutionRow.state == "ACTIVE",
+            )
+            .order_by(
+                EntityAliasResolutionRow.updated_at.desc(),
+                EntityAliasResolutionRow.id,
+            )
+            .limit(limit_per_kind)
+        ).all()
+    )
+    for row in aliases:
+        alias_node_id = ensure_entity("ACTOR", row.alias_actor_key)
+        canonical_node_id = ensure_entity("ACTOR", row.canonical_actor_key)
+        put_edge(
+            CognitiveEdge(
+                edge_id=_edge_id(
+                    tenant_id=tenant_id,
+                    source_node_id=alias_node_id,
+                    target_node_id=canonical_node_id,
+                    relation_kind=CognitiveRelationKind.IDENTITY_ALIAS,
+                    semantic_relation="ALIAS_OF",
+                    source_ref=row.id,
+                ),
+                tenant_id=tenant_id,
+                source_node_id=alias_node_id,
+                target_node_id=canonical_node_id,
+                relation_kind=CognitiveRelationKind.IDENTITY_ALIAS,
+                semantic_relation="ALIAS_OF",
+                inference_class=CognitiveInferenceClass.EXPLICIT,
+                confidence=1.0,
+                provenance={
+                    "alias_resolution_id": row.id,
+                    "candidate_id": row.candidate_id,
+                    "decision_actor_key": row.decision_actor_key,
+                    "decision_ref": row.decision_ref,
+                },
             )
         )
 
