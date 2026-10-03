@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     personal_context_authority_runtime_enabled: bool = False
     personal_context_materialization_runtime_enabled: bool = False
     learned_graph_shadow_enabled: bool = False
+    cognitive_runtime_enabled: bool = False
+    cognitive_runtime_interval_seconds: int = 300
+    cognitive_runtime_tenant_limit: int = 50
+    cognitive_runtime_graph_limit_per_kind: int = 200
+    cognitive_runtime_candidate_limit: int = 24
     personal_context_materialization_intent_limit: int = 50
     personal_context_runtime_owner_limit: int = 50
     conversation_repetition_window_seconds: int = 24 * 60 * 60
@@ -572,6 +577,22 @@ class Settings(BaseSettings):
         if not 1 <= self.personal_context_materialization_intent_limit <= 500:
             raise ValueError(
                 "PERSONAL_CONTEXT_MATERIALIZATION_INTENT_LIMIT must be between 1 and 500"
+            )
+        if self.cognitive_runtime_interval_seconds <= 0:
+            raise ValueError(
+                "COGNITIVE_RUNTIME_INTERVAL_SECONDS must be positive"
+            )
+        if not 1 <= self.cognitive_runtime_tenant_limit <= 500:
+            raise ValueError(
+                "COGNITIVE_RUNTIME_TENANT_LIMIT must be between 1 and 500"
+            )
+        if not 1 <= self.cognitive_runtime_graph_limit_per_kind <= 1000:
+            raise ValueError(
+                "COGNITIVE_RUNTIME_GRAPH_LIMIT_PER_KIND must be between 1 and 1000"
+            )
+        if not 1 <= self.cognitive_runtime_candidate_limit <= 64:
+            raise ValueError(
+                "COGNITIVE_RUNTIME_CANDIDATE_LIMIT must be between 1 and 64"
             )
         positive_platform_limits = {
             "HEALTH_POLL_INTERVAL": self.health_poll_interval,

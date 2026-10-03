@@ -13,6 +13,10 @@ from attention_router.application.owner_reply_grace import (
     process_due_grace_windows,
 )
 from attention_router.application.memory import process_memory_ingestion_jobs
+from attention_router.application.cognitive_runtime import (
+    CognitiveRuntimeCycleResult,
+    run_cognitive_runtime_cycle,
+)
 from attention_router.application.personal_context_runtime import (
     PersonalContextRuntimeCycleResult,
     run_personal_context_runtime_cycle,
@@ -257,6 +261,57 @@ def process_scheduled_events_if_available(session) -> int:
     return process_due_scheduled_events(session)
 
 
+def process_cognitive_runtime_if_due(
+    session,
+    *,
+    now_monotonic: float,
+    last_run_monotonic: float | None,
+) -> tuple[CognitiveRuntimeCycleResult | None, float | None]:
+    if not settings.cognitive_runtime_enabled:
+        return None, last_run_monotonic
+    if (
+        last_run_monotonic is not None
+        and now_monotonic - last_run_monotonic
+        < settings.cognitive_runtime_interval_seconds
+    ):
+        return None, last_run_monotonic
+
+    with start_span("cognitive.runtime") as runtime_span:
+        result = run_cognitive_runtime_cycle(
+            session,
+            tenant_limit=settings.cognitive_runtime_tenant_limit,
+            graph_limit_per_kind=(
+                settings.cognitive_runtime_graph_limit_per_kind
+            ),
+            candidate_limit=settings.cognitive_runtime_candidate_limit,
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.cognitive.tenants_considered",
+            result.tenants_considered,
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.cognitive.tenants_failed",
+            result.tenants_failed,
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.cognitive.relation_candidates",
+            result.relation_candidates,
+        )
+        safe_set_attribute(
+            runtime_span,
+            "attention.cognitive.candidate_insights_created",
+            result.candidate_insights_created,
+        )
+        set_outcome(
+            runtime_span,
+            "PARTIAL" if result.tenants_failed else "PROCESSED",
+        )
+    return result, now_monotonic
+
+
 def process_personal_context_runtime_if_due(
     session,
     *,
@@ -331,6 +386,7 @@ def process_personal_context_materialization_runtime_if_due(
 
 def run_forever() -> None:
     identity = f"{socket.gethostname()}:{new_id()}"
+    last_cognitive_runtime_run_monotonic: float | None = None
     last_personal_context_run_monotonic: float | None = None
     last_personal_context_authority_run_monotonic: float | None = None
     last_personal_context_materialization_run_monotonic: float | None = None
@@ -380,6 +436,30 @@ def run_forever() -> None:
             else:
                 memory_count = 0
             session.commit()
+
+            cognitive_runtime_result = None
+            cognitive_runtime_now = time.monotonic()
+            try:
+                (
+                    cognitive_runtime_result,
+                    last_cognitive_runtime_run_monotonic,
+                ) = process_cognitive_runtime_if_due(
+                    session,
+                    now_monotonic=cognitive_runtime_now,
+                    last_run_monotonic=(
+                        last_cognitive_runtime_run_monotonic
+                    ),
+                )
+                if cognitive_runtime_result is not None:
+                    session.commit()
+            except Exception as exc:
+                session.rollback()
+                logger.exception(
+                    "cognitive runtime cycle failed "
+                    "worker_id=%s error=%s",
+                    identity,
+                    exc,
+                )
 
             personal_context_result = None
             personal_context_now = time.monotonic()
