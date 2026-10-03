@@ -15,6 +15,7 @@ from attention_router.application.memory import (
 from attention_router.application import services
 from attention_router.config import settings
 from attention_router.infrastructure.models import ConversationMessageRow, MemoryCandidateRow, MemoryClaimRow, MemoryIngestionJobRow, QueueRow
+from attention_router.infrastructure.repository import upsert_actor_binding
 
 
 def msg(session, text, key="actor-a", source_id=None, sent_at=None, thread="chat-a", thread_type="DIRECT"):
@@ -300,3 +301,63 @@ def test_memory_archive_failure_does_not_fail_inbound(session, monkeypatch):
         "Bom dia.", {"metadata": {"thread_key": "chat"}},
     )
     assert result["id"]
+
+
+def test_persistent_memory_canary_uses_exact_actor_binding_id(
+    session,
+    monkeypatch,
+):
+    binding = upsert_actor_binding(
+        session,
+        "synthetic",
+        "canary-external",
+        "canary-actor",
+        "known",
+        display_name="Canary",
+    )
+    session.flush()
+    monkeypatch.setattr(settings, "persistent_memory_enabled", True)
+    monkeypatch.setattr(settings, "memory_ingestion_enabled", False)
+    monkeypatch.setattr(
+        settings,
+        "persistent_memory_canary_binding_id",
+        binding.id,
+    )
+
+    services.receive_inbound_event(
+        session,
+        "synthetic",
+        "canary-event",
+        "message",
+        "canary-external",
+        "Canary",
+        "known",
+        None,
+        "Mensagem orgânica do canário.",
+        {
+            "lineage_classification": "ORGANIC",
+            "metadata": {"thread_key": "canary-thread"},
+        },
+    )
+    assert session.scalar(
+        select(func.count()).select_from(ConversationMessageRow)
+    ) == 1
+
+    services.receive_inbound_event(
+        session,
+        "synthetic",
+        "outside-event",
+        "message",
+        "outside-external",
+        "Outside",
+        "known",
+        None,
+        "Não deve entrar na memória canário.",
+        {
+            "lineage_classification": "ORGANIC",
+            "metadata": {"thread_key": "outside-thread"},
+        },
+    )
+    assert session.scalar(
+        select(func.count()).select_from(ConversationMessageRow)
+    ) == 1

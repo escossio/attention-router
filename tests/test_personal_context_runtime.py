@@ -8,6 +8,7 @@ from attention_router.application import services
 from attention_router.application.personal_context_runtime import (
     PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION,
     PersonalContextRuntimeCycleResult,
+    _owner_actor_scopes,
     run_personal_context_runtime_cycle,
 )
 from attention_router.application.platform.capability_pack import (
@@ -455,3 +456,54 @@ def test_worker_runtime_schedule_respects_feature_flag_and_interval(
     assert result is not None
     assert last3 == 401.0
     assert len(calls) == 2
+
+
+def test_personal_context_runtime_exact_canary_tenant_scopes_owner_scan(
+    session,
+):
+    _owner(session)
+    tenant_b = "00000000-0000-4000-8000-000000000252"
+    stamp = now_utc()
+    session.add(
+        TenantRow(
+            id=tenant_b,
+            slug="pc-canary-252",
+            name="PC Canary 252",
+            status="ACTIVE",
+            created_at=stamp,
+            updated_at=stamp,
+        )
+    )
+    session.add(
+        ActorBindingRow(
+            id=new_id(),
+            tenant_id=tenant_b,
+            source="wwebjs",
+            external_actor_id="owner-b@c.us",
+            actor_key="owner-b",
+            display_name="Owner B",
+            actor_category="owner",
+            active_context=None,
+            is_active=True,
+            binding_metadata={
+                "owner": True,
+                "owner_channel_role": "PRIMARY_OWNER_WHATSAPP",
+            },
+            created_at=stamp,
+            updated_at=stamp,
+        )
+    )
+    session.flush()
+
+    assert _owner_actor_scopes(
+        session,
+        tenant_id=tenant_b,
+    ) == ((tenant_b, "owner-b"),)
+
+    result = run_personal_context_runtime_cycle(
+        session,
+        now=stamp,
+        owner_limit=10,
+        canary_tenant_id=tenant_b,
+    )
+    assert result.owners_scanned == 1
