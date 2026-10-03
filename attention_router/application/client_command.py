@@ -69,6 +69,11 @@ from attention_router.application.owner_operational_control import (
     OperationalControlUnauthorized,
 )
 from attention_router.application.platform.context import resolve_represented_subject
+from attention_router.application.speech_transcription import (
+    ALLOWED_SPEECH_MIME_TYPES,
+    InternalSpeechTranscriber,
+    SpeechTranscriptionError,
+)
 from attention_router.config import Settings
 from attention_router.core.client.bootstrap import TenantRole
 from attention_router.core.events import OperatorAuthority, OwnerCommandUnauthorized
@@ -99,6 +104,18 @@ class ClientCommandConflict(ClientCommandError):
 
 class ClientCommandInvalid(ClientCommandError):
     code = "CLIENT_COMMAND_INVALID"
+
+
+class ClientCommandVoiceDisabled(ClientCommandError):
+    code = "CLIENT_COMMAND_VOICE_DISABLED"
+
+
+class ClientCommandVoiceInvalid(ClientCommandError):
+    code = "CLIENT_COMMAND_VOICE_INVALID"
+
+
+class ClientCommandVoiceUnavailable(ClientCommandError):
+    code = "CLIENT_COMMAND_VOICE_UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,9 +173,13 @@ class ClientCommandService:
         *,
         settings: Settings,
         client_sessions: ClientSessionService,
+        speech_transcriber: InternalSpeechTranscriber | None = None,
     ):
         self.settings = settings
         self.client_sessions = client_sessions
+        self.speech_transcriber = speech_transcriber or InternalSpeechTranscriber(
+            settings=settings
+        )
 
     def _require_enabled(self) -> None:
         if not self.settings.client_command_enabled:
@@ -287,7 +308,28 @@ class ClientCommandService:
         text: str,
         now: datetime | None = None,
     ) -> ClientCommandView:
+        return self._submit_transcript(
+            session,
+            session_token=session_token,
+            client_request_id=client_request_id,
+            text=text,
+            modality="TEXT",
+            now=now,
+        )
+
+    def _submit_transcript(
+        self,
+        session: Session,
+        *,
+        session_token: str | None,
+        client_request_id: str,
+        text: str,
+        modality: str,
+        now: datetime | None = None,
+    ) -> ClientCommandView:
         self._require_enabled()
+        if modality not in {"TEXT", "VOICE"}:
+            raise ClientCommandInvalid()
         current = now or datetime.now(UTC)
         stripped = text.strip() if isinstance(text, str) else ""
         if (
@@ -317,7 +359,9 @@ class ClientCommandService:
             client_request_id=client_request_id,
         )
         if existing is not None:
-            if existing.modality == "TEXT" and existing.input_text == stripped:
+            if existing.modality == modality and (
+                modality == "VOICE" or existing.input_text == stripped
+            ):
                 return self._view(existing)
             raise ClientCommandConflict()
 
@@ -328,7 +372,7 @@ class ClientCommandService:
             device_id=bootstrap.device.device_id,
             client_session_id=session_row.id,
             client_request_id=client_request_id,
-            modality="TEXT",
+            modality=modality,
             input_text=stripped,
             state="RECEIVED",
             normalized_action=None,
@@ -350,8 +394,8 @@ class ClientCommandService:
             )
             if (
                 replay is not None
-                and replay.modality == "TEXT"
-                and replay.input_text == stripped
+                and replay.modality == modality
+                and (modality == "VOICE" or replay.input_text == stripped)
             ):
                 return self._view(replay)
             raise ClientCommandConflict() from exc
@@ -718,6 +762,102 @@ class ClientCommandService:
         )
         session.flush()
         return self._view(row)
+    def submit_voice(
+        self,
+        session: Session,
+        *,
+        session_token: str | None,
+        client_request_id: str,
+        audio: bytes,
+        mime_type: str,
+        now: datetime | None = None,
+    ) -> ClientCommandView:
+        self._require_enabled()
+        if not self.settings.client_command_voice_enabled:
+            raise ClientCommandVoiceDisabled()
+        current = now or datetime.now(UTC)
+        if (
+            not client_request_id
+            or len(client_request_id) > 80
+            or not re.fullmatch(r"[A-Za-z0-9_.:-]+", client_request_id)
+        ):
+            raise ClientCommandVoiceInvalid()
+        normalized_mime = (
+            mime_type.split(";", 1)[0].strip().casefold()
+            if isinstance(mime_type, str)
+            else ""
+        )
+        if (
+            normalized_mime not in ALLOWED_SPEECH_MIME_TYPES
+            or not isinstance(audio, bytes)
+            or not audio
+            or len(audio) > self.settings.client_command_voice_max_bytes
+        ):
+            raise ClientCommandVoiceInvalid()
+
+        bootstrap, _, _, _, _ = self._authority(
+            session,
+            session_token,
+            now=current,
+        )
+        existing = self._existing(
+            session,
+            tenant_id=bootstrap.active_tenant_id,
+            human_identity_id=bootstrap.human_identity_id,
+            client_request_id=client_request_id,
+        )
+        if existing is not None:
+            if existing.modality == "VOICE":
+                return self._view(existing)
+            raise ClientCommandConflict()
+
+        try:
+            transcription = self.speech_transcriber.transcribe_bytes(
+                audio,
+                mime_type=normalized_mime,
+                max_bytes=self.settings.client_command_voice_max_bytes,
+            )
+        except SpeechTranscriptionError as exc:
+            audit(
+                session,
+                None,
+                "client_command.voice_transcription_failed",
+                {"error_code": str(exc)[:120]},
+                correlation_id=client_request_id,
+                causation_id=None,
+                origin="client_command",
+                tenant_id=bootstrap.active_tenant_id,
+                created_at=current,
+            )
+            raise ClientCommandVoiceUnavailable() from exc
+
+        transcript = transcription.transcript.strip()
+        if not transcript or len(transcript) > 4000:
+            raise ClientCommandVoiceUnavailable()
+        audit(
+            session,
+            None,
+            "client_command.voice_transcribed",
+            {
+                "provider": transcription.provider,
+                "model": transcription.model,
+                "device_id": bootstrap.device.device_id,
+            },
+            correlation_id=client_request_id,
+            causation_id=None,
+            origin="client_command",
+            tenant_id=bootstrap.active_tenant_id,
+            created_at=current,
+        )
+        return self._submit_transcript(
+            session,
+            session_token=session_token,
+            client_request_id=client_request_id,
+            text=transcript,
+            modality="VOICE",
+            now=current,
+        )
+
     def list_recent(
         self,
         session: Session,
@@ -767,6 +907,9 @@ __all__ = [
     "ClientCommandDisabled",
     "ClientCommandError",
     "ClientCommandInvalid",
+    "ClientCommandVoiceDisabled",
+    "ClientCommandVoiceInvalid",
+    "ClientCommandVoiceUnavailable",
     "ClientCommandService",
     "ClientCommandView",
 ]
