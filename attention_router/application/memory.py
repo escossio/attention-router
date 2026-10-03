@@ -80,6 +80,8 @@ class HistoryBackfillService:
         page_size: int = 50,
         max_messages_per_chat: int = 100,
         max_total_messages: int | None = None,
+        source_override: str | None = None,
+        source_account_override: str | None = None,
     ) -> HistoryBackfillResult:
         if page_size < 1:
             raise ValueError("HISTORY_BACKFILL_PAGE_SIZE_INVALID")
@@ -142,8 +144,11 @@ class HistoryBackfillService:
                             metrics["secret_redactions"] += 1
                         continue
                     item = ArchivedMessageInput(
-                        source=payload.get("source", "whatsapp"),
-                        source_account=payload.get("source_account", "default"),
+                        source=source_override or payload.get("source", "whatsapp"),
+                        source_account=(
+                            source_account_override
+                            or payload.get("source_account", "default")
+                        ),
                         thread_key=chat_key,
                         thread_type=chat.get("thread_type", "DIRECT"),
                         source_message_id=payload["source_message_id"],
