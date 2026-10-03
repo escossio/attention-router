@@ -545,22 +545,32 @@ def expire_due_context_recommendations(
     *,
     now: datetime | None = None,
     limit: int = 100,
+    tenant_id: str | None = None,
 ) -> int:
     if limit < 1 or limit > 1000:
         raise ValueError("RECOMMENDATION_EXPIRY_LIMIT_OUT_OF_RANGE")
 
     stamp = _utc(now or datetime.now(UTC))
-    rows = session.scalars(
-        select(MemoryClaimRow)
-        .where(
-            MemoryClaimRow.predicate == RECOMMENDATION_CLAIM_PREDICATE,
-            MemoryClaimRow.source_quality == RECOMMENDATION_SOURCE_QUALITY,
-            MemoryClaimRow.status == "ACTIVE",
-            MemoryClaimRow.valid_until.is_not(None),
-            MemoryClaimRow.valid_until <= stamp,
+    query = select(MemoryClaimRow).where(
+        MemoryClaimRow.predicate == RECOMMENDATION_CLAIM_PREDICATE,
+        MemoryClaimRow.source_quality == RECOMMENDATION_SOURCE_QUALITY,
+        MemoryClaimRow.status == "ACTIVE",
+        MemoryClaimRow.valid_until.is_not(None),
+        MemoryClaimRow.valid_until <= stamp,
+    )
+    if tenant_id is not None:
+        query = (
+            query.join(
+                MemoryActorRow,
+                MemoryActorRow.id == MemoryClaimRow.subject_actor_id,
+            )
+            .where(MemoryActorRow.tenant_id == tenant_id)
         )
-        .order_by(MemoryClaimRow.valid_until, MemoryClaimRow.id)
-        .limit(limit)
+    rows = session.scalars(
+        query.order_by(
+            MemoryClaimRow.valid_until,
+            MemoryClaimRow.id,
+        ).limit(limit)
     ).all()
 
     expired = 0

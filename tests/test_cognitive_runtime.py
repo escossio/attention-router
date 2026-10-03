@@ -189,6 +189,7 @@ def test_cognitive_runtime_settings_default_off_and_bounded():
     configured = Settings(_env_file=None)
 
     assert configured.cognitive_runtime_enabled is False
+    assert configured.cognitive_runtime_canary_tenant_id is None
     assert configured.cognitive_runtime_interval_seconds == 300
     assert configured.cognitive_runtime_tenant_limit == 50
     assert configured.cognitive_runtime_graph_limit_per_kind == 200
@@ -312,3 +313,53 @@ def test_cognitive_runtime_rollback_does_not_inflate_committed_metrics(
     assert session.scalar(
         select(func.count()).select_from(CandidateInsightRow)
     ) == 0
+
+
+def test_cognitive_runtime_exact_canary_tenant_skips_other_active_tenants(
+    session,
+):
+    stamp = datetime(2026, 1, 3, 12, 0, tzinfo=UTC)
+    _world(
+        session,
+        suffix="non-canary-organic",
+        lineage="ORGANIC",
+        stamp=stamp,
+    )
+    canary_tenant = "00000000-0000-4000-8000-000000000251"
+    session.add(
+        TenantRow(
+            id=canary_tenant,
+            slug="cognitive-canary-251",
+            name="Cognitive Canary 251",
+            status="ACTIVE",
+            created_at=stamp,
+            updated_at=stamp,
+        )
+    )
+    session.flush()
+
+    result = run_cognitive_runtime_cycle(
+        session,
+        tenant_limit=10,
+        canary_tenant_id=canary_tenant,
+        graph_limit_per_kind=50,
+        candidate_limit=10,
+        now=stamp + timedelta(hours=1),
+    )
+
+    assert result.tenants_considered == 1
+    assert result.tenants_succeeded == 1
+    assert result.relation_candidates == 0
+    assert session.scalar(
+        select(func.count()).select_from(CandidateInsightRow)
+    ) == 0
+
+
+def test_cognitive_canary_empty_env_values_normalize_to_none():
+    configured = Settings(
+        _env_file=None,
+        cognitive_runtime_canary_tenant_id="",
+        personal_context_runtime_canary_tenant_id="   ",
+    )
+    assert configured.cognitive_runtime_canary_tenant_id is None
+    assert configured.personal_context_runtime_canary_tenant_id is None

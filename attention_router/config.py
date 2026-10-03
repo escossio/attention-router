@@ -140,12 +140,14 @@ class Settings(BaseSettings):
     persistent_memory_canary_binding_id: str | None = None
     personal_context_runtime_enabled: bool = False
     personal_context_runtime_interval_seconds: int = 300
+    personal_context_runtime_canary_tenant_id: str | None = None
     personal_context_recommendation_delivery_enabled: bool = False
     personal_context_suggestion_delivery_enabled: bool = False
     personal_context_authority_runtime_enabled: bool = False
     personal_context_materialization_runtime_enabled: bool = False
     learned_graph_shadow_enabled: bool = False
     cognitive_runtime_enabled: bool = False
+    cognitive_runtime_canary_tenant_id: str | None = None
     cognitive_runtime_interval_seconds: int = 300
     cognitive_runtime_tenant_limit: int = 50
     cognitive_runtime_graph_limit_per_kind: int = 200
@@ -211,6 +213,20 @@ class Settings(BaseSettings):
     disk_block_new_heavy_tests: int = 95
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator(
+        "personal_context_runtime_canary_tenant_id",
+        "cognitive_runtime_canary_tenant_id",
+        mode="before",
+    )
+    @classmethod
+    def empty_canary_tenant_id_to_none(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
 
     @field_validator(
         "otel_tracing_enabled", "otel_service_name", "otel_service_version",
@@ -570,6 +586,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 "PERSONAL_CONTEXT_RUNTIME_INTERVAL_SECONDS must be positive"
             )
+        if (
+            self.personal_context_runtime_canary_tenant_id is not None
+            and not self.personal_context_runtime_canary_tenant_id.strip()
+        ):
+            raise ValueError(
+                "PERSONAL_CONTEXT_RUNTIME_CANARY_TENANT_ID must not be empty"
+            )
         if not 1 <= self.personal_context_runtime_owner_limit <= 500:
             raise ValueError(
                 "PERSONAL_CONTEXT_RUNTIME_OWNER_LIMIT must be between 1 and 500"
@@ -581,6 +604,13 @@ class Settings(BaseSettings):
         if self.cognitive_runtime_interval_seconds <= 0:
             raise ValueError(
                 "COGNITIVE_RUNTIME_INTERVAL_SECONDS must be positive"
+            )
+        if (
+            self.cognitive_runtime_canary_tenant_id is not None
+            and not self.cognitive_runtime_canary_tenant_id.strip()
+        ):
+            raise ValueError(
+                "COGNITIVE_RUNTIME_CANARY_TENANT_ID must not be empty"
             )
         if not 1 <= self.cognitive_runtime_tenant_limit <= 500:
             raise ValueError(

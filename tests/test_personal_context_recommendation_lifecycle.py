@@ -562,3 +562,78 @@ def test_proposed_recommendation_cannot_advance_after_source_invalidation(sessio
     assert proposed.object_json["lifecycle_state"] == "PROPOSED"
     assert proposed.object_json["execution_requested"] is False
     assert proposed.object_json["grants_authority"] is False
+
+
+def test_recommendation_expiry_can_be_scoped_to_exact_tenant(session):
+    stamp = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
+    default_actor = _install_owner(session)
+    default_source = _source_claim(
+        session,
+        actor=default_actor,
+        stamp=stamp - timedelta(days=2),
+        suffix="default-expiry",
+    )
+    default_recommendation = _recommendation(
+        source_claim=default_source,
+        stamp=stamp - timedelta(days=2),
+        suffix="default-expiry",
+        valid_until=stamp - timedelta(hours=1),
+    )
+    default_row, _ = persist_context_recommendation(
+        session,
+        recommendation=default_recommendation,
+    )
+
+    tenant_b = "00000000-0000-4000-8000-000000000253"
+    session.add(
+        TenantRow(
+            id=tenant_b,
+            slug="recommendation-canary-253",
+            name="Recommendation Canary 253",
+            status="ACTIVE",
+            created_at=stamp,
+            updated_at=stamp,
+        )
+    )
+    actor_b = MemoryActorRow(
+        id=new_id(),
+        tenant_id=tenant_b,
+        actor_key="owner-expiry-b",
+        metadata_json={},
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    session.add(actor_b)
+    session.flush()
+    source_b = _source_claim(
+        session,
+        actor=actor_b,
+        stamp=stamp - timedelta(days=2),
+        suffix="tenant-b-expiry",
+    )
+    recommendation_b = replace(
+        _recommendation(
+            source_claim=source_b,
+            stamp=stamp - timedelta(days=2),
+            suffix="tenant-b-expiry",
+            valid_until=stamp - timedelta(hours=1),
+        ),
+        tenant_id=tenant_b,
+        actor_id=actor_b.actor_key,
+    )
+    row_b, _ = persist_context_recommendation(
+        session,
+        recommendation=recommendation_b,
+    )
+
+    assert expire_due_context_recommendations(
+        session,
+        now=stamp,
+        tenant_id=tenant_b,
+    ) == 1
+    session.flush()
+    session.refresh(default_row)
+    session.refresh(row_b)
+
+    assert default_row.status == "ACTIVE"
+    assert row_b.status == "SUPERSEDED"

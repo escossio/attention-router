@@ -102,14 +102,17 @@ def _utc(value: datetime) -> datetime:
 
 def _owner_actor_scopes(
     session: Session,
+    *,
+    tenant_id: str | None = None,
 ) -> tuple[tuple[str, str], ...]:
+    query = select(ActorBindingRow).where(
+        ActorBindingRow.is_active.is_(True),
+        ActorBindingRow.actor_category == "owner",
+    )
+    if tenant_id is not None:
+        query = query.where(ActorBindingRow.tenant_id == tenant_id)
     rows = session.scalars(
-        select(ActorBindingRow)
-        .where(
-            ActorBindingRow.is_active.is_(True),
-            ActorBindingRow.actor_category == "owner",
-        )
-        .order_by(
+        query.order_by(
             ActorBindingRow.tenant_id,
             ActorBindingRow.actor_key,
             ActorBindingRow.id,
@@ -600,6 +603,7 @@ def run_personal_context_runtime_cycle(
     delivery_enabled: bool = False,
     suggestion_delivery_enabled: bool = False,
     owner_limit: int = 50,
+    canary_tenant_id: str | None = None,
 ) -> PersonalContextRuntimeCycleResult:
     """Run bounded Personal Context detection/persistence/recommendation work.
 
@@ -615,6 +619,7 @@ def run_personal_context_runtime_cycle(
         session,
         now=stamp,
         limit=500,
+        tenant_id=canary_tenant_id,
     )
     counters = {
         "owners_scanned": 0,
@@ -639,7 +644,10 @@ def run_personal_context_runtime_cycle(
         "expired_recommendations": expired,
     }
 
-    for tenant_id, actor_key in _owner_actor_scopes(session)[:owner_limit]:
+    for tenant_id, actor_key in _owner_actor_scopes(
+        session,
+        tenant_id=canary_tenant_id,
+    )[:owner_limit]:
         counters["owners_scanned"] += 1
         try:
             with session.begin_nested():

@@ -52,13 +52,14 @@ def _active_tenant_ids(
     session: Session,
     *,
     tenant_limit: int,
+    canary_tenant_id: str | None = None,
 ) -> tuple[str, ...]:
+    query = select(TenantRow.id).where(TenantRow.status == "ACTIVE")
+    if canary_tenant_id is not None:
+        query = query.where(TenantRow.id == canary_tenant_id)
     return tuple(
         session.scalars(
-            select(TenantRow.id)
-            .where(TenantRow.status == "ACTIVE")
-            .order_by(TenantRow.id)
-            .limit(tenant_limit)
+            query.order_by(TenantRow.id).limit(tenant_limit)
         ).all()
     )
 
@@ -67,6 +68,7 @@ def run_cognitive_runtime_cycle(
     session: Session,
     *,
     tenant_limit: int = 50,
+    canary_tenant_id: str | None = None,
     graph_limit_per_kind: int = 200,
     candidate_limit: int = 24,
     now: datetime | None = None,
@@ -85,6 +87,7 @@ def run_cognitive_runtime_cycle(
     tenant_ids = _active_tenant_ids(
         session,
         tenant_limit=tenant_limit,
+        canary_tenant_id=canary_tenant_id,
     )
     engines = default_graph_intelligence_engines()
 
