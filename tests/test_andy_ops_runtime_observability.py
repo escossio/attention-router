@@ -145,3 +145,31 @@ def test_frontend_renders_disabled_observability_sources():
     source = (PANEL_ROOT / "app.js").read_text()
     assert "obs.enabled === false" in source
     assert "tracePayload.enabled === false" in source
+
+
+def test_runtime_observers_are_default_off(monkeypatch):
+    monkeypatch.delenv("ANDY_OPS_TRANSPORT_OBSERVABILITY_ENABLED", raising=False)
+    monkeypatch.delenv("ANDY_OPS_MESSAGE_TRACING_ENABLED", raising=False)
+    monkeypatch.delenv("ANDY_OPS_TRACE_DB_CONTAINER", raising=False)
+
+    transport = load(TRANSPORT, "andy_transport_observability_default_off_test")
+    tracing = load(TRACING, "andy_message_tracing_default_off_test")
+
+    transport_payload = transport.sample_transport_observability()
+    trace_payload = tracing.sample_message_traces()
+
+    assert transport_payload["enabled"] is False
+    assert transport_payload["derived"]["severity"] == "DISABLED"
+    assert trace_payload["enabled"] is False
+    assert trace_payload["ok"] is True
+    assert trace_payload["traces"] == []
+
+
+def test_runtime_observer_flags_are_documented_as_disabled_by_default():
+    env_example = (PANEL_ROOT / "andy-ops-panel.env.example").read_text()
+    app = (PANEL_ROOT / "app.js").read_text()
+
+    assert "ANDY_OPS_TRANSPORT_OBSERVABILITY_ENABLED=false" in env_example
+    assert "ANDY_OPS_MESSAGE_TRACING_ENABLED=false" in env_example
+    assert "obs.enabled === false" in app
+    assert "tracePayload.enabled === false" in app
