@@ -45,6 +45,14 @@ The installed Remote Desktop Commander keeps a bounded JSONL tool-call history. 
 
 Arguments are summarized and obvious token/secret/password/bearer patterns are redacted before data reaches the browser. The panel must remain LAN-only because command summaries can still contain operational context.
 
+### Agent / Transport and Message Trace views
+
+Two additional read-only views can be enabled explicitly on a private control-plane host.
+
+ANDY_OPS_TRANSPORT_OBSERVABILITY_ENABLED=true correlates independent transport evidence: systemd unit state, the configured transport status endpoint, browser CDP state, observer freshness and backend readiness. Journal excerpts are bounded and redact WhatsApp-like identifiers, URLs and bearer values before reaching the browser.
+
+ANDY_OPS_MESSAGE_TRACING_ENABLED=true enables a bounded message-lifecycle projection (INBOUND -> INGRESS -> CONTROL -> QUEUE -> DECISION -> EXECUTION -> OUTBOX -> OUTBOUND). It reads operational metadata through a host-private PostgreSQL container configured by ANDY_OPS_TRACE_DB_CONTAINER. Message bodies and outbox destinations are not selected or exposed. This capability is default-off and must remain LAN-only.
+
 ### HTTP / GoAccess and Containers / Dozzle views
 
 Two optional lazy-loaded tabs embed the existing LAN-only observability UIs without proxying or duplicating their data:
@@ -64,9 +72,11 @@ The server samples:
 - the same sources over SSH aliases for CI01/CI02/CI03;
 - `/var/log/andy-ci/*-postgres-distributed/summary.json`;
 - the Remote Desktop Commander JSONL tool history;
-- local descendant processes of the Desktop Commander server.
+- local descendant processes of the Desktop Commander server;
+- optional transport/browser/systemd evidence when Transport Observability is enabled;
+- optional bounded message-lifecycle metadata when Message Tracing is explicitly enabled.
 
-No Attention Router production database is queried.
+The default configuration does not query an Attention Router production database. Message Tracing is a separately gated, read-only LAN capability and requires an explicit host-private database container name.
 ## Configuration
 
 The public package contains no LAN addresses. Host-specific values stay outside Git.
@@ -80,6 +90,11 @@ Environment variables:
 - `ANDY_OPS_CI01_HOST`, `ANDY_OPS_CI02_HOST`, `ANDY_OPS_CI03_HOST` - SSH aliases;
 - `ANDY_OPS_CI_LOG_ROOT` - defaults to `/var/log/andy-ci`;
 - `ANDY_OPS_TOOL_HISTORY` - defaults to the current user's Desktop Commander JSONL history path.
+- ANDY_OPS_TRANSPORT_OBSERVABILITY_ENABLED - default false; enables the read-only AGENT / TRANSPORT projection.
+- ANDY_OPS_WHATSAPP_TRANSPORT_STATUS_URL, ANDY_OPS_WHATSAPP_BROWSER_DEBUG_URL, ANDY_OPS_ATTENTION_API_READY_URL - private runtime endpoints used only when transport observability is enabled.
+- ANDY_OPS_MESSAGE_TRACING_ENABLED - default false; enables bounded message lifecycle tracing.
+- ANDY_OPS_TRACE_DB_CONTAINER - required host-private PostgreSQL container name when message tracing is enabled; intentionally blank in public examples.
+- ANDY_OPS_TRACE_DB_USER, ANDY_OPS_TRACE_DB_NAME, ANDY_OPS_TRACE_LIMIT - bounded read-only trace query settings.
 - ANDY_OPS_GOACCESS_URL - optional LAN URL for the GoAccess UI;
 - ANDY_OPS_DOZZLE_URL - optional LAN URL for the Dozzle UI.
 - `ANDY_OPS_NETWORK_OSI_URL` - optional URL of the authenticated Grafana ROC
@@ -128,7 +143,7 @@ A dispatch is shown as `RUNNING` only when a live AGT/worker process reports tha
 - LAN-only by design.
 - Read-only observers; no controls or execution buttons in V1.
 - No provider credentials or GitHub tokens are required by the web server.
-- No production database access.
+- No production database access in the default configuration. Optional Message Tracing is explicit, bounded, read-only and LAN-only.
 - Command summaries are redacted, but the UI must still be treated as operationally sensitive.
 - Public repository files contain no private host addresses or credentials.
 

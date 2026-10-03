@@ -23,6 +23,7 @@
   <nav class="tabs" aria-label="Painéis">
     <button class="tab is-active" data-tab="compute" type="button">COMPUTE</button>
     <button class="tab" data-tab="chat" type="button">CHAT / CONSOLE</button>
+    <button class="tab" data-tab="transport" type="button">AGENT / TRANSPORT</button>
     <button class="tab" data-tab="goaccess" type="button">HTTP / GOACCESS</button>
     <button class="tab" data-tab="dozzle" type="button">CONTAINERS / DOZZLE</button>
     <button class="tab" data-tab="network" type="button">NETWORK / OSI</button>
@@ -95,6 +96,107 @@
           <span class="muted">argumentos sensíveis são resumidos</span>
         </div>
         <div id="tool-history" class="tool-history"></div>
+      </section>
+    </section>
+
+    <section id="transport-view" class="view">
+      <section class="transport-hero">
+        <div>
+          <span class="section-label">TRUST / STATE OBSERVABILITY</span>
+          <h2>WhatsApp transport · estados independentes</h2>
+          <p>Compara a página real do WhatsApp, o estado interno do whatsapp-web.js, autoridade do owner, observer e backend. Divergências são tratadas como sinal operacional de primeira classe.</p>
+        </div>
+        <div id="transport-overall-state" class="source-state">AGUARDANDO</div>
+      </section>
+
+      <section class="transport-grid">
+        <article class="transport-card">
+          <span class="section-label">BROWSER / PÁGINA</span>
+          <strong id="wa-page-state">—</strong>
+          <dl>
+            <div><dt>Browser unit</dt><dd id="wa-browser-unit">—</dd></div>
+            <div><dt>CDP</dt><dd id="wa-browser-debug">—</dd></div>
+            <div><dt>Páginas WA</dt><dd id="wa-page-count">—</dd></div>
+            <div><dt>AuthStore</dt><dd id="wa-auth-state">—</dd></div>
+            <div><dt>hasSynced</dt><dd id="wa-has-synced">—</dd></div>
+            <div><dt>Sync handler</dt><dd id="wa-sync-handler">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="transport-card">
+          <span class="section-label">TRANSPORT / WWEBJS</span>
+          <strong id="wa-client-state">—</strong>
+          <dl>
+            <div><dt>Service</dt><dd id="wa-transport-unit">—</dd></div>
+            <div><dt>/ready</dt><dd id="wa-transport-ready">—</dd></div>
+            <div><dt>WWEBJS</dt><dd id="wa-wwebjs-connected">—</dd></div>
+            <div><dt>PID</dt><dd id="wa-transport-pid">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="transport-card">
+          <span class="section-label">OWNER AUTHORITY</span>
+          <strong id="wa-authority-state">—</strong>
+          <dl>
+            <div><dt>Verification</dt><dd id="wa-authority-verification">—</dd></div>
+            <div><dt>Reason</dt><dd id="wa-authority-reason">—</dd></div>
+            <div><dt>Última invalidação</dt><dd id="wa-authority-invalidation">—</dd></div>
+            <div><dt>Quando</dt><dd id="wa-authority-invalidation-at">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="transport-card">
+          <span class="section-label">FLOW / BACKEND</span>
+          <strong id="wa-flow-state">—</strong>
+          <dl>
+            <div><dt>Observer</dt><dd id="wa-observer-state">—</dd></div>
+            <div><dt>Último evento</dt><dd id="wa-observer-age">—</dd></div>
+            <div><dt>Inbound seen</dt><dd id="wa-inbound-count">—</dd></div>
+            <div><dt>API</dt><dd id="wa-api-ready">—</dd></div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="trace-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">MESSAGE TRACE / INBOUND → OUTBOUND</span>
+            <h2 id="trace-title">Aguardando fluxo</h2>
+          </div>
+          <span id="trace-state" class="source-state">AGUARDANDO</span>
+        </div>
+        <div id="trace-latest" class="trace-latest"></div>
+        <div class="trace-recent-heading">
+          <span class="section-label">FLUXOS RECENTES</span>
+          <span id="trace-updated" class="muted">—</span>
+        </div>
+        <div id="trace-list" class="trace-list"></div>
+      </section>
+
+      <section class="divergence-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">DIVERGÊNCIA DE ESTADO</span>
+            <h2 id="wa-divergence-title">Aguardando amostra</h2>
+          </div>
+          <span id="wa-recovery-gate" class="source-state">—</span>
+        </div>
+        <div id="wa-divergence-list" class="divergence-list"></div>
+        <div class="recovery-explain">
+          <span class="section-label">GATE DE RECUPERAÇÃO</span>
+          <p id="wa-recovery-reason">—</p>
+        </div>
+      </section>
+
+      <section class="history-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">JOURNAL DO SISTEMA OPERACIONAL</span>
+            <h2>Sequência do transport</h2>
+          </div>
+          <span class="muted">somente eventos relevantes · read-only</span>
+        </div>
+        <div id="wa-timeline" class="transport-timeline"></div>
       </section>
     </section>
 

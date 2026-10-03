@@ -283,12 +283,250 @@ function renderChat(chat) {
   });
 }
 
+function renderTransport(obs) {
+  obs = obs || {};
+  const browser = obs.browser || {};
+  const transport = obs.transport || {};
+  const observer = obs.observer || {};
+  const api = obs.api || {};
+  const derived = obs.derived || {};
+  const severity = String(derived.severity || "UNKNOWN");
+
+  const overall = $("#transport-overall-state");
+  if (obs.enabled === false) {
+    overall.textContent = "DESABILITADO";
+    overall.className = "source-state ready";
+    [
+      "#wa-page-state", "#wa-browser-unit", "#wa-browser-debug", "#wa-page-count",
+      "#wa-auth-state", "#wa-has-synced", "#wa-sync-handler", "#wa-client-state",
+      "#wa-transport-unit", "#wa-transport-ready", "#wa-wwebjs-connected",
+      "#wa-transport-pid", "#wa-authority-state", "#wa-authority-verification",
+      "#wa-authority-reason", "#wa-authority-invalidation", "#wa-authority-invalidation-at",
+      "#wa-flow-state", "#wa-observer-state", "#wa-observer-age", "#wa-inbound-count",
+      "#wa-api-ready", "#wa-recovery-gate", "#wa-recovery-reason"
+    ].forEach((selector) => {
+      const element = $(selector);
+      if (element) element.textContent = "—";
+    });
+    $("#wa-divergence-title").textContent = "Observabilidade de transport desabilitada";
+    const divergenceRoot = $("#wa-divergence-list");
+    divergenceRoot.replaceChildren();
+    divergenceRoot.innerHTML = '<div class="empty">Ative por configuração privada do host.</div>';
+    const timeline = $("#wa-timeline");
+    timeline.replaceChildren();
+    timeline.innerHTML = '<div class="empty">Transport observability desabilitado.</div>';
+    return;
+  }
+  overall.textContent = severity === "OK" ? "COERENTE" : severity;
+  overall.className = "source-state " + (
+    severity === "OK" ? "live" : severity === "CRITICAL" ? "offline" : "ready"
+  );
+
+  $("#wa-page-state").textContent = derived.page_state || "UNKNOWN";
+  $("#wa-browser-unit").textContent = browser.active ? "ACTIVE" : String(browser.active_state || "UNKNOWN").toUpperCase();
+  $("#wa-browser-debug").textContent = browser.debug_reachable ? "REACHABLE" : "UNREACHABLE";
+  $("#wa-page-count").textContent = browser.whatsapp_page_count ?? "—";
+  $("#wa-auth-state").textContent = browser.auth_state || "—";
+  $("#wa-has-synced").textContent = browser.has_synced === true ? "TRUE" : browser.has_synced === false ? "FALSE" : "—";
+  $("#wa-sync-handler").textContent = browser.sync_handler_present === true ? "PRESENT" : browser.sync_handler_present === false ? "ABSENT" : "—";
+
+  $("#wa-client-state").textContent = transport.client_state || "UNKNOWN";
+  $("#wa-transport-unit").textContent = transport.active ? "ACTIVE" : String(transport.active_state || "UNKNOWN").toUpperCase();
+  $("#wa-transport-ready").textContent = transport.ready === true ? "READY" : "NOT READY";
+  $("#wa-wwebjs-connected").textContent = transport.wwebjs_connected === true ? "CONNECTED" : "NOT CONNECTED";
+  $("#wa-transport-pid").textContent = transport.pid || "—";
+
+  const authorityReady = transport.owner_command_authority_ready === true;
+  $("#wa-authority-state").textContent = authorityReady ? "AUTHORIZED" : "NOT AUTHORIZED";
+  $("#wa-authority-verification").textContent = transport.owner_identity_verification || "—";
+  $("#wa-authority-reason").textContent = transport.owner_command_authority_reason || "—";
+  $("#wa-authority-invalidation").textContent = transport.owner_authority_last_invalidation_reason || "—";
+  $("#wa-authority-invalidation-at").textContent = fmtTime(transport.owner_authority_last_invalidation_at);
+
+  const flowReady = transport.ready === true && api.ready === true;
+  $("#wa-flow-state").textContent = flowReady ? "FLOW READY" : "FLOW DEGRADED";
+  $("#wa-observer-state").textContent = observer.active ? (observer.fresh ? "ACTIVE / FRESH" : "ACTIVE") : "OFFLINE";
+  $("#wa-observer-age").textContent = fmtAge(observer.age_seconds);
+  $("#wa-inbound-count").textContent = transport.inbound_seen_count ?? "—";
+  $("#wa-api-ready").textContent = api.ready ? "READY" : "NOT READY";
+
+  const divergences = Array.isArray(derived.divergences) ? derived.divergences : [];
+  $("#wa-divergence-title").textContent = divergences.length
+    ? divergences.length + (divergences.length === 1 ? " divergência detectada" : " divergências detectadas")
+    : "Nenhuma divergência detectada";
+  const divergenceRoot = $("#wa-divergence-list");
+  divergenceRoot.replaceChildren();
+  if (!divergences.length) {
+    const item = document.createElement("div");
+    item.className = "divergence-item good";
+    item.textContent = "As fontes independentes observadas estão coerentes.";
+    divergenceRoot.append(item);
+  } else {
+    divergences.forEach((entry) => {
+      const item = document.createElement("div");
+      item.className = "divergence-item " + (entry.severity === "CRITICAL" ? "bad" : "warn");
+      const code = document.createElement("strong");
+      code.textContent = entry.code || "DIVERGENCE";
+      const detail = document.createElement("span");
+      detail.textContent = entry.detail || "—";
+      item.append(code, detail);
+      divergenceRoot.append(item);
+    });
+  }
+
+  const gate = derived.recovery_gate || {};
+  const gateEl = $("#wa-recovery-gate");
+  gateEl.textContent = gate.state || "UNKNOWN";
+  gateEl.className = "source-state " + (
+    gate.state === "NOT_NEEDED" || gate.state === "ELIGIBLE" ? "live"
+      : gate.state === "BLOCKED" ? "offline" : "ready"
+  );
+  $("#wa-recovery-reason").textContent = gate.reason || "—";
+
+  const timeline = $("#wa-timeline");
+  timeline.replaceChildren();
+  const events = Array.isArray(obs.timeline) ? obs.timeline : [];
+  if (!events.length) {
+    timeline.innerHTML = '<div class="empty">Sem eventos relevantes no journal.</div>';
+  } else {
+    events.forEach((event) => {
+      const row = document.createElement("div");
+      row.className = "timeline-row";
+      const time = document.createElement("span");
+      time.className = "mono";
+      time.textContent = fmtTime(event.timestamp);
+      const message = document.createElement("span");
+      message.textContent = event.message || "—";
+      row.append(time, message);
+      timeline.append(row);
+    });
+  }
+}
+
+function fmtMs(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  const ms = Math.max(0, Number(value));
+  if (ms < 1000) return Math.round(ms) + "ms";
+  if (ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + "s";
+  return fmtDuration(ms / 1000);
+}
+
+function traceTone(value) {
+  const v = String(value || "UNKNOWN").toUpperCase();
+  if (["COMPLETED", "DONE", "IGNORED"].includes(v)) return "good";
+  if (["FAILED", "BLOCKED"].includes(v)) return "bad";
+  if (["ACTIVE", "WAITING", "WAITING_GRACE", "WAITING_WORKER", "DECIDED", "INGESTED", "RECEIVED"].includes(v)) return "warn";
+  return "muted";
+}
+
+function renderMessageTraces(tracePayload) {
+  const latestRoot = $("#trace-latest");
+  const listRoot = $("#trace-list");
+  const badge = $("#trace-state");
+  if (!latestRoot || !listRoot || !badge) return;
+
+  latestRoot.replaceChildren();
+  listRoot.replaceChildren();
+  if (tracePayload.enabled === false) {
+    badge.textContent = "DESABILITADO";
+    badge.className = "source-state ready";
+    $("#trace-title").textContent = "Message tracing desabilitado";
+    $("#trace-updated").textContent = "—";
+    latestRoot.innerHTML = '<div class="empty">Ative por configuração privada do host.</div>';
+    return;
+  }
+  const traces = Array.isArray(tracePayload.traces) ? tracePayload.traces : [];
+  $("#trace-updated").textContent = tracePayload.generated_at ? "Atualizado " + fmtTime(tracePayload.generated_at) : "—";
+
+  if (tracePayload.ok === false) {
+    badge.textContent = "TRACE ERROR";
+    badge.className = "source-state offline";
+    $("#trace-title").textContent = "Tracer indisponível";
+    latestRoot.innerHTML = '<div class="empty">Falha ao consultar o tracer read-only.</div>';
+    return;
+  }
+  if (!traces.length) {
+    badge.textContent = "SEM FLUXOS";
+    badge.className = "source-state ready";
+    $("#trace-title").textContent = "Nenhuma mensagem recente";
+    latestRoot.innerHTML = '<div class="empty">Nenhum inbound disponível para correlação.</div>';
+    return;
+  }
+
+  const latest = traces[0];
+  const tone = traceTone(latest.overall_state);
+  badge.textContent = latest.overall_state || "UNKNOWN";
+  badge.className = "source-state " + (tone === "good" ? "live" : tone === "bad" ? "offline" : "ready");
+  $("#trace-title").textContent = "Trace " + (latest.correlation_short || "—") + " · " + (latest.overall_state || "UNKNOWN");
+
+  const meta = document.createElement("div");
+  meta.className = "trace-meta";
+  const total = latest.duration_ms ?? latest.age_ms;
+  const corr = document.createElement("span");
+  corr.className = "mono";
+  corr.textContent = latest.correlation_short || "—";
+  const when = document.createElement("span");
+  when.textContent = fmtTime(latest.received_at);
+  const totalEl = document.createElement("span");
+  totalEl.textContent = (latest.duration_ms !== null && latest.duration_ms !== undefined ? "TOTAL " : "ABERTO ") + fmtMs(total);
+  meta.append(corr, when, totalEl);
+  latestRoot.append(meta);
+
+  const rail = document.createElement("div");
+  rail.className = "trace-rail";
+  (latest.stages || []).forEach((stage) => {
+    const item = document.createElement("div");
+    item.className = "trace-stage " + String(stage.state || "unknown").toLowerCase();
+    const dot = document.createElement("span");
+    dot.className = "trace-dot";
+    const body = document.createElement("div");
+    body.className = "trace-stage-body";
+    const head = document.createElement("div");
+    head.className = "trace-stage-head";
+    const label = document.createElement("strong");
+    label.textContent = stage.label || stage.key || "—";
+    const timing = document.createElement("span");
+    timing.className = "mono";
+    timing.textContent = stage.elapsed_ms === null || stage.elapsed_ms === undefined ? "—" : "+" + fmtMs(stage.elapsed_ms);
+    head.append(label, timing);
+    const detail = document.createElement("small");
+    detail.textContent = (stage.state || "UNKNOWN") + (stage.detail ? " · " + stage.detail : "");
+    body.append(head, detail);
+    item.append(dot, body);
+    rail.append(item);
+  });
+  latestRoot.append(rail);
+
+  traces.slice(1).forEach((trace) => {
+    const row = document.createElement("div");
+    row.className = "trace-row";
+    const whenEl = document.createElement("span");
+    whenEl.className = "mono";
+    whenEl.textContent = fmtTime(trace.received_at);
+    const corrEl = document.createElement("span");
+    corrEl.className = "mono";
+    corrEl.textContent = trace.correlation_short || "—";
+    const current = document.createElement("span");
+    current.textContent = trace.current_stage || "—";
+    const status = document.createElement("strong");
+    status.className = traceTone(trace.overall_state);
+    status.textContent = trace.overall_state || "UNKNOWN";
+    const elapsed = document.createElement("span");
+    elapsed.className = "mono";
+    elapsed.textContent = fmtMs(trace.duration_ms ?? trace.age_ms);
+    row.append(whenEl, corrEl, current, status, elapsed);
+    listRoot.append(row);
+  });
+}
+
 function render(payload) {
   state.lastPayload = payload;
   renderNodes(payload.nodes || []);
   renderDispatch(payload);
   renderDispatchHistory(payload.recent || []);
   renderChat(payload.chat || {});
+  renderTransport(payload.transport_observability || {});
+  renderMessageTraces(payload.message_traces || {});
 
   $("#live-label").textContent = "AO VIVO";
   $("#last-update").textContent = "Atualizado " + fmtTime(payload.generated_at);

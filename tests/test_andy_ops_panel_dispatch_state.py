@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,11 +15,19 @@ SCHEDULER = (
 
 
 def load_panel():
+    panel_dir = str(PANEL.parent)
+    inserted = panel_dir not in sys.path
+    if inserted:
+        sys.path.insert(0, panel_dir)
     spec = importlib.util.spec_from_file_location("andy_ops_panel_test", PANEL)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    try:
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if inserted:
+            sys.path.remove(panel_dir)
 
 
 def make_run(root: Path, sha_short: str = "c11b0ef7a1f3") -> Path:
