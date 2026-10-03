@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#071018">
+<meta name="description" content="Marco arquitetural da Andy: arquitetura cognitiva pessoal persistente.">
+<meta property="og:title" content="O coração da Andy — Arquitetura Cognitiva Pessoal Persistente">
+<meta property="og:description" content="Da memória de chatbot a uma representação viva, temporal, multimodal, auditável e governada do mundo do usuário.">
+<meta property="og:type" content="article">
+<title>O coração da Andy</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="experience-gate" id="experience-gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+  <div class="experience-panel">
+    <p class="eyebrow">MARCO · EXPERIÊNCIA NARRADA</p>
+    <h2 id="gate-title">Quer começar ouvindo?</h2>
+    <p>A voz do <strong>Zargan</strong> já está gravada e hospedada nesta página. A leitura acompanha o texto em modo karaokê, com pausas e emoção contida.</p>
+    <div class="gate-actions">
+      <button class="primary" id="start-experience">▶ Iniciar com Zargan</button>
+      <button id="skip-audio">Entrar sem áudio</button>
+    </div>
+    <small>O navegador exige um toque para liberar áudio com som.</small>
+  </div>
+</div>
+<header class="topbar"><div class="shell"><div class="brand">ANDY <span>/ ATTENTION ROUTER</span></div><a href="#ouvir">Ouvir com Zargan ↓</a></div></header>
+<main>
+<section class="hero shell">
+<p class="eyebrow">MARCO ARQUITETURAL · 03 OUT 2026</p>
+<h1>O coração<br>da <em>Andy</em></h1>
+<p class="subtitle">Arquitetura cognitiva pessoal persistente.</p>
+<p class="thesis narration-segment" id="thesis"></p>
+<div class="hero-actions"><a class="pill primary" href="#passagem">Passagem do marco</a><a class="pill" href="#arquitetura">Arquitetura</a><a class="pill" href="#documento">Documento completo</a></div>
+</section>
+
+<section class="passage shell" id="passagem">
+<p class="eyebrow">A PASSAGEM</p>
+<blockquote class="narration-segment" id="passage-primary"></blockquote>
+<blockquote class="secondary narration-segment" id="passage-secondary"></blockquote>
+</section>
+
+<section class="architecture shell" id="arquitetura">
+<p class="eyebrow">COGNITIVE LOOP</p>
+<h2>Do mundo observado à ação autorizada.</h2>
+<div class="flow" aria-label="Fluxo cognitivo da Andy">
+<div>Fontes / Sensores</div><b>→</b><div>Eventos</div><b>→</b><div>Evidências</div><b>→</b><div class="core">Cognitive Graph</div><b>→</b><div>Padrões</div><b>→</b><div>Expectativas</div><b>→</b><div>Atenção</div><b>→</b><div>Context Compiler</div><b>→</b><div>Raciocínio</div><b>→</b><div>Autoridade</div><b>→</b><div>Ação</div>
+</div>
+<div class="separation"><span>Evidence</span><i>≠</i><span>Claim</span><i>≠</i><span>Pattern</span><i>≠</i><span>Recommendation</span><i>≠</i><span>Authority</span><i>≠</i><span>Execution</span></div>
+</section>
+
+<section class="reader shell" id="ouvir">
+<div class="reader-head"><div><p class="eyebrow">NARRAÇÃO</p><h2>Escute o marco inteiro.</h2><p>Zargan · xAI · áudio pré-gerado. O texto acompanha a reprodução.</p></div><div class="audio-meta"><span id="audio-status">Carregando narração…</span></div></div>
+<audio id="player" preload="auto" src="audio/zargan-cognitive-architecture.mp3"></audio>
+<div class="controls"><button id="play" class="primary">▶ Reproduzir</button><button id="pause">⏸ Pausar</button><button id="stop">■ Parar</button><label>Velocidade <select id="rate"><option>.85</option><option selected>1</option><option>1.15</option><option>1.3</option></select></label></div>
+</section>
+
+<section class="document shell" id="documento">
+<div class="doc-head"><p class="eyebrow">DOCUMENTO</p><h2>A arquitetura materializada.</h2><p>O texto abaixo preserva o raciocínio completo do marco e foi estruturado para leitura humana e narração.</p></div>
+<article id="article"></article>
+</section>
+
+<section class="references shell"><p class="eyebrow">REFERÊNCIAS</p><h2>Linhas acadêmicas que convergem com a visão.</h2><div id="references" class="ref-grid"></div></section>
+</main>
+<footer class="shell"><span>MARCO-2026-10-03 · ANDY COGNITIVE ARCHITECTURE</span><span>GitHub-first · AGT valida e publica</span></footer>
+<script src="app.js"></script>
+</body>
+</html>
