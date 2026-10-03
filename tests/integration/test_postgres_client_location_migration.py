@@ -16,7 +16,7 @@ def test_client_location_snapshot_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0052_entity_resolution_v0"]
+            ).scalars().all() == ["0053_semantic_episode_v0"]
 
             schema = inspect(connection)
             tables = set(schema.get_table_names())
