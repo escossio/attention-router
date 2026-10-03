@@ -68,7 +68,7 @@ The server samples:
 - bounded read-only WhatsApp transport/browser/observer probes;
 - a bounded metadata-only message trace projection from the configured runtime database container.
 
-The message tracer issues SELECT-only queries and deliberately excludes message bodies, outbox destinations, full correlation ids and full inbound-event ids from the browser payload. The database container is host configuration; no runtime container name or credential is committed.
+Message tracing is default-off and must be explicitly enabled on the host. When enabled, it issues bounded SELECT-only queries and deliberately excludes message bodies, outbox destinations, full correlation ids and full inbound-event ids from the browser payload. The database container is host configuration; no runtime container name or credential is committed.
 
 No Attention Router production database is queried.
 ## Configuration
