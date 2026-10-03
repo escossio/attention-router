@@ -167,6 +167,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:18103/internal/history/chats"
     )
     whatsapp_history_hmac_secret: str | None = Field(default=None, repr=False)
+    whatsapp_history_source_account: str = "default"
     whatsapp_history_timeout_seconds: float = 10.0
     whatsapp_history_max_response_bytes: int = 4 * 1024 * 1024
     synthetic_transport_status_url: str | None = None
@@ -590,6 +591,12 @@ class Settings(BaseSettings):
             raise ValueError("CONVERSATION_REPETITION_WINDOW_SECONDS must be positive")
         if not self.whatsapp_history_read_url.startswith(("http://", "https://")):
             raise ValueError("WHATSAPP_HISTORY_READ_URL must be http(s)")
+        if not self.whatsapp_history_source_account.strip() or len(
+            self.whatsapp_history_source_account
+        ) > 180:
+            raise ValueError(
+                "WHATSAPP_HISTORY_SOURCE_ACCOUNT must be 1..180 chars"
+            )
         if not 1 <= self.whatsapp_history_timeout_seconds <= 60:
             raise ValueError(
                 "WHATSAPP_HISTORY_TIMEOUT_SECONDS must be between 1 and 60"

@@ -137,13 +137,12 @@ def _normalized_budget(value: dict[str, Any] | None) -> dict[str, int]:
     return budget
 
 
-def _require_owner_scope(
+def resolve_bootstrap_owner_actor_key(
     session: Session,
     *,
     tenant_id: str,
     owner_human_identity_id: str,
-    represented_owner_actor_key: str,
-) -> None:
+) -> str:
     tenant = session.get(TenantRow, tenant_id)
     if tenant is None or tenant.status != "ACTIVE":
         raise PersonalContextBootstrapError("BOOTSTRAP_TENANT_UNAVAILABLE")
@@ -179,7 +178,22 @@ def _require_owner_scope(
         raise PersonalContextBootstrapError(
             "BOOTSTRAP_REPRESENTED_OWNER_AMBIGUOUS"
         )
-    if represented_owner_actor_key not in owner_actor_keys:
+    return next(iter(owner_actor_keys))
+
+
+def _require_owner_scope(
+    session: Session,
+    *,
+    tenant_id: str,
+    owner_human_identity_id: str,
+    represented_owner_actor_key: str,
+) -> None:
+    owner_actor_key = resolve_bootstrap_owner_actor_key(
+        session,
+        tenant_id=tenant_id,
+        owner_human_identity_id=owner_human_identity_id,
+    )
+    if represented_owner_actor_key != owner_actor_key:
         raise PersonalContextBootstrapError(
             "BOOTSTRAP_REPRESENTED_OWNER_UNRESOLVED"
         )
@@ -546,5 +560,6 @@ __all__ = [
     "process_next_bootstrap_batch",
     "queue_bootstrap_run",
     "request_bootstrap_control",
+    "resolve_bootstrap_owner_actor_key",
     "resume_bootstrap_run",
 ]
