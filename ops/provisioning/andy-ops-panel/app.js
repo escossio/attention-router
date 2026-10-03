@@ -293,6 +293,32 @@ function renderTransport(obs) {
   const severity = String(derived.severity || "UNKNOWN");
 
   const overall = $("#transport-overall-state");
+  if (obs.enabled === false) {
+    overall.textContent = "DESABILITADO";
+    overall.className = "source-state ready";
+    [
+      "#wa-page-state", "#wa-browser-unit", "#wa-browser-debug", "#wa-page-count",
+      "#wa-auth-state", "#wa-has-synced", "#wa-sync-handler", "#wa-client-state",
+      "#wa-transport-unit", "#wa-transport-ready", "#wa-wwebjs-connected",
+      "#wa-transport-pid", "#wa-authority-state", "#wa-authority-verification",
+      "#wa-authority-reason", "#wa-authority-invalidation", "#wa-authority-invalidation-at",
+      "#wa-flow-state", "#wa-observer-state", "#wa-observer-age", "#wa-inbound-count",
+      "#wa-api-ready", "#wa-recovery-gate", "#wa-recovery-reason"
+    ].forEach((selector) => {
+      const element = $(selector);
+      if (element) element.textContent = "—";
+    });
+    $("#wa-divergence-title").textContent = "Observabilidade de transport desabilitada";
+    const divergenceRoot = $("#wa-divergence-list");
+    divergenceRoot.replaceChildren();
+    const item = document.createElement("div");
+    item.className = "divergence-item warn";
+    item.textContent = "Ative por configuração privada do host.";
+    divergenceRoot.append(item);
+    const timeline = $("#wa-timeline");
+    timeline.innerHTML = '<div class="empty">Transport observability desabilitado.</div>';
+    return;
+  }
   overall.textContent = severity === "OK" ? "COERENTE" : severity;
   overall.className = "source-state " + (
     severity === "OK" ? "live" : severity === "CRITICAL" ? "offline" : "ready"
@@ -403,6 +429,14 @@ function renderMessageTraces(tracePayload) {
 
   latestRoot.replaceChildren();
   listRoot.replaceChildren();
+  if (tracePayload.enabled === false) {
+    badge.textContent = "DESABILITADO";
+    badge.className = "source-state ready";
+    $("#trace-title").textContent = "Message tracing desabilitado";
+    $("#trace-updated").textContent = "—";
+    latestRoot.innerHTML = '<div class="empty">Ative por configuração privada do host.</div>';
+    return;
+  }
   const traces = Array.isArray(tracePayload.traces) ? tracePayload.traces : [];
   $("#trace-updated").textContent = tracePayload.generated_at ? "Atualizado " + fmtTime(tracePayload.generated_at) : "—";
 
