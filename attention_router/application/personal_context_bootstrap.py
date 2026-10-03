@@ -26,6 +26,7 @@ from attention_router.infrastructure.personal_context_bootstrap_models import (
 
 
 SUPPORTED_BOOTSTRAP_SOURCES = frozenset({"WHATSAPP_TEXT"})
+_ARCHIVE_SOURCE_BY_KIND = {"WHATSAPP_TEXT": "whatsapp"}
 BOOTSTRAP_MODE = "HISTORICAL_BOOTSTRAP"
 _TERMINAL_STATES = frozenset({"COMPLETED", "CANCELLED", "FAILED"})
 _STABLE_DISCOVERY_METRICS = frozenset(
@@ -91,6 +92,7 @@ def _normalized_selection(value: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     if (
         not isinstance(chat_keys, list)
+        or not chat_keys
         or len(chat_keys) > 5000
         or any(
             not isinstance(item, str)
@@ -470,6 +472,8 @@ def process_next_bootstrap_batch(
                 page_size=budget["page_size"],
                 max_messages_per_chat=budget["max_messages_per_chat"],
                 max_total_messages=budget["max_total_messages"],
+                source_override=_ARCHIVE_SOURCE_BY_KIND[row.source_kind],
+                source_account_override=row.source_account,
             )
     except Exception as exc:
         failed_at = _utc()
