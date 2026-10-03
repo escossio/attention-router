@@ -74,7 +74,18 @@ def explicit_intent(text: str, known_slots: ConversationSlots | None = None) -> 
         "é automática", "e automatica",
     ):
         return "ASSISTANT_NATURE_QUESTION"
-    if _text_has(text, "é o alex", "e o alex", "estou falando com o alex"):
+    if (
+        re.search(
+            r"^\s*(?:[ÉéEe])\s+(?:o|a)\s+"
+            r"[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][\wÀ-ÿ'-]{1,79}\s*[?.!]*\s*$",
+            text,
+        )
+        or re.search(
+            r"\b[Ee]stou\s+falando\s+com\s+(?:o|a)\s+"
+            r"[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][\wÀ-ÿ'-]{1,79}\b",
+            text,
+        )
+    ):
         return "OWNER_IDENTITY_QUESTION"
     if _text_has(
         text,
@@ -163,6 +174,40 @@ def message_family(decision_type: str, recommended_action: str) -> str:
     return "FALLBACK"
 
 
+_OWNER_REFERENCE_TOKEN = "{{owner_reference_name}}"
+
+
+def _owner_label(reference_name: str | None) -> str:
+    normalized = " ".join((reference_name or "").split())
+    return normalized or "titular da conta"
+
+
+def _owner_possessive(reference_name: str | None) -> str:
+    normalized = " ".join((reference_name or "").split())
+    return f"de {normalized}" if normalized else "do titular da conta"
+
+
+def _owner_subject(reference_name: str | None) -> str:
+    normalized = " ".join((reference_name or "").split())
+    return normalized or "o titular da conta"
+
+
+def _bind_owner_reference(value: Any, reference_name: str | None) -> Any:
+    label = _owner_label(reference_name)
+    if isinstance(value, str):
+        return value.replace(_OWNER_REFERENCE_TOKEN, label)
+    if isinstance(value, list):
+        return [_bind_owner_reference(item, reference_name) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_bind_owner_reference(item, reference_name) for item in value)
+    if isinstance(value, dict):
+        return {
+            key: _bind_owner_reference(item, reference_name)
+            for key, item in value.items()
+        }
+    return value
+
+
 def _audience_style(profile: dict[str, Any], audience: str | None) -> dict[str, Any]:
     styles = profile.get("audience_styles") or {}
     return styles.get(audience) or styles.get("default") or {}
@@ -230,10 +275,16 @@ def _schedule_proposal(known: dict[str, str]) -> str:
     return f"Entendi a sugestão de {date}{f' às {time}' if time else ''}."
 
 
-def _schedule_confirmation(known: dict[str, str]) -> str:
+def _schedule_confirmation(
+    known: dict[str, str],
+    owner_possessive: str,
+) -> str:
     if "proposed_date" in known or "proposed_time" in known:
         return "Essa sugestão de horário ainda não está confirmada."
-    return "Eu ainda não tenho confirmação da agenda do Alex e não consigo marcar por conta própria."
+    return (
+        f"Eu ainda não tenho confirmação da agenda {owner_possessive} e não "
+        "consigo marcar por conta própria."
+    )
 
 
 def promise_guard(text: str, *, escalation_recorded: bool = False, registration_recorded: bool = False) -> str:
@@ -269,7 +320,12 @@ def render_response(
     known_slots: ConversationSlots | None = None,
     capabilities: dict[str, bool] | None = None,
     memory_context: dict[str, Any] | None = None,
+    represented_reference_name: str | None = None,
 ) -> ResponseCandidate | None:
+    owner_label = _owner_label(represented_reference_name)
+    owner_possessive = _owner_possessive(represented_reference_name)
+    owner_subject = _owner_subject(represented_reference_name)
+    profile = _bind_owner_reference(profile, represented_reference_name)
     family = message_family(str(result.decision_type), result.recommended_action)
     if family == "DO_NOT_RESPOND":
         return None
@@ -294,7 +350,7 @@ def render_response(
         known = known_slots.known if known_slots else {}
         if known_slots and known_slots.schedule_status == "PROPOSED":
             requests = [
-                f"{_schedule_proposal(known)} A vaga é de {known.get('job_role', 'seu cargo')}. Eu não consigo confirmar a agenda do Alex por conta própria."
+                f"{_schedule_proposal(known)} A vaga é de {known.get('job_role', 'seu cargo')}. Eu não consigo confirmar a agenda {owner_possessive} por conta própria."
             ]
         else:
             requests = [f"A vaga é de {known.get('job_role', 'seu cargo')}."]
@@ -302,9 +358,9 @@ def render_response(
         known = known_slots.known
         proposal = _schedule_proposal(known)
         if "job_role" not in known:
-            requests = [f"{proposal} Eu não consigo confirmar a agenda do Alex por conta própria. Qual é a vaga?"]
+            requests = [f"{proposal} Eu não consigo confirmar a agenda {owner_possessive} por conta própria. Qual é a vaga?"]
         else:
-            requests = [f"{proposal} A vaga é de {known['job_role']}. Eu não consigo confirmar a agenda do Alex por conta própria."]
+            requests = [f"{proposal} A vaga é de {known['job_role']}. Eu não consigo confirmar a agenda {owner_possessive} por conta própria."]
     if urgent:
         requests = style.get("urgent_questions") or entries.get("urgent_requests") or requests
     escalation_recorded = bool(getattr(result, "escalation_recorded", False))
@@ -319,7 +375,7 @@ def render_response(
     )
     if intent == "SCHEDULE_ACTION_REQUEST":
         include_intro = not introduced
-        requests = ["Eu não consigo marcar ou confirmar a agenda do Alex por conta própria."]
+        requests = [f"Eu não consigo marcar ou confirmar a agenda {owner_possessive} por conta própria."]
         direct = requests
     elif intent == "AMBIGUOUS_CONFIRMATION_QUESTION":
         include_intro = not introduced
@@ -327,18 +383,18 @@ def render_response(
         direct = requests
     elif intent == "MESSAGE_READ_STATUS_QUESTION":
         include_intro = False
-        requests = ["Eu não consigo confirmar se o Alex já viu sua mensagem."]
+        requests = [f"Eu não consigo confirmar se {owner_subject} já viu sua mensagem."]
         direct = requests
     elif intent == "SCHEDULE_CONFIRMATION_QUESTION":
         known = known_slots.known if known_slots else {}
         include_intro = not introduced
-        requests = [_schedule_confirmation(known)]
+        requests = [_schedule_confirmation(known, owner_possessive)]
         direct = requests
     elif intent in {"ASSISTANT_NATURE_QUESTION", "OWNER_IDENTITY_QUESTION"}:
         include_intro = False
         direct = (
             profile.get("direct_responses", {}).get(intent)
-            or "Sou uma assistente virtual. Meu nome é Andy e ajudo o Alex com as mensagens quando ele não consegue responder."
+            or f"Sou uma assistente virtual. Meu nome é Andy e ajudo {owner_subject} com as mensagens quando essa pessoa não consegue responder."
         )
         requests = [direct] if isinstance(direct, str) else direct
     if direct and inbound_text.strip() and (slot in {"identity", "privacy"} or intent in {"IDENTITY_QUESTION", "STATUS_QUESTION", "LOCATION_QUESTION", "MESSAGE_READ_STATUS_QUESTION", "CONFIRMATION_QUESTION", "SCHEDULE_CONFIRMATION_QUESTION", "AMBIGUOUS_CONFIRMATION_QUESTION", "SCHEDULE_ACTION_REQUEST", "CALLBACK_REQUEST", "FUTURE_NOTIFICATION_REQUEST"}):
@@ -354,7 +410,14 @@ def render_response(
         if not include_intro:
             text = " ".join(part.strip() for part in (request, closing) if part.strip())
         lowered_text = text.casefold()
-        if any(lowered_text.count(phrase) > 1 for phrase in ("ajudando o alex", "mensagens do alex")):
+        owner_folded = owner_label.casefold()
+        if any(
+            lowered_text.count(phrase) > 1
+            for phrase in (
+                f"ajudando {owner_folded}",
+                f"mensagens de {owner_folded}",
+            )
+        ):
             continue
         promise_check = promise_guard(text, escalation_recorded=escalation_recorded)
         if promise_check == "UNSUPPORTED_PROMISE" or internal_language_leaks(text):

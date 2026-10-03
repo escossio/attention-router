@@ -2372,6 +2372,78 @@ class HumanExecutionAuthorizationRow(Base):
         ),
     )
 
+class SensitiveDisclosureRequestRow(Base):
+    """Durable one-shot request to disclose sensitive owner data to a peer."""
+
+    __tablename__ = "sensitive_disclosure_requests"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("tenants.id"), nullable=False
+    )
+    source_interaction_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("interactions.id"), nullable=False
+    )
+    source_event_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("inbound_events.id"), nullable=False
+    )
+    requester_actor_binding_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("actor_bindings.id")
+    )
+    requester_contact_id: Mapped[str] = mapped_column(String(180), nullable=False)
+    requester_display_name: Mapped[str | None] = mapped_column(String(160))
+    requester_relationship: Mapped[str | None] = mapped_column(String(120))
+    requester_identity_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    represented_owner_actor_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    represented_owner_human_identity_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("human_identities.id"), nullable=False
+    )
+    represented_owner_reference_name: Mapped[str | None] = mapped_column(String(160))
+    capability: Mapped[str] = mapped_column(String(120), nullable=False)
+    recipient_reference: Mapped[str] = mapped_column(String(180), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("execution_intents.id"), nullable=False, unique=True
+    )
+    authorization_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("human_execution_authorizations.id"),
+        nullable=False,
+        unique=True,
+    )
+    response_outbox_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("outbox_messages.id"), unique=True
+    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    result: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
+    failure_reason: Mapped[str | None] = mapped_column(String(160))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "state in ('PENDING_APPROVAL','RESPONSE_PENDING',"
+            "'RESPONDED','FAILED','EXPIRED')",
+            name="ck_sensitive_disclosure_request_state",
+        ),
+        CheckConstraint(
+            "requester_identity_source in ('BOUND','SELF_REPORTED','MIXED')",
+            name="ck_sensitive_disclosure_request_identity_source",
+        ),
+        UniqueConstraint(
+            "source_interaction_id",
+            "capability",
+            name="uq_sensitive_disclosure_interaction_capability",
+        ),
+        Index(
+            "ix_sensitive_disclosure_pending",
+            "tenant_id",
+            "state",
+            "created_at",
+        ),
+    )
+
+
 class HumanApprovalDecisionEvidenceRow(Base):
     """Provider-neutral evidence for exactly one terminal human approval decision."""
 

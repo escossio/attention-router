@@ -75,16 +75,18 @@ def test_negated_identity_statements_are_allowed():
         assert validate_output(_answer(text)).response_text == text
 
 
-def test_positive_identity_statements_remain_blocked():
+def test_represented_owner_identity_statements_remain_blocked():
     for text in (
-        "Sou o Alex.",
-        "Eu sou o Alex.",
-        "Oi, sou o Alex.",
+        "Sou o Leonardo.",
+        "Eu sou o Leonardo.",
         "Sou humana.",
         "Eu sou humana.",
     ):
         try:
-            validate_output(_answer(text))
+            validate_output(
+                _answer(text),
+                represented_reference_name="Leonardo",
+            )
         except AndyAgentError as exc:
             assert str(exc) == "AGENT_OUTPUT_IDENTITY_VIOLATION"
         else:

@@ -51,7 +51,7 @@ def ensure_default_tenant(session: Session) -> TenantRow:
         row = TenantRow(
             id=DEFAULT_TENANT_ID,
             slug=DEFAULT_TENANT_SLUG,
-            name="Alex",
+            name="Default Tenant",
             status="ACTIVE",
             created_at=stamp,
             updated_at=stamp,

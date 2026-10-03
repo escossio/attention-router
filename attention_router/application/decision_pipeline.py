@@ -32,9 +32,14 @@ from attention_router.domain.decision import DecisionResult, DecisionType
 from attention_router.application.agents import AndyAgentError, run_andy
 from attention_router.application.agents.readiness import get_andy_readiness
 from attention_router.application.agents.context import ActionCapability, AllowedAgentContext
+from attention_router.application.assistant_provenance import ensure_introduction
 from attention_router.application.lab_conversation import claim_inbound
 from attention_router.application.platform.capability_pack import execute_owner_capability
-from attention_router.application.platform.context import build_context_snapshot, resolve_represented_subject
+from attention_router.application.platform.context import (
+    build_context_snapshot,
+    resolve_represented_subject,
+    resolve_represented_subject_identity,
+)
 from attention_router.application.platform.entities import (
     EffectiveRelationship,
     resolve_effective_audience,
@@ -44,6 +49,10 @@ from attention_router.core.entities import EntityReference
 from attention_router.application.platform.disclosure import evaluate_disclosure_authority, project_private_state_for_agent
 from attention_router.application.platform.events import normalize_inbound_event
 from attention_router.application.platform.registry import resolve_capability_request
+from attention_router.application.sensitive_disclosure import (
+    LOCATION_CAPABILITY,
+    prepare_location_disclosure,
+)
 from attention_router.platform.standing_directives import resolve_effective_standing_directives
 from attention_router.domain.models import new_id, now_utc
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
@@ -358,6 +367,33 @@ def _recent_agent_turns(
     return turns
 
 
+def _assistant_introduced(
+    session: Session,
+    tenant_id: str,
+    contact_id: str,
+) -> bool:
+    return session.scalar(
+        select(AgentDecisionRow.id)
+        .join(InteractionRow, InteractionRow.id == AgentDecisionRow.interaction_id)
+        .join(
+            AgentExecutionIntentRow,
+            AgentExecutionIntentRow.agent_decision_id == AgentDecisionRow.id,
+        )
+        .join(
+            OutboxMessageRow,
+            OutboxMessageRow.execution_intent_id == AgentExecutionIntentRow.id,
+        )
+        .where(
+            InteractionRow.tenant_id == tenant_id,
+            InteractionRow.contact_id == contact_id,
+            AgentDecisionRow.response_introduction_included.is_(True),
+            OutboxMessageRow.status == "DONE",
+            OutboxMessageRow.destination == "local_transport",
+        )
+        .limit(1)
+    ) is not None
+
+
 def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow | None:
     existing = session.scalars(
         select(AgentDecisionRow).where(
@@ -499,6 +535,20 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
     )
     agent_output = None
     agent_result = None
+    represented_identity = resolve_represented_subject_identity(
+        session,
+        interaction.tenant_id,
+    )
+    represented_subject = (
+        represented_identity.actor
+        if represented_identity is not None
+        else resolve_represented_subject(session, interaction.tenant_id)
+    )
+    assistant_introduced = _assistant_introduced(
+        session,
+        interaction.tenant_id,
+        interaction.contact_id,
+    )
     capability_resolutions: list[dict[str, Any]] = []
     owner_authenticated = (
         event.payload.get("event_origin") == "OWNER_COMMAND"
@@ -509,7 +559,6 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         event=event, blueprint_configured=version is not None,
     )
     if agent_path_enabled:
-        represented_subject = resolve_represented_subject(session, interaction.tenant_id)
         platform_context = build_context_snapshot(
             session,
             canonical_event,
@@ -562,11 +611,35 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             "private_state_exposed": bool(private_state),
             "disclosure_reason_code": disclosure_authority.reason_code,
         })
+        interaction_actor = {
+            "type": "ACTOR",
+            "id": identifier_hash(context.actor_id),
+            "display_name": binding.display_name if binding is not None else None,
+            "relationship": (
+                (binding.binding_metadata or {}).get("relationship")
+                if binding is not None
+                else interaction.relationship_category
+            ),
+        }
+        represented_prompt = (
+            represented_identity.prompt_payload()
+            if represented_identity is not None
+            else (
+                {
+                    "type": represented_subject.entity_type,
+                    "id": represented_subject.entity_id,
+                    "reference_name": None,
+                }
+                if represented_subject is not None
+                else None
+            )
+        )
         agent_context = AllowedAgentContext(
             actor_id=identifier_hash(context.actor_id),
             binding_id=identifier_hash(context.actor_binding_id) if context.actor_binding_id else None,
-            interaction_actor={"type": "ACTOR", "id": identifier_hash(context.actor_id)},
-            represented_subject=represented_subject.model_dump() if represented_subject else None,
+            interaction_actor=interaction_actor,
+            represented_subject=represented_prompt,
+            assistant_introduced=assistant_introduced,
             audience=audience,
             policy_summary=f"policy={policy_version.policy_id if policy_version else 'none'}; "
             f"conversation_contract={DIRECT_TEXT_CONVERSATION_CONTRACT_VERSION}; capabilities_require_separate_authority",
@@ -575,7 +648,7 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             recent_turns=_recent_agent_turns(
                 session, interaction.tenant_id, interaction.contact_id, interaction.id
             ),
-            available_action_capabilities=["leave_message", "request_callback", "notify_alex"],
+            available_action_capabilities=["leave_message", "request_callback", "notify_owner"],
             current_message=effective_text,
             relationship=interaction.relationship_category,
             contact_return_channel_available=direct.return_channel_available,
@@ -595,7 +668,7 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                     description="propose a callback request; no phone call is executed by Andy",
                 ),
                 ActionCapability(
-                    action_type="notify_alex",
+                    action_type="notify_owner",
                     available=False,
                     description="no direct notification capability is exposed to this run",
                 ),
@@ -675,12 +748,55 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                 set_outcome(span, "COMPLETED")
             configured_capabilities = set((policy_config or {}).get("allowed_capabilities") or [])
             configured_capabilities.update((policy_config or {}).get("allowed_actions") or [])
+            location_disclosure_handled = False
             for capability_request in agent_output.requested_capabilities:
                 if capability_request.capability == "presence.set":
                     normalized_parameters = dict(capability_request.parameters)
                     normalized_parameters.setdefault("state", normalized_parameters.get("status"))
                     normalized_parameters.setdefault("audience_scope", normalized_parameters.get("audience", "all"))
                     capability_request = capability_request.model_copy(update={"parameters": normalized_parameters})
+                if (
+                    capability_request.capability in {"device.location", LOCATION_CAPABILITY}
+                    and not owner_authenticated
+                    and direct.eligible
+                    and direct.peer_reference
+                ):
+                    location_disclosure_handled = True
+                    preparation = prepare_location_disclosure(
+                        session,
+                        interaction=interaction,
+                        source_event_id=event.id,
+                        binding=binding,
+                        represented_identity=represented_identity,
+                        recipient_reference=direct.peer_reference,
+                        parameters=dict(capability_request.parameters),
+                    )
+                    capability_resolutions.append(
+                        {
+                            "capability": LOCATION_CAPABILITY,
+                            "status": preparation.status,
+                            "reason_code": preparation.status,
+                            "request_id": preparation.request_id,
+                        }
+                    )
+                    agent_output = agent_output.model_copy(
+                        update={
+                            "response_text": preparation.response_text,
+                            "reason_code": preparation.status,
+                            "needs_more_information": bool(
+                                preparation.missing_information
+                            ),
+                            "missing_information": list(
+                                preparation.missing_information
+                            ),
+                            "conversation_state": (
+                                "clarify"
+                                if preparation.missing_information
+                                else "answer"
+                            ),
+                        }
+                    )
+                    continue
                 resource_id = (
                     str(capability_request.resource.get("id"))
                     if capability_request.resource and capability_request.resource.get("id")
@@ -719,6 +835,47 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                             "execution_reason_code": execution.reason_code,
                         }
                     )
+            if (
+                not location_disclosure_handled
+                and agent_output.objective in {"location/current", "location.current"}
+                and not owner_authenticated
+                and direct.eligible
+                and direct.peer_reference
+            ):
+                preparation = prepare_location_disclosure(
+                    session,
+                    interaction=interaction,
+                    source_event_id=event.id,
+                    binding=binding,
+                    represented_identity=represented_identity,
+                    recipient_reference=direct.peer_reference,
+                    parameters={},
+                )
+                capability_resolutions.append(
+                    {
+                        "capability": LOCATION_CAPABILITY,
+                        "status": preparation.status,
+                        "reason_code": preparation.status,
+                        "request_id": preparation.request_id,
+                    }
+                )
+                agent_output = agent_output.model_copy(
+                    update={
+                        "response_text": preparation.response_text,
+                        "reason_code": preparation.status,
+                        "needs_more_information": bool(
+                            preparation.missing_information
+                        ),
+                        "missing_information": list(
+                            preparation.missing_information
+                        ),
+                        "conversation_state": (
+                            "clarify"
+                            if preparation.missing_information
+                            else "answer"
+                        ),
+                    }
+                )
         except AndyAgentError as exc:
             with start_span("andy.agent.validate") as span:
                 safe_set_attribute(span, "attention.agent.failure_reason", str(exc))
@@ -763,9 +920,20 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         set_outcome(decision_span, "EVALUATED")
     behavior = None if agent_path_enabled else _live_behavior_profile(binding)
     candidate = None
+    agent_introduction_included = False
     with start_span("behavior.generate") as behavior_span:
         if agent_output is not None:
             proposed_response = agent_output.response_text if agent_output.conversation_state != "hold" and agent_output.response_text.strip() else None
+            if proposed_response:
+                proposed_response, agent_introduction_included = ensure_introduction(
+                    proposed_response,
+                    introduced=assistant_introduced,
+                    represented_reference_name=(
+                        represented_identity.reference_name
+                        if represented_identity is not None
+                        else None
+                    ),
+                )
             safe_set_attribute(behavior_span, "attention.response_source", "OPENAI_AGENTS_SDK")
             safe_set_attribute(behavior_span, "attention.behavior_branch", agent_output.conversation_state.upper())
             safe_set_attribute(behavior_span, "attention.response_objective", agent_output.objective)
@@ -794,6 +962,11 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                 missing_information=result.missing_information,
                 known_slots=known_slots,
                 memory_context=actor_memory,
+                represented_reference_name=(
+                    represented_identity.reference_name
+                    if represented_identity is not None
+                    else None
+                ),
             )
             proposed_response = candidate.text if candidate else None
             safe_set_attribute(behavior_span, "attention.response_source", "andy_behavior")
@@ -845,7 +1018,11 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         response_message_family=candidate.message_family if candidate else None,
         response_variant_id=candidate.variant_id if candidate else None,
         response_spoken_text=candidate.spoken_text if candidate else None,
-        response_introduction_included=candidate.introduction_included if candidate else None,
+        response_introduction_included=(
+            candidate.introduction_included
+            if candidate
+            else (agent_introduction_included if agent_output is not None else None)
+        ),
         escalation_required=result.escalation_required,
         escalation_reason=result.escalation_reason,
         confidence=result.confidence,

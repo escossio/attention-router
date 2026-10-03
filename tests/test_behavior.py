@@ -115,10 +115,16 @@ def test_assistant_nature_questions_are_answered_transparently():
     )
     for question in questions:
         assert explicit_intent(question) == "ASSISTANT_NATURE_QUESTION"
-        candidate = render_response(result(), PROFILE, audience="unknown", inbound_text=question)
+        candidate = render_response(
+            result(),
+            PROFILE,
+            audience="unknown",
+            inbound_text=question,
+            represented_reference_name="Leonardo",
+        )
         assert candidate is not None
         assert "assistente virtual" in candidate.text.casefold()
-        assert "alex" in candidate.text.casefold()
+        assert "leonardo" in candidate.text.casefold()
         assert "robô" not in candidate.text.casefold() or "não uma pessoa" in candidate.text.casefold()
         assert "worker" not in candidate.text.casefold()
 
@@ -310,9 +316,15 @@ def test_confirmation_offer_does_not_claim_unsupported_forwarding():
 
 
 def test_read_receipt_question_is_treated_as_privacy_uncertainty():
-    candidate = render_response(result(), PROFILE, audience="unknown", inbound_text="Ele viu minha mensagem?")
+    candidate = render_response(
+        result(),
+        PROFILE,
+        audience="unknown",
+        inbound_text="Ele viu minha mensagem?",
+        represented_reference_name="Leonardo",
+    )
     assert explicit_intent("Ele viu minha mensagem?") == "MESSAGE_READ_STATUS_QUESTION"
-    assert "não consigo confirmar se o alex já viu" in candidate.text.casefold()
+    assert "não consigo confirmar se leonardo já viu" in candidate.text.casefold()
     assert "localização" not in candidate.text.casefold()
 
 
