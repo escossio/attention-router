@@ -350,6 +350,80 @@ def assign_timeline_event_to_episode(
     )
 
 
+
+def record_episode_lineage(
+    session: Session,
+    *,
+    target_episode_id: str,
+    source_episode_ids: list[str],
+    lineage_kind: str,
+    now: datetime | None = None,
+) -> SemanticEpisodeRow:
+    """Record non-destructive supersede/split/merge lineage."""
+    target = session.get(SemanticEpisodeRow, target_episode_id)
+    if target is None:
+        raise SemanticEpisodeError("SEMANTIC_EPISODE_TARGET_NOT_FOUND")
+    if target.state != "ACTIVE":
+        raise SemanticEpisodeError("SEMANTIC_EPISODE_TARGET_NOT_ACTIVE")
+
+    kind = lineage_kind.strip().upper()
+    source_ids = list(dict.fromkeys(source_episode_ids))
+    if target.id in source_ids:
+        raise SemanticEpisodeError("SEMANTIC_EPISODE_LINEAGE_CYCLE")
+    if kind in {"SUPERSEDE", "SPLIT"} and len(source_ids) != 1:
+        raise SemanticEpisodeError(
+            "SEMANTIC_EPISODE_LINEAGE_SOURCE_COUNT_INVALID"
+        )
+    if kind == "MERGE" and len(source_ids) < 2:
+        raise SemanticEpisodeError(
+            "SEMANTIC_EPISODE_LINEAGE_SOURCE_COUNT_INVALID"
+        )
+    if kind not in {"SUPERSEDE", "SPLIT", "MERGE"}:
+        raise SemanticEpisodeError(
+            "SEMANTIC_EPISODE_LINEAGE_KIND_UNSUPPORTED"
+        )
+
+    sources: list[SemanticEpisodeRow] = []
+    for source_id in source_ids:
+        source = session.get(SemanticEpisodeRow, source_id)
+        if source is None:
+            raise SemanticEpisodeError(
+                "SEMANTIC_EPISODE_LINEAGE_SOURCE_NOT_FOUND"
+            )
+        if source.tenant_id != target.tenant_id:
+            raise SemanticEpisodeError(
+                "SEMANTIC_EPISODE_LINEAGE_TENANT_MISMATCH"
+            )
+        if source.state not in {"ACTIVE", "CLOSED"}:
+            raise SemanticEpisodeError(
+                "SEMANTIC_EPISODE_LINEAGE_SOURCE_TERMINAL"
+            )
+        sources.append(source)
+
+    stamp = _utc(now or now_utc())
+    if kind == "SUPERSEDE":
+        target.supersedes_episode_id = sources[0].id
+        sources[0].state = "SUPERSEDED"
+        sources[0].updated_at = stamp
+    elif kind == "SPLIT":
+        target.split_from_episode_id = sources[0].id
+        sources[0].state = "SPLIT"
+        sources[0].updated_at = stamp
+    else:
+        target.merged_from_episode_ids = sorted(source.id for source in sources)
+        for source in sources:
+            source.state = "MERGED"
+            source.updated_at = stamp
+
+    target.provenance = {
+        **(target.provenance or {}),
+        "lineage_kind": kind,
+        "lineage_source_episode_ids": sorted(source_ids),
+    }
+    target.updated_at = stamp
+    session.flush()
+    return target
+
 def close_episode(
     session: Session,
     *,
@@ -382,4 +456,5 @@ __all__ = [
     "SemanticEpisodeError",
     "assign_timeline_event_to_episode",
     "close_episode",
+    "record_episode_lineage",
 ]
