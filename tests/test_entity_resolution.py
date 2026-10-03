@@ -19,7 +19,6 @@ from attention_router.domain.cognitive_graph import CognitiveRelationKind
 from attention_router.domain.models import now_utc
 from attention_router.infrastructure.entity_resolution_models import (
     EntityAliasResolutionRow,
-    EntityResolutionCandidateRow,
     EntityResolutionEvidenceRow,
 )
 from attention_router.infrastructure.models import (
