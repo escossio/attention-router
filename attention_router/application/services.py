@@ -2333,6 +2333,7 @@ def _is_external_network_outbox(row: OutboxMessageRow) -> bool:
             "wwebjs_manual_reply_text",
             "agent_execution_text",
             "agent_execution_voice",
+            "sensitive_disclosure_text",
         }
     )
 
@@ -2632,6 +2633,32 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                     audit(session, row.interaction_id, "execution.dispatch_succeeded", {"intent_id": intent.id, "outbox_id": row.id, "message_reference_present": bool((result.response or {}).get("message_reference"))})
                     if row.action_type == "agent_execution_voice":
                         _mark_voice_outbox_artifact_terminal(session, row)
+            elif (
+                row.action_type == "sensitive_disclosure_text"
+                and row.destination == "local_transport"
+            ):
+                external_attempted = True
+                with start_span("transport.send") as transport_span:
+                    result = local_transport_outbound.dispatch_outbox(row)
+                    provider_confirmed = result.status in {"sent", "already_sent"}
+                    safe_set_attribute(
+                        transport_span,
+                        "attention.delivery_type",
+                        "local_transport",
+                    )
+                    safe_set_attribute(
+                        transport_span,
+                        "attention.message_reference_present",
+                        bool((result.response or {}).get("message_reference")),
+                    )
+                    set_outcome(transport_span, "SENT")
+                from attention_router.application.sensitive_disclosure import (
+                    mark_sensitive_disclosure_delivered,
+                )
+                mark_sensitive_disclosure_delivered(
+                    session,
+                    outbox_id=row.id,
+                )
             elif (
                 row.action_type
                 in {

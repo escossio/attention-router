@@ -8,6 +8,7 @@ from attention_router.application.decision_pipeline import process_agent_decisio
 from attention_router.application.autonomy import evaluate_and_route
 from attention_router.application.execution import enqueue_ready_intents, probe_transport_ready
 from attention_router.application.services import process_due_timers, process_outbox
+from attention_router.application.sensitive_disclosure import process_sensitive_disclosures
 from attention_router.application.owner_reply_grace import (
     grace_allows_interaction,
     process_due_grace_windows,
@@ -353,6 +354,8 @@ def run_forever() -> None:
             )
             session.commit()
             tts_count = process_tts_derivations(session, identity)
+            sensitive_disclosure_count = process_sensitive_disclosures(session)
+            session.commit()
             outbox_count = process_outbox(session, identity)
             timer_count = process_due_timers(session, identity)
             scheduled_event_count = process_scheduled_events_if_available(session)
@@ -476,6 +479,7 @@ def run_forever() -> None:
             or decision_count
             or execution_count
             or tts_count
+            or sensitive_disclosure_count
             or outbox_count
             or timer_count
             or scheduled_event_count
@@ -522,7 +526,8 @@ def run_forever() -> None:
         ):
             logger.info(
                 "processed worker_id=%s grace_count=%s "
-                "artifact_understanding_count=%s decision_count=%s outbox_count=%s "
+                "artifact_understanding_count=%s decision_count=%s "
+                "sensitive_disclosure_count=%s outbox_count=%s "
                 "timer_count=%s scheduled_event_count=%s "
                 "integration_dispatch_processed=%s "
                 "integration_dispatch_blocked=%s "
@@ -539,6 +544,7 @@ def run_forever() -> None:
                 grace_count,
                 artifact_understanding_count,
                 decision_count,
+                sensitive_disclosure_count,
                 outbox_count,
                 timer_count,
                 scheduled_event_count,
