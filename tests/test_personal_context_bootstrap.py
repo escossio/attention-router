@@ -162,6 +162,23 @@ def test_v2b_bootstrap_run_is_owner_scoped_and_idempotent(session):
     ) == 1
 
 
+
+def test_v2b_source_selection_order_does_not_change_run_identity(session):
+    _seed_owner(session)
+    first, created = _create_run(
+        session,
+        source_selection={"chat_keys": ["chat-b", "chat-a", "chat-b"]},
+    )
+    second, second_created = _create_run(
+        session,
+        source_selection={"chat_keys": ["chat-a", "chat-b"]},
+    )
+
+    assert created is True
+    assert second_created is False
+    assert second.id == first.id
+    assert first.source_selection == {"chat_keys": ["chat-a", "chat-b"]}
+
 def test_v2b_bootstrap_advances_in_bounded_resumable_batches(session):
     _seed_owner(session)
     run, _ = _create_run(session)
