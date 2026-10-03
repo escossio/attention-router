@@ -352,14 +352,17 @@ def build_cognitive_graph_slice(
         )
         put_edge(direct)
 
-    timeline_events = list(
-        session.scalars(
-            select(TimelineEventRow)
-            .where(TimelineEventRow.tenant_id == tenant_id)
-            .order_by(TimelineEventRow.occurred_at.desc(), TimelineEventRow.id)
-            .limit(limit_per_kind)
-        ).all()
+    timeline_query = (
+        select(TimelineEventRow)
+        .where(TimelineEventRow.tenant_id == tenant_id)
+        .order_by(TimelineEventRow.occurred_at.desc(), TimelineEventRow.id)
+        .limit(limit_per_kind)
     )
+    if not include_secret:
+        timeline_query = timeline_query.where(
+            TimelineEventRow.visibility != "SECRET"
+        )
+    timeline_events = list(session.scalars(timeline_query).all())
     for row in timeline_events:
         event_node_id = _event_node_id(row.id)
         put_node(
@@ -818,6 +821,8 @@ def build_cognitive_graph_slice(
             if target_node_id not in nodes:
                 event = session.get(TimelineEventRow, row.member_ref)
                 if event is None or event.tenant_id != tenant_id:
+                    continue
+                if not include_secret and event.visibility == "SECRET":
                     continue
                 put_node(
                     CognitiveNode(
