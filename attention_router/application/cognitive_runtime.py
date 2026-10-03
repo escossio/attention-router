@@ -96,6 +96,9 @@ def run_cognitive_runtime_cycle(
 
     for tenant_id in tenant_ids:
         try:
+            tenant_relation_candidates = 0
+            tenant_created = 0
+            tenant_reused = 0
             with session.begin_nested():
                 graph = build_cognitive_graph_slice(
                     session,
@@ -111,7 +114,7 @@ def run_cognitive_runtime_cycle(
                         max_candidates=candidate_limit,
                     ),
                 )
-                relation_candidates += len(candidates)
+                tenant_relation_candidates = len(candidates)
                 for candidate in candidates:
                     _row, was_created = persist_relation_candidate_insight(
                         session,
@@ -120,9 +123,12 @@ def run_cognitive_runtime_cycle(
                         now=stamp,
                     )
                     if was_created:
-                        created += 1
+                        tenant_created += 1
                     else:
-                        reused += 1
+                        tenant_reused += 1
+            relation_candidates += tenant_relation_candidates
+            created += tenant_created
+            reused += tenant_reused
             succeeded += 1
         except Exception:
             failed += 1

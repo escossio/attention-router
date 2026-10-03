@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
+from attention_router.application import cognitive_runtime
 from attention_router.application.cognitive_runtime import (
     run_cognitive_runtime_cycle,
 )
@@ -269,3 +270,45 @@ def test_worker_cognitive_runtime_schedule_respects_flag_and_interval(
     assert result is None
     assert same_last == last
     assert len(calls) == 1
+
+
+def test_cognitive_runtime_rollback_does_not_inflate_committed_metrics(
+    session,
+    monkeypatch,
+):
+    stamp = datetime(2026, 1, 2, 12, 0, tzinfo=UTC)
+    _world(
+        session,
+        suffix="rollback",
+        lineage="ORGANIC",
+        stamp=stamp,
+    )
+    original = cognitive_runtime.persist_relation_candidate_insight
+
+    def persist_then_fail(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("synthetic tenant stage failure")
+
+    monkeypatch.setattr(
+        cognitive_runtime,
+        "persist_relation_candidate_insight",
+        persist_then_fail,
+    )
+
+    result = run_cognitive_runtime_cycle(
+        session,
+        tenant_limit=10,
+        graph_limit_per_kind=50,
+        candidate_limit=10,
+        now=stamp + timedelta(hours=1),
+    )
+
+    assert result.tenants_considered == 1
+    assert result.tenants_succeeded == 0
+    assert result.tenants_failed == 1
+    assert result.relation_candidates == 0
+    assert result.candidate_insights_created == 0
+    assert result.candidate_insights_reused == 0
+    assert session.scalar(
+        select(func.count()).select_from(CandidateInsightRow)
+    ) == 0
