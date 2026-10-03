@@ -498,6 +498,7 @@ def process_next_bootstrap_batch(
         result.metrics,
     )
     row.updated_at = completed_at
+    session.flush()
 
     # A control request made while the bounded batch was running is applied
     # before another batch may start.
