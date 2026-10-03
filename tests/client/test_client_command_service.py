@@ -16,8 +16,10 @@ from attention_router.application.client_command import (
     ClientCommandAuthorityRejected,
     ClientCommandConflict,
     ClientCommandService,
+    ClientCommandVoiceInvalid,
 )
 from attention_router.application.client_session import ClientSessionService
+from attention_router.application.speech_transcription import SpeechTranscriptionResult
 from attention_router.application.owner_control import (
     AutomaticResponsesEnabledParameters,
     OwnerControlAction,
@@ -69,6 +71,36 @@ def command_settings() -> Settings:
         client_command_enabled=True,
         owner_control_semantic_enabled=False,
     )
+
+
+def voice_settings(*, semantic: bool = False) -> Settings:
+    return command_settings().model_copy(
+        update={
+            "client_command_voice_enabled": True,
+            "client_command_voice_max_bytes": 1024 * 1024,
+            "stt_enabled": True,
+            "stt_internal_token": "synthetic-stt-token",
+            "owner_control_semantic_enabled": semantic,
+        }
+    )
+
+
+class FakeTranscriber:
+    def __init__(self, transcript: str):
+        self.transcript = transcript
+        self.calls = 0
+
+    def transcribe_bytes(self, audio, *, mime_type, max_bytes):
+        self.calls += 1
+        assert audio
+        assert mime_type == "audio/mp4"
+        assert max_bytes == 1024 * 1024
+        return SpeechTranscriptionResult(
+            transcript=self.transcript,
+            provider="synthetic",
+            model="synthetic-stt",
+            request_id="opaque-synthetic-request",
+        )
 
 
 def keypair():
@@ -644,3 +676,171 @@ def test_android_client_explicit_command_supersedes_pending_clarification(
     assert (pending.provenance or {})["superseding_source_client_command_id"] == (
         explicit.command_id
     )
+
+
+def test_voice_transcript_uses_same_pause_control_and_replay_skips_stt(session):
+    sessions, issued = issue_owner_session(session)
+    transcriber = FakeTranscriber("pare")
+    commands = ClientCommandService(
+        settings=voice_settings(),
+        client_sessions=sessions,
+        speech_transcriber=transcriber,
+    )
+
+    paused = commands.submit_voice(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-pause-1",
+        audio=b"synthetic-mp4-bytes",
+        mime_type="audio/mp4",
+        now=NOW + timedelta(seconds=30),
+    )
+    session.commit()
+
+    assert paused.modality == "VOICE"
+    assert paused.input_text == "pare"
+    assert paused.state == "COMPLETED"
+    assert paused.normalized_action == "SET_AUTOMATIC_RESPONSES_ENABLED"
+    assert automation_denial_reason(session, DEFAULT_TENANT_ID) == OWNER_AUTOMATION_PAUSED
+    assert transcriber.calls == 1
+
+    replay = commands.submit_voice(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-pause-1",
+        audio=b"different-retry-bytes",
+        mime_type="audio/mp4",
+        now=NOW + timedelta(seconds=31),
+    )
+    session.commit()
+
+    assert replay.command_id == paused.command_id
+    assert transcriber.calls == 1
+    assert (
+        session.scalar(
+            select(func.count()).select_from(OwnerAutomationControlChangeRow)
+        )
+        == 1
+    )
+
+
+def test_voice_invalid_mime_fails_before_stt(session):
+    sessions, issued = issue_owner_session(session)
+    transcriber = FakeTranscriber("pare")
+    commands = ClientCommandService(
+        settings=voice_settings(),
+        client_sessions=sessions,
+        speech_transcriber=transcriber,
+    )
+
+    with pytest.raises(ClientCommandVoiceInvalid):
+        commands.submit_voice(
+            session,
+            session_token=issued.session_token,
+            client_request_id="voice-invalid",
+            audio=b"bytes",
+            mime_type="audio/wav",
+            now=NOW + timedelta(seconds=30),
+        )
+    assert transcriber.calls == 0
+
+
+def test_voice_transcript_uses_current_clarification_and_learned_idiolect(
+    session,
+    monkeypatch,
+):
+    sessions, issued = issue_owner_session(session)
+    transcriber = FakeTranscriber("voltar a trabalhar")
+    commands = ClientCommandService(
+        settings=voice_settings(semantic=True),
+        client_sessions=sessions,
+        speech_transcriber=transcriber,
+    )
+
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_semantically",
+        lambda _text: OwnerControlParseResult(
+            OwnerControlParseStatus.NOT_CONTROL_COMMAND
+        ),
+    )
+    monkeypatch.setattr(
+        client_command_module,
+        "interpret_owner_control_candidates",
+        lambda text: _resume_candidate_set()
+        if text == "voltar a trabalhar"
+        else None,
+    )
+
+    commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-idiolect-pause",
+        text="pare",
+        now=NOW + timedelta(seconds=40),
+    )
+    session.commit()
+
+    clarification = commands.submit_voice(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-idiolect-source",
+        audio=b"voice-source",
+        mime_type="audio/mp4",
+        now=NOW + timedelta(seconds=41),
+    )
+    session.commit()
+
+    assert clarification.modality == "VOICE"
+    assert clarification.input_text == "voltar a trabalhar"
+    assert clarification.state == "CLARIFICATION_REQUIRED"
+
+    resolved = commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-idiolect-confirm",
+        text="sim",
+        now=NOW + timedelta(seconds=42),
+    )
+    session.commit()
+    assert resolved.state == "COMPLETED"
+    assert automation_denial_reason(session, DEFAULT_TENANT_ID) is None
+
+    learned = session.scalar(
+        select(FactRow).where(
+            FactRow.fact_class == "USER_CONFIRMED_LANGUAGE",
+            FactRow.predicate == "idiolect.pragmatic_mapping",
+        )
+    )
+    assert learned is not None
+    assert learned.value_json["expression"] == "voltar a trabalhar"
+
+    commands.submit_text(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-idiolect-pause-again",
+        text="pare",
+        now=NOW + timedelta(seconds=43),
+    )
+    session.commit()
+
+    repeated = commands.submit_voice(
+        session,
+        session_token=issued.session_token,
+        client_request_id="voice-idiolect-repeat",
+        audio=b"voice-repeat",
+        mime_type="audio/mp4",
+        now=NOW + timedelta(seconds=44),
+    )
+    session.commit()
+
+    assert repeated.modality == "VOICE"
+    assert repeated.state == "COMPLETED"
+    assert repeated.normalized_action == "SET_AUTOMATIC_RESPONSES_ENABLED"
+    assert automation_denial_reason(session, DEFAULT_TENANT_ID) is None
+    assert transcriber.calls == 2
+    assert session.scalar(
+        select(func.count())
+        .select_from(PendingIntentRow)
+        .where(PendingIntentRow.state == "PENDING")
+    ) == 0
