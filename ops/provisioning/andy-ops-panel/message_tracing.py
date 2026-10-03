@@ -10,6 +10,9 @@ import subprocess
 from typing import Any
 
 
+MESSAGE_TRACING_ENABLED = os.environ.get(
+    "ANDY_OPS_MESSAGE_TRACING_ENABLED", "false"
+).strip().casefold() in {"1", "true", "yes", "on"}
 DB_CONTAINER = os.environ.get("ANDY_OPS_TRACE_DB_CONTAINER", "").strip()
 DB_USER = os.environ.get("ANDY_OPS_TRACE_DB_USER", "attention_router")
 DB_NAME = os.environ.get("ANDY_OPS_TRACE_DB_NAME", "attention_router")
@@ -355,11 +358,28 @@ def _build_trace(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def sample_message_traces() -> dict[str, Any]:
+    if not MESSAGE_TRACING_ENABLED:
+        return {
+            "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+            "enabled": False,
+            "ok": True,
+            "error": None,
+            "traces": [],
+        }
+    if not DB_CONTAINER:
+        return {
+            "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+            "enabled": True,
+            "ok": False,
+            "error": "TRACE_DB_CONTAINER_NOT_CONFIGURED",
+            "traces": [],
+        }
     try:
         rows = _psql_json(TRACE_SQL)
         traces = [_build_trace(row) for row in rows]
         return {
             "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+            "enabled": True,
             "ok": True,
             "error": None,
             "traces": traces,
@@ -367,6 +387,7 @@ def sample_message_traces() -> dict[str, Any]:
     except Exception as error:
         return {
             "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+            "enabled": True,
             "ok": False,
             "error": type(error).__name__,
             "traces": [],
