@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func, select
@@ -30,7 +30,6 @@ from attention_router.infrastructure.models import (
 )
 from attention_router.infrastructure.obligation_models import (
     ObligationFulfillmentRow,
-    ObligationInstanceRow,
     ObligationTransitionRow,
     RecurringObligationDefinitionRow,
 )
