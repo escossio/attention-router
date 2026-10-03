@@ -49,6 +49,10 @@ from attention_router.core.entities import EntityReference
 from attention_router.application.platform.disclosure import evaluate_disclosure_authority, project_private_state_for_agent
 from attention_router.application.platform.events import normalize_inbound_event
 from attention_router.application.platform.registry import resolve_capability_request
+from attention_router.application.sensitive_disclosure import (
+    LOCATION_CAPABILITY,
+    prepare_location_disclosure,
+)
 from attention_router.platform.standing_directives import resolve_effective_standing_directives
 from attention_router.domain.models import new_id, now_utc
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
@@ -744,12 +748,55 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                 set_outcome(span, "COMPLETED")
             configured_capabilities = set((policy_config or {}).get("allowed_capabilities") or [])
             configured_capabilities.update((policy_config or {}).get("allowed_actions") or [])
+            location_disclosure_handled = False
             for capability_request in agent_output.requested_capabilities:
                 if capability_request.capability == "presence.set":
                     normalized_parameters = dict(capability_request.parameters)
                     normalized_parameters.setdefault("state", normalized_parameters.get("status"))
                     normalized_parameters.setdefault("audience_scope", normalized_parameters.get("audience", "all"))
                     capability_request = capability_request.model_copy(update={"parameters": normalized_parameters})
+                if (
+                    capability_request.capability in {"device.location", LOCATION_CAPABILITY}
+                    and not owner_authenticated
+                    and direct.eligible
+                    and direct.peer_reference
+                ):
+                    location_disclosure_handled = True
+                    preparation = prepare_location_disclosure(
+                        session,
+                        interaction=interaction,
+                        source_event_id=event.id,
+                        binding=binding,
+                        represented_identity=represented_identity,
+                        recipient_reference=direct.peer_reference,
+                        parameters=dict(capability_request.parameters),
+                    )
+                    capability_resolutions.append(
+                        {
+                            "capability": LOCATION_CAPABILITY,
+                            "status": preparation.status,
+                            "reason_code": preparation.status,
+                            "request_id": preparation.request_id,
+                        }
+                    )
+                    agent_output = agent_output.model_copy(
+                        update={
+                            "response_text": preparation.response_text,
+                            "reason_code": preparation.status,
+                            "needs_more_information": bool(
+                                preparation.missing_information
+                            ),
+                            "missing_information": list(
+                                preparation.missing_information
+                            ),
+                            "conversation_state": (
+                                "clarify"
+                                if preparation.missing_information
+                                else "answer"
+                            ),
+                        }
+                    )
+                    continue
                 resource_id = (
                     str(capability_request.resource.get("id"))
                     if capability_request.resource and capability_request.resource.get("id")
@@ -788,6 +835,47 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                             "execution_reason_code": execution.reason_code,
                         }
                     )
+            if (
+                not location_disclosure_handled
+                and agent_output.objective in {"location/current", "location.current"}
+                and not owner_authenticated
+                and direct.eligible
+                and direct.peer_reference
+            ):
+                preparation = prepare_location_disclosure(
+                    session,
+                    interaction=interaction,
+                    source_event_id=event.id,
+                    binding=binding,
+                    represented_identity=represented_identity,
+                    recipient_reference=direct.peer_reference,
+                    parameters={},
+                )
+                capability_resolutions.append(
+                    {
+                        "capability": LOCATION_CAPABILITY,
+                        "status": preparation.status,
+                        "reason_code": preparation.status,
+                        "request_id": preparation.request_id,
+                    }
+                )
+                agent_output = agent_output.model_copy(
+                    update={
+                        "response_text": preparation.response_text,
+                        "reason_code": preparation.status,
+                        "needs_more_information": bool(
+                            preparation.missing_information
+                        ),
+                        "missing_information": list(
+                            preparation.missing_information
+                        ),
+                        "conversation_state": (
+                            "clarify"
+                            if preparation.missing_information
+                            else "answer"
+                        ),
+                    }
+                )
         except AndyAgentError as exc:
             with start_span("andy.agent.validate") as span:
                 safe_set_attribute(span, "attention.agent.failure_reason", str(exc))
