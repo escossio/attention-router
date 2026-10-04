@@ -21,6 +21,15 @@ Future design documents are not claims of implemented functionality.
 - Every relevant PR description MUST state its impact on both tracks. If historical acceleration is not implemented in that increment, state whether it is unavailable, unsafe, too disruptive, or intentionally deferred; do not silently forget it.
 - This invariant applies to WhatsApp, Gmail and future channels. A provider-specific limitation may change the implementation, not the requirement to evaluate both tracks.
 
+## Container communication and network placement invariant
+- Before creating a new container/service or changing its network placement, read [docs/architecture/container-communication-network-placement-v1.md](docs/architecture/container-communication-network-placement-v1.md).
+- A new container does **not** imply a new IP, static address, subnet, VLAN, bridge or network attachment. Addressing is a consequence of the communication graph.
+- Every relevant PR MUST declare who initiates connections to whom, protocol/port when applicable, required vs optional flows, application authority, and network/trust zone before choosing placement.
+- Attach only the networks required by that graph. Multi-network/dual-homed placement requires explicit justification and must not create unintended transit.
+- Every relevant PR MUST record whether L2 identity, L3 identity, a dedicated IP and a static IP are actually required, with reasons. Prefer service identity/DNS when fixed addressing is not architecturally necessary.
+- Network reachability and application authority are independent controls: being able to reach a service never grants permission to act.
+- Do not version private AGT IP plans, host-private inventory or deployment secrets while satisfying this rule.
+
 ## Distributed validation policy
 - Treat a host with `andy-ci-distributed` installed as the CI control plane, not as a heavy test worker.
 - On the control plane, do not run the full PostgreSQL suite, migration-heavy regression suites, full repository test sweeps, or other long CPU/I/O-heavy validation locally while distributed workers are available.
