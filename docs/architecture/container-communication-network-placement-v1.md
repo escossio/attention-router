@@ -99,6 +99,34 @@ Even when a dedicated IP is required, a static address still requires justificat
 Prefer stable service identity/DNS when routing and policy do not require a fixed
 address.
 
+
+## IPAM allocation authority
+
+IPAM is the authoritative system for operational VLAN, subnet, gateway and IP
+reservations.
+
+Architecture may propose candidate ranges for discussion, but a candidate is not
+an allocation until it has been checked and reserved in IPAM.
+
+Required order after the communication/network-placement decision:
+
+1. query IPAM for current allocation/capacity;
+2. reserve the VLAN/subnet/gateway/IP objects in IPAM;
+3. record the logical reservation/reference for the deployment;
+4. only then configure Compose, host VLAN interfaces, routing/firewall or network
+   appliances.
+
+Do not allocate by arithmetic sequence alone (for example, "the previous VLAN is
+217, therefore use 218") without checking IPAM first.
+
+The public repository should not become a duplicate private address inventory.
+Keep private allocation details in IPAM; Git may carry the role, topology
+contract, and a non-secret reservation/reference needed to prove that allocation
+was governed.
+
+If runtime state and IPAM disagree, stop deployment and reconcile the source of
+truth before creating another allocation.
+
 ## Least-reachability principle
 
 Attach the container only to networks required by the communication graph.
