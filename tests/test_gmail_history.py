@@ -485,3 +485,127 @@ def test_incremental_readonly_artifact_survives_cursor_rollback(
     )
     assert artifact is not None
     assert receipt is not None
+
+
+class ReadonlyBodyHistoryReader(Reader):
+    def read_message_with_body(
+        self,
+        message_id,
+        *,
+        max_bytes,
+        max_mime_depth,
+    ):
+        assert max_bytes >= 6
+        assert max_mime_depth >= 1
+        return GmailMessage(
+            message_id=message_id,
+            thread_id="gmail-thread-live-1",
+            sender="Synthetic Sender <sender@example.invalid>",
+            to=("owner@example.invalid",),
+            cc=(),
+            bcc=(),
+            subject="Contexto ao vivo",
+            body="739184",
+            email_ts=NOW.isoformat(),
+            attachments=(),
+            body_observed=True,
+            attachments_observed=False,
+        )
+
+
+def test_incremental_readonly_body_archives_organic_live_context(
+    session,
+    monkeypatch,
+):
+    from attention_router.infrastructure.models import ConversationMessageRow
+
+    installation = _seed_connected(session, monkeypatch)
+    _enabled(monkeypatch)
+    monkeypatch.setattr(settings, "gmail_body_ingestion_enabled", True)
+    monkeypatch.setattr(settings, "gmail_body_max_bytes", 1024)
+    monkeypatch.setattr(settings, "gmail_body_max_mime_depth", 4)
+    monkeypatch.setattr(settings, "memory_ingestion_enabled", False)
+
+    provider = session.get(ProviderAuthorizationRow, installation)
+    provider.granted_scopes = [GMAIL_READONLY_SCOPE]
+    session.commit()
+
+    reader = ReadonlyBodyHistoryReader()
+    ingress = FakeIngress("synthetic-bearer")
+    runner = GmailProductRunner(
+        settings=settings,
+        token_refresher=FakeRefresher(),
+        reader_factory=lambda token: reader,
+        ingress_factory=lambda bearer: ingress,
+    )
+
+    initialized = runner.run_incremental(
+        session,
+        installation_id=installation,
+        now=NOW,
+    )
+    assert initialized.initialized
+    session.commit()
+
+    result = runner.run_incremental(
+        session,
+        installation_id=installation,
+        now=NOW,
+    )
+
+    assert result.accepted == 1
+    assert provider.gmail_history_id == "20"
+    archived = session.scalar(
+        select(ConversationMessageRow).where(
+            ConversationMessageRow.tenant_id == provider.tenant_id,
+            ConversationMessageRow.source == "gmail",
+            ConversationMessageRow.source_message_id == "one",
+        )
+    )
+    assert archived is not None
+    assert archived.text == "Assunto: Contexto ao vivo\n\n739184"
+    assert archived.searchable is True
+    assert archived.sensitivity_class == "NORMAL"
+    assert archived.metadata_json["live_context_version"] == "gmail-live-text-v1"
+    assert archived.metadata_json["platform_lineage"]["classification"] == "ORGANIC"
+    assert ingress.payloads[0]["metadata_sanitized"]["body_observed"] is True
+    assert "739184" not in json.dumps(ingress.payloads[0])
+
+
+def test_incremental_body_feature_does_not_upgrade_metadata_scope(
+    session,
+    monkeypatch,
+):
+    installation = _seed_connected(session, monkeypatch)
+    _enabled(monkeypatch)
+    monkeypatch.setattr(settings, "gmail_body_ingestion_enabled", True)
+
+    provider = session.get(ProviderAuthorizationRow, installation)
+    # _seed_connected persists the metadata-only profile.
+    assert provider.granted_scopes != [GMAIL_READONLY_SCOPE]
+    session.commit()
+
+    reader = Reader()
+    ingress = FakeIngress("synthetic-bearer")
+    runner = GmailProductRunner(
+        settings=settings,
+        token_refresher=FakeRefresher(),
+        reader_factory=lambda token: reader,
+        ingress_factory=lambda bearer: ingress,
+    )
+
+    assert runner.run_incremental(
+        session,
+        installation_id=installation,
+        now=NOW,
+    ).initialized
+    session.commit()
+    result = runner.run_incremental(
+        session,
+        installation_id=installation,
+        now=NOW,
+    )
+
+    assert result.accepted == 1
+    assert reader.reads == ["one"]
+    assert ingress.payloads[0]["metadata_sanitized"]["body_observed"] is False

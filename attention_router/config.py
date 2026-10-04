@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     gmail_product_scheduler_poll_interval_seconds: int = 30
     gmail_product_scheduler_batch_size: int = 20
     gmail_product_scheduler_max_pages: int = 10
+    gmail_body_ingestion_enabled: bool = False
+    gmail_body_max_bytes: int = 128 * 1024
+    gmail_body_max_mime_depth: int = 12
     gmail_attachment_ingestion_enabled: bool = False
     gmail_attachment_max_count: int = 10
     gmail_attachment_max_bytes: int = 25 * 1024 * 1024
@@ -329,6 +332,19 @@ class Settings(BaseSettings):
         if not 1 <= self.gmail_product_scheduler_max_pages <= 10:
             raise ValueError(
                 "GMAIL_PRODUCT_SCHEDULER_MAX_PAGES must be between 1 and 10"
+            )
+        if not 1 <= self.gmail_body_max_bytes <= 1024 * 1024:
+            raise ValueError(
+                "GMAIL_BODY_MAX_BYTES must be between 1 and 1048576"
+            )
+        if not 1 <= self.gmail_body_max_mime_depth <= 32:
+            raise ValueError(
+                "GMAIL_BODY_MAX_MIME_DEPTH must be between 1 and 32"
+            )
+        if self.gmail_body_ingestion_enabled and not self.gmail_product_runner_enabled:
+            raise ValueError(
+                "GMAIL_BODY_INGESTION_ENABLED requires "
+                "GMAIL_PRODUCT_RUNNER_ENABLED=true"
             )
         if not 1 <= self.gmail_attachment_max_count <= 64:
             raise ValueError(
