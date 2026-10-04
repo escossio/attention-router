@@ -29,6 +29,7 @@ Future design documents are not claims of implemented functionality.
 - Every relevant PR MUST record whether L2 identity, L3 identity, a dedicated IP and a static IP are actually required, with reasons. Prefer service identity/DNS when fixed addressing is not architecturally necessary.
 - Network reachability and application authority are independent controls: being able to reach a service never grants permission to act.
 - Do not version private AGT IP plans, host-private inventory or deployment secrets while satisfying this rule.
+- IPAM is the authoritative allocation system for VLAN/subnet/gateway/IP reservations. Candidate addresses are not allocations until reserved there; Git may record the logical reservation/reference, but private address inventory remains in IPAM.
 
 ## Distributed validation policy
 - Treat a host with `andy-ci-distributed` installed as the CI control plane, not as a heavy test worker.
