@@ -263,7 +263,11 @@ def test_clear_private_restores_read_eligibility_without_disclosure_authority(
     assert current.object_json["grants_disclosure_authority"] is False
     assert claim_is_owner_private(session, claim=sequence) is False
 
-    snapshot = build_personal_context(session, DEFAULT_TENANT_ID)
+    snapshot = build_personal_context(
+        session,
+        DEFAULT_TENANT_ID,
+        now=reviewed_at + timedelta(minutes=2),
+    )
     assert any(
         item.claim_id == sequence.id
         for item in snapshot.claims
@@ -296,7 +300,11 @@ def test_non_actionable_control_blocks_new_suggestions_but_keeps_knowledge_visib
     assert policy.private is False
     assert policy.non_actionable is True
 
-    snapshot = build_personal_context(session, DEFAULT_TENANT_ID)
+    snapshot = build_personal_context(
+        session,
+        DEFAULT_TENANT_ID,
+        now=reviewed_at + timedelta(minutes=1),
+    )
     assert any(
         item.claim_id == sequence.id
         for item in snapshot.claims

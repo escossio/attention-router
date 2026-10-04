@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from email.utils import parseaddr
 import json
 from typing import TYPE_CHECKING, Callable, Protocol, TypeVar
 from urllib import parse as urllib_parse
@@ -10,6 +11,7 @@ from urllib import request as urllib_request
 from sqlalchemy.orm import Session
 
 from attention_router.application.gmail_attachments import GmailAttachmentIngestor
+from attention_router.application.memory import archive_incremental_message, enqueue_memory_ingestion
 from attention_router.application.gmail_connection import (
     GMAIL_METADATA_SCOPE,
     GMAIL_READONLY_SCOPE,
@@ -26,6 +28,7 @@ from attention_router.infrastructure.models import (
     IntegrationBindingRow,
     IntegrationCredentialRow,
 )
+from attention_router.platform.lineage import LineageClassification
 from attention_router.infrastructure.provider_authorization_models import (
     ProviderAuthorizationRow,
 )
@@ -35,7 +38,9 @@ from attention_router.integrations.gmail_api_reader import (
 )
 from attention_router.integrations.gmail_connector import (
     GmailConnectorConfig,
+    GmailConnectorError,
     GmailInboundConnector,
+    GmailMessage,
     GmailPollResult,
     GmailReader,
     IntegrationIngressClient,
@@ -353,7 +358,20 @@ class GmailProductRunner:
             )
         return self._token_refresher.refresh_access_token(refresh_token)
 
-    def _attachment_preparer(
+    @staticmethod
+    def _same_provider_message(left: GmailMessage, right: GmailMessage) -> bool:
+        return (
+            left.message_id == right.message_id
+            and left.thread_id == right.thread_id
+            and left.sender == right.sender
+            and left.to == right.to
+            and left.cc == right.cc
+            and left.bcc == right.bcc
+            and left.subject == right.subject
+            and left.email_ts == right.email_ts
+        )
+
+    def _message_preparer(
         self,
         *,
         row: ProviderAuthorizationRow,
@@ -361,26 +379,145 @@ class GmailProductRunner:
         reader: GmailReader,
     ):
         scope = gmail_authorization_scope(row.granted_scopes)
+        body_mode = (
+            self.settings.gmail_body_ingestion_enabled
+            and scope == GMAIL_READONLY_SCOPE
+        )
+        attachment_mode = (
+            self.settings.gmail_attachment_ingestion_enabled
+            and scope == GMAIL_READONLY_SCOPE
+        )
+        if not body_mode and not attachment_mode:
+            return None
+
+        ingestor = (
+            GmailAttachmentIngestor(
+                settings=self.settings,
+                session_factory=self._artifact_session_factory,
+                store=self._artifact_store,
+            )
+            if attachment_mode
+            else None
+        )
+
+        def prepare(message_id: str):
+            body_message = None
+            if body_mode:
+                body_reader = getattr(reader, "read_message_with_body", None)
+                if not callable(body_reader):
+                    raise GmailConnectorError("GMAIL_BODY_READER_UNAVAILABLE")
+                body_message = body_reader(
+                    message_id,
+                    max_bytes=self.settings.gmail_body_max_bytes,
+                    max_mime_depth=self.settings.gmail_body_max_mime_depth,
+                )
+                if (
+                    body_message.message_id != message_id
+                    or not body_message.body_observed
+                ):
+                    raise GmailConnectorError("GMAIL_BODY_MESSAGE_INVALID")
+
+            if ingestor is not None:
+                attachment_message, staged = ingestor.prepare_message(
+                    reader,
+                    tenant_id=row.tenant_id,
+                    source_account=binding.account_key or "default",
+                    message_id=message_id,
+                )
+                if body_message is not None:
+                    if not self._same_provider_message(
+                        body_message,
+                        attachment_message,
+                    ):
+                        raise GmailConnectorError("GMAIL_MESSAGE_IDENTITY_MISMATCH")
+                    attachment_message = replace(
+                        attachment_message,
+                        body=body_message.body,
+                        body_observed=True,
+                    )
+                return attachment_message, staged
+
+            assert body_message is not None
+            return body_message, ()
+
+        return prepare
+
+    def _live_body_observer(
+        self,
+        *,
+        session: Session,
+        row: ProviderAuthorizationRow,
+        binding: IntegrationBindingRow,
+    ):
+        scope = gmail_authorization_scope(row.granted_scopes)
         if (
-            not self.settings.gmail_attachment_ingestion_enabled
+            not self.settings.gmail_body_ingestion_enabled
             or scope != GMAIL_READONLY_SCOPE
         ):
             return None
-        ingestor = GmailAttachmentIngestor(
-            settings=self.settings,
-            session_factory=self._artifact_session_factory,
-            store=self._artifact_store,
-        )
-        return lambda message_id: ingestor.prepare_message(
-            reader,
-            tenant_id=row.tenant_id,
-            source_account=binding.account_key or "default",
-            message_id=message_id,
-        )
+
+        def observe(message: GmailMessage) -> None:
+            if not message.body_observed:
+                raise GmailConnectorError("GMAIL_BODY_NOT_OBSERVED")
+            subject = " ".join(message.subject.split())
+            body = message.body.strip()
+            text = "\n\n".join(
+                value
+                for value in (
+                    f"Assunto: {subject}" if subject else "",
+                    body,
+                )
+                if value
+            )
+            if not text:
+                return
+
+            display_name, sender_address = parseaddr(message.sender)
+            sender_address = sender_address.strip().casefold()
+            if not sender_address or "@" not in sender_address:
+                raise GmailConnectorError("GMAIL_SENDER_INVALID")
+            try:
+                sent_at = datetime.fromisoformat(
+                    message.email_ts.replace("Z", "+00:00")
+                )
+            except ValueError as exc:
+                raise GmailConnectorError("GMAIL_TIMESTAMP_INVALID") from exc
+
+            archived, created = archive_incremental_message(
+                session,
+                source="gmail",
+                source_account=binding.account_key or "default",
+                thread_key=message.thread_id or message.message_id,
+                thread_type="DIRECT",
+                source_message_id=message.message_id,
+                actor_key=sender_address,
+                display_name=display_name.strip() or None,
+                text=text,
+                sent_at=sent_at,
+                from_me=False,
+                metadata={
+                    "channel": "channel.email",
+                    "provider": "GMAIL",
+                    "subject": subject[:500],
+                    "body_observed": True,
+                    "live_context_version": "gmail-live-text-v1",
+                },
+                tenant_id=row.tenant_id,
+                lineage_classification=LineageClassification.ORGANIC.value,
+            )
+            if created and self.settings.memory_ingestion_enabled:
+                enqueue_memory_ingestion(
+                    session,
+                    archived.id,
+                    mode="INCREMENTAL",
+                )
+
+        return observe
 
     def _build_connector(
         self,
         *,
+        session: Session,
         row: ProviderAuthorizationRow,
         binding: IntegrationBindingRow,
         reader: GmailReader,
@@ -400,10 +537,25 @@ class GmailProductRunner:
                 ingress_url=self.settings.gmail_product_runner_ingress_url,
                 ingress_bearer=ingress_bearer,
             ),
-            message_preparer=self._attachment_preparer(
+            message_preparer=self._message_preparer(
                 row=row,
                 binding=binding,
                 reader=reader,
+            ),
+            message_observer=self._live_body_observer(
+                session=session,
+                row=row,
+                binding=binding,
+            ),
+            body_mode=(
+                self.settings.gmail_body_ingestion_enabled
+                and gmail_authorization_scope(row.granted_scopes)
+                == GMAIL_READONLY_SCOPE
+            ),
+            attachment_mode=(
+                self.settings.gmail_attachment_ingestion_enabled
+                and gmail_authorization_scope(row.granted_scopes)
+                == GMAIL_READONLY_SCOPE
             ),
         )
 
@@ -459,6 +611,7 @@ class GmailProductRunner:
             GmailProductProviderUnavailable, lambda: self._reader_factory(access_token)
         )
         connector = self._build_connector(
+            session=session,
             row=row,
             binding=binding,
             reader=reader,

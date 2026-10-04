@@ -16,6 +16,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from attention_router.infrastructure import human_identity_models as _human_identity_models  # noqa: F401
+from attention_router.infrastructure import models as _models  # noqa: F401
 from attention_router.infrastructure.db import Base
 
 

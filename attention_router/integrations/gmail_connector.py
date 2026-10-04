@@ -89,6 +89,7 @@ GmailMessagePreparer = Callable[
     [str],
     tuple[GmailMessage, tuple[GmailStagedAttachment, ...]],
 ]
+GmailMessageObserver = Callable[[GmailMessage], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,16 +280,26 @@ class GmailInboundConnector:
         ingress: IntegrationIngressClient,
         config: GmailConnectorConfig,
         message_preparer: GmailMessagePreparer | None = None,
+        message_observer: GmailMessageObserver | None = None,
+        body_mode: bool = False,
+        attachment_mode: bool = False,
     ):
         self._reader = reader
         self._ingress = ingress
         self._config = config
         self._message_preparer = message_preparer
+        self._message_observer = message_observer
+        self._body_mode = bool(body_mode)
+        self._attachment_mode = bool(attachment_mode)
         self._adapter = EmailNormalizedAdapter()
 
     @property
+    def body_mode(self) -> bool:
+        return self._body_mode
+
+    @property
     def attachment_mode(self) -> bool:
-        return self._message_preparer is not None
+        return self._attachment_mode
 
     def prepare_message(
         self,
@@ -321,9 +332,12 @@ class GmailInboundConnector:
             account_id=self._config.account_id,
             received_at=received_at or datetime.now(UTC),
         )
-        return self._ingress.send(
+        response = self._ingress.send(
             output.event.model_dump(mode="json")
         )
+        if self._message_observer is not None:
+            self._message_observer(message)
+        return response
 
     def poll(
         self,
@@ -363,6 +377,7 @@ __all__ = [
     "GmailConnectorError",
     "GmailInboundConnector",
     "GmailMessage",
+    "GmailMessageObserver",
     "GmailPollResult",
     "GmailReader",
     "IntegrationIngressClient",

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 import base64
 import binascii
 from datetime import UTC, datetime
+from email.message import Message
 from email.utils import getaddresses, parsedate_to_datetime
 import json
 from typing import Any, Protocol
@@ -185,6 +186,45 @@ class GmailApiReader(GmailReader):
         )
         return _gmail_api_payload_to_message(payload)
 
+    def read_message_with_body(
+        self,
+        message_id: str,
+        *,
+        max_bytes: int,
+        max_mime_depth: int,
+    ) -> GmailMessage:
+        if not isinstance(message_id, str) or not message_id.strip():
+            raise ValueError("GMAIL_MESSAGE_ID_REQUIRED")
+        if type(max_bytes) is not int or not 1 <= max_bytes <= 1024 * 1024:
+            raise ValueError("GMAIL_BODY_MAX_BYTES_OUT_OF_RANGE")
+        if type(max_mime_depth) is not int or not 1 <= max_mime_depth <= 32:
+            raise ValueError("GMAIL_BODY_MIME_DEPTH_OUT_OF_RANGE")
+        encoded_limit = 4 * ((max_bytes + 2) // 3) + 256 * 1024
+        payload = self._get_json(
+            f"/messages/{urllib_parse.quote(message_id, safe='')}",
+            query={
+                "format": "full",
+                "fields": (
+                    "id,threadId,internalDate,"
+                    f"payload({_body_part_projection(max_mime_depth)})"
+                ),
+            },
+            max_response_bytes=encoded_limit,
+        )
+        message = _gmail_api_payload_to_message(payload)
+        body = _plain_text_body(
+            payload,
+            max_bytes=max_bytes,
+            max_mime_depth=max_mime_depth,
+            read_external=lambda attachment_id, expected_size, remaining: self.read_attachment(
+                message_id,
+                attachment_id,
+                expected_size=expected_size,
+                max_bytes=remaining,
+            ),
+        )
+        return replace(message, body=body, body_observed=True)
+
 
     def read_message_with_attachments(
         self,
@@ -272,6 +312,129 @@ class GmailApiReader(GmailReader):
         if len(decoded) != expected_size:
             raise GmailConnectorError("GMAIL_ATTACHMENT_SIZE_MISMATCH")
         return decoded
+
+
+def _body_part_projection(depth: int) -> str:
+    fields = "mimeType,filename,headers(name,value),body(attachmentId,size,data)"
+    if depth > 1:
+        fields += f",parts({_body_part_projection(depth - 1)})"
+    return fields
+
+
+def _part_headers(part: dict[str, Any]) -> dict[str, str]:
+    raw = part.get("headers", [])
+    if not isinstance(raw, list):
+        raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+    result: dict[str, str] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+        name = item.get("name")
+        value = item.get("value")
+        if isinstance(name, str) and isinstance(value, str):
+            result.setdefault(name.casefold(), value)
+    return result
+
+
+def _decode_body_data(encoded: str, *, expected_size: int, max_bytes: int) -> bytes:
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((max_bytes + 2) // 3) + 8:
+        raise GmailConnectorError("GMAIL_BODY_RESPONSE_INVALID")
+    try:
+        raw = encoded.encode("ascii")
+        padding = b"=" * ((-len(raw)) % 4)
+        decoded = base64.b64decode(raw + padding, altchars=b"-_", validate=True)
+    except (UnicodeEncodeError, binascii.Error, ValueError):
+        raise GmailConnectorError("GMAIL_BODY_RESPONSE_INVALID") from None
+    if len(decoded) != expected_size or len(decoded) > max_bytes:
+        raise GmailConnectorError("GMAIL_BODY_SIZE_INVALID")
+    return decoded
+
+
+def _decode_text_part(data: bytes, headers: dict[str, str]) -> str:
+    content_type = headers.get("content-type", "text/plain; charset=utf-8")
+    message = Message()
+    message["content-type"] = content_type
+    charset = message.get_content_charset() or "utf-8"
+    try:
+        text = data.decode(charset)
+    except (LookupError, UnicodeDecodeError):
+        raise GmailConnectorError("GMAIL_BODY_ENCODING_UNSUPPORTED") from None
+    if "\x00" in text:
+        raise GmailConnectorError("GMAIL_BODY_TEXT_INVALID")
+    return text
+
+
+def _plain_text_body(
+    payload: dict[str, Any],
+    *,
+    max_bytes: int,
+    max_mime_depth: int,
+    read_external,
+) -> str:
+    root = payload.get("payload")
+    if not isinstance(root, dict):
+        raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+    parts: list[str] = []
+    consumed = 0
+    nodes = 0
+
+    def walk(part: dict[str, Any], depth: int) -> None:
+        nonlocal consumed, nodes
+        nodes += 1
+        if nodes > 1024:
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_TOO_LARGE")
+        mime_type = part.get("mimeType")
+        if not isinstance(mime_type, str) or not 1 <= len(mime_type) <= 160:
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+        filename = part.get("filename", "")
+        if not isinstance(filename, str) or len(filename) > 512:
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+        headers = _part_headers(part)
+        disposition = headers.get("content-disposition", "").casefold()
+        body = part.get("body") or {}
+        if not isinstance(body, dict):
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+        size = body.get("size", 0)
+        if type(size) is not int or size < 0:
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+
+        if mime_type.casefold() == "text/plain" and not filename and "attachment" not in disposition:
+            data = body.get("data")
+            attachment_id = body.get("attachmentId")
+            if data is not None and attachment_id is not None:
+                raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+            if size:
+                remaining = max_bytes - consumed
+                if size > remaining or remaining <= 0:
+                    raise GmailConnectorError("GMAIL_BODY_SIZE_EXCEEDED")
+                if data is not None:
+                    decoded = _decode_body_data(data, expected_size=size, max_bytes=remaining)
+                elif attachment_id is not None:
+                    if not isinstance(attachment_id, str) or not 1 <= len(attachment_id) <= 2048:
+                        raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+                    decoded = read_external(attachment_id, size, remaining)
+                    if len(decoded) != size:
+                        raise GmailConnectorError("GMAIL_BODY_SIZE_INVALID")
+                else:
+                    raise GmailConnectorError("GMAIL_BODY_CONTENT_MISSING")
+                consumed += len(decoded)
+                parts.append(_decode_text_part(decoded, headers))
+
+        children = part.get("parts")
+        if children is not None:
+            if not isinstance(children, list) or len(children) > 512:
+                raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+            if depth >= max_mime_depth and children:
+                raise GmailConnectorError("GMAIL_BODY_MIME_DEPTH_EXCEEDED")
+            for child in children:
+                if not isinstance(child, dict):
+                    raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+                walk(child, depth + 1)
+        elif depth >= max_mime_depth and mime_type.casefold().startswith("multipart/"):
+            raise GmailConnectorError("GMAIL_BODY_MIME_DEPTH_EXCEEDED")
+
+    walk(root, 1)
+    return "\n".join(part.strip() for part in parts if part.strip()).strip()
 
 
 def _mime_part_projection(depth: int) -> str:
