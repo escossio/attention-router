@@ -473,3 +473,130 @@ def test_reader_rejects_ambiguous_externalized_body_part():
             max_attachments=4,
             max_mime_depth=4,
         )
+
+
+def _body_payload(text: str, *, external: bool = False, include_attachment: bool = False):
+    import base64
+
+    encoded = base64.urlsafe_b64encode(text.encode("utf-8")).decode().rstrip("=")
+    body = {"size": len(text.encode("utf-8"))}
+    if external:
+        body["attachmentId"] = "provider-body-1"
+    else:
+        body["data"] = encoded
+    parts = [
+        {
+            "mimeType": "text/plain",
+            "filename": "",
+            "headers": [
+                {"name": "Content-Type", "value": "text/plain; charset=utf-8"},
+            ],
+            "body": body,
+        }
+    ]
+    if include_attachment:
+        parts.append(
+            {
+                "mimeType": "text/plain",
+                "filename": "notes.txt",
+                "headers": [
+                    {"name": "Content-Disposition", "value": "attachment; filename=notes.txt"},
+                    {"name": "Content-Type", "value": "text/plain; charset=utf-8"},
+                ],
+                "body": {
+                    "size": 14,
+                    "data": "U0VDUkVUX0FUVEFDSA",
+                },
+            }
+        )
+    return {
+        "id": "gmail-message-1",
+        "threadId": "gmail-thread-1",
+        "internalDate": "1789941600000",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "filename": "",
+            "headers": [
+                {"name": "From", "value": "Sender <sender@example.invalid>"},
+                {"name": "To", "value": "owner@example.invalid"},
+                {"name": "Subject", "value": "Live context"},
+                {"name": "Date", "value": "Sun, 20 Sep 2026 19:00:00 -0300"},
+            ],
+            "body": {"size": 0},
+            "parts": parts,
+        },
+    }
+
+
+def test_reader_reads_bounded_plain_text_body_without_snippet_or_attachment_content():
+    calls = []
+    payload = _body_payload("739184", include_attachment=True)
+
+    def opener(request, timeout):
+        calls.append(request.full_url)
+        return FakeResponse(200, payload)
+
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=opener,
+    )
+    message = reader.read_message_with_body(
+        "gmail-message-1",
+        max_bytes=1024,
+        max_mime_depth=4,
+    )
+
+    assert message.body == "739184"
+    assert message.body_observed is True
+    assert message.attachments_observed is False
+    assert len(calls) == 1
+    decoded_url = urllib_parse.unquote(calls[0])
+    assert "format=full" in decoded_url
+    assert "snippet" not in decoded_url
+    assert "body(attachmentId,size,data)" in decoded_url
+    assert "SECRET_ATTACH" not in message.body
+
+
+def test_reader_reads_externalized_plain_text_body_through_bounded_attachment_endpoint():
+    import base64
+
+    calls = []
+    payload = _body_payload("external body", external=True)
+    encoded = base64.urlsafe_b64encode(b"external body").decode().rstrip("=")
+
+    def opener(request, timeout):
+        calls.append(request.full_url)
+        if "/attachments/provider-body-1" in request.full_url:
+            return FakeResponse(200, {"size": 13, "data": encoded})
+        return FakeResponse(200, payload)
+
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=opener,
+    )
+    message = reader.read_message_with_body(
+        "gmail-message-1",
+        max_bytes=1024,
+        max_mime_depth=4,
+    )
+
+    assert message.body == "external body"
+    assert message.body_observed is True
+    assert len(calls) == 2
+    assert "/attachments/provider-body-1" in calls[1]
+
+
+def test_reader_rejects_plain_text_body_above_configured_bound():
+    payload = _body_payload("0123456789")
+
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=lambda _request, timeout: FakeResponse(200, payload),
+    )
+
+    with pytest.raises(GmailConnectorError, match="GMAIL_BODY_SIZE_EXCEEDED"):
+        reader.read_message_with_body(
+            "gmail-message-1",
+            max_bytes=5,
+            max_mime_depth=4,
+        )

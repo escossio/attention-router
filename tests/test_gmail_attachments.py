@@ -378,3 +378,29 @@ def test_attachment_feature_requires_runner_and_artifact_store():
         _attachment_settings(
             artifact_store_enabled=False,
         )
+
+
+def test_body_configuration_is_default_off_and_bounded():
+    configured = _settings()
+    assert configured.gmail_body_ingestion_enabled is False
+    assert configured.gmail_body_max_bytes == 128 * 1024
+    assert configured.gmail_body_max_mime_depth == 12
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("gmail_body_max_bytes", 0, "GMAIL_BODY_MAX_BYTES"),
+        ("gmail_body_max_bytes", 1024 * 1024 + 1, "GMAIL_BODY_MAX_BYTES"),
+        ("gmail_body_max_mime_depth", 0, "GMAIL_BODY_MAX_MIME_DEPTH"),
+        ("gmail_body_max_mime_depth", 33, "GMAIL_BODY_MAX_MIME_DEPTH"),
+    ],
+)
+def test_body_configuration_rejects_invalid_bounds(field, value, reason):
+    with pytest.raises(ValueError, match=reason):
+        _settings(**{field: value})
+
+
+def test_body_feature_requires_product_runner():
+    with pytest.raises(ValueError, match="GMAIL_PRODUCT_RUNNER_ENABLED"):
+        _settings(gmail_body_ingestion_enabled=True)

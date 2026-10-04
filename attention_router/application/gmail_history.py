@@ -99,11 +99,12 @@ def _cycle(reader, connector, start, limit, max_pages):
                 return cursor, examined, len(seen), accepted, duplicates
             for message_id in pending:
                 message, staged = connector.prepare_message(message_id)
-                if (
-                    message.message_id != message_id
-                    or message.body_observed
-                    or message.body
-                ):
+                if message.message_id != message_id:
+                    raise GmailProductProviderUnavailable()
+                if connector.body_mode:
+                    if not message.body_observed:
+                        raise GmailProductProviderUnavailable()
+                elif message.body_observed or message.body:
                     raise GmailProductProviderUnavailable()
                 if connector.attachment_mode:
                     if (
@@ -203,6 +204,7 @@ def run_incremental(
         session.flush([row])
         return GmailHistoryResult(row.id, initialized=True, cursor_advanced=True)
     connector = runner._build_connector(
+        session=session,
         row=row,
         binding=binding,
         reader=reader,

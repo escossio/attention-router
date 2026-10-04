@@ -57,12 +57,30 @@ From/To/Cc/Bcc/Subject/Date headers, no body, snippet, MIME parts or attachment
 bytes, and events preserve `body_observed=false` plus
 `attachments_observed=false`.
 
+Plain-text live context is a separate default-off capability. When
+`GMAIL_BODY_INGESTION_ENABLED=true` and the persisted authorization is exactly
+`gmail.readonly`, the reader performs a bounded `format=full` projection and
+observes only non-attachment `text/plain` MIME parts. It never uses Gmail
+`snippet`, never renders or executes HTML, never dereferences remote content, and
+fails closed on invalid MIME structure, unsupported text encoding, depth overflow
+or decoded body bytes above `GMAIL_BODY_MAX_BYTES`. A metadata-only authorization
+cannot be silently upgraded into body access.
+
+After neutral ingress accepts or deduplicates the provider event, observed
+plain-text content is archived tenant-scoped in the existing conversation archive
+as an `ORGANIC` Gmail message with provider message/thread provenance. This write
+is idempotent by source message identity and participates in the caller-owned live
+cursor transaction. The raw body is not copied into the neutral integration event
+payload. Existing secret redaction and memory-ingestion policy remain in force.
+
 When attachment ingestion is explicitly enabled and the persisted authorization
 is exactly `gmail.readonly`, the reader performs a second message request using
 a server-side fields projection limited to MIME type, filename,
-`body(attachmentId,size)`, and recursively bounded child parts. It never asks
-for snippet or `body.data`; receiving body data anyway fails closed. Attachment
-bytes are then fetched only through `users.messages.attachments.get`.
+`body(attachmentId,size)`, and recursively bounded child parts. That
+attachment-only projection never asks for snippet or `body.data`; receiving body
+data there still fails closed. Attachment bytes are then fetched only through
+`users.messages.attachments.get`. Body observation and attachment staging may be
+enabled together, with independent bounds and validation.
 
 There are still no send, modify, mark-as-read or label mutation requests.
 
@@ -85,6 +103,9 @@ Reuse the product settings already introduced by PR #146:
 | `GMAIL_PRODUCT_RUNNER_INGRESS_URL` | Explicit server destination for neutral ingress. |
 | `GOOGLE_WORKSPACE_OAUTH_CLIENT_ID`, `GOOGLE_WORKSPACE_OAUTH_CLIENT_SECRET` | Existing server OAuth client used by Connect Gmail. |
 | `PROVIDER_AUTHORIZATION_KEY_B64URL` | Existing server AES-GCM key. |
+| `GMAIL_BODY_INGESTION_ENABLED` | Defaults false; requires runner and exact persisted `gmail.readonly` at execution time. |
+| `GMAIL_BODY_MAX_BYTES` | Default 128 KiB decoded plain-text body bytes per message; hard limit 1 byte..1 MiB. |
+| `GMAIL_BODY_MAX_MIME_DEPTH` | Default 12; hard limit 1..32. |
 | `GMAIL_ATTACHMENT_INGESTION_ENABLED` | Defaults false; requires runner + Artifact Store and exact persisted `gmail.readonly`. |
 | `GMAIL_ATTACHMENT_MAX_COUNT` | Default 10; hard limit 1..64 attachments per message. |
 | `GMAIL_ATTACHMENT_MAX_BYTES` | Default 25 MiB decoded bytes per attachment; hard ceiling 256 MiB and cannot exceed Artifact Store max when enabled. |
@@ -98,6 +119,12 @@ must select the address reachable from the runner's network. Canary
 `GMAIL_CONNECTOR_*` and `ATTENTION_ROUTER_INTEGRATION_*` variables are not read
 by the product runner. No subscriber configuration or second provisioning flow
 is introduced.
+
+Body ingestion is separately default-off. `GMAIL_BODY_INGESTION_ENABLED`
+requires the governed product runner and exact persisted `gmail.readonly`
+authority at execution time; it never broadens an existing provider grant. Body
+bytes and MIME depth are bounded by `GMAIL_BODY_MAX_BYTES` and
+`GMAIL_BODY_MAX_MIME_DEPTH`.
 
 Attachment ingestion is separately default-off. `GMAIL_ATTACHMENT_INGESTION_ENABLED`
 requires the product runner and Artifact Store. Count, decoded bytes per attachment,
@@ -145,11 +172,16 @@ mail.** The caller must commit that baseline. A new installation always seeds;
 same-account reconnect preserves the cursor, while account replacement clears it
 under the installation lock, including A -> B -> A replacement.
 
+This cursor is the **live continuity** track. It intentionally does not backfill
+older mail. Historical acceleration remains a separate bounded/import-resume
+concern and must not reseed, skip or mutate this live cursor.
+
 Subsequent calls use `users.history.list` with `historyTypes=messageAdded`,
 `labelId=INBOX`, `maxResults=100` and a fields projection. Both exact
 authorization profiles can drive the same durable cursor: `gmail.metadata`
-keeps metadata-only ingestion, while `gmail.readonly` may additionally stage
-attachments when the attachment feature is explicitly enabled. See the
+keeps metadata-only ingestion, while exact `gmail.readonly` may additionally
+archive bounded plain-text body content and/or stage attachments when the
+respective features are explicitly enabled. See the
 [official history contract](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/history/list).
 Only `messagesAdded` entries explicitly carrying INBOX are selected. Other
 changes can advance the cursor without ingestion. History IDs must increase;
@@ -216,10 +248,13 @@ No new timestamp or duplicate semantics are imposed on neutral ingress.
 Successful results expose only installation ID, initialization status, record
 count, selected/accepted/duplicate counts and whether the cursor advanced.
 Provider IDs, page tokens and all secrets stay out of result/repr and sanitized
-error chains. Message bodies and snippets are never fetched. Attachment bytes
-are fetched only for exact `gmail.readonly` installations when attachment
-ingestion is explicitly enabled; those bytes are staged into Artifact Plane and
-never serialized into the canonical e-mail event.
+error chains. Message snippets are never fetched. Message bodies remain
+unobserved unless the default-off live body capability is enabled for an exact
+`gmail.readonly` installation; in that mode only bounded non-attachment
+`text/plain` content is archived as contextual evidence. Attachment bytes are
+fetched only for exact `gmail.readonly` installations when attachment ingestion
+is explicitly enabled; those bytes are staged into Artifact Plane and never
+serialized into the canonical e-mail event.
 
 
 ## Automatic polling scheduler V1
