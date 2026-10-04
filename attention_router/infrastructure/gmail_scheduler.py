@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, MutableSet
-from dataclasses import dataclass
 from datetime import datetime
 import logging
 import time
@@ -11,6 +10,14 @@ import time
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.channel_sync import (
+    ChannelSyncBusy,
+    ChannelSyncCapabilities,
+    ChannelSyncLiveResult,
+    ChannelSyncProviderFailure,
+    ChannelSyncStale,
+    ChannelSyncUnavailable,
+)
 from attention_router.application.gmail_history import (
     GmailProductHistoryBusy,
     GmailProductHistoryStale,
@@ -21,6 +28,10 @@ from attention_router.application.gmail_product_runner import (
     GmailProductRunnerError,
 )
 from attention_router.config import settings
+from attention_router.infrastructure.channel_sync_runtime import (
+    ChannelSyncCycleResult,
+    run_channel_sync_cycle,
+)
 from attention_router.infrastructure.db import SessionLocal
 from attention_router.infrastructure.provider_authorization_models import (
     ProviderAuthorizationRow,
@@ -28,20 +39,7 @@ from attention_router.infrastructure.provider_authorization_models import (
 
 logger = logging.getLogger(__name__)
 
-@dataclass(frozen=True, slots=True)
-class GmailSchedulerCycleResult:
-    selected: int = 0
-    processed: int = 0
-    initialized: int = 0
-    busy: int = 0
-    stale: int = 0
-    quarantined: int = 0
-    unavailable: int = 0
-    failed: int = 0
-    accepted: int = 0
-    duplicates: int = 0
-    cursor_advanced: int = 0
-    last_installation_id: str | None = None
+GmailSchedulerCycleResult = ChannelSyncCycleResult
 
 
 def _eligible_installations():
@@ -51,6 +49,7 @@ def _eligible_installations():
         ProviderAuthorizationRow.status == "ACTIVE",
         ProviderAuthorizationRow.revoked_at.is_(None),
     )
+
 
 def discover_active_installation_ids(
     session: Session,
@@ -91,6 +90,71 @@ def discover_active_installation_ids(
     return forward + wrapped
 
 
+class GmailChannelSyncAdapter:
+    """Translate the certified Gmail live path into the neutral runtime contract."""
+
+    key = "google.gmail"
+    capabilities = ChannelSyncCapabilities(
+        live_continuity=True,
+        historical_acceleration=False,
+    )
+
+    def __init__(
+        self,
+        runner: GmailProductRunner,
+        *,
+        max_results: int,
+        max_pages: int,
+    ):
+        self.runner = runner
+        self.max_results = max_results
+        self.max_pages = max_pages
+
+    def discover_live_installation_ids(
+        self,
+        session: Session,
+        *,
+        limit: int,
+        after_id: str | None = None,
+    ) -> tuple[str, ...]:
+        return discover_active_installation_ids(
+            session,
+            limit=limit,
+            after_id=after_id,
+        )
+
+    def run_live(
+        self,
+        session: Session,
+        *,
+        installation_id: str,
+        now: datetime | None = None,
+    ) -> ChannelSyncLiveResult:
+        try:
+            result = self.runner.run_incremental(
+                session,
+                installation_id=installation_id,
+                max_results=self.max_results,
+                max_pages=self.max_pages,
+                now=now,
+            )
+        except GmailProductHistoryBusy:
+            raise ChannelSyncBusy() from None
+        except GmailProductHistoryStale:
+            raise ChannelSyncStale() from None
+        except GmailProductAuthorizationUnavailable:
+            raise ChannelSyncUnavailable() from None
+        except GmailProductRunnerError as exc:
+            raise ChannelSyncProviderFailure(exc.code) from None
+
+        return ChannelSyncLiveResult(
+            initialized=result.initialized,
+            accepted=result.accepted,
+            duplicates=result.duplicates,
+            cursor_advanced=result.cursor_advanced,
+        )
+
+
 def run_scheduler_cycle(
     session_factory: Callable[[], Session],
     runner: GmailProductRunner,
@@ -102,89 +166,19 @@ def run_scheduler_cycle(
     stale_installations: MutableSet[str] | None = None,
     now: datetime | None = None,
 ) -> GmailSchedulerCycleResult:
-    """Discover first, then give every installation its own transaction."""
-    stale_installations = (
-        stale_installations if stale_installations is not None else set()
+    """Run Gmail through the provider-neutral live-continuity cycle."""
+    adapter = GmailChannelSyncAdapter(
+        runner,
+        max_results=max_results,
+        max_pages=max_pages,
     )
-    with session_factory() as discovery:
-        installation_ids = discover_active_installation_ids(
-            discovery,
-            limit=limit,
-            after_id=after_id,
-        )
-
-    processed = initialized = busy = stale = quarantined = 0
-    unavailable = failed = accepted = duplicates = advanced = 0
-
-    for installation_id in installation_ids:
-        if installation_id in stale_installations:
-            quarantined += 1
-            continue
-
-        with session_factory() as session:
-            try:
-                result = runner.run_incremental(
-                    session,
-                    installation_id=installation_id,
-                    max_results=max_results,
-                    max_pages=max_pages,
-                    now=now,
-                )
-                session.commit()
-            except GmailProductHistoryBusy:
-                session.rollback()
-                busy += 1
-                continue
-            except GmailProductHistoryStale:
-                session.rollback()
-                stale_installations.add(installation_id)
-                stale += 1
-                continue
-
-            except GmailProductAuthorizationUnavailable:
-                session.rollback()
-                unavailable += 1
-                continue
-            except GmailProductRunnerError as exc:
-                session.rollback()
-                failed += 1
-                logger.warning(
-                    "gmail scheduler installation failed installation_id=%s code=%s",
-                    installation_id,
-                    exc.code,
-                )
-                continue
-            except Exception as exc:
-                session.rollback()
-                failed += 1
-                logger.error(
-                    "gmail scheduler installation failed installation_id=%s error_type=%s",
-                    installation_id,
-                    type(exc).__name__,
-                )
-                continue
-
-        processed += 1
-        initialized += int(result.initialized)
-        accepted += result.accepted
-        duplicates += result.duplicates
-        advanced += int(result.cursor_advanced)
-
-    return GmailSchedulerCycleResult(
-        selected=len(installation_ids),
-        processed=processed,
-        initialized=initialized,
-        busy=busy,
-        stale=stale,
-        quarantined=quarantined,
-        unavailable=unavailable,
-        failed=failed,
-        accepted=accepted,
-        duplicates=duplicates,
-        cursor_advanced=advanced,
-        last_installation_id=(
-            installation_ids[-1] if installation_ids else after_id
-        ),
+    return run_channel_sync_cycle(
+        session_factory,
+        adapter,
+        limit=limit,
+        after_id=after_id,
+        stale_installations=stale_installations,
+        now=now,
     )
 
 
@@ -230,7 +224,6 @@ def run_forever() -> None:
                     result.cursor_advanced,
                     result.busy,
                     result.stale,
-
                     result.quarantined,
                     result.unavailable,
                     result.failed,
