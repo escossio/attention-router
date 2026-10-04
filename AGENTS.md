@@ -14,6 +14,13 @@ Future design documents are not claims of implemented functionality.
 - Keep investigations bounded, checkpoint between logical phases, and freeze secondary issues instead of silently switching frontiers.
 - Establish artifact provenance before deep debugging whenever an APK, container or other built artifact is involved.
 
+## Dual-track channel context invariant
+- Before changing a channel, connector, scheduler, ingress path, context/memory ingestion path or historical import, read [docs/architecture/channel-context-dual-track-v1.md](docs/architecture/channel-context-dual-track-v1.md).
+- Every channel/context change MUST account for both tracks: **live continuity** (new authorized events keep Andy current) and **historical acceleration** (available history/import/export is evaluated as a bounded way to make Andy useful faster).
+- Historical acceleration never replaces live continuity. It must not silently reseed or corrupt live cursors, weaken tenant/identity/provenance/authority boundaries, or promote inference into fact. Give historical ingestion its own checkpoint/idempotency semantics when implemented.
+- Every relevant PR description MUST state its impact on both tracks. If historical acceleration is not implemented in that increment, state whether it is unavailable, unsafe, too disruptive, or intentionally deferred; do not silently forget it.
+- This invariant applies to WhatsApp, Gmail and future channels. A provider-specific limitation may change the implementation, not the requirement to evaluate both tracks.
+
 ## Distributed validation policy
 - Treat a host with `andy-ci-distributed` installed as the CI control plane, not as a heavy test worker.
 - On the control plane, do not run the full PostgreSQL suite, migration-heavy regression suites, full repository test sweeps, or other long CPU/I/O-heavy validation locally while distributed workers are available.
