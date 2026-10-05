@@ -94,15 +94,15 @@ Raw webhook bodies, private keys, signatures, tokens, conversations and provider
 
 
 
-## Distributed shadow CI
+## Distributed CI checks
 
-The GitHub App can also publish non-required shadow checks that execute existing CI suites on the self-managed worker pool instead of on a persistent GitHub self-hosted runner:
+The GitHub App publishes exact-SHA checks that execute existing CI suites on the self-managed worker pool instead of on a persistent GitHub self-hosted runner:
 
-- `distributed-python`;
-- `distributed-transport`;
-- `distributed-docker`.
+- `distributed-python` — required full Python-suite gate;
+- `distributed-transport` — non-required shadow check;
+- `distributed-docker` — non-required shadow check.
 
-The daemon consumes the same signed Pull Request deliveries already stored by the webhook receiver, binds every job to the exact PR head SHA, and creates one independent check-run per suite. It does not alter the current required GitHub Actions checks and does not change the `distributed-postgres` gate.
+The daemon consumes the same signed Pull Request deliveries already stored by the webhook receiver, binds every job to the exact PR head SHA, and creates one independent check-run per suite. `distributed-python` is now part of the repository merge authority alongside the independently required `distributed-postgres`. The transport and Docker distributed checks remain non-required until their migrations are separately approved.
 
 For each new PR head, the daemon enqueues the three suites and claims up to three jobs concurrently. The generic scheduler then selects an eligible Host Registry worker and invokes the already-installed `andy-ci-run <sha> <suite>` executor. Worker lock contention causes a retry on another eligible host; a real suite failure is terminal.
 
@@ -116,7 +116,7 @@ systemctl daemon-reload
 systemctl enable --now andy-github-distributed-shadow-ci.service
 ```
 
-The migration is intentionally two-phase. Shadow checks must first demonstrate repeated exact-SHA equivalence with `python-tests`, `transport-tests` and `docker-build`. Updating the repository ruleset to make distributed checks required is a separate administrative change and is not performed by this package.
+The Python migration completed after repeated exact-SHA equivalence with the former GitHub-hosted full suite. `distributed-python` is required; GitHub-hosted `python-tests` is retained only as lightweight public preflight. `distributed-transport` and `distributed-docker` remain in the shadow-certification phase, and promoting either one requires a separate repository-ruleset change.
 
 ## Event-driven continuation stages
 

@@ -1,6 +1,6 @@
 # Heterogeneous distributed CI lab
 
-Status: self-managed preflight accelerator. GitHub Actions remains the authoritative public certification path.
+Status: self-managed exact-SHA CI execution. `distributed-python` and `distributed-postgres` are authoritative required checks; GitHub Actions retains lightweight public preflight and repository-native gates.
 
 This package documents the distributed CI control plane used to accelerate the Attention Router PostgreSQL integration suite without attaching a persistent self-hosted runner directly to the public repository.
 
@@ -84,8 +84,7 @@ one worker:
   for that worker within the existing bounded capacity timeout and then blocks;
 - there is no silent PostgreSQL fallback to another worker.
 
-The generic `python`, `transport` and `docker` shadow schedulers remain
-capability-based and may continue using CI01/CI02/CI03 independently.
+The generic `python`, `transport` and `docker` schedulers remain capability-based and may continue using CI01/CI02/CI03 independently. `python` is now a required full-suite gate; `transport` and `docker` remain shadow checks until separately migrated.
 
 This keeps the physical-worker choice explicit and replaceable without encoding
 an IP address or local hostname in Git.
@@ -120,7 +119,7 @@ a bounded infrastructure condition; a real test failure remains terminal.
 - `benchmark-20260919.json`: machine-readable benchmark evidence.
 
 
-## Shadow generic suites
+## Distributed generic suites
 
 The worker executor already supports `python`, `transport` and `docker` suites in addition to PostgreSQL. The generic shadow scheduler exposes those existing worker capabilities without replacing the proven sharded PostgreSQL scheduler:
 
@@ -134,13 +133,17 @@ The scheduler asks the Host Registry for the generic `ci-worker` capability. Dur
 
 Generic suites are whole-suite jobs rather than test-file shards. Concurrent shadow checks deliberately use different stable starting offsets in the benchmark-ordered worker list, so `python`, `docker` and `transport` normally begin on different workers. The worker lock remains authoritative: a collision returns `CI_WORKER_BUSY`, and the scheduler tries the next eligible worker. Worker loss and SSH failures fail over; a real suite failure is terminal and is not retried on another machine.
 
-The GitHub App publishes these results as **non-required shadow checks**:
+The GitHub App publishes three generic exact-SHA checks:
 
-- `distributed-python`;
-- `distributed-transport`;
-- `distributed-docker`.
+- `distributed-python` — **required** and authoritative for the full Python test suite;
+- `distributed-transport` — non-required shadow check;
+- `distributed-docker` — non-required shadow check.
 
-The existing GitHub-hosted `python-tests`, `transport-tests` and `docker-build` required checks remain unchanged during certification. Only after repeated exact-SHA equivalence has been demonstrated should the repository ruleset be migrated to the distributed checks. `distributed-postgres` remains independent and unchanged.
+The Python migration is complete. GitHub-hosted `python-tests` remains required only as a lightweight public preflight: dependency install, Ruff, compileall, generated SDK verification and standalone Python SDK wheel validation. It no longer executes the full `pytest` suite.
+
+The worker-owned `distributed-python` check executes `run_python`, including the same fast validations plus the standalone SDK test and `python -m pytest -q`, on the self-managed worker pool. AGT coordinates exact-SHA dispatch and does not execute the heavy suite locally.
+
+`transport-tests` and `docker-build` remain GitHub-hosted required checks while `distributed-transport` and `distributed-docker` continue their certification phase. `distributed-postgres` remains independently required and unchanged.
 
 ## Security boundary
 
@@ -148,4 +151,4 @@ This is deliberately **not** a persistent GitHub-hosted-to-LAN self-hosted runne
 
 The public repository contains no LAN addresses, SSH private keys, production environment files, GitHub App private keys, provider credentials or production database access. Host addressing and authorization remain local to the control plane. Workspaces are disposable, test databases contain synthetic data, and the virtualized worker provides an additional KVM isolation boundary.
 
-For public pull requests, the `andy-github-control-plane` App binds execution to the current exact PR head SHA and publishes the aggregated result as the required `distributed-postgres` GitHub check. The PostgreSQL suite is therefore not rerun on a GitHub-hosted runner. GitHub Actions and CodeQL remain authoritative for the other repository-native gates.
+For public pull requests, the `andy-github-control-plane` App binds execution to the current exact PR head SHA and publishes required `distributed-python` and `distributed-postgres` checks. Neither full suite is rerun on a GitHub-hosted runner. GitHub Actions remains authoritative for lightweight public preflight, transport, Docker build and secret scanning; CodeQL remains an independent repository-native gate.
