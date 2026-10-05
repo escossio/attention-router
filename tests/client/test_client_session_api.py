@@ -91,8 +91,9 @@ class FakeService:
             active_tenant_id="tnt_synthetic",
             memberships=(
                 ClientTenantDirectoryMembership(
+                    membership_id="ctm_synthetic",
                     tenant_id="tnt_synthetic",
-                    tenant_name="Personal",
+                    display_name="Personal",
                     role=TenantRole.OWNER,
                     status=MembershipStatus.ACTIVE,
                 ),
@@ -164,8 +165,9 @@ def test_authenticated_tenant_directory_is_additive_and_bounded(client):
         "active_tenant_id": "tnt_synthetic",
         "memberships": [
             {
+                "membership_id": "ctm_synthetic",
                 "tenant_id": "tnt_synthetic",
-                "tenant_name": "Personal",
+                "display_name": "Personal",
                 "role": "OWNER",
                 "status": "ACTIVE",
             }
