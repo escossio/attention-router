@@ -84,6 +84,7 @@ def _seed(session):
             HumanIdentityRow(id=HUMAN, created_at=NOW),
         ]
     )
+    session.flush()
     source_binding = IntegrationBindingRow(
         id="gmail-bind-source",
         audience="andy-integration-ingress",
