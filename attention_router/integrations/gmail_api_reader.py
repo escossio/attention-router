@@ -6,6 +6,7 @@ import binascii
 from datetime import UTC, datetime
 from email.message import Message
 from email.utils import getaddresses, parsedate_to_datetime
+from html.parser import HTMLParser
 import json
 from typing import Any, Protocol
 from urllib import error as urllib_error
@@ -212,7 +213,7 @@ class GmailApiReader(GmailReader):
             max_response_bytes=encoded_limit,
         )
         message = _gmail_api_payload_to_message(payload)
-        body = _plain_text_body(
+        body = _message_text_body(
             payload,
             max_bytes=max_bytes,
             max_mime_depth=max_mime_depth,
@@ -364,7 +365,182 @@ def _decode_text_part(data: bytes, headers: dict[str, str]) -> str:
     return text
 
 
-def _plain_text_body(
+_HTML_SUPPRESSED_TAGS = frozenset({
+    "head",
+    "iframe",
+    "math",
+    "noscript",
+    "object",
+    "script",
+    "style",
+    "svg",
+    "template",
+})
+_HTML_BLOCK_TAGS = frozenset({
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "br",
+    "dd",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+})
+
+
+class _InertHtmlTextExtractor(HTMLParser):
+    """Extract visible text without rendering markup or inspecting attributes."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._chunks: list[str] = []
+        self._suppressed: list[str] = []
+        self._events = 0
+
+    def _bounded_event(self) -> None:
+        self._events += 1
+        if self._events > 65536:
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_TOO_LARGE")
+
+    def _separator(self) -> None:
+        if not self._suppressed:
+            self._chunks.append("\n")
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        self._bounded_event()
+        normalized = tag.casefold()
+        if self._suppressed:
+            if normalized in _HTML_SUPPRESSED_TAGS:
+                self._suppressed.append(normalized)
+            return
+        if normalized in _HTML_SUPPRESSED_TAGS:
+            self._suppressed.append(normalized)
+            return
+        if normalized in _HTML_BLOCK_TAGS:
+            self._separator()
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        self._bounded_event()
+        normalized = tag.casefold()
+        if not self._suppressed and normalized in _HTML_BLOCK_TAGS:
+            self._separator()
+
+    def handle_endtag(self, tag: str) -> None:
+        self._bounded_event()
+        normalized = tag.casefold()
+        if self._suppressed:
+            if normalized == self._suppressed[-1]:
+                self._suppressed.pop()
+            elif normalized in self._suppressed:
+                raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+            return
+        if normalized in _HTML_BLOCK_TAGS:
+            self._separator()
+
+    def handle_data(self, data: str) -> None:
+        self._bounded_event()
+        if not self._suppressed:
+            self._chunks.append(data)
+
+    def result(self) -> str:
+        if self._suppressed:
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+        lines = []
+        for line in "".join(self._chunks).splitlines():
+            normalized = " ".join(line.split())
+            if normalized:
+                lines.append(normalized)
+        return "\n".join(lines).strip()
+
+
+def _html_to_inert_text(value: str) -> str:
+    parser = _InertHtmlTextExtractor()
+    try:
+        parser.feed(value)
+        parser.close()
+    except GmailConnectorError:
+        raise
+    except Exception:
+        raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID") from None
+    return parser.result()
+
+
+def _decode_body_candidates(
+    candidates: list[tuple[dict[str, Any], dict[str, str]]],
+    *,
+    max_bytes: int,
+    read_external,
+    html_fallback: bool = False,
+) -> str:
+    parts: list[str] = []
+    consumed = 0
+    for body, headers in candidates:
+        size = body.get("size", 0)
+        if not size:
+            continue
+        remaining = max_bytes - consumed
+        if size > remaining or remaining <= 0:
+            raise GmailConnectorError("GMAIL_BODY_SIZE_EXCEEDED")
+        data = body.get("data")
+        attachment_id = body.get("attachmentId")
+        if data is not None and attachment_id is not None:
+            raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+        if data is not None:
+            decoded = _decode_body_data(
+                data,
+                expected_size=size,
+                max_bytes=remaining,
+            )
+        elif attachment_id is not None:
+            if (
+                not isinstance(attachment_id, str)
+                or not 1 <= len(attachment_id) <= 2048
+            ):
+                raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
+            decoded = read_external(attachment_id, size, remaining)
+            if len(decoded) != size:
+                raise GmailConnectorError("GMAIL_BODY_SIZE_INVALID")
+        else:
+            raise GmailConnectorError("GMAIL_BODY_CONTENT_MISSING")
+        consumed += len(decoded)
+        value = _decode_text_part(decoded, headers)
+        if html_fallback:
+            value = _html_to_inert_text(value)
+        if value.strip():
+            parts.append(value.strip())
+    return "\n".join(parts).strip()
+
+
+def _message_text_body(
     payload: dict[str, Any],
     *,
     max_bytes: int,
@@ -374,12 +550,12 @@ def _plain_text_body(
     root = payload.get("payload")
     if not isinstance(root, dict):
         raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
-    parts: list[str] = []
-    consumed = 0
+    plain_candidates: list[tuple[dict[str, Any], dict[str, str]]] = []
+    html_candidates: list[tuple[dict[str, Any], dict[str, str]]] = []
     nodes = 0
 
     def walk(part: dict[str, Any], depth: int) -> None:
-        nonlocal consumed, nodes
+        nonlocal nodes
         nodes += 1
         if nodes > 1024:
             raise GmailConnectorError("GMAIL_BODY_STRUCTURE_TOO_LARGE")
@@ -398,27 +574,12 @@ def _plain_text_body(
         if type(size) is not int or size < 0:
             raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
 
-        if mime_type.casefold() == "text/plain" and not filename and "attachment" not in disposition:
-            data = body.get("data")
-            attachment_id = body.get("attachmentId")
-            if data is not None and attachment_id is not None:
-                raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
-            if size:
-                remaining = max_bytes - consumed
-                if size > remaining or remaining <= 0:
-                    raise GmailConnectorError("GMAIL_BODY_SIZE_EXCEEDED")
-                if data is not None:
-                    decoded = _decode_body_data(data, expected_size=size, max_bytes=remaining)
-                elif attachment_id is not None:
-                    if not isinstance(attachment_id, str) or not 1 <= len(attachment_id) <= 2048:
-                        raise GmailConnectorError("GMAIL_BODY_STRUCTURE_INVALID")
-                    decoded = read_external(attachment_id, size, remaining)
-                    if len(decoded) != size:
-                        raise GmailConnectorError("GMAIL_BODY_SIZE_INVALID")
-                else:
-                    raise GmailConnectorError("GMAIL_BODY_CONTENT_MISSING")
-                consumed += len(decoded)
-                parts.append(_decode_text_part(decoded, headers))
+        if not filename and "attachment" not in disposition:
+            normalized_mime = mime_type.casefold()
+            if normalized_mime == "text/plain":
+                plain_candidates.append((body, headers))
+            elif normalized_mime == "text/html":
+                html_candidates.append((body, headers))
 
         children = part.get("parts")
         if children is not None:
@@ -434,7 +595,19 @@ def _plain_text_body(
             raise GmailConnectorError("GMAIL_BODY_MIME_DEPTH_EXCEEDED")
 
     walk(root, 1)
-    return "\n".join(part.strip() for part in parts if part.strip()).strip()
+    plain = _decode_body_candidates(
+        plain_candidates,
+        max_bytes=max_bytes,
+        read_external=read_external,
+    )
+    if plain:
+        return plain
+    return _decode_body_candidates(
+        html_candidates,
+        max_bytes=max_bytes,
+        read_external=read_external,
+        html_fallback=True,
+    )
 
 
 def _mime_part_projection(depth: int) -> str:

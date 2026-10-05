@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import base64
 import json
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
@@ -476,8 +477,6 @@ def test_reader_rejects_ambiguous_externalized_body_part():
 
 
 def _body_payload(text: str, *, external: bool = False, include_attachment: bool = False):
-    import base64
-
     encoded = base64.urlsafe_b64encode(text.encode("utf-8")).decode().rstrip("=")
     body = {"size": len(text.encode("utf-8"))}
     if external:
@@ -598,5 +597,141 @@ def test_reader_rejects_plain_text_body_above_configured_bound():
         reader.read_message_with_body(
             "gmail-message-1",
             max_bytes=5,
+            max_mime_depth=4,
+        )
+
+
+def _html_body_payload(
+    html: str,
+    *,
+    plain: str | None = None,
+):
+    payload = _body_payload(plain or "")
+    parts = payload["payload"]["parts"]
+    payload["payload"]["mimeType"] = (
+        "multipart/alternative" if plain is not None else "multipart/related"
+    )
+    if plain is None:
+        parts.clear()
+    html_bytes = html.encode("utf-8")
+    html_encoded = base64.urlsafe_b64encode(html_bytes).decode().rstrip("=")
+    parts.append(
+        {
+            "mimeType": "text/html",
+            "filename": "",
+            "headers": [
+                {"name": "Content-Type", "value": "text/html; charset=utf-8"},
+            ],
+            "body": {
+                "size": len(html_bytes),
+                "data": html_encoded,
+            },
+        }
+    )
+    return payload
+
+
+def test_reader_uses_inert_html_text_only_when_plain_text_is_unavailable():
+    calls = []
+    payload = _html_body_payload(
+        """
+        <html>
+          <head><style>.secret{display:none}</style></head>
+          <body>
+            <p>13579 &amp; pronto</p>
+            <script>window.stolen = 99999</script>
+            <img src="https://example.invalid/tracker.png" onerror="steal()">
+            <a href="https://example.invalid/private">Link visível</a>
+          </body>
+        </html>
+        """
+    )
+
+    def opener(request, timeout):
+        calls.append(request.full_url)
+        return FakeResponse(200, payload)
+
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=opener,
+    )
+    message = reader.read_message_with_body(
+        "gmail-message-1",
+        max_bytes=4096,
+        max_mime_depth=4,
+    )
+
+    assert message.body == "13579 & pronto\nLink visível"
+    assert "99999" not in message.body
+    assert "example.invalid" not in message.body
+    assert "steal" not in message.body
+    assert len(calls) == 1
+
+
+def test_reader_prefers_plain_text_over_html_alternative():
+    payload = _html_body_payload(
+        "<p>HTML should not win 99999</p>",
+        plain="plain wins 13579",
+    )
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=lambda _request, timeout: FakeResponse(200, payload),
+    )
+
+    message = reader.read_message_with_body(
+        "gmail-message-1",
+        max_bytes=4096,
+        max_mime_depth=4,
+    )
+
+    assert message.body == "plain wins 13579"
+    assert "99999" not in message.body
+
+
+def test_reader_falls_back_to_html_when_plain_text_is_only_whitespace():
+    payload = _html_body_payload(
+        "<div>fallback 13579</div>",
+        plain="   \n\t ",
+    )
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=lambda _request, timeout: FakeResponse(200, payload),
+    )
+
+    message = reader.read_message_with_body(
+        "gmail-message-1",
+        max_bytes=4096,
+        max_mime_depth=4,
+    )
+
+    assert message.body == "fallback 13579"
+
+
+def test_reader_rejects_html_body_above_configured_bound():
+    payload = _html_body_payload("<p>0123456789</p>")
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=lambda _request, timeout: FakeResponse(200, payload),
+    )
+
+    with pytest.raises(GmailConnectorError, match="GMAIL_BODY_SIZE_EXCEEDED"):
+        reader.read_message_with_body(
+            "gmail-message-1",
+            max_bytes=5,
+            max_mime_depth=4,
+        )
+
+
+def test_reader_rejects_unclosed_suppressed_html_content():
+    payload = _html_body_payload("<div>safe</div><script>never closes")
+    reader = GmailApiReader(
+        token_provider=StaticGmailAccessTokenProvider("token"),
+        opener=lambda _request, timeout: FakeResponse(200, payload),
+    )
+
+    with pytest.raises(GmailConnectorError, match="GMAIL_BODY_STRUCTURE_INVALID"):
+        reader.read_message_with_body(
+            "gmail-message-1",
+            max_bytes=4096,
             max_mime_depth=4,
         )
