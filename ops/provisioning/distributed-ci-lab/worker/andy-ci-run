@@ -220,7 +220,7 @@ run_transport() {
 }
 
 run_android() {
-  local image="${ANDY_CI_ANDROID_IMAGE:-andy-android-ci:api37-jdk17-v1}"
+  local image="${ANDY_CI_ANDROID_IMAGE:-andy-android-ci:api37-jdk17-v2}"
   [[ -x ./gradlew ]] || { echo "ANDROID_GRADLE_WRAPPER_MISSING"; return 70; }
   docker image inspect "$image" >/dev/null 2>&1 || {
     echo "ANDROID_CI_IMAGE_MISSING=$image"
@@ -231,7 +231,7 @@ run_android() {
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp/andy-home \
     -e ANDROID_USER_HOME=/tmp/andy-android-user \
-    -e GRADLE_OPTS=-Duser.home=/tmp/andy-home \
+    -e JAVA_TOOL_OPTIONS=-Duser.home=/tmp/andy-home \
     -e GRADLE_USER_HOME=/cache/gradle \
     -e ANDROID_HOME=/opt/android-sdk \
     -e ANDROID_SDK_ROOT=/opt/android-sdk \
