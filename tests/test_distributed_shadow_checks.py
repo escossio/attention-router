@@ -300,6 +300,9 @@ def test_generic_scheduler_and_worker_support_android_repository():
     assert "andy-ci-run '$REPOSITORY' '$SHA' '$SUITE'" in scheduler
     assert "https://github.com/escossio/andy-android.git" in worker
     assert "andy-android-ci:api37-jdk17-v1" in worker
+    assert "ANDROID_USER_HOME=/tmp/andy-android-user" in worker
+    assert "GRADLE_OPTS=-Duser.home=/tmp/andy-home" in worker
+    assert 'mkdir -p "$HOME" "$ANDROID_USER_HOME"' in worker
     assert ":sdk:client-api:test" in worker
     assert ":app:assembleDebug" in worker
 
