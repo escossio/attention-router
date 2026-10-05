@@ -17,11 +17,11 @@ from attention_router.application.personal_context_bootstrap import (
 TOKEN = "cst_" + "b" * 43
 
 
-def _row(state="QUEUED"):
+def _row(state="QUEUED", source_kind="WHATSAPP_TEXT"):
     now = datetime(2026, 10, 3, tzinfo=UTC)
     return SimpleNamespace(
         id="pcb_test",
-        source_kind="WHATSAPP_TEXT",
+        source_kind=source_kind,
         state=state,
         requested_control="NONE",
         source_selection={"chat_keys": ["chat-a"]},
@@ -40,6 +40,29 @@ def _row(state="QUEUED"):
         failed_at=None,
         failure_summary=None,
     )
+
+
+class FakeGmailService:
+    def __init__(self):
+        self.calls = []
+
+    def create_and_queue(
+        self,
+        session,
+        *,
+        session_token,
+        consent_ref,
+        processing_budget=None,
+    ):
+        self.calls.append(
+            (
+                "create_gmail",
+                session_token,
+                consent_ref,
+                processing_budget,
+            )
+        )
+        return _row(source_kind="GMAIL_TEXT")
 
 
 class FakeService:
@@ -83,8 +106,9 @@ class FakeService:
         return _row("CANCELLED")
 
 
-def _client(session):
+def _client(session, *, with_gmail=False):
     service = FakeService()
+    gmail_service = FakeGmailService() if with_gmail else None
 
     def get_session():
         yield session
@@ -94,13 +118,14 @@ def _client(session):
         build_personal_context_bootstrap_router(
             get_session=get_session,
             service=service,
+            gmail_service=gmail_service,
         )
     )
-    return TestClient(app), service
+    return TestClient(app), service, gmail_service
 
 
 def test_bootstrap_api_create_queues_owner_request_without_identity_shortcuts(session):
-    client, service = _client(session)
+    client, service, _gmail_service = _client(session)
 
     response = client.post(
         "/api/v1/personal-context/bootstrap",
@@ -137,7 +162,7 @@ def test_bootstrap_api_create_queues_owner_request_without_identity_shortcuts(se
 
 
 def test_bootstrap_status_pause_resume_cancel_use_same_client_session(session):
-    client, service = _client(session)
+    client, service, _gmail_service = _client(session)
 
     status_response = client.get(
         "/api/v1/personal-context/bootstrap/pcb_test",
@@ -168,8 +193,86 @@ def test_bootstrap_status_pause_resume_cancel_use_same_client_session(session):
     ]
 
 
+def test_gmail_bootstrap_api_uses_same_client_session_without_tenant_override(session):
+    client, _service, gmail_service = _client(
+        session,
+        with_gmail=True,
+    )
+
+    response = client.post(
+        "/api/v1/personal-context/bootstrap/gmail",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        json={
+            "consent_ref": "gmail-consent-ui-001",
+            "processing_budget": {"max_total_messages": 25},
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["source_kind"] == "GMAIL_TEXT"
+    assert response.json()["state"] == "QUEUED"
+    assert gmail_service.calls == [
+        (
+            "create_gmail",
+            TOKEN,
+            "gmail-consent-ui-001",
+            {"max_total_messages": 25},
+        )
+    ]
+
+    forbidden = client.post(
+        "/api/v1/personal-context/bootstrap/gmail",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        json={
+            "consent_ref": "gmail-consent-ui-001",
+            "tenant_id": "client-selected-tenant",
+        },
+    )
+    assert forbidden.status_code == 422
+
+
+def test_gmail_bootstrap_missing_connection_is_conflict(session, monkeypatch):
+    from attention_router.application.gmail_bootstrap import (
+        GmailBootstrapConnectionRequired,
+    )
+
+    client, _service, gmail_service = _client(session, with_gmail=True)
+
+    def missing_connection(*args, **kwargs):
+        raise GmailBootstrapConnectionRequired()
+
+    monkeypatch.setattr(gmail_service, "create_and_queue", missing_connection)
+    response = client.post(
+        "/api/v1/personal-context/bootstrap/gmail",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        json={"consent_ref": "gmail-consent-ui-connection"},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "GMAIL_BOOTSTRAP_CONNECTION_REQUIRED"
+
+
+def test_gmail_bootstrap_readonly_upgrade_is_conflict(session, monkeypatch):
+    from attention_router.application.gmail_bootstrap import (
+        GmailBootstrapReadonlyRequired,
+    )
+
+    client, _service, gmail_service = _client(session, with_gmail=True)
+
+    def readonly_required(*args, **kwargs):
+        raise GmailBootstrapReadonlyRequired()
+
+    monkeypatch.setattr(gmail_service, "create_and_queue", readonly_required)
+    response = client.post(
+        "/api/v1/personal-context/bootstrap/gmail",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        json={"consent_ref": "gmail-consent-ui-readonly"},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "GMAIL_BOOTSTRAP_READONLY_REQUIRED"
+
+
 def test_bootstrap_lifecycle_error_detail_is_never_echoed(session, monkeypatch):
-    client, service = _client(session)
+    client, service, _gmail_service = _client(session)
     provider_detail = "provider-detail-must-not-cross-api-boundary"
 
     def fail_status(session, *, session_token, run_id):

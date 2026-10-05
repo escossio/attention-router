@@ -12,6 +12,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from attention_router.application.client_session import ClientSessionError
+from attention_router.application.gmail_bootstrap import (
+    GmailBootstrapConnectionRequired,
+    GmailBootstrapProductDisabled,
+    GmailBootstrapProductService,
+    GmailBootstrapReadonlyRequired,
+)
 from attention_router.application.personal_context_bootstrap import (
     PersonalContextBootstrapError,
 )
@@ -42,12 +48,19 @@ class PersonalContextBootstrapCreateRequest(BaseModel):
     processing_budget: dict[str, int] | None = None
 
 
+class GmailPersonalContextBootstrapCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    consent_ref: str = Field(min_length=1, max_length=240)
+    processing_budget: dict[str, int] | None = None
+
+
 class PersonalContextBootstrapRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     contract_version: Literal["1"]
     run_id: str
-    source_kind: Literal["WHATSAPP_TEXT"]
+    source_kind: Literal["WHATSAPP_TEXT", "GMAIL_TEXT"]
     state: Literal[
         "CREATED",
         "QUEUED",
@@ -100,6 +113,13 @@ def _session_status(error: ClientSessionError) -> int:
 def _product_status(error: PersonalContextBootstrapProductError) -> int:
     if isinstance(error, PersonalContextBootstrapProductTenantForbidden):
         return status.HTTP_403_FORBIDDEN
+    if isinstance(
+        error,
+        (GmailBootstrapConnectionRequired, GmailBootstrapReadonlyRequired),
+    ):
+        return status.HTTP_409_CONFLICT
+    if isinstance(error, GmailBootstrapProductDisabled):
+        return status.HTTP_503_SERVICE_UNAVAILABLE
     if isinstance(error, PersonalContextBootstrapProductRunNotFound):
         return status.HTTP_404_NOT_FOUND
     if isinstance(
@@ -161,6 +181,7 @@ def build_personal_context_bootstrap_router(
     *,
     get_session,
     service: PersonalContextBootstrapProductService,
+    gmail_service: GmailBootstrapProductService | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["personal-context-bootstrap"])
 
@@ -242,6 +263,44 @@ def build_personal_context_bootstrap_router(
             WhatsAppHistoryError,
         ) as error:
             return _error(error)
+
+    if gmail_service is not None:
+
+        @router.post(
+            "/api/v1/personal-context/bootstrap/gmail",
+            response_model=PersonalContextBootstrapRunResponse,
+            status_code=status.HTTP_201_CREATED,
+            responses={
+                400: {"model": PersonalContextBootstrapErrorResponse},
+                401: {"model": PersonalContextBootstrapErrorResponse},
+                403: {"model": PersonalContextBootstrapErrorResponse},
+                503: {"model": PersonalContextBootstrapErrorResponse},
+            },
+            operation_id="createGmailPersonalContextBootstrap",
+        )
+        def create_gmail(
+            payload: GmailPersonalContextBootstrapCreateRequest,
+            credentials: Annotated[
+                HTTPAuthorizationCredentials | None,
+                Security(_BEARER),
+            ],
+            session: Session = Depends(get_session),
+        ) -> PersonalContextBootstrapRunResponse | JSONResponse:
+            try:
+                with session.begin_nested():
+                    row = gmail_service.create_and_queue(
+                        session,
+                        session_token=_token(credentials),
+                        consent_ref=payload.consent_ref,
+                        processing_budget=payload.processing_budget,
+                    )
+                return _view(row)
+            except (
+                ClientSessionError,
+                PersonalContextBootstrapProductError,
+                PersonalContextBootstrapError,
+            ) as error:
+                return _error(error)
 
     @router.get(
         "/api/v1/personal-context/bootstrap/{run_id}",
@@ -364,6 +423,7 @@ def build_personal_context_bootstrap_router(
 
 
 __all__ = [
+    "GmailPersonalContextBootstrapCreateRequest",
     "PersonalContextBootstrapCreateRequest",
     "PersonalContextBootstrapErrorResponse",
     "PersonalContextBootstrapRunResponse",

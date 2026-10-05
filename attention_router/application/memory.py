@@ -150,8 +150,14 @@ class HistoryBackfillService:
                             source_account_override
                             or payload.get("source_account", "default")
                         ),
-                        thread_key=chat_key,
-                        thread_type=chat.get("thread_type", "DIRECT"),
+                        thread_key=payload.get(
+                            "external_thread_key",
+                            chat_key,
+                        ),
+                        thread_type=payload.get(
+                            "thread_type",
+                            chat.get("thread_type", "DIRECT"),
+                        ),
                         source_message_id=payload["source_message_id"],
                         sender_key=payload.get("external_sender_key"),
                         sender_display_name=payload.get("sender_display_name"),
@@ -160,7 +166,7 @@ class HistoryBackfillService:
                         message_type=payload.get("type", "UNSUPPORTED"),
                         from_me=bool(payload.get("from_me", False)),
                         direction="OUTBOUND" if payload.get("from_me") else "INBOUND",
-                        title=chat.get("title"),
+                        title=payload.get("title", chat.get("title")),
                         metadata=payload.get("metadata", {}),
                         tenant_id=tenant_id,
                     )
