@@ -6,7 +6,7 @@
 - Dedicated provider-neutral process, static `google.gmail` registry, independent adapter schedule/quarantine and offline CLI config check are implemented. Legacy Gmail scheduler remains unchanged.
 - Public provisioning package and YAML contract tests are complete. Compose uses one external dedicated trust zone, no inbound application port, no embedded allocation and default-off Gmail flags. Attachments and historical backfill remain excluded.
 - IPAM installation/allocation and physical networking are future operational prerequisites; no live deployment or infrastructure mutation is part of this candidate. The precursor ingress failure remains a frozen follow-up.
-- Focused runtime, legacy scheduler, service and provisioning tests: 45 passed. Ruff, focused compilation and diff-check passed; fresh-process config validation performs no network/DB I/O. Exact-SHA GitHub/distributed certification follows publication.
+- Focused runtime, legacy scheduler, service and provisioning tests: 45 passed. Ruff, focused compilation and diff-check passed; fresh-process config validation performs no network/DB I/O. Review: [PR #269](https://github.com/escossio/attention-router/pull/269). Its current-head GitHub and distributed checks are the authoritative certification record; no heavy suite runs on the control plane.
 
 Updated: 2026-09-30
 
