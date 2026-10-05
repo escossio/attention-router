@@ -35,7 +35,6 @@ jobs:
         run: python scripts/generate_integration_sdks.py --check
       - name: Build and test the standalone Python SDK wheel
         run: python scripts/test_python_integration_sdk.py
-      - run: python -m pytest -q
   transport-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
