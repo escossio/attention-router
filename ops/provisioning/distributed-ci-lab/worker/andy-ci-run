@@ -229,7 +229,9 @@ run_android() {
   echo "CI_ANDROID_IMAGE=$image"
   docker run --rm \
     --user "$(id -u):$(id -g)" \
-    -e HOME=/tmp/andy-ci-home \
+    -e HOME=/tmp/andy-home \
+    -e ANDROID_USER_HOME=/tmp/andy-android-user \
+    -e GRADLE_OPTS=-Duser.home=/tmp/andy-home \
     -e GRADLE_USER_HOME=/cache/gradle \
     -e ANDROID_HOME=/opt/android-sdk \
     -e ANDROID_SDK_ROOT=/opt/android-sdk \
@@ -237,7 +239,7 @@ run_android() {
     -v "$BASE/cache/gradle:/cache/gradle" \
     -w /work \
     "$image" \
-    ./gradlew --no-daemon \
+    sh -lc 'mkdir -p "$HOME" "$ANDROID_USER_HOME" && exec ./gradlew --no-daemon \
       :app:testDebugUnitTest \
       :app:assembleDebug \
       :core:device-identity:test \
@@ -245,7 +247,7 @@ run_android() {
       :core:human-identity:test \
       :sdk:client-api:test \
       :integrations:google-identity:testDebugUnitTest \
-      :features:onboarding:testDebugUnitTest
+      :features:onboarding:testDebugUnitTest'
 }
 
 run_docker() {
