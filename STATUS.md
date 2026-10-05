@@ -1,5 +1,13 @@
 # Project status
 
+## Channel Sync Deployment V1 — candidate (#265)
+
+- Isolated branch starts at `428f9bd29ba283ac5eb6102d0fcc097fb60ac979`, after #268 IPAM authority passed all checks and merged.
+- Dedicated provider-neutral process, static `google.gmail` registry, independent adapter schedule/quarantine and offline CLI config check are being validated. Legacy Gmail scheduler remains unchanged.
+- Public Compose uses one external dedicated trust zone, no inbound application port, no embedded allocation and default-off Gmail flags. Attachments and historical backfill remain excluded.
+- IPAM installation/allocation and physical networking are future operational prerequisites; no live deployment or infrastructure mutation is part of this candidate. The precursor ingress failure remains a frozen follow-up.
+- Targeted tests and exact-SHA GitHub/distributed certification pending.
+
 Updated: 2026-09-30
 
 ## Android Client Command Clarification + User Idiolect — physical E2E complete
