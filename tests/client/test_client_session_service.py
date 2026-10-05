@@ -186,8 +186,7 @@ def test_tenant_directory_fails_closed_for_unavailable_secondary_tenant(session)
     )
     issued = service.complete_session(
         session,
-        session_challenge_id=challenge.challenge_id
-            if hasattr(challenge, "challenge_id") else challenge.session_challenge_id,
+        session_challenge_id=challenge.session_challenge_id,
         device_signature_b64url=sign(private, challenge.challenge_b64url),
         now=NOW + timedelta(seconds=1),
     )
