@@ -100,8 +100,9 @@ class AuthenticatedClientBootstrapResult:
 
 @dataclass(frozen=True, slots=True)
 class ClientTenantDirectoryMembership:
+    membership_id: str
     tenant_id: str
-    tenant_name: str
+    display_name: str
     role: TenantRole
     status: MembershipStatus
 
@@ -342,18 +343,19 @@ class ClientSessionService:
                 tenant_id=membership.tenant_id,
             )
             name = getattr(tenant, "name", None) if tenant is not None else None
+            display_name = " ".join(name.split()) if isinstance(name, str) else ""
             if (
                 tenant is None
                 or tenant.status != "ACTIVE"
-                or not isinstance(name, str)
-                or not name.strip()
-                or len(name) > 160
+                or not display_name
+                or len(display_name) > 160
             ):
                 raise ClientSessionAuthorityRejected()
             options.append(
                 ClientTenantDirectoryMembership(
+                    membership_id=membership.membership_id,
                     tenant_id=membership.tenant_id,
-                    tenant_name=name.strip(),
+                    display_name=display_name,
                     role=membership.role,
                     status=membership.status,
                 )
