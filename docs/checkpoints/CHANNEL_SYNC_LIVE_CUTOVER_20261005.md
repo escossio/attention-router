@@ -105,8 +105,52 @@ integration secrets:
 - the Gmail history cursor advanced naturally on the successful Channel Sync
   cycle;
 - no `gmail_history_id` reseed was performed;
-- admitted work remained pending because integration dispatch intentionally
-  remains disabled.
+- admission and dispatch were rolled out as separate gates.
+
+## Integration Dispatch live enablement
+
+After Channel Sync admission was stable, Integration Dispatch was validated and
+enabled as a separate step.
+
+Before enablement, a rollback-only transaction exercised the complete pending
+integration inbox against the real PostgreSQL state. At that point the probe
+selected 28 pending rows, would have processed all 28 and blocked none. Inside
+the uncommitted transaction the only new objects were 28 Canonical Events and
+28 Timeline Events. The same transaction created zero decision queue rows, zero
+Agent execution intents and zero outbox messages. Rollback returned every count
+to its pre-probe value.
+
+The live worker revision was also checked before rollout. The
+`attention_router/integrations/dispatch.py` blob was identical to the current
+main revision, and the worker's dispatch gate/commit path was unchanged for this
+feature.
+
+A host-private Compose override then enabled:
+
+```text
+INTEGRATION_DISPATCH_ENABLED=true
+INTEGRATION_DISPATCH_BATCH_SIZE=20
+```
+
+Only the worker container was recreated. The initial backlog drained in two
+bounded cycles:
+
+```text
+integration_dispatch_processed=20 integration_dispatch_blocked=0
+integration_dispatch_processed=8  integration_dispatch_blocked=0
+```
+
+Those same worker cycles reported `decision_count=0` and `outbox_count=0`.
+Subsequent point-in-time database verification, after continued Gmail admission,
+showed every admitted integration inbox row processed with a one-to-one
+Canonical Event and Timeline Event projection. No BLOCKED row was present.
+
+This proves the live boundary remains:
+
+`Integration Inbox -> Canonical Event -> Timeline Event`
+
+It does not yet cross into Agent decisions, execution intents, outbox delivery,
+memory or Personal Context.
 
 ## Security and authority properties preserved
 
@@ -166,8 +210,10 @@ At the end of this checkpoint:
 - legacy Gmail scheduler is stopped;
 - Gmail admission is succeeding;
 - Gmail cursor progression is natural;
-- integration dispatch remains disabled;
-- WhatsApp remains untouched and operational;
+- Integration Dispatch is explicitly enabled and processing admitted work;
+- the verified backlog produced no BLOCKED rows;
+- WhatsApp remains operational; its Browser, Observer and Transport services were
+  not restarted by the dispatch rollout;
 - context/memory/persistence enablement remains a separate future step.
 
 ## Rollback
@@ -189,7 +235,7 @@ The next work must remain separate:
 
 1. harden the Neutral Integration Ingress host-private env;
 2. reconcile the manual private allocation into the future IPAM bootstrap;
-3. decide and validate Integration Dispatch enablement;
+3. observe Channel Sync + Integration Dispatch stability as one channel path;
 4. only after channel operation is stable, address context, storage, memory and
    persistence enablement.
 
