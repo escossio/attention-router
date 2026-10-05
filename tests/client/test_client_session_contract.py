@@ -132,12 +132,18 @@ def test_named_tenant_directory_is_additive_and_does_not_mutate_bootstrap_member
     named = document["components"]["schemas"]["ClientTenantDirectoryMembershipView"]
     assert named["additionalProperties"] is False
     assert named["required"] == [
+        "membership_id",
         "tenant_id",
-        "tenant_name",
+        "display_name",
         "role",
         "status",
     ]
-    assert named["properties"]["tenant_name"] == {
+    assert named["properties"]["membership_id"] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+    }
+    assert named["properties"]["display_name"] == {
         "type": "string",
         "minLength": 1,
         "maxLength": 160,
@@ -192,8 +198,9 @@ def test_v03c_wire_examples_validate():
         "contract_version": "1",
         "active_tenant_id": "tnt_synthetic",
         "memberships": [{
+            "membership_id": "ctm_synthetic",
             "tenant_id": "tnt_synthetic",
-            "tenant_name": "Personal",
+            "display_name": "Personal",
             "role": "OWNER",
             "status": "ACTIVE",
         }],
