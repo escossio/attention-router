@@ -14,6 +14,7 @@ from attention_router.integrations.gmail_connector import (
     GmailInboundConnector,
     GmailMessage,
     IntegrationIngressClient,
+    IntegrationIngressResponse,
     gmail_message_to_normalized_input,
 )
 
@@ -209,6 +210,45 @@ def test_gmail_connector_poll_treats_200_duplicate_as_success():
     assert result.duplicates == 1
     assert reader.queries == [("", 2)]
     assert reader.reads == ["gmail-1", "gmail-2"]
+
+
+def test_gmail_connector_poll_defers_observers_until_all_ingress_io_finishes():
+    messages = [_message("gmail-1"), _message("gmail-2")]
+    order = []
+
+    class Ingress:
+        def send(self, payload):
+            message_id = payload["external_event_id"]
+            order.append(f"ingress:{message_id}")
+            return IntegrationIngressResponse(
+                202,
+                {
+                    "transport_version": "1",
+                    "status": "accepted",
+                    "receipt_id": f"receipt-{message_id}",
+                    "admitted_at": "2026-09-20T22:00:01Z",
+                    "correlation_id": f"corr-{message_id}",
+                },
+            )
+
+    connector = GmailInboundConnector(
+        reader=FakeReader(messages),
+        ingress=Ingress(),
+        config=_config(),
+        message_observer=lambda message: order.append(
+            f"observe:{message.message_id}"
+        ),
+    )
+
+    result = connector.poll(max_results=2)
+
+    assert result.accepted == 2
+    assert order == [
+        "ingress:gmail-1",
+        "ingress:gmail-2",
+        "observe:gmail-1",
+        "observe:gmail-2",
+    ]
 
 
 def test_gmail_connector_metadata_only_event_does_not_invent_content_observation():

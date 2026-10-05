@@ -232,9 +232,14 @@ that is awaiting ingress. That original application-level cycle is partly HTTP,
 so PostgreSQL's deadlock detector cannot see the full graph; ingress instead
 hits its lock timeout. The runner holds no Tenant/Binding/Credential locks across
 network I/O. Neutral ingress independently locks and revalidates its authority.
-Use clean caller sessions without pre-acquired locks or pending writes; composing
-these operations after unrelated locks can violate this ordering. SQLite's gate
-is a functional no-op and does not certify concurrency.
+For bounded multi-message work, every neutral-ingress POST completes before the
+live body/archive observers run. Observers are then executed before the cycle
+returns, still inside the caller-owned cursor transaction. This keeps archive
+writes and cursor advancement atomic without holding conversation/archive locks
+across later ingress network calls. Use clean caller sessions without
+pre-acquired locks or pending writes; composing these operations after unrelated
+locks can violate this ordering. SQLite's gate is a functional no-op and does not
+certify concurrency.
 
 Only successful cycles flush a new cursor; failures leave it at the cycle's
 starting position, even if earlier events were admitted. There is no hidden

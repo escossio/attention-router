@@ -1,4 +1,5 @@
 """Synthetic incremental runner contracts, including replay and bounds."""
+from dataclasses import replace
 from datetime import UTC, datetime
 import json
 import traceback
@@ -511,6 +512,99 @@ class ReadonlyBodyHistoryReader(Reader):
             body_observed=True,
             attachments_observed=False,
         )
+
+
+def test_incremental_body_defers_archive_until_all_ingress_io(
+    session,
+    monkeypatch,
+):
+    installation = _seed_connected(session, monkeypatch)
+    _enabled(monkeypatch)
+    monkeypatch.setattr(settings, "gmail_body_ingestion_enabled", True)
+    monkeypatch.setattr(settings, "gmail_body_max_bytes", 1024)
+    monkeypatch.setattr(settings, "gmail_body_max_mime_depth", 4)
+    monkeypatch.setattr(settings, "memory_ingestion_enabled", False)
+
+    provider = session.get(ProviderAuthorizationRow, installation)
+    provider.granted_scopes = [GMAIL_READONLY_SCOPE]
+    session.commit()
+
+    class TwoBodyReader(ReadonlyBodyHistoryReader):
+        def __init__(self):
+            super().__init__()
+            self.pages = [{
+                "historyId": "30",
+                "history": [record(12, "one", "two")],
+            }]
+
+        def read_message_with_body(
+            self,
+            message_id,
+            *,
+            max_bytes,
+            max_mime_depth,
+        ):
+            message = super().read_message_with_body(
+                message_id,
+                max_bytes=max_bytes,
+                max_mime_depth=max_mime_depth,
+            )
+            return replace(
+                message,
+                message_id=message_id,
+                body=f"body-{message_id}",
+            )
+
+    order = []
+    reader = TwoBodyReader()
+
+    class OrderedIngress(FakeIngress):
+        def send(self, payload):
+            order.append(f"ingress:{payload['external_event_id']}")
+            return super().send(payload)
+
+    ingress = OrderedIngress("synthetic-bearer")
+
+    def fake_archive(*args, **kwargs):
+        order.append(f"observe:{kwargs['source_message_id']}")
+
+        class Row:
+            id = "synthetic"
+
+        return Row(), True
+
+    monkeypatch.setattr(
+        "attention_router.application.gmail_product_runner.archive_incremental_message",
+        fake_archive,
+    )
+
+    runner = GmailProductRunner(
+        settings=settings,
+        token_refresher=FakeRefresher(),
+        reader_factory=lambda token: reader,
+        ingress_factory=lambda bearer: ingress,
+    )
+
+    assert runner.run_incremental(
+        session,
+        installation_id=installation,
+        now=NOW,
+    ).initialized
+    session.commit()
+
+    result = runner.run_incremental(
+        session,
+        installation_id=installation,
+        now=NOW,
+    )
+
+    assert result.accepted == 2
+    assert order == [
+        "ingress:one",
+        "ingress:two",
+        "observe:one",
+        "observe:two",
+    ]
 
 
 def test_incremental_readonly_body_archives_organic_live_context(
