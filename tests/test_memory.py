@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func, select
@@ -14,7 +14,7 @@ from attention_router.application.memory import (
 )
 from attention_router.application import services
 from attention_router.config import settings
-from attention_router.infrastructure.models import ConversationMessageRow, MemoryCandidateRow, MemoryClaimRow, MemoryIngestionJobRow, QueueRow
+from attention_router.infrastructure.models import ConversationMessageRow, ConversationParticipantRow, ConversationThreadRow, MemoryCandidateRow, MemoryClaimRow, MemoryIngestionJobRow, QueueRow
 from attention_router.infrastructure.repository import upsert_actor_binding
 
 
@@ -71,6 +71,45 @@ def test_group_keeps_real_sender_and_archive_backfill_is_idempotent(session):
     ingest_message(session, row.id, mode="BACKFILL")
     assert ingest_message(session, row.id, mode="BACKFILL") == []
     assert session.scalar(select(func.count()).select_from(ConversationMessageRow)) == 1
+
+
+def test_archive_existing_thread_normalizes_mixed_timezone_values(session):
+    first = msg(
+        session,
+        "primeira",
+        key="same-actor",
+        source_id="mixed-time-1",
+        thread="mixed-time-thread",
+        sent_at=datetime(2026, 10, 5, 15, 0, tzinfo=timezone(timedelta(hours=-3))),
+    )
+    thread = session.get(ConversationThreadRow, first.conversation_id)
+    participant = session.scalar(
+        select(ConversationParticipantRow).where(
+            ConversationParticipantRow.conversation_id == first.conversation_id,
+            ConversationParticipantRow.external_participant_key == "same-actor",
+        )
+    )
+    assert thread is not None
+    assert participant is not None
+
+    # Simulate PostgreSQL's timezone-aware round trip for existing rows.
+    thread.first_message_at = datetime(2026, 10, 5, 18, 0, tzinfo=timezone.utc)
+    thread.last_message_at = datetime(2026, 10, 5, 18, 0, tzinfo=timezone.utc)
+    participant.last_seen_at = datetime(2026, 10, 5, 18, 0, tzinfo=timezone.utc)
+
+    second = msg(
+        session,
+        "segunda",
+        key="same-actor",
+        source_id="mixed-time-2",
+        thread="mixed-time-thread",
+        sent_at=datetime(2026, 10, 5, 18, 5, tzinfo=timezone.utc),
+    )
+
+    assert second.id != first.id
+    assert thread.first_message_at == datetime(2026, 10, 5, 18, 0, tzinfo=timezone.utc)
+    assert thread.last_message_at == datetime(2026, 10, 5, 18, 5, tzinfo=timezone.utc)
+    assert participant.last_seen_at == datetime(2026, 10, 5, 18, 5, tzinfo=timezone.utc)
 
 
 class FakeHistoryAdapter:
