@@ -29,6 +29,10 @@ def load_receiver(monkeypatch, tmp_path):
     monkeypatch.setenv("STATE_DIRECTORY", str(state))
     monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", str(INSTALLATION_ID))
     monkeypatch.setenv("GITHUB_WEBHOOK_REPOSITORY", "escossio/attention-router")
+    monkeypatch.setenv(
+        "GITHUB_WEBHOOK_REPOSITORIES",
+        "escossio/attention-router,escossio/andy-android",
+    )
 
     spec = importlib.util.spec_from_file_location("github_webhook_receiver_test", RECEIVER)
     module = importlib.util.module_from_spec(spec)
@@ -182,6 +186,28 @@ def test_signed_pull_request_is_persisted_once(receiver):
         66,
         HEAD,
     )
+
+
+def test_android_pull_request_is_accepted_by_repository_allowlist(receiver):
+    module, server = receiver
+    payload = pull_request_payload(repo="escossio/andy-android")
+
+    status, body = request(
+        server,
+        payload=payload,
+        event="pull_request",
+        delivery="delivery-android",
+    )
+
+    assert status == 202
+    assert body == {"status": "accepted"}
+    with sqlite3.connect(module.DB_PATH) as db:
+        row = db.execute(
+            "select repository, pr_number, head_sha from deliveries "
+            "where delivery_id = ?",
+            ("delivery-android",),
+        ).fetchone()
+    assert row == ("escossio/andy-android", 66, HEAD)
 
 
 @pytest.mark.parametrize(

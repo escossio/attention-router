@@ -11,18 +11,22 @@ CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
 GENERIC_CAPABILITY="${ANDY_CI_GENERIC_CAPABILITY:-ci-worker}"
 FALLBACK_CAPABILITY="${ANDY_CI_GENERIC_FALLBACK_CAPABILITY:-postgres-worker}"
 
-SHA="${1:-}"
-SUITE="${2:-}"
-[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || {
-  echo 'usage: andy-ci-distributed-suite <40-char-sha> <python|transport|docker>' >&2
+REPOSITORY=attention-router
+if [[ $# -eq 2 ]]; then
+  SHA="$1"
+  SUITE="$2"
+elif [[ $# -eq 3 ]]; then
+  REPOSITORY="$1"
+  SHA="$2"
+  SUITE="$3"
+else
+  echo 'usage: andy-ci-distributed-suite [attention-router|andy-android] <40-char-sha> <suite>' >&2
   exit 64
-}
-case "$SUITE" in
-  python|transport|docker) ;;
-  *)
-    echo 'suite must be one of: python, transport, docker' >&2
-    exit 64
-    ;;
+fi
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid SHA' >&2; exit 64; }
+case "$REPOSITORY:$SUITE" in
+  attention-router:python|attention-router:transport|attention-router:docker|andy-android:android) ;;
+  *) echo 'invalid repository/suite pair' >&2; exit 64 ;;
 esac
 
 for required in "$REGISTRY_CLI" "$CAPACITY"; do
@@ -37,6 +41,7 @@ RUN_DIR="$LOG_ROOT/$RUN_ID"
 mkdir -p "$RUN_DIR"
 
 echo "CI_DISTRIBUTED_RUN_ID=$RUN_ID"
+echo "CI_DISTRIBUTED_REPOSITORY=$REPOSITORY"
 echo "CI_DISTRIBUTED_SHA=$SHA"
 echo "CI_DISTRIBUTED_SUITE=$SUITE"
 echo "CI_DISTRIBUTED_SCHEDULER_VERSION=1"
@@ -123,7 +128,7 @@ probe_worker() {
   local target
   target="$(host_target "$worker")"
   local preflight='test -x /srv/andy-ci/bin/andy-ci-run'
-  if [[ "$SUITE" == docker ]]; then
+  if [[ "$SUITE" == docker || "$SUITE" == android ]]; then
     preflight+=' && docker info >/dev/null'
   fi
   if ! "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" "$preflight" >/dev/null 2>&1; then
@@ -197,7 +202,7 @@ def score(worker):
 
 ordered = sorted(workers, key=score)
 if ordered:
-    offsets = {"python": 0, "docker": 1, "transport": 2}
+    offsets = {"python": 0, "docker": 1, "transport": 2, "android": 0}
     offset = offsets.get(suite, 0) % len(ordered)
     ordered = ordered[offset:] + ordered[:offset]
 for worker in ordered:
@@ -260,7 +265,7 @@ while (( $(date +%s) < DEADLINE )); do
 
     set +e
     "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-      "/srv/andy-ci/bin/andy-ci-run '$SHA' '$SUITE'" \
+      "/srv/andy-ci/bin/andy-ci-run '$REPOSITORY' '$SHA' '$SUITE'" \
       >"$log" 2>&1
     rc=$?
     set -e
@@ -310,7 +315,7 @@ END_EPOCH=$(date +%s)
 WALL_SECONDS=$((END_EPOCH - START_EPOCH))
 registry snapshot --capability "$ACTIVE_CAPABILITY" > "$RUN_DIR/registry-final.json"
 
-python3 - "$RUN_DIR" "$SHA" "$SUITE" "$WALL_SECONDS" "$ATTEMPTS" \
+python3 - "$RUN_DIR" "$REPOSITORY" "$SHA" "$SUITE" "$WALL_SECONDS" "$ATTEMPTS" \
   "$FINAL_STATUS" "$SELECTED_WORKER" "$FAILURE_CLASS" "$ACTIVE_CAPABILITY" <<'PY'
 import csv
 import json
@@ -318,18 +323,20 @@ import pathlib
 import sys
 
 run_dir = pathlib.Path(sys.argv[1])
-sha = sys.argv[2]
-suite = sys.argv[3]
-wall = int(sys.argv[4])
-attempts_path = pathlib.Path(sys.argv[5])
-status = sys.argv[6]
-selected_worker = sys.argv[7] or None
-failure_class = sys.argv[8] or None
-capability = sys.argv[9]
+repository = sys.argv[2]
+sha = sys.argv[3]
+suite = sys.argv[4]
+wall = int(sys.argv[5])
+attempts_path = pathlib.Path(sys.argv[6])
+status = sys.argv[7]
+selected_worker = sys.argv[8] or None
+failure_class = sys.argv[9] or None
+capability = sys.argv[10]
 attempts = list(csv.DictReader(attempts_path.open(), delimiter="\t"))
 
 summary = {
     "schema_version": 1,
+    "repository": repository,
     "sha": sha,
     "suite": suite,
     "status": status,

@@ -11,6 +11,14 @@ from pathlib import Path
 HOST = os.environ.get("GITHUB_WEBHOOK_HOST", "127.0.0.1")
 PORT = int(os.environ.get("GITHUB_WEBHOOK_PORT", "18104"))
 TARGET_REPO = os.environ.get("GITHUB_WEBHOOK_REPOSITORY", "escossio/attention-router")
+TARGET_REPOS = frozenset(
+    item.strip()
+    for item in os.environ.get(
+        "GITHUB_WEBHOOK_REPOSITORIES",
+        TARGET_REPO,
+    ).split(",")
+    if item.strip()
+)
 INSTALLATION_ID = int(os.environ.get("GITHUB_APP_INSTALLATION_ID", "0"))
 MAX_BODY = int(os.environ.get("GITHUB_WEBHOOK_MAX_BODY", str(1024 * 1024)))
 STATE_DIR = Path(os.environ.get("STATE_DIRECTORY", "/var/lib/andy-github-app"))
@@ -342,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
 
         meta = extract_metadata(event, payload)
         if event != "ping":
-            if meta["repository"] != TARGET_REPO:
+            if meta["repository"] not in TARGET_REPOS:
                 return self.json_response(403, {"error": "repository_not_allowed"})
             if INSTALLATION_ID and meta["installation_id"] != INSTALLATION_ID:
                 return self.json_response(403, {"error": "installation_mismatch"})
@@ -362,6 +370,10 @@ def main():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"LISTENING={HOST}:{PORT}", flush=True)
     print(f"TARGET_REPOSITORY={TARGET_REPO}", flush=True)
+    print(
+        "TARGET_REPOSITORIES=" + ",".join(sorted(TARGET_REPOS)),
+        flush=True,
+    )
     print("MODE=EVENT_DRIVEN_STAGE_SIGNAL", flush=True)
     server.serve_forever()
 

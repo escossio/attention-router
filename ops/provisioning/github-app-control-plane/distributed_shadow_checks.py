@@ -19,13 +19,24 @@ DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
 TARGET_REPO = "escossio/attention-router"
 CI_RUN = "/usr/local/lib/andy-ci/bin/andy-ci-distributed-suite"
 ACTIONS = {"opened", "synchronize", "reopened", "ready_for_review"}
-SUITES = {
-    "python": "distributed-python",
-    "transport": "distributed-transport",
-    "docker": "distributed-docker",
+REPOSITORIES = {
+    "escossio/attention-router": {
+        "project": "attention-router",
+        "suites": {
+            "python": "distributed-python",
+            "transport": "distributed-transport",
+            "docker": "distributed-docker",
+        },
+    },
+    "escossio/andy-android": {
+        "project": "andy-android",
+        "suites": {
+            "android": "distributed-android",
+        },
+    },
 }
 DEBOUNCE_SECONDS = 5
-MAX_PARALLEL = len(SUITES)
+MAX_PARALLEL = max(len(item["suites"]) for item in REPOSITORIES.values())
 
 
 def now_iso() -> str:
@@ -116,7 +127,7 @@ def enqueue_new_deliveries() -> int:
         for rowid, delivery_id, repo, action, pr_number, sha in rows:
             last = rowid
             if not (
-                repo == TARGET_REPO
+                repo in REPOSITORIES
                 and action in ACTIONS
                 and pr_number is not None
                 and isinstance(sha, str)
@@ -125,7 +136,7 @@ def enqueue_new_deliveries() -> int:
                 continue
 
             normalized_sha = sha.lower()
-            for suite in SUITES:
+            for suite in REPOSITORIES[repo]["suites"]:
                 cur = db.execute(
                     """INSERT OR IGNORE INTO distributed_shadow_jobs
                        (delivery_id,repository,pr_number,head_sha,suite,state,created_at,updated_at)
@@ -218,7 +229,7 @@ def create_check(
     pr_number: int,
     suite: str,
 ) -> int:
-    check_name = SUITES[suite]
+    check_name = REPOSITORIES[repo]["suites"][suite]
     status, check = request_json(
         f"/repos/{repo}/check-runs",
         token,
@@ -331,7 +342,8 @@ def execute_exact_sha(
 
     check_id = create_check(token, repo, sha, pr_number, suite)
     try:
-        result = run_command([CI_RUN, sha, suite])
+        project = REPOSITORIES[repo]["project"]
+        result = run_command([CI_RUN, project, sha, suite])
         summary = extract_summary(result.stdout)
         detail = render_summary(summary, suite)
 
@@ -418,10 +430,10 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run")
-    run.add_argument("--repo", default=TARGET_REPO, choices=[TARGET_REPO])
+    run.add_argument("--repo", default=TARGET_REPO, choices=sorted(REPOSITORIES))
     run.add_argument("--pr", type=int, required=True)
     run.add_argument("--sha", required=True)
-    run.add_argument("--suite", required=True, choices=sorted(SUITES))
+    run.add_argument("--suite", required=True)
 
     sub.add_parser("daemon")
     args = parser.parse_args()
@@ -433,6 +445,8 @@ def main() -> None:
 
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.sha):
         raise SystemExit("invalid SHA")
+    if args.suite not in REPOSITORIES[args.repo]["suites"]:
+        raise SystemExit("invalid repository/suite pair")
 
     state, detail, check_id = execute_exact_sha(
         args.repo,

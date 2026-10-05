@@ -99,6 +99,32 @@ def test_shadow_publisher_enqueues_three_suites_per_exact_head(tmp_path):
     assert states == {"RUNNING"}
 
 
+def test_shadow_publisher_enqueues_android_suite(tmp_path):
+    module = load_publisher()
+    db_path = tmp_path / "events.sqlite3"
+    module.DB_PATH = db_path
+    init_deliveries(db_path)
+    module.ensure_tables()
+    module.bootstrap_cursor()
+
+    sha = "d" * 40
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            """INSERT INTO deliveries(
+                delivery_id,repository,action,pr_number,head_sha
+            ) VALUES(?,?,?,?,?)""",
+            ("delivery-android", "escossio/andy-android", "synchronize", 78, sha),
+        )
+        db.commit()
+
+    assert module.enqueue_new_deliveries() == 1
+    jobs = module.claim_jobs()
+    assert len(jobs) == 1
+    assert jobs[0]["repository"] == "escossio/andy-android"
+    assert jobs[0]["suite"] == "android"
+    assert jobs[0]["head_sha"] == sha
+
+
 def test_shadow_publisher_marks_pending_old_head_stale(tmp_path):
     module = load_publisher()
     db_path = tmp_path / "events.sqlite3"
@@ -166,7 +192,7 @@ def test_generic_scheduler_is_valid_bash_and_rejects_postgres():
         text=True,
     )
     assert invalid.returncode == 64
-    assert "python, transport, docker" in invalid.stderr
+    assert "invalid repository/suite pair" in invalid.stderr
 
 
 def test_ci_service_units_allow_host_registry_state_writes():
@@ -252,3 +278,37 @@ def test_postgres_check_ui_reports_exclusive_worker_policy():
     content = publisher.read_text()
     assert "PostgreSQL worker policy: CI03" in content
     assert "CI01/CI02/CI03" not in content
+
+
+
+def test_generic_scheduler_and_worker_support_android_repository():
+    scheduler = SCHEDULER.read_text()
+    worker_path = (
+        ROOT
+        / "ops/provisioning/distributed-ci-lab/worker/andy-ci-run"
+    )
+    worker = worker_path.read_text()
+
+    worker_syntax = subprocess.run(
+        ["bash", "-n", str(worker_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert worker_syntax.returncode == 0, worker_syntax.stderr
+    assert "andy-android:android" in scheduler
+    assert "andy-ci-run '$REPOSITORY' '$SHA' '$SUITE'" in scheduler
+    assert "https://github.com/escossio/andy-android.git" in worker
+    assert "andy-android-ci:api37-jdk17-v1" in worker
+    assert ":sdk:client-api:test" in worker
+    assert ":app:assembleDebug" in worker
+
+
+def test_android_toolchain_is_pinned_to_jdk17_and_existing_sdk_contract():
+    dockerfile = (
+        ROOT
+        / "ops/provisioning/distributed-ci-lab/worker/android-ci.Dockerfile"
+    ).read_text()
+    assert dockerfile.startswith("FROM eclipse-temurin:17-jdk-jammy")
+    assert "platforms/android-37.0" in dockerfile
+    assert "build-tools/36.0.0" in dockerfile
