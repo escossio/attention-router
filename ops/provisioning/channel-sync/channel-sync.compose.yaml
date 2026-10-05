@@ -1,0 +1,32 @@
+services:
+  channel-sync:
+    image: ${CHANNEL_SYNC_IMAGE:?set a certified image digest}
+    command: [python, -m, attention_router.infrastructure.channel_sync_service]
+    restart: on-failure
+    init: true
+    stop_grace_period: 60s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    cpus: "1.0"
+    mem_limit: 512m
+    env_file:
+      - ${CHANNEL_SYNC_ENV_FILE:?set the absolute host-private env path}
+    healthcheck:
+      test: [CMD, python, -m, attention_router.infrastructure.channel_sync_service, --check]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - channel_sync
+networks:
+  channel_sync:
+    external: true
+    name: ${CHANNEL_SYNC_NETWORK_NAME:?set the IPAM-governed host-provisioned network}

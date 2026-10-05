@@ -4,7 +4,7 @@
 
 - Isolated branch starts at `428f9bd29ba283ac5eb6102d0fcc097fb60ac979`, after #268 IPAM authority passed all checks and merged.
 - Dedicated provider-neutral process, static `google.gmail` registry, independent adapter schedule/quarantine and offline CLI config check are implemented. Legacy Gmail scheduler remains unchanged.
-- Public Compose uses one external dedicated trust zone, no inbound application port, no embedded allocation and default-off Gmail flags. Attachments and historical backfill remain excluded.
+- Public provisioning package and YAML contract tests are complete. Compose uses one external dedicated trust zone, no inbound application port, no embedded allocation and default-off Gmail flags. Attachments and historical backfill remain excluded.
 - IPAM installation/allocation and physical networking are future operational prerequisites; no live deployment or infrastructure mutation is part of this candidate. The precursor ingress failure remains a frozen follow-up.
 - Focused runtime, legacy scheduler, service and provisioning tests: 45 passed. Ruff, focused compilation and diff-check passed; fresh-process config validation performs no network/DB I/O. Exact-SHA GitHub/distributed certification follows publication.
 
