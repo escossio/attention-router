@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 
 from attention_router.api.v1.client_session import build_client_session_router
 from attention_router.application.client_session import (
-    AuthenticatedClientBootstrapResult, ClientSessionActiveTenantRequired,
+    AuthenticatedClientBootstrapResult, AuthenticatedClientTenantDirectoryResult,
+    ClientSessionActiveTenantRequired, ClientTenantDirectoryMembership,
     ClientSessionAuthorityRejected, ClientSessionChallengeConsumed,
     ClientSessionDeviceRejected, ClientSessionUnauthenticated,
 )
@@ -24,6 +25,7 @@ CONTRACT = json.loads((ROOT / "contracts/client/v1/client-api.openapi.json").rea
 START = "/api/v1/session/device/challenges"
 COMPLETE = START + "/{session_challenge_id}/complete"
 SNAPSHOT = "/api/v1/client/bootstrap"
+TENANTS = "/api/v1/client/tenants"
 
 
 class FakeSession:
@@ -34,7 +36,9 @@ class FakeSession:
 class FakeService:
     def __init__(self):
         self.start_error = self.complete_error = self.bootstrap_error = None
+        self.directory_error = None
         self.start_calls, self.complete_calls, self.bootstrap_calls = [], [], []
+        self.directory_calls = []
 
     def start_session(self, session, **kwargs):
         self.start_calls.append((session, kwargs))
@@ -74,6 +78,24 @@ class FakeService:
             ),
             session_expires_at=datetime(2026, 9, 18, 17, 15, tzinfo=UTC),
             server_time=datetime(2026, 9, 18, 17, 1, tzinfo=UTC),
+        )
+
+
+    def authenticated_tenant_directory(self, session, **kwargs):
+        self.directory_calls.append((session, kwargs))
+        if self.directory_error:
+            raise self.directory_error
+        return AuthenticatedClientTenantDirectoryResult(
+            active_tenant_id="tnt_synthetic",
+            memberships=(
+                ClientTenantDirectoryMembership(
+                    membership_id="ctm_synthetic",
+                    tenant_id="tnt_synthetic",
+                    display_name="Personal",
+                    role=TenantRole.OWNER,
+                    status=MembershipStatus.ACTIVE,
+                ),
+            ),
         )
 
 
@@ -127,6 +149,43 @@ def test_authenticated_bootstrap_requires_bearer(client):
     assert "session_token" not in response.text
 
 
+def test_authenticated_tenant_directory_is_additive_and_bounded(client):
+    http, service, session = client
+    token = "cst_" + "x" * 43
+    response = http.get(
+        TENANTS,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "contract_version": "1",
+        "active_tenant_id": "tnt_synthetic",
+        "memberships": [
+            {
+                "membership_id": "ctm_synthetic",
+                "tenant_id": "tnt_synthetic",
+                "display_name": "Personal",
+                "role": "OWNER",
+                "status": "ACTIVE",
+            }
+        ],
+    }
+    assert service.directory_calls[-1][0] is session
+    assert service.directory_calls[-1][1]["session_token"] == token
+
+
+def test_authenticated_tenant_directory_uses_session_errors(client):
+    http, service, _ = client
+    service.directory_error = ClientSessionAuthorityRejected()
+    response = http.get(
+        TENANTS,
+        headers={"Authorization": "Bearer " + "cst_" + "x" * 43},
+    )
+    assert response.status_code == 403
+    assert response.json() == {"code": "CLIENT_SESSION_AUTHORITY_REJECTED"}
+
+
 def test_authority_rejection_maps_to_forbidden(client):
     http, service, _ = client
     service.bootstrap_error = ClientSessionAuthorityRejected()
@@ -136,8 +195,13 @@ def test_authority_rejection_maps_to_forbidden(client):
 
 def test_runtime_openapi_matches_frozen_v03c_contract(client):
     runtime = client[0].app.openapi()
-    assert set(runtime["paths"]) == {START, COMPLETE, SNAPSHOT}
-    for path, method in ((START, "post"), (COMPLETE, "post"), (SNAPSHOT, "get")):
+    assert set(runtime["paths"]) == {START, COMPLETE, SNAPSHOT, TENANTS}
+    for path, method in (
+        (START, "post"),
+        (COMPLETE, "post"),
+        (SNAPSHOT, "get"),
+        (TENANTS, "get"),
+    ):
         actual, expected = runtime["paths"][path][method], CONTRACT["paths"][path][method]
         assert actual["operationId"] == expected["operationId"]
         assert actual["security"] == expected["security"]
