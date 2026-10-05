@@ -220,27 +220,50 @@ def _parse_task(lines: list[str], node_id: str) -> dict[str, Any] | None:
     patterns: list[tuple[str, re.Pattern[str]]] = []
     if node_id == "agt":
         patterns.extend([
-            ("DISPATCH", re.compile(r"andy-ci-distributed\s+([0-9a-f]{40})\s+(\w+)")),
+            (
+                "DISPATCH",
+                re.compile(
+                    r"andy-ci-distributed(?:-suite)?\s+"
+                    r"(?:(attention-router|andy-android)\s+)?"
+                    r"([0-9a-f]{40})\s+(\w+)"
+                ),
+            ),
             ("REPROFILE", re.compile(r"andy-ci-reprofile\s+([0-9a-f]{40})")),
         ])
     else:
-        patterns.append(("RUNNER", re.compile(r"andy-ci-run\s+([0-9a-f]{40})\s+(\w+)")))
+        patterns.append(
+            (
+                "RUNNER",
+                re.compile(
+                    r"andy-ci-run\s+"
+                    r"(?:(attention-router|andy-android)\s+)?"
+                    r"([0-9a-f]{40})\s+(\w+)"
+                ),
+            )
+        )
 
     for kind, pattern in patterns:
         for pid, elapsed, args in candidates:
             found = pattern.search(args)
             if not found:
                 continue
-            sha = found.group(1)
-            suite = found.group(2) if found.lastindex and found.lastindex >= 2 else "postgres-profile"
+            if kind in {"DISPATCH", "RUNNER"}:
+                repository = found.group(1) or "attention-router"
+                sha = found.group(2)
+                suite = found.group(3)
+            else:
+                repository = "attention-router"
+                sha = found.group(1)
+                suite = "postgres-profile"
             return {
                 "kind": kind,
                 "pid": pid,
                 "elapsed_seconds": elapsed,
+                "repository": repository,
                 "sha": sha,
                 "sha_short": sha[:12],
                 "suite": suite,
-                "label": f"{suite} · {sha[:12]}",
+                "label": f"{repository} · {suite} · {sha[:12]}",
             }
 
     for pid, elapsed, args in candidates:
@@ -300,7 +323,11 @@ def _recent_dispatches(
     if not LOG_ROOT.exists():
         return []
     paths = sorted(
-        (p for p in LOG_ROOT.iterdir() if p.is_dir() and p.name.endswith("-postgres-distributed")),
+        (
+            p
+            for p in LOG_ROOT.iterdir()
+            if p.is_dir() and p.name.endswith("-distributed")
+        ),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -308,7 +335,8 @@ def _recent_dispatches(
     for path in paths[:limit]:
         bits = path.name.split("-")
         stamp = bits[0] if bits else ""
-        sha_short = bits[1] if len(bits) > 1 else "unknown"
+        fallback_sha_short = bits[1] if len(bits) > 1 else "unknown"
+        fallback_suite = bits[-2] if len(bits) >= 2 else "unknown"
         summary_file = path / "summary.json"
         summary = None
         if summary_file.is_file():
@@ -316,8 +344,23 @@ def _recent_dispatches(
                 summary = json.loads(summary_file.read_text())
             except (OSError, json.JSONDecodeError):
                 summary = None
+
+        if isinstance(summary, dict):
+            sha = summary.get("sha")
+            sha_short = sha[:12] if isinstance(sha, str) else fallback_sha_short
+            suite = str(summary.get("suite") or fallback_suite)
+            repository = str(summary.get("repository") or "attention-router")
+        else:
+            sha = None
+            sha_short = fallback_sha_short
+            suite = fallback_suite
+            repository = "attention-router"
+
         try:
-            started_at = datetime.strptime(stamp, "%Y%m%dT%H%M%S").astimezone().isoformat()
+            started_at = datetime.strptime(
+                stamp,
+                "%Y%m%dT%H%M%S",
+            ).astimezone().isoformat()
         except ValueError:
             started_at = None
         age = int(time.time() - path.stat().st_mtime)
@@ -329,9 +372,10 @@ def _recent_dispatches(
         )
         result.append({
             "id": path.name,
+            "repository": repository,
             "sha_short": sha_short,
-            "sha": summary.get("sha") if isinstance(summary, dict) else None,
-            "suite": "postgres",
+            "sha": sha,
+            "suite": suite,
             "started_at": started_at,
             "status": status,
             "wall_seconds": (
@@ -339,9 +383,21 @@ def _recent_dispatches(
                 if isinstance(summary, dict)
                 else age
             ),
-            "failure_class": summary.get("failure_class") if isinstance(summary, dict) else None,
-            "total_passed_tests": summary.get("total_passed_tests") if isinstance(summary, dict) else None,
-            "workers": summary.get("workers", {}) if isinstance(summary, dict) else {},
+            "failure_class": (
+                summary.get("failure_class")
+                if isinstance(summary, dict)
+                else None
+            ),
+            "total_passed_tests": (
+                summary.get("total_passed_tests")
+                if isinstance(summary, dict)
+                else None
+            ),
+            "workers": (
+                summary.get("workers", {})
+                if isinstance(summary, dict)
+                else {}
+            ),
         })
     return result
 
@@ -349,11 +405,37 @@ def _recent_dispatches(
 def _dispatch(nodes: list[dict[str, Any]], recent: list[dict[str, Any]]) -> dict[str, Any] | None:
     active = [node for node in nodes if node.get("task")]
     if active:
-        sha = next((node["task"].get("sha") for node in active if node["task"].get("sha")), None)
-        suite = next((node["task"].get("suite") for node in active if node["task"].get("suite")), "postgres")
-        elapsed = max((node["task"].get("elapsed_seconds", 0) for node in active), default=0)
+        sha = next(
+            (
+                node["task"].get("sha")
+                for node in active
+                if node["task"].get("sha")
+            ),
+            None,
+        )
+        suite = next(
+            (
+                node["task"].get("suite")
+                for node in active
+                if node["task"].get("suite")
+            ),
+            "postgres",
+        )
+        repository = next(
+            (
+                node["task"].get("repository")
+                for node in active
+                if node["task"].get("repository")
+            ),
+            "attention-router",
+        )
+        elapsed = max(
+            (node["task"].get("elapsed_seconds", 0) for node in active),
+            default=0,
+        )
         return {
             "status": "RUNNING",
+            "repository": repository,
             "sha": sha,
             "sha_short": sha[:12] if sha else None,
             "suite": suite,
@@ -364,6 +446,7 @@ def _dispatch(nodes: list[dict[str, Any]], recent: list[dict[str, Any]]) -> dict
         latest = recent[0]
         return {
             "status": latest["status"],
+            "repository": latest.get("repository", "attention-router"),
             "sha": latest.get("sha"),
             "sha_short": latest.get("sha_short"),
             "suite": latest.get("suite"),

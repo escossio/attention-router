@@ -2,17 +2,36 @@
 set -Eeuo pipefail
 
 BASE=/srv/andy-ci
-MIRROR="$BASE/repos/attention-router.git"
-REPO_URL=https://github.com/escossio/attention-router.git
-
-if [[ $# -ne 2 ]]; then
-  echo "usage: andy-ci-run <40-char-sha> <fast|python|postgres|transport|docker|full>" >&2
+REPOSITORY=attention-router
+if [[ $# -eq 2 ]]; then
+  SHA="$1"
+  SUITE="$2"
+elif [[ $# -eq 3 ]]; then
+  REPOSITORY="$1"
+  SHA="$2"
+  SUITE="$3"
+else
+  echo "usage: andy-ci-run [attention-router|andy-android] <40-char-sha> <suite>" >&2
   exit 64
 fi
-SHA="$1"
-SUITE="$2"
+
+case "$REPOSITORY" in
+  attention-router)
+    MIRROR="$BASE/repos/attention-router.git"
+    REPO_URL=https://github.com/escossio/attention-router.git
+    case "$SUITE" in fast|python|postgres|transport|docker|full) ;; *) echo "invalid attention-router suite" >&2; exit 64 ;; esac
+    ;;
+  andy-android)
+    MIRROR="$BASE/repos/andy-android.git"
+    REPO_URL=https://github.com/escossio/andy-android.git
+    [[ "$SUITE" == android ]] || { echo "invalid andy-android suite" >&2; exit 64; }
+    ;;
+  *)
+    echo "invalid repository" >&2
+    exit 64
+    ;;
+esac
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid SHA" >&2; exit 64; }
-case "$SUITE" in fast|python|postgres|transport|docker|full) ;; *) echo "invalid suite" >&2; exit 64 ;; esac
 
 SHORT="${SHA:0:12}"
 START_EPOCH=$(date +%s)
@@ -22,7 +41,7 @@ WORK="$BASE/work/$RUN_ID"
 LOG="$BASE/logs/$RUN_ID.log"
 RESULT="$BASE/results/$RUN_ID.json"
 PG_NAME="andy-ci-pg-$SHORT-$$"
-mkdir -p "$BASE"/{repos,work,logs,results,envs,shards,cache/pip,cache/npm}
+mkdir -p "$BASE"/{repos,work,logs,results,envs,shards,cache/pip,cache/npm,cache/gradle}
 exec 9>"$BASE/worker.lock"
 if ! flock -n 9; then
   echo "CI_WORKER_BUSY"
@@ -31,6 +50,7 @@ fi
 
 exec > >(tee -a "$LOG") 2>&1
 echo "CI_HOST=$(hostname)"
+echo "CI_REPOSITORY=$REPOSITORY"
 echo "CI_SHA=$SHA"
 echo "CI_SUITE=$SUITE"
 echo "CI_STARTED_AT=$STARTED_AT"
@@ -52,6 +72,7 @@ finish() {
   status=PASS; [[ $rc -eq 0 ]] || status=FAIL
   jq -n \
     --arg host "$(hostname)" \
+    --arg repository "$REPOSITORY" \
     --arg sha "$SHA" \
     --arg suite "$SUITE" \
     --arg status "$status" \
@@ -59,7 +80,7 @@ finish() {
     --arg ended_at "$ended_at" \
     --arg log "$LOG" \
     --argjson duration_seconds "$duration" \
-    '{host:$host,sha:$sha,suite:$suite,status:$status,started_at:$started_at,ended_at:$ended_at,duration_seconds:$duration_seconds,log:$log}' \
+    '{host:$host,repository:$repository,sha:$sha,suite:$suite,status:$status,started_at:$started_at,ended_at:$ended_at,duration_seconds:$duration_seconds,log:$log}' \
     > "$RESULT"
   echo "CI_STATUS=$status"
   echo "CI_DURATION_SECONDS=$duration"
@@ -198,6 +219,35 @@ run_transport() {
   popd >/dev/null
 }
 
+run_android() {
+  local image="${ANDY_CI_ANDROID_IMAGE:-andy-android-ci:api37-jdk17-v1}"
+  [[ -x ./gradlew ]] || { echo "ANDROID_GRADLE_WRAPPER_MISSING"; return 70; }
+  docker image inspect "$image" >/dev/null 2>&1 || {
+    echo "ANDROID_CI_IMAGE_MISSING=$image"
+    return 70
+  }
+  echo "CI_ANDROID_IMAGE=$image"
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/tmp/andy-ci-home \
+    -e GRADLE_USER_HOME=/cache/gradle \
+    -e ANDROID_HOME=/opt/android-sdk \
+    -e ANDROID_SDK_ROOT=/opt/android-sdk \
+    -v "$WORK:/work" \
+    -v "$BASE/cache/gradle:/cache/gradle" \
+    -w /work \
+    "$image" \
+    ./gradlew --no-daemon \
+      :app:testDebugUnitTest \
+      :app:assembleDebug \
+      :core:device-identity:test \
+      :data:device-identity:testDebugUnitTest \
+      :core:human-identity:test \
+      :sdk:client-api:test \
+      :integrations:google-identity:testDebugUnitTest \
+      :features:onboarding:testDebugUnitTest
+}
+
 run_docker() {
   docker build \
     --build-arg ATTENTION_ROUTER_BUILD_SHA="$SHA" \
@@ -210,6 +260,7 @@ case "$SUITE" in
   postgres) run_postgres ;;
   transport) run_transport ;;
   docker) run_docker ;;
+  android) run_android ;;
   full)
     run_python
     run_postgres
