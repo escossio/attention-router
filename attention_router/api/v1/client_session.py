@@ -90,6 +90,25 @@ class AuthenticatedClientBootstrapSnapshot(BaseModel):
     server_time: datetime
 
 
+class ClientTenantDirectoryMembershipView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    membership_id: str = Field(min_length=1, max_length=64)
+    tenant_id: str = Field(min_length=1, max_length=64)
+    display_name: str = Field(min_length=1, max_length=160)
+    role: Literal["OWNER", "ADMIN", "MEMBER"]
+    status: Literal["ACTIVE"]
+
+
+class AuthenticatedClientTenantDirectorySnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contract_version: Literal["1"]
+    active_tenant_id: str = Field(min_length=1, max_length=64)
+    memberships: list[ClientTenantDirectoryMembershipView] = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+
 ClientSessionErrorCode = Literal[
     "CLIENT_SESSION_DEVICE_REJECTED", "CLIENT_SESSION_CHALLENGE_NOT_FOUND",
     "CLIENT_SESSION_CHALLENGE_EXPIRED", "CLIENT_SESSION_CHALLENGE_CONSUMED",
@@ -224,6 +243,47 @@ def build_client_session_router(*, get_session, service: ClientSessionService) -
                 status=result.device.status.value,
             ),
             session_expires_at=result.session_expires_at, server_time=result.server_time,
+        )
+
+    @router.get(
+        "/api/v1/client/tenants",
+        response_model=AuthenticatedClientTenantDirectorySnapshot,
+        responses={
+            401: {"model": ClientSessionErrorResponse},
+            403: {"model": ClientSessionErrorResponse},
+            409: {"model": ClientSessionErrorResponse},
+            503: {"model": ClientSessionErrorResponse},
+        },
+        operation_id="getAuthenticatedClientTenantDirectory",
+    )
+    def authenticated_tenant_directory(
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Security(_BEARER),
+        ],
+        session: Session = Depends(get_session),
+    ) -> AuthenticatedClientTenantDirectorySnapshot | JSONResponse:
+        token = credentials.credentials if credentials is not None else None
+        try:
+            result = service.authenticated_tenant_directory(
+                session,
+                session_token=token,
+            )
+        except tuple(_ERROR_STATUS) as error:
+            return _error_response(error)
+        return AuthenticatedClientTenantDirectorySnapshot(
+            contract_version=result.contract_version,
+            active_tenant_id=result.active_tenant_id,
+            memberships=[
+                ClientTenantDirectoryMembershipView(
+                    membership_id=item.membership_id,
+                    tenant_id=item.tenant_id,
+                    display_name=item.display_name,
+                    role=item.role.value,
+                    status=item.status.value,
+                )
+                for item in result.memberships
+            ],
         )
 
     return router

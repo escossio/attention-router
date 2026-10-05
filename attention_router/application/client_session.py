@@ -98,6 +98,22 @@ class AuthenticatedClientBootstrapResult:
     contract_version: str = "1"
 
 
+@dataclass(frozen=True, slots=True)
+class ClientTenantDirectoryMembership:
+    membership_id: str
+    tenant_id: str
+    display_name: str
+    role: TenantRole
+    status: MembershipStatus
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedClientTenantDirectoryResult:
+    active_tenant_id: str
+    memberships: tuple[ClientTenantDirectoryMembership, ...]
+    contract_version: str = "1"
+
+
 def _aware(value: datetime, reference: datetime) -> datetime:
     return value.replace(tzinfo=reference.tzinfo or UTC) if value.tzinfo is None else value
 
@@ -305,4 +321,52 @@ class ClientSessionService:
             device=_device_view(device),
             session_expires_at=_aware(session_row.expires_at, current),
             server_time=current,
+        )
+
+    def authenticated_tenant_directory(
+        self,
+        session: Session,
+        *,
+        session_token: str | None,
+        now: datetime | None = None,
+    ) -> AuthenticatedClientTenantDirectoryResult:
+        """Return bounded, server-named memberships for tenant selection."""
+        bootstrap = self.authenticated_bootstrap(
+            session,
+            session_token=session_token,
+            now=now,
+        )
+        options: list[ClientTenantDirectoryMembership] = []
+        for membership in bootstrap.memberships:
+            tenant = repository.get_tenant(
+                session,
+                tenant_id=membership.tenant_id,
+            )
+            name = getattr(tenant, "name", None) if tenant is not None else None
+            display_name = " ".join(name.split()) if isinstance(name, str) else ""
+            if (
+                tenant is None
+                or tenant.status != "ACTIVE"
+                or not display_name
+                or len(display_name) > 160
+            ):
+                raise ClientSessionAuthorityRejected()
+            options.append(
+                ClientTenantDirectoryMembership(
+                    membership_id=membership.membership_id,
+                    tenant_id=membership.tenant_id,
+                    display_name=display_name,
+                    role=membership.role,
+                    status=membership.status,
+                )
+            )
+
+        if not any(
+            item.tenant_id == bootstrap.active_tenant_id
+            for item in options
+        ):
+            raise ClientSessionAuthorityRejected()
+        return AuthenticatedClientTenantDirectoryResult(
+            active_tenant_id=bootstrap.active_tenant_id,
+            memberships=tuple(options),
         )
