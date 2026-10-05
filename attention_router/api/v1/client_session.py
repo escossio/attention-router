@@ -92,8 +92,9 @@ class AuthenticatedClientBootstrapSnapshot(BaseModel):
 
 class ClientTenantDirectoryMembershipView(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    membership_id: str = Field(min_length=1, max_length=64)
     tenant_id: str = Field(min_length=1, max_length=64)
-    tenant_name: str = Field(min_length=1, max_length=160)
+    display_name: str = Field(min_length=1, max_length=160)
     role: Literal["OWNER", "ADMIN", "MEMBER"]
     status: Literal["ACTIVE"]
 
@@ -275,8 +276,9 @@ def build_client_session_router(*, get_session, service: ClientSessionService) -
             active_tenant_id=result.active_tenant_id,
             memberships=[
                 ClientTenantDirectoryMembershipView(
+                    membership_id=item.membership_id,
                     tenant_id=item.tenant_id,
-                    tenant_name=item.tenant_name,
+                    display_name=item.display_name,
                     role=item.role.value,
                     status=item.status.value,
                 )
