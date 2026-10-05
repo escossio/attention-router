@@ -111,9 +111,43 @@ def test_session_issue_persists_digest_only_and_authenticated_bootstrap(session)
     )
     assert directory.active_tenant_id == TENANT_ID
     assert len(directory.memberships) == 1
+    assert directory.memberships[0].membership_id == "ctm_" + "m" * 24
     assert directory.memberships[0].tenant_id == TENANT_ID
-    assert directory.memberships[0].tenant_name == "Personal"
+    assert directory.memberships[0].display_name == "Personal"
     assert directory.memberships[0].role.value == "OWNER"
+
+
+def test_tenant_directory_normalizes_display_name_without_changing_authority(session):
+    private, spki, public = keypair()
+    seed(session, spki)
+    tenant = session.get(TenantRow, TENANT_ID)
+    tenant.name = "  Personal\n\tContext  "
+    session.commit()
+
+    service = ClientSessionService(settings=settings())
+    challenge = service.start_session(
+        session,
+        public_key_spki_b64url=public,
+        requested_tenant_id=TENANT_ID,
+        now=NOW,
+    )
+    issued = service.complete_session(
+        session,
+        session_challenge_id=challenge.session_challenge_id,
+        device_signature_b64url=sign(private, challenge.challenge_b64url),
+        now=NOW + timedelta(seconds=1),
+    )
+    session.commit()
+
+    directory = service.authenticated_tenant_directory(
+        session,
+        session_token=issued.session_token,
+        now=NOW + timedelta(seconds=2),
+    )
+
+    assert directory.memberships[0].display_name == "Personal Context"
+    assert directory.memberships[0].membership_id == "ctm_" + "m" * 24
+    assert directory.memberships[0].tenant_id == TENANT_ID
 
 
 def test_tenant_directory_fails_closed_for_unavailable_secondary_tenant(session):
