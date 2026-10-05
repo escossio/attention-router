@@ -8,9 +8,13 @@ from sqlalchemy import select
 from attention_router.application.gmail_history import GmailProductHistoryBusy
 from attention_router.application.gmail_product_runner import GmailProductRunner, GmailProductIngressFailed
 from attention_router.config import settings
+from attention_router.infrastructure.models import ConversationMessageRow
 from attention_router.infrastructure.provider_authorization_models import ProviderAuthorizationRow
 from attention_router.integrations.admission import admit_inbound
-from attention_router.integrations.gmail_connector import IntegrationIngressResponse
+from attention_router.integrations.gmail_connector import (
+    GmailMessage,
+    IntegrationIngressResponse,
+)
 from test_gmail_history import Reader, record
 from test_gmail_product_runner import _seed_connected, _enabled, FakeRefresher
 
@@ -57,6 +61,118 @@ def test_cursor_lock_persistence_and_real_admission_replay(Session, monkeypatch)
         first.commit()
         assert attempts == ["ACCEPTED", "DUPLICATE"]
         assert second.scalar(select(ProviderAuthorizationRow.gmail_history_id)) == "20"
+
+
+
+def test_multi_message_body_archive_does_not_hold_tenant_lock_across_ingress(
+    Session,
+    monkeypatch,
+):
+    stamp = datetime.now(UTC)
+    with Session() as seed:
+        installation = _seed_connected(seed, monkeypatch, now=stamp)
+        row = seed.get(ProviderAuthorizationRow, installation)
+        from attention_router.application.gmail_connection import GMAIL_READONLY_SCOPE
+        row.granted_scopes = [GMAIL_READONLY_SCOPE]
+        seed.commit()
+
+    _enabled(monkeypatch)
+    monkeypatch.setattr(settings, "gmail_body_ingestion_enabled", True)
+    monkeypatch.setattr(settings, "gmail_body_max_bytes", 1024)
+    monkeypatch.setattr(settings, "gmail_body_max_mime_depth", 4)
+    monkeypatch.setattr(settings, "memory_ingestion_enabled", False)
+
+    class BodyReader(Reader):
+        def __init__(self):
+            super().__init__()
+            self.pages = [{
+                "historyId": "30",
+                "history": [record(12, "one", "two")],
+            }]
+
+        def read_message_with_body(
+            self,
+            message_id,
+            *,
+            max_bytes,
+            max_mime_depth,
+        ):
+            return GmailMessage(
+                message_id=message_id,
+                thread_id="shared-thread",
+                sender="Synthetic Sender <sender@example.invalid>",
+                to=("owner@example.invalid",),
+                cc=(),
+                bcc=(),
+                subject="Synthetic",
+                body=f"body-{message_id}",
+                email_ts=stamp.isoformat(),
+                attachments=(),
+                body_observed=True,
+                attachments_observed=False,
+            )
+
+    reader = BodyReader()
+    ingress_codes = []
+
+    class RealIngress:
+        def __init__(self, bearer):
+            self.bearer = bearer
+
+        def send(self, payload):
+            raw = json.dumps(
+                payload,
+                ensure_ascii=True,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode()
+            receipt = admit_inbound(
+                Session,
+                self.bearer,
+                raw,
+                audience=settings.integration_ingress_audience,
+            )
+            ingress_codes.append(receipt.code)
+            status = {
+                "ACCEPTED": "accepted",
+                "DUPLICATE": "duplicate",
+            }[receipt.code]
+            return IntegrationIngressResponse(
+                202 if receipt.code == "ACCEPTED" else 200,
+                {"status": status},
+            )
+
+    runner = GmailProductRunner(
+        settings=settings,
+        token_refresher=FakeRefresher(),
+        reader_factory=lambda token: reader,
+        ingress_factory=RealIngress,
+    )
+
+    with Session() as session:
+        assert runner.run_incremental(
+            session,
+            installation_id=installation,
+            now=stamp,
+        ).initialized
+        session.commit()
+
+        result = runner.run_incremental(
+            session,
+            installation_id=installation,
+            now=stamp,
+        )
+        assert result.accepted == 2
+        session.commit()
+
+        archived = session.scalars(
+            select(ConversationMessageRow).where(
+                ConversationMessageRow.source == "gmail",
+                ConversationMessageRow.source_message_id.in_(("one", "two")),
+            )
+        ).all()
+        assert {row.source_message_id for row in archived} == {"one", "two"}
+        assert ingress_codes == ["ACCEPTED", "ACCEPTED"]
 
 
 def test_migration_roundtrip_and_populated_downgrade_guard(Session, monkeypatch, pg_url):

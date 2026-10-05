@@ -77,6 +77,13 @@ def _cycle(reader, connector, start, limit, max_pages):
     tokens = set()
     token = None
     examined = accepted = duplicates = 0
+    observed = []
+
+    def finish(result_cursor):
+        for message in observed:
+            connector.observe_message(message)
+        return result_cursor, examined, len(seen), accepted, duplicates
+
     for _ in range(max_pages):
         page = reader.history_page(start, token)
         records = page.get("history", [])
@@ -96,7 +103,7 @@ def _cycle(reader, connector, start, limit, max_pages):
                 raise GmailProductHistoryRecordTooLarge()
             pending = [value for value in ids if value not in seen]
             if len(seen) + len(pending) > limit:
-                return cursor, examined, len(seen), accepted, duplicates
+                return finish(cursor)
             for message_id in pending:
                 message, staged = connector.prepare_message(message_id)
                 if message.message_id != message_id:
@@ -126,6 +133,7 @@ def _cycle(reader, connector, start, limit, max_pages):
                     received_at=datetime.fromisoformat(
                         message.email_ts.replace("Z", "+00:00")
                     ),
+                    observe=False,
                 )
                 if response.status_code not in {200, 202}:
                     raise GmailProductIngressFailed()
@@ -136,16 +144,17 @@ def _cycle(reader, connector, start, limit, max_pages):
                 else:
                     raise GmailProductIngressFailed()
                 seen.add(message_id)
+                observed.append(message)
             examined += 1
             cursor = record_id
         token = page.get("nextPageToken")
         if token is None:
-            return end, examined, len(seen), accepted, duplicates
+            return finish(end)
         if not isinstance(token, str) or not 1 <= len(token) <= 2048 or token in tokens:
             raise GmailProductProviderUnavailable()
         tokens.add(token)
     # Never use the mailbox-wide historyId while pages remain unexamined.
-    return cursor, examined, len(seen), accepted, duplicates
+    return finish(cursor)
 
 
 def run_incremental(

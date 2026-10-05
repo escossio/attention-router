@@ -309,12 +309,17 @@ class GmailInboundConnector:
             return self._message_preparer(message_id)
         return self._reader.read_message(message_id), ()
 
+    def observe_message(self, message: GmailMessage) -> None:
+        if self._message_observer is not None:
+            self._message_observer(message)
+
     def ingest_message(
         self,
         message: GmailMessage,
         *,
         staged_attachments: tuple[GmailStagedAttachment, ...] = (),
         received_at: datetime | None = None,
+        observe: bool = True,
     ) -> IntegrationIngressResponse:
         normalized = gmail_message_to_normalized_input(
             message,
@@ -335,8 +340,8 @@ class GmailInboundConnector:
         response = self._ingress.send(
             output.event.model_dump(mode="json")
         )
-        if self._message_observer is not None:
-            self._message_observer(message)
+        if observe:
+            self.observe_message(message)
         return response
 
     def poll(
@@ -353,16 +358,21 @@ class GmailInboundConnector:
         )[:max_results]
         accepted = 0
         duplicates = 0
+        observed: list[GmailMessage] = []
         for message_id in message_ids:
             message, staged = self.prepare_message(message_id)
             response = self.ingest_message(
                 message,
                 staged_attachments=staged,
+                observe=False,
             )
             if response.body["status"] == "accepted":
                 accepted += 1
             else:
                 duplicates += 1
+            observed.append(message)
+        for message in observed:
+            self.observe_message(message)
         return GmailPollResult(
             selected=len(message_ids),
             accepted=accepted,
