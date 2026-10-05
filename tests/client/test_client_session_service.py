@@ -104,6 +104,72 @@ def test_session_issue_persists_digest_only_and_authenticated_bootstrap(session)
     assert snapshot.active_tenant_id == TENANT_ID
     assert snapshot.device.device_id == DEVICE_ID
 
+    directory = service.authenticated_tenant_directory(
+        session,
+        session_token=issued.session_token,
+        now=NOW + timedelta(seconds=2),
+    )
+    assert directory.active_tenant_id == TENANT_ID
+    assert len(directory.memberships) == 1
+    assert directory.memberships[0].tenant_id == TENANT_ID
+    assert directory.memberships[0].tenant_name == "Personal"
+    assert directory.memberships[0].role.value == "OWNER"
+
+
+def test_tenant_directory_fails_closed_for_unavailable_secondary_tenant(session):
+    private, spki, public = keypair()
+    seed(session, spki)
+    secondary_tenant_id = "tnt_" + "o" * 24
+    session.add(
+        TenantRow(
+            id=secondary_tenant_id,
+            slug="secondary-synthetic",
+            name="Secondary",
+            status="ACTIVE",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    session.flush()
+    session.add(
+        ClientTenantMembershipRow(
+            id="ctm_" + "n" * 24,
+            human_identity_id=HUMAN_ID,
+            tenant_id=secondary_tenant_id,
+            role="OWNER",
+            status="ACTIVE",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    session.commit()
+
+    service = ClientSessionService(settings=settings())
+    challenge = service.start_session(
+        session,
+        public_key_spki_b64url=public,
+        requested_tenant_id=TENANT_ID,
+        now=NOW,
+    )
+    issued = service.complete_session(
+        session,
+        session_challenge_id=challenge.session_challenge_id,
+        device_signature_b64url=sign(private, challenge.challenge_b64url),
+        now=NOW + timedelta(seconds=1),
+    )
+    session.commit()
+
+    secondary = session.get(TenantRow, secondary_tenant_id)
+    secondary.status = "DISABLED"
+    session.commit()
+
+    with pytest.raises(ClientSessionAuthorityRejected):
+        service.authenticated_tenant_directory(
+            session,
+            session_token=issued.session_token,
+            now=NOW + timedelta(seconds=2),
+        )
+
 
 def test_wrong_signature_keeps_challenge_pending_and_creates_no_session(session):
     _, spki, public = keypair()
