@@ -56,39 +56,53 @@ exception details.
 
 ## Recommended live cutover order
 
+Google documents programmatic token revocation as removing the project's OAuth
+authorization for the user and invalidating issued access/refresh tokens. A new
+destination grant must therefore be created **after** source revocation, not
+before it:
+
+https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke
+
 1. Confirm the authenticated Human Identity is an ACTIVE member of both the
    current source tenant and intended destination tenant.
 2. Stop Channel Sync and prove no legacy Gmail scheduler is running.
-3. Switch the Android Client Session to the destination tenant through the normal
+3. Record only non-secret source/destination installation references needed by
+   the operator. Preserve the source ProviderAuthorization and history cursor.
+4. With the Client Session on the source tenant, disconnect Gmail. This revokes
+   the Google project authorization and deactivates the source binding/credential
+   while preserving the durable source cursor.
+5. Switch the Android Client Session to the destination tenant through the normal
    device challenge/signature flow.
-4. Connect Gmail in the destination tenant. The destination must remain unpolled
-   so its cursor stays NULL. A scope upgrade such as metadata -> readonly is
-   allowed because provider account identity, not scope profile, anchors the
-   cursor handoff.
-5. Optionally inspect the new installation and account identity while the old
-   source remains active. Do not restart Channel Sync.
-6. Switch the Client Session back to the source tenant and disconnect Gmail there.
-   This revokes the source provider grant and deactivates its binding/credential.
-7. Switch the Client Session to the destination tenant again.
+6. Connect Gmail in the destination tenant. The current Android client requests
+   `gmail.readonly`; if Google does not return a refresh token on the first
+   attempt, the existing explicit-consent retry remains authoritative.
+7. Keep Channel Sync stopped. The destination must remain unpolled so its cursor
+   stays NULL.
 8. Run the handoff CLI without `--apply`. Continue only when it returns `READY`.
 9. Run the same command with `--apply`. `APPLIED` or `ALREADY_APPLIED` is success.
 10. Start Channel Sync with the destination installation discoverable.
 11. Observe the first incremental cycle. The runner must continue from the copied
     cursor; it must not execute first-run baseline initialization.
-12. Keep the source ProviderAuthorization row and cursor for audit/recovery.
+12. Keep the revoked source ProviderAuthorization row and cursor for
+    audit/recovery.
 
-If destination connection fails before source disconnect, leave the source
-installation active and abort the cutover. If handoff fails after source
-disconnect, keep Channel Sync stopped, correct the refusal condition, and retry;
-do not allow the destination to initialize a fresh baseline.
+The service gap between source revocation and destination activation does not
+require a provider baseline reseed. Gmail messages that arrive during that gap
+remain discoverable from the preserved source history cursor once the destination
+installation resumes incremental history processing.
+
+If destination connection fails after source revocation, keep Channel Sync
+stopped and retry the normal destination consent flow. Do not initialize the
+destination with a fresh baseline and do not manually invent a historyId.
 
 ## Rollback
 
 Before source disconnect, rollback is simply to keep the original installation
 and resume Channel Sync.
 
-After source disconnect, rollback requires an explicitly authorized reconnect of
-the source tenant. Never restore service by manually inventing or reseeding a
+After source disconnect, the prior Google project authorization has been revoked.
+Rollback therefore requires a fresh, explicitly authorized OAuth connection in
+the chosen tenant. Never restore service by manually inventing or reseeding a
 historyId.
 
 A destination cursor already copied by this operation is not deleted by rollback.
