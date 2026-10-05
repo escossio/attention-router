@@ -2424,18 +2424,24 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "membership_id",
           "tenant_id",
-          "tenant_name",
+          "display_name",
           "role",
           "status"
         ],
         "properties": {
+          "membership_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
           "tenant_id": {
             "type": "string",
             "minLength": 1,
             "maxLength": 64
           },
-          "tenant_name": {
+          "display_name": {
             "type": "string",
             "minLength": 1,
             "maxLength": 160
