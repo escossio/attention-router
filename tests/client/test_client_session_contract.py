@@ -9,6 +9,7 @@ CONTRACT = ROOT / "contracts/client/v1/client-api.openapi.json"
 START = "/api/v1/session/device/challenges"
 COMPLETE = START + "/{session_challenge_id}/complete"
 SNAPSHOT = "/api/v1/client/bootstrap"
+TENANTS = "/api/v1/client/tenants"
 
 
 def load_contract() -> dict:
@@ -29,9 +30,11 @@ def test_v03c_adds_exact_session_and_authenticated_bootstrap_paths():
     assert START in document["paths"]
     assert COMPLETE in document["paths"]
     assert SNAPSHOT in document["paths"]
+    assert TENANTS in document["paths"]
     assert document["paths"][START]["post"]["security"] == []
     assert document["paths"][COMPLETE]["post"]["security"] == []
     assert document["paths"][SNAPSHOT]["get"]["security"] == [{"ClientSession": []}]
+    assert document["paths"][TENANTS]["get"]["security"] == [{"ClientSession": []}]
 
 
 def test_client_session_security_scheme_is_separate_opaque_bearer():
@@ -115,6 +118,33 @@ def test_authenticated_bootstrap_is_deliberately_bounded():
         assert forbidden not in raw
 
 
+def test_named_tenant_directory_is_additive_and_does_not_mutate_bootstrap_membership():
+    document = load_contract()
+    legacy = document["components"]["schemas"]["ClientTenantMembershipView"]
+    assert legacy["required"] == [
+        "membership_id",
+        "tenant_id",
+        "role",
+        "status",
+    ]
+    assert "display_name" not in legacy["properties"]
+
+    named = document["components"]["schemas"]["ClientTenantDirectoryMembershipView"]
+    assert named["additionalProperties"] is False
+    assert named["required"] == [
+        "membership_id",
+        "tenant_id",
+        "display_name",
+        "role",
+        "status",
+    ]
+    assert named["properties"]["display_name"] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160,
+    }
+
+
 def test_v03c_wire_examples_validate():
     start = {
         "public_key_spki_b64url": "A" * 120,
@@ -159,12 +189,24 @@ def test_v03c_wire_examples_validate():
         "session_expires_at": "2026-09-18T16:30:00Z",
         "server_time": "2026-09-18T16:16:00Z",
     }
+    tenant_directory = {
+        "contract_version": "1",
+        "active_tenant_id": "tnt_synthetic",
+        "memberships": [{
+            "membership_id": "ctm_synthetic",
+            "tenant_id": "tnt_synthetic",
+            "display_name": "Personal",
+            "role": "OWNER",
+            "status": "ACTIVE",
+        }],
+    }
     for schema_name, payload in (
         ("ClientSessionChallengeRequest", start),
         ("ClientSessionChallengeResponse", challenge),
         ("ClientSessionCompleteRequest", complete),
         ("ClientSessionEstablishedResponse", established),
         ("AuthenticatedClientBootstrapSnapshot", snapshot),
+        ("AuthenticatedClientTenantDirectorySnapshot", tenant_directory),
     ):
         assert validator_for(schema_name).is_valid(payload)
 
