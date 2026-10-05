@@ -262,6 +262,13 @@ def _normalize(text: str | None) -> str | None:
     return " ".join((text or "").casefold().split()) or None
 
 
+def _utc_aware(value: datetime) -> datetime:
+    """Normalize archive timestamps to one comparable UTC-aware representation."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _redact(text: str | None) -> tuple[str | None, str]:
     if not text:
         return text, "NORMAL"
@@ -308,7 +315,7 @@ def archive_message(session: Session, item: ArchivedMessageInput) -> tuple[Conve
             raise ValueError("SYNTHETIC_SCENARIO_LINEAGE_REQUIRED")
     elif any(scenario_values):
         raise ValueError("NON_SYNTHETIC_SCENARIO_LINEAGE_FORBIDDEN")
-    sent_at = item.sent_at.astimezone(timezone.utc).replace(tzinfo=None) if item.sent_at.tzinfo else item.sent_at
+    sent_at = _utc_aware(item.sent_at)
     existing = session.scalar(
         select(ConversationMessageRow).where(
             ConversationMessageRow.tenant_id == item.tenant_id,
@@ -333,8 +340,18 @@ def archive_message(session: Session, item: ArchivedMessageInput) -> tuple[Conve
         session.add(thread)
         session.flush()
     else:
-        thread.first_message_at = min(thread.first_message_at or sent_at, sent_at)
-        thread.last_message_at = max(thread.last_message_at or sent_at, sent_at)
+        first_message_at = (
+            _utc_aware(thread.first_message_at)
+            if thread.first_message_at is not None
+            else sent_at
+        )
+        last_message_at = (
+            _utc_aware(thread.last_message_at)
+            if thread.last_message_at is not None
+            else sent_at
+        )
+        thread.first_message_at = min(first_message_at, sent_at)
+        thread.last_message_at = max(last_message_at, sent_at)
         thread.updated_at = now
     sender_id = _actor(session, item.sender_key, item.tenant_id)
     if item.sender_key:
@@ -347,7 +364,12 @@ def archive_message(session: Session, item: ArchivedMessageInput) -> tuple[Conve
                 external_participant_key=item.sender_key, observed_display_name=item.sender_display_name,
                 participant_role="MEMBER", first_seen_at=sent_at, last_seen_at=sent_at))
         else:
-            participant.last_seen_at = max(participant.last_seen_at or sent_at, sent_at)
+            last_seen_at = (
+                _utc_aware(participant.last_seen_at)
+                if participant.last_seen_at is not None
+                else sent_at
+            )
+            participant.last_seen_at = max(last_seen_at, sent_at)
     safe_text, sensitivity = _redact(item.text)
     metadata = dict(item.metadata or {})
     metadata["platform_lineage"] = {
