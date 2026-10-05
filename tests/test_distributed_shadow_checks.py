@@ -299,9 +299,9 @@ def test_generic_scheduler_and_worker_support_android_repository():
     assert "andy-android:android" in scheduler
     assert "andy-ci-run '$REPOSITORY' '$SHA' '$SUITE'" in scheduler
     assert "https://github.com/escossio/andy-android.git" in worker
-    assert "andy-android-ci:api37-jdk17-v1" in worker
+    assert "andy-android-ci:api37-jdk17-v2" in worker
     assert "ANDROID_USER_HOME=/tmp/andy-android-user" in worker
-    assert "GRADLE_OPTS=-Duser.home=/tmp/andy-home" in worker
+    assert "JAVA_TOOL_OPTIONS=-Duser.home=/tmp/andy-home" in worker
     assert 'mkdir -p "$HOME" "$ANDROID_USER_HOME"' in worker
     assert ":sdk:client-api:test" in worker
     assert ":app:assembleDebug" in worker
@@ -313,5 +313,7 @@ def test_android_toolchain_is_pinned_to_jdk17_and_existing_sdk_contract():
         / "ops/provisioning/distributed-ci-lab/worker/android-ci.Dockerfile"
     ).read_text()
     assert dockerfile.startswith("FROM eclipse-temurin:17-jdk-jammy")
+    assert "COPY --chown=1000:1000 . /opt/android-sdk" in dockerfile
+    assert "JAVA_TOOL_OPTIONS=-Duser.home=/tmp/andy-home" in dockerfile
     assert "platforms/android-37.0" in dockerfile
     assert "build-tools/36.0.0" in dockerfile
