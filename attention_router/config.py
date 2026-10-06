@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     local_history_hmac_secret: str | None = Field(default=None, repr=False)
     whatsapp_history_timeout_seconds: float = 5.0
     whatsapp_history_snapshot_limit: int = 100
+    whatsapp_history_max_scan_messages: int = 1000
     local_source_account: str = "default"
     personal_context_bootstrap_enabled: bool = False
     personal_context_bootstrap_canary_tenant_id: str | None = None
@@ -572,6 +573,10 @@ class Settings(BaseSettings):
         if not 1 <= self.whatsapp_history_snapshot_limit <= 100:
             raise ValueError(
                 "WHATSAPP_HISTORY_SNAPSHOT_LIMIT must be between 1 and 100"
+            )
+        if not self.whatsapp_history_snapshot_limit <= self.whatsapp_history_max_scan_messages <= 10000:
+            raise ValueError(
+                "WHATSAPP_HISTORY_MAX_SCAN_MESSAGES must be between snapshot limit and 10000"
             )
         if (
             not self.local_source_account.strip()

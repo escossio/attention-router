@@ -79,7 +79,7 @@ class PersonalContextBootstrapProductService:
             session_token=session_token,
         )
         canary = self.settings.personal_context_bootstrap_canary_tenant_id
-        if canary is not None and authority.active_tenant_id != canary:
+        if canary is None or authority.active_tenant_id != canary:
             raise PersonalContextBootstrapProductTenantForbidden()
         return authority
 
@@ -135,12 +135,13 @@ class PersonalContextBootstrapProductService:
         processing_budget: dict[str, int] | None,
     ) -> dict[str, int]:
         snapshot_limit = self.adapter.snapshot_limit
+        scan_limit = getattr(self.adapter, "max_scan_messages", snapshot_limit)
         budget = {
             "page_size": min(50, snapshot_limit),
-            "max_messages_per_chat": snapshot_limit,
+            "max_messages_per_chat": scan_limit,
             "max_total_messages": min(
                 500,
-                max(1, selected_chat_count) * snapshot_limit,
+                max(1, selected_chat_count) * scan_limit,
             ),
         }
         if processing_budget is not None:
@@ -156,7 +157,7 @@ class PersonalContextBootstrapProductService:
             or not 1 <= budget["page_size"] <= snapshot_limit
             or isinstance(budget["max_messages_per_chat"], bool)
             or not isinstance(budget["max_messages_per_chat"], int)
-            or not 1 <= budget["max_messages_per_chat"] <= snapshot_limit
+            or not 1 <= budget["max_messages_per_chat"] <= scan_limit
             or isinstance(budget["max_total_messages"], bool)
             or not isinstance(budget["max_total_messages"], int)
             or not 1 <= budget["max_total_messages"] <= 5000
@@ -191,7 +192,7 @@ class PersonalContextBootstrapProductService:
             represented_owner_actor_key=owner_actor_key,
             source_kind="WHATSAPP_TEXT",
             source_account=self.settings.local_source_account,
-            source_revision="wwebjs-limit-only-snapshot-v0",
+            source_revision="wwebjs-opaque-cursor-snapshot-v1",
             source_selection={"chat_keys": selected},
             consent_ref=consent_ref,
             processing_budget=budget,

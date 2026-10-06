@@ -113,12 +113,10 @@ gmail_connection_service = GmailConnectionService(
 )
 whatsapp_history_adapter = WhatsAppHistoryAdapter(
     base_url=settings.whatsapp_history_url,
-    hmac_secret=(
-        settings.local_history_hmac_secret
-        or settings.internal_ingress_hmac_secret
-    ),
+    hmac_secret=settings.local_history_hmac_secret,
     timeout_seconds=settings.whatsapp_history_timeout_seconds,
     snapshot_limit=settings.whatsapp_history_snapshot_limit,
+    max_scan_messages=settings.whatsapp_history_max_scan_messages,
 )
 personal_context_bootstrap_service = PersonalContextBootstrapProductService(
     settings=settings,

@@ -40,6 +40,14 @@ test('createConfig defaults are fail closed', () => {
   assert.equal(config.httpHost, '127.0.0.1');
   assert.equal(config.httpPort, 18103);
   assert.equal(config.browserDebugUrl, null);
+  assert.equal(config.historyMaxScanMessages, 1000);
+  assert.equal(config.historyTimeoutMs, 15000);
+});
+
+test('history scan and timeout settings are explicit', () => {
+  const config = createConfig({ LOCAL_HISTORY_MAX_SCAN_MESSAGES: '2000', LOCAL_HISTORY_TIMEOUT_MS: '9000' });
+  assert.equal(config.historyMaxScanMessages, 2000);
+  assert.equal(config.historyTimeoutMs, 9000);
 });
 
 test('startTransport blocks when browser debug url is unavailable', async () => {

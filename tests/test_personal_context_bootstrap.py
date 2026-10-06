@@ -201,10 +201,13 @@ def test_v2b_bootstrap_advances_in_bounded_resumable_batches(session):
         "batches_completed"
     ] == 1
 
+    assert request_bootstrap_control(session, run.id, control="PAUSE").state == "PAUSED"
+    assert resume_bootstrap_run(session, run.id).state == "QUEUED"
+
     second = process_next_bootstrap_batch(
         session,
         run.id,
-        adapter=adapter,
+        adapter=BootstrapHistoryAdapter(),
     )
     assert second.state == "COMPLETED"
     assert second.resume_cursor is None
@@ -411,6 +414,24 @@ def test_v2b_failed_batch_rolls_back_partial_history_work(session):
     ) == 0
 
 
+def test_scan_limit_failure_never_completes_or_archives_partial_history(session):
+    from attention_router.integrations.whatsapp_history import WhatsAppHistoryScanLimitExceeded
+
+    class OversizedAdapter(BootstrapHistoryAdapter):
+        def fetch_messages(self, chat_key, limit, cursor=None):
+            raise WhatsAppHistoryScanLimitExceeded()
+
+    _seed_owner(session)
+    run, _ = _create_run(session)
+    queue_bootstrap_run(session, run.id)
+    result = process_next_bootstrap_batch(session, run.id, adapter=OversizedAdapter())
+    assert result.state == "FAILED"
+    assert session.scalar(select(func.count()).select_from(ConversationMessageRow)) == 0
+    assert session.scalar(select(func.count()).select_from(OutboxMessageRow)) == 0
+    assert session.scalar(select(func.count()).select_from(ExecutionIntentRow)) == 0
+    assert session.scalar(select(func.count()).select_from(RelationshipRow)) == 0
+
+
 def test_product_runtime_freezes_real_chat_selection_and_owner_controls(session):
     from types import SimpleNamespace
 
@@ -451,6 +472,7 @@ def test_product_runtime_freezes_real_chat_selection_and_owner_controls(session)
         internal_ingress_hmac_secret="i" * 32,
         client_session_enabled=True,
         personal_context_bootstrap_enabled=True,
+        personal_context_bootstrap_canary_tenant_id=DEFAULT_TENANT_ID,
         whatsapp_history_snapshot_limit=3,
     )
     service = PersonalContextBootstrapProductService(
@@ -472,6 +494,19 @@ def test_product_runtime_freezes_real_chat_selection_and_owner_controls(session)
         "max_messages_per_chat": 3,
         "max_total_messages": 6,
     }
+    service.adapter.max_scan_messages = 1000
+    assert service._budget(selected_chat_count=1, processing_budget=None) == {
+        "page_size": 3,
+        "max_messages_per_chat": 1000,
+        "max_total_messages": 500,
+    }
+    from attention_router.application.personal_context_bootstrap_product import (
+        PersonalContextBootstrapProductTenantForbidden,
+    )
+    configured.personal_context_bootstrap_canary_tenant_id = None
+    with pytest.raises(PersonalContextBootstrapProductTenantForbidden):
+        service.status(session, session_token="session-token", run_id=row.id)
+    configured.personal_context_bootstrap_canary_tenant_id = DEFAULT_TENANT_ID
 
     assert service.pause(
         session,
