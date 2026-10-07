@@ -1,5 +1,14 @@
 # Project status
 
+## WhatsApp history live rollout — rolled back after read-only probe
+
+- The first-owner canary was resolved from the latest valid Client Session and its verified tenant-request challenge, active OWNER membership and active device. The session switches across two tenants were owner-initiated.
+- The `#294` merge release `4371ccf59eb2a89ff944be8253c4635d3dd27cb7` was staged and briefly promoted to transport, API and worker with dedicated history HMAC and bounded read-only settings. Transport stayed CONNECTED with its browser PID preserved; API and worker were healthy.
+- A signed `GET /internal/history/chats` returned `503 history_read_failed` twice. Missing, invalid and query-tampered HMAC requests were rejected. No chat list, message body, BootstrapRun or archive ingestion was produced. The rollout was stopped and all live configurations, transport release and API/worker images were restored from the timestamped private backup; baseline health passed. The failure needs a separate diagnosis before retrying.
+- Read-only diagnosis isolated the failure to `whatsapp-web.js` chat serialization: the current page exposes a serialized last-message key as `$1`, while `getChats()` reads `_serialized` and passes `undefined` to IndexedDB. A transport-only candidate reads minimal chat metadata from the same cached collection without accessing last messages, and fails closed on missing or duplicate IDs. Focused synthetic history tests pass; full certification and any new live rollout remain pending.
+
+Updated: 2026-10-07
+
 ## WhatsApp deep historical bootstrap — branch candidate (#255)
 
 - `feat/whatsapp-deep-history-bootstrap-255` starts at `7ec01f3e151e08ca966a97412f449c630763f2e6` and adds bounded, HMAC-authenticated opaque cursor pagination to the read-only local history surface.

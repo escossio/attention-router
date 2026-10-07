@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const vm = require('node:vm');
 
 const { capabilities, decodeHistoryCursor, fetchHistoryMessages, listHistoryChats, mapMessage, signHistoryRequest, verifyHistoryHmac } = require('../src/history');
 const { createServer } = require('../src/server');
@@ -30,7 +31,12 @@ function fakeClient(calls) {
   };
   const client = {
     info: { wid: { _serialized: 'me@c.us' } },
-    getChats: async () => { calls.push(['getChats']); return [chat]; },
+    getChats: async () => { throw new Error('GET_CHATS_CALLED'); },
+    pupPage: syntheticChatPage([{
+      id: { _serialized: 'contact024@example.com' }, groupMetadata: {}, formattedTitle: 'Family', t: 1700000000,
+      get msgs() { throw new Error('MESSAGE_BODY_READ'); },
+      get lastReceivedKey() { throw new Error('LAST_MESSAGE_READ'); },
+    }], calls),
     getChatById: async (id) => { calls.push(['getChatById', id]); return id === 'contact024@example.com' ? chat : null; },
   };
   for (const method of ['sendMessage', 'sendSeen', 'sendStateTyping', 'sendStateRecording',
@@ -41,6 +47,18 @@ function fakeClient(calls) {
     chat[method] = async () => { throw new Error('MUTATION_CALLED'); };
   }
   return client;
+}
+
+function syntheticChatPage(chats, calls = []) {
+  return { evaluate: async (callback) => {
+    calls.push(['listChatMetadata']);
+    return vm.runInNewContext(`(${callback.toString()})()`, {
+      window: { require: (name) => {
+        assert.equal(name, 'WAWebCollections');
+        return { Chat: { getModelsArray: () => chats } };
+      } },
+    });
+  } };
 }
 
 test('history capabilities are explicit for whatsapp-web.js v1.34.7', () => {
@@ -68,7 +86,30 @@ test('history adapter only calls read APIs and preserves group sender', async ()
   assert.equal(result.messages[0].external_sender_key, 'person-a@c.us');
   assert.equal(result.messages[0].source_message_id, 'message-1');
   assert.equal(result.messages[0].reply_reference, 'message-0');
-  assert.deepEqual(calls, [['getChats'], ['getChatById', 'contact024@example.com'], ['fetchMessages', 1001]]);
+  assert.deepEqual(calls, [['listChatMetadata'], ['getChatById', 'contact024@example.com'], ['fetchMessages', 1001]]);
+});
+
+test('history chat listing accepts $1 IDs without reading message fields', async () => {
+  const calls = [];
+  const client = fakeClient(calls);
+  client.pupPage = syntheticChatPage([{
+    id: { $1: 'contact024@example.com' }, groupMetadata: null, formattedTitle: 'Direct', t: 1700000000,
+    get msgs() { throw new Error('MESSAGE_BODY_READ'); },
+    get lastReceivedKey() { throw new Error('LAST_MESSAGE_READ'); },
+  }], calls);
+  const chats = await listHistoryChats(client);
+  assert.equal(chats.length, 1);
+  assert.equal(chats[0].external_thread_key, 'contact024@example.com');
+  assert.equal(chats[0].thread_type, 'DIRECT');
+  assert.deepEqual(calls, [['listChatMetadata']]);
+});
+
+test('history chat listing fails closed on missing or duplicate IDs', async () => {
+  const client = fakeClient([]);
+  for (const source of [[{ id: null }], [{ id: 'same' }, { id: 'same' }]]) {
+    client.pupPage = syntheticChatPage(source);
+    await assert.rejects(listHistoryChats(client), /HISTORY_CHAT_LIST_INVALID/);
+  }
 });
 
 test('history HMAC is path-bound and read-only endpoint credentials are verifiable', () => {
@@ -164,7 +205,7 @@ test('history endpoint is authenticated, bounded, and read-only', async () => {
     });
     assert.equal(response.statusCode, 200);
     assert.equal(JSON.parse(response.body).chats[0].thread_type, 'GROUP');
-    assert.deepEqual(calls, [['getChats']]);
+    assert.deepEqual(calls, [['listChatMetadata']]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

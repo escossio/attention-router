@@ -101,8 +101,20 @@ function assertReadOnlyClient(client) {
 }
 
 async function listHistoryChats(client) {
-  assertReadOnlyClient(client);
-  const chats = await client.getChats();
+  if (typeof client?.pupPage?.evaluate !== 'function') throw historyError('HISTORY_CHAT_LIST_UNAVAILABLE');
+  // whatsapp-web.js getChats() serializes lastMessage through lastReceivedKey._serialized.
+  // Current WhatsApp Web exposes that key as $1; read only chat metadata instead.
+  const chats = await client.pupPage.evaluate(() => window.require('WAWebCollections').Chat.getModelsArray().map((chat) => ({
+    id: chat?.id?._serialized || chat?.id?.$1 || null,
+    isGroup: Boolean(chat?.groupMetadata),
+    name: chat?.formattedTitle ?? null,
+    timestamp: chat?.t ?? null,
+  })));
+  if (!Array.isArray(chats) || chats.some((chat) => typeof chat?.id !== 'string' || !chat.id || chat.id.length > 240
+    || (chat.name !== null && typeof chat.name !== 'string'))
+    || new Set(chats.map((chat) => chat.id)).size !== chats.length) {
+    throw historyError('HISTORY_CHAT_LIST_INVALID');
+  }
   return chats.map(mapChat);
 }
 
