@@ -10,13 +10,13 @@ observer="andy-wa-observer-offline-${RANDOM}"
 cleanup() {
   docker rm -f "$observer" "$transport" "$browser" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
-  rm -rf "$scratch"
+  sudo rm -rf "$scratch"
 }
 trap cleanup EXIT
 
 mkdir -p "$scratch"/{profile,spool,media,observer}
 chmod 0711 "$scratch"
-chown -R 1000:1000 "$scratch"/{profile,spool,media,observer}
+sudo chown -R 1000:1000 "$scratch"/{profile,spool,media,observer}
 docker network create --internal "$network" >/dev/null
 
 docker run -d --name "$browser" --network "$network" \

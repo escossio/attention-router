@@ -20,8 +20,14 @@ be launched against the live profile until the reviewed cutover window.
 - No complete earlier Browser + Transport Compose implementation was found in
   reachable public/private refs, tags, worktrees, stopped containers or Docker
   image names. The old HA transport was host-native; its preserved LocalAuth is
-  historical fallback, not the current AGT Chrome session. The pairing lab
-  Docker network is a lab artifact, not production precedent.
+  historical fallback, not the current AGT Chrome session. An August 8
+  `wwebjs-pairing-lab` Compose/image did run isolated Chromium + LocalAuth
+  without ingress, outbound, CDP or production profile. It reached QR, not
+  a certified authenticated production transport. Stage 3.5 subsequently
+  found its Chromium/wwebjs pairing path could not complete, while official
+  Chrome pairing and post-auth attach worked. The lab uses `--no-sandbox` and
+  explicitly disclaims production security suitability; reuse its volume/
+  isolation lessons, not its browser/runtime design.
 - The transport source at production merge `20fb542` is byte-identical to the
   current branch's `whatsapp-transport-local/` before importing the observer.
 
@@ -63,11 +69,12 @@ must be examined only after the old Chrome exits. The retired HA LocalAuth is
 `LEGACY` and remains untouched. No secret, session, spool payload or real
 inventory is committed.
 
-The active profile has a root-owned `Local State` file despite its normal
-runtime UID. The operator must record its original ownership in the private
-backup, prove Chrome can read the staged clone as the container UID, and plan
-the minimum ownership correction only after the live writer stops. Do not
-blindly `chown -R` the profile. Chrome sandbox behavior under Docker's default
+The active profile has four root-owned files (including `Local State` and
+Chrome preferences/session metadata) despite its normal runtime UID. The
+operator must record their original ownership in the private backup, prove
+Chrome can read the staged clone as the container UID, and plan the minimum
+ownership correction only after the live writer stops. Do not blindly
+`chown -R` the profile. Chrome sandbox behavior under Docker's default
 seccomp and dropped capabilities also needs an offline candidate proof. A
 candidate requiring `--no-sandbox` is **not certified** by this package.
 
@@ -132,7 +139,7 @@ Do not mask/delete units until the soak and rollback proof pass.
 - IPAM reservation/reconciliation for existing identities and Docker network
   parent behavior. No candidate physical network has been created.
 - Official Chrome sandbox under Docker default restrictions and profile clone
-  compatibility; the root-owned `Local State` file requires explicit handling.
+  compatibility; four root-owned profile files require explicit handling.
 - Distributed image build and synthetic offline run, GitHub PR checks, and
   Docker/ROC integration proof remain pending.
 - Andy Ops and the live preflight still report host units; they must switch to
