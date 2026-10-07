@@ -1,0 +1,402 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+    - uuid: a571c0d144b14fd4a87a9d9b2aa9fcd6
+      name: Templates/Applications
+  templates:
+    - uuid: 8a151ac48f284f66b54de51da0e0604a
+      template: 'AGT01 Docker control plane inventory'
+      name: 'AGT01 Docker control plane inventory'
+      description: 'Control plane discovery via local allowlisted Docker Unix proxy; no container IP checks.'
+      groups:
+        - name: Templates/Applications
+      items:
+        - uuid: 6dfa13d3eff44a8da69dfd36b70dd948
+          name: 'Docker control plane snapshot'
+          key: andy.docker.inventory
+          delay: 2m
+          history: '0'
+          value_type: TEXT
+          description: 'All containers including stopped, networks, attachments and ports.'
+        - uuid: 55ba130862b24d6c813bfe59d7e0e09f
+          name: 'Docker attachments inventory'
+          key: andy.docker.inventory.attachments
+          delay: 2m
+          history: 7d
+          value_type: TEXT
+        - uuid: fe67f265ecec499a985ece3c3d05f2e8
+          name: 'Docker containers inventory'
+          key: andy.docker.inventory.containers
+          delay: 2m
+          history: 7d
+          value_type: TEXT
+        - uuid: f38d1b07d6094629967ccc9d2f4be4ef
+          name: 'Docker container_labels inventory'
+          key: andy.docker.inventory.container_labels
+          delay: 2m
+          history: 7d
+          value_type: TEXT
+        - uuid: 763d907b00f4402c9a9968c5bf5e3dc1
+          name: 'Docker networks inventory'
+          key: andy.docker.inventory.networks
+          delay: 2m
+          history: 7d
+          value_type: TEXT
+        - uuid: 0d23da8885fa42a3b955182d1997dc29
+          name: 'Docker ports inventory'
+          key: andy.docker.inventory.ports
+          delay: 2m
+          history: 7d
+          value_type: TEXT
+      discovery_rules:
+        - uuid: db65de7fe4af45ffb5caa645ea7c7ed8
+          name: 'Docker container network attachments'
+          type: DEPENDENT
+          key: andy.docker.attachments.discovery
+          item_prototypes:
+            - uuid: 0a121cd7dd6f4e80b3b8479cf9266566
+              name: 'Container {#CONTAINER_NAME} on {#NETWORK}'
+              type: DEPENDENT
+              key: 'andy.docker.attachment["{#ATTACHMENT_KEY}"]'
+              history: 30d
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.attachment_key == "{#ATTACHMENT_KEY}")].first()'
+              master_item:
+                key: andy.docker.inventory.attachments
+              tags:
+                - tag: container.id
+                  value: '{#CONTAINER_ID}'
+                - tag: docker.driver
+                  value: '{#NETWORK_DRIVER}'
+                - tag: docker.network
+                  value: '{#NETWORK}'
+                - tag: entity.type
+                  value: container.network
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+          master_item:
+            key: andy.docker.inventory
+          lld_macro_paths:
+            - lld_macro: '{#ATTACHMENT_KEY}'
+              path: $.attachment_key
+            - lld_macro: '{#CONTAINER_ID}'
+              path: $.container_id
+            - lld_macro: '{#CONTAINER_NAME}'
+              path: $.container_name
+            - lld_macro: '{#ENTITY_KEY}'
+              path: $.entity_key
+            - lld_macro: '{#GATEWAY}'
+              path: $.gateway
+            - lld_macro: '{#IPV6_GATEWAY}'
+              path: $.ipv6_gateway
+            - lld_macro: '{#IPV6_SUBNET}'
+              path: $.ipv6_subnet
+            - lld_macro: '{#IPV6}'
+              path: $.ipv6
+            - lld_macro: '{#IP}'
+              path: $.ip
+            - lld_macro: '{#MAC}'
+              path: $.mac
+            - lld_macro: '{#NETWORK_DRIVER}'
+              path: $.driver
+            - lld_macro: '{#NETWORK}'
+              path: $.network
+            - lld_macro: '{#SUBNET}'
+              path: $.subnet
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.attachments
+        - uuid: 4f666e1617fa43a29c6bb32ec1b15aaa
+          name: 'Docker containers'
+          type: DEPENDENT
+          key: andy.docker.containers.discovery
+          item_prototypes:
+            - uuid: 7d1c72a95ee34e3c9bed48cc77701ccb
+              name: 'Container {#SERVICE} ({#ENTITY_KEY})'
+              type: DEPENDENT
+              key: 'andy.docker.container["{#ENTITY_KEY}"]'
+              history: 30d
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.entity_key == "{#ENTITY_KEY}")].first()'
+              master_item:
+                key: andy.docker.inventory.containers
+              tags:
+                - tag: compose.project
+                  value: '{#COMPOSE_PROJECT}'
+                - tag: compose.service
+                  value: '{#COMPOSE_SERVICE}'
+                - tag: container.id
+                  value: '{#CONTAINER_ID}'
+                - tag: container.state
+                  value: '{#STATE}'
+                - tag: deployment.environment
+                  value: '{#DEPLOYMENT_ENVIRONMENT}'
+                - tag: docker.driver
+                  value: '{#NETWORK_DRIVERS}'
+                - tag: docker.network
+                  value: '{#NETWORKS}'
+                - tag: entity.type
+                  value: container
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+                - tag: service.instance.id
+                  value: '{#CONTAINER_ID}'
+                - tag: service.name
+                  value: '{#SERVICE_NAME}'
+            - uuid: 1afe6a1e630a4b83990380a5498ff8d3
+              name: 'Container {#SERVICE}: Docker labels'
+              type: DEPENDENT
+              key: 'andy.docker.labels["{#ENTITY_KEY}"]'
+              history: 30d
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.entity_key == "{#ENTITY_KEY}")].first()'
+              master_item:
+                key: andy.docker.inventory.container_labels
+              tags:
+                - tag: container.id
+                  value: '{#CONTAINER_ID}'
+                - tag: entity.type
+                  value: container
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+          master_item:
+            key: andy.docker.inventory
+          lld_macro_paths:
+            - lld_macro: '{#COMPOSE_PROJECT}'
+              path: $.compose_project
+            - lld_macro: '{#COMPOSE_SERVICE}'
+              path: $.compose_service
+            - lld_macro: '{#CONTAINER_ID}'
+              path: $.container_id
+            - lld_macro: '{#CONTAINER_NAME}'
+              path: $.name
+            - lld_macro: '{#DEPLOYMENT_ENVIRONMENT}'
+              path: $.deployment_environment
+            - lld_macro: '{#ENTITY_KEY}'
+              path: $.entity_key
+            - lld_macro: '{#IMAGE}'
+              path: $.image
+            - lld_macro: '{#NETWORKS}'
+              path: $.networks_tag
+            - lld_macro: '{#NETWORK_DRIVERS}'
+              path: $.network_drivers_tag
+            - lld_macro: '{#SERVICE_NAME}'
+              path: $.service_name
+            - lld_macro: '{#SERVICE}'
+              path: $.service
+            - lld_macro: '{#STATE}'
+              path: $.state
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.containers
+        - uuid: b65fe3f9757e435da4dc0afc239152e0
+          name: 'Docker networks'
+          type: DEPENDENT
+          key: andy.docker.networks.discovery
+          item_prototypes:
+            - uuid: 1aab872102184815a1525aeca52a9811
+              name: 'Network {#NETWORK}'
+              type: DEPENDENT
+              key: 'andy.docker.network["{#NETWORK_KEY}"]'
+              history: 30d
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.network_key == "{#NETWORK_KEY}")].first()'
+              master_item:
+                key: andy.docker.inventory.networks
+              tags:
+                - tag: docker.driver
+                  value: '{#NETWORK_DRIVER}'
+                - tag: docker.network
+                  value: '{#NETWORK}'
+                - tag: entity.type
+                  value: docker.network
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+          master_item:
+            key: andy.docker.inventory
+          lld_macro_paths:
+            - lld_macro: '{#NETWORK_DRIVER}'
+              path: $.driver
+            - lld_macro: '{#NETWORK_ID}'
+              path: $.network_id
+            - lld_macro: '{#NETWORK_KEY}'
+              path: $.network_key
+            - lld_macro: '{#NETWORK}'
+              path: $.name
+            - lld_macro: '{#SCOPE}'
+              path: $.scope
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.networks
+        - uuid: 4f0fca96de3b4df7bd0941da7cda58c9
+          name: 'Docker exposed and published ports'
+          type: DEPENDENT
+          key: andy.docker.ports.discovery
+          item_prototypes:
+            - uuid: 186b21df51b84d70aa2cec74da3a7f70
+              name: 'Container {#CONTAINER_NAME}: {#PRIVATE_PORT}/{#PORT_PROTOCOL} port'
+              type: DEPENDENT
+              key: 'andy.docker.port["{#PORT_KEY}"]'
+              history: 30d
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.port_key == "{#PORT_KEY}")].first()'
+              master_item:
+                key: andy.docker.inventory.ports
+              tags:
+                - tag: container.id
+                  value: '{#CONTAINER_ID}'
+                - tag: entity.type
+                  value: container.port
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+          master_item:
+            key: andy.docker.inventory
+          lld_macro_paths:
+            - lld_macro: '{#BIND_ADDRESS}'
+              path: $.bind_address
+            - lld_macro: '{#CONTAINER_ID}'
+              path: $.container_id
+            - lld_macro: '{#CONTAINER_NAME}'
+              path: $.container_name
+            - lld_macro: '{#ENTITY_KEY}'
+              path: $.entity_key
+            - lld_macro: '{#PORT_KEY}'
+              path: $.port_key
+            - lld_macro: '{#PORT_PROTOCOL}'
+              path: $.protocol
+            - lld_macro: '{#PRIVATE_PORT}'
+              path: $.private_port
+            - lld_macro: '{#PUBLIC_PORT}'
+              path: $.public_port
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.ports
+        - uuid: 233327e4537e47fc891cb9abb610ff42
+          name: 'Running Docker containers for stats'
+          key: 'docker.containers.discovery[false]'
+          delay: 5m
+          lifetime: 1d
+          item_prototypes:
+            - uuid: fd2f9289d6f242c988911e8aa9c6fe7f
+              name: 'Container {#NAME}: CPU usage'
+              type: DEPENDENT
+              key: 'andy.docker.cpu_pct["{#NAME}"]'
+              history: 7d
+              value_type: FLOAT
+              trends: 90d
+              units: '%'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var x=JSON.parse(value),a=x.cpu_stats||{},b=x.precpu_stats||{};var c=(a.cpu_usage||{}).total_usage-(b.cpu_usage||{}).total_usage;var s=a.system_cpu_usage-b.system_cpu_usage;return s>0&&c>=0?c/s*(a.online_cpus||1)*100:0;'
+              master_item:
+                key: 'docker.container_stats["{#NAME}"]'
+              tags:
+                - tag: entity.type
+                  value: container
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+            - uuid: 580c2e409f094d8a92444f0b22aa60b7
+              name: 'Container {#NAME}: Memory usage'
+              type: DEPENDENT
+              key: 'andy.docker.memory_bytes["{#NAME}"]'
+              history: 7d
+              trends: 90d
+              units: B
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'return JSON.parse(value).memory_stats.usage||0;'
+              master_item:
+                key: 'docker.container_stats["{#NAME}"]'
+              tags:
+                - tag: entity.type
+                  value: container
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+            - uuid: 047dbf85ec3f4b18815a19ac8ea76abd
+              name: 'Container {#NAME}: Network received'
+              type: DEPENDENT
+              key: 'andy.docker.rx_bytes["{#NAME}"]'
+              history: 7d
+              trends: 90d
+              units: B
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var n=JSON.parse(value).networks||{};return Object.keys(n).reduce(function(s,k){return s+(n[k].rx_bytes||0)},0);'
+              master_item:
+                key: 'docker.container_stats["{#NAME}"]'
+              tags:
+                - tag: entity.type
+                  value: container
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+            - uuid: b5c95c0478134b76b754e91b84f06fb9
+              name: 'Container {#NAME}: Network transmitted'
+              type: DEPENDENT
+              key: 'andy.docker.tx_bytes["{#NAME}"]'
+              history: 7d
+              trends: 90d
+              units: B
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var n=JSON.parse(value).networks||{};return Object.keys(n).reduce(function(s,k){return s+(n[k].tx_bytes||0)},0);'
+              master_item:
+                key: 'docker.container_stats["{#NAME}"]'
+              tags:
+                - tag: entity.type
+                  value: container
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker
+            - uuid: 1562d8c0a44b4a8c8c90154c15e9882f
+              name: 'Container {#NAME}: Docker stats'
+              key: 'docker.container_stats["{#NAME}"]'
+              delay: 5m
+              history: 7d
+              value_type: TEXT
+              tags:
+                - tag: entity.type
+                  value: container
+                - tag: host.name
+                  value: agt01
+                - tag: runtime
+                  value: docker

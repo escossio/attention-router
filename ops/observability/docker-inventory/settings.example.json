@@ -1,0 +1,10 @@
+{
+  "api_url": "http://127.0.0.1:PORT/api_jsonrpc.php",
+  "username": "PRIVATE_ADMIN_USERNAME",
+  "password": "PRIVATE_ADMIN_PASSWORD",
+  "engine_host": "Andy Engine - AGT01",
+  "engine_name": "agt01",
+  "host_group_id": "PRIVATE_EXISTING_GROUP_ID",
+  "agent_address": "PRIVATE_HOST_REACHABLE_ADDRESS",
+  "agent_port": "10050"
+}
