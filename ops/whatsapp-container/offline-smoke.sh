@@ -35,6 +35,8 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 if [[ "$healthy" != yes ]]; then
+  docker inspect --format 'browser={{.State.Status}} health={{.State.Health.Status}} exit={{.State.ExitCode}}' "$browser" >&2 || true
+  docker exec "$browser" sh -c 'ps -eo pid,ppid,stat,args | head -35; ls -la /profile | head -35; cat /proc/net/tcp | head -15' >&2 || true
   docker logs --tail 40 "$browser" >&2
   echo 'offline browser candidate failed' >&2
   exit 1

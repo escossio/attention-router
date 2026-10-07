@@ -14,6 +14,7 @@ LEGACY_UNITS = re.compile(
     r"|andy-(?:browser-cdp-edge|transport-cdp-proxy|browser-netns|"
     r"transport-netns|transport-compat18103))\.service"
 )
+RUNTIME_ASSIGNMENT = re.compile(r"\bWHATSAPP_RUNTIME\s*=\s*(\w+)")
 SCANNED_SUFFIXES = {".py", ".sh", ".service", ".yaml", ".yml", ".env", ".md"}
 
 
@@ -43,7 +44,13 @@ def check(root: Path = ROOT) -> list[str]:
                 continue
             if LEGACY_UNITS.search(path.name) or LEGACY_UNITS.search(path.read_text(errors="replace")):
                 errors.append(f"legacy WhatsApp unit in canonical source: {relative}")
-    if LEGACY_UNITS.search((root / "README.md").read_text(errors="replace")):
+            for runtime in RUNTIME_ASSIGNMENT.findall(path.read_text(errors="replace")):
+                if runtime != "CONTAINERIZED":
+                    errors.append(f"host-native WhatsApp runtime declaration: {relative}")
+    project_readme = (root / "README.md").read_text(errors="replace")
+    if "WHATSAPP_RUNTIME=CONTAINERIZED" not in project_readme:
+        errors.append("project README must declare containerized WhatsApp target")
+    if LEGACY_UNITS.search(project_readme):
         errors.append("legacy WhatsApp unit in project README")
     return errors
 
