@@ -4,6 +4,7 @@ services:
   browser:
     profiles: [production]
     container_name: andy-whatsapp-browser
+    hostname: andy-whatsapp-browser
     build:
       context: ../..
       dockerfile: ops/whatsapp-container/Dockerfile.browser

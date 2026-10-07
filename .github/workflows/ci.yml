@@ -89,6 +89,8 @@ jobs:
         run: docker build -f ops/whatsapp-container/Dockerfile.browser --build-arg SOURCE_SHA=${{ github.sha }} -t andy-whatsapp-browser:ci .
       - name: Smoke WhatsApp candidate without provider network
         run: bash ops/whatsapp-container/offline-smoke.sh
+      - name: Smoke Browser restart and recreate with an isolated profile
+        run: bash ops/whatsapp-container/browser-lifecycle-smoke.sh
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 10

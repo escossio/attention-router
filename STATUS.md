@@ -1,5 +1,15 @@
 # Project status
 
+## WhatsApp Browser persistent-profile lifecycle — certified clone, PR candidate
+
+- PR #305 merged as `3cb4aa685e49a0e77cfe66ac5989a5657dadced4` after all 11 checks passed. The first cutover remains rolled back; host-native Browser and Transport are still active.
+- Root cause: Chrome's persistent `SingletonLock` stores hostname/PID. The first container start used a clean profile; recreate inherited links naming the old container and Chrome rejected the new hostname. Docker restart may also retain an unbound Singleton socket inode in the container's `/tmp`.
+- A separate candidate branch adds stable Browser hostname, a persistent operational `flock`, and a fail-closed guard that classifies clean, active, proven stale and ambiguous Singleton state before Chrome starts. It removes only three validated symlinks after ownership checks; foreign host, live PID/listener, unknown artifacts and concurrent candidate block startup.
+- Private stopped-writer profile clone: first start, Docker restart, Compose stop/start, force-recreate, down/up and three additional recreates all passed with CDP, one writer, zero crash loops and IPv4 forwarding off. Second candidate against the same clone failed before Chrome on the operational lock. Transport synthetic start/restart/recreate kept cache and spool writable, rootfs read-only and CDP proxy reachable. Observer synthetic READY survived restart/recreate with body capture off and failed closed when the synthetic page disappeared. No provider, pairing, logout or outbound test was used.
+- The single new quarantine file from rollback was inspected read-only: ingress returned HTTP 422 at its timestamp; no matching backend inbound event or interaction was found. Classified `INVALID_PAYLOAD`; file retained without replay/deletion.
+- The candidate is awaiting a separate PR and CI; no second live cutover occurred or is authorized in this phase.
+
+
 ## WhatsApp container cutover — rolled back after controlled attempt
 
 - PR #304 merged as `0d141e48f66b33ed03286684cf4bb2985205d788`. The clean candidate checkout was updated to that main SHA; the original legacy workspace was preserved.
