@@ -16,7 +16,7 @@ def test_pending_intent_client_command_source_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0056_attention_salience_v0"]
+            ).scalars().all() == ["0057_bootstrap_selection"]
 
             schema = inspect(connection)
             columns = {

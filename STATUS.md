@@ -1,5 +1,14 @@
 # Project status
 
+## Owner-authenticated WhatsApp bootstrap selection — backend candidate
+
+- A temporary, canary-tenant and owner-bound selection can be staged from private operator files. The staging command validates the five approved indices against the private chat map, stores an expiring opaque ticket, and creates no BootstrapRun.
+- The Android-facing read returns only the ticket ID, expiry and bounded display labels. Confirmation requires the existing Client Session, revalidates owner and tenant, then calls the existing Product Bootstrap service. A consumed ticket replays the same run for an identical request.
+- No private chat key, personal label, bearer or tenant identifier is committed. No live selection, BootstrapRun, message fetch, deployment or merge has been performed by this candidate. Live continuity is unaffected; historical acceleration remains owner initiated.
+- Local compile, Ruff and diff checks passed. The explicit Alembic chain test expects head `0057_bootstrap_selection` and proves its parent is `0056_attention_salience_v0`; the focused schema/API/bootstrap selection passed 29 tests. A fixture truncate omission and 25 old-head assertions were corrected without removing downgrade checks. On the resulting code SHA, all required GitHub checks passed, including distributed Python and 463 distributed PostgreSQL tests without degradation. No production operation was performed.
+
+Updated: 2026-10-07
+
 ## WhatsApp history live rollout — rolled back after read-only probe
 
 - The first-owner canary was resolved from the latest valid Client Session and its verified tenant-request challenge, active OWNER membership and active device. The session switches across two tenants were owner-initiated.

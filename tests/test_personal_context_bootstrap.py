@@ -525,6 +525,110 @@ def test_product_runtime_freezes_real_chat_selection_and_owner_controls(session)
     ).state == "CANCELLED"
 
 
+def test_staged_selection_requires_owner_session_and_confirms_once(session):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from attention_router.application.personal_context_bootstrap_product import (
+        PersonalContextBootstrapProductService,
+    )
+    from attention_router.application.personal_context_bootstrap_selection import (
+        BootstrapSelectionExpired,
+        BootstrapSelectionService,
+        stage_selection,
+    )
+    from attention_router.config import Settings
+    from attention_router.infrastructure.models import (
+        AgentExecutionIntentRow, CapabilityGrantRow,
+    )
+
+    keys = [f"synthetic-chat-{i}" for i in range(5)]
+    chats = [
+        {"index": i + 1, "external_thread_key": key,
+         "display_name": f"Conversa {i + 1}",
+         "thread_type": "GROUP" if i == 0 else "DIRECT"}
+        for i, key in enumerate(keys)
+    ]
+    budget = {"page_size": 50, "max_messages_per_chat": 1000,
+              "max_total_messages": 5000}
+
+    class ClientSessions:
+        def authenticated_bootstrap(self, _session, *, session_token):
+            return SimpleNamespace(
+                active_tenant_id=(
+                    "wrong-tenant" if session_token == "wrong-tenant"
+                    else DEFAULT_TENANT_ID
+                ),
+                human_identity_id=(
+                    "wrong-owner" if session_token == "wrong-owner"
+                    else OWNER_HUMAN_ID
+                ),
+            )
+
+    class Adapter:
+        snapshot_limit = 100
+        max_scan_messages = 1000
+
+        def list_chats(self):
+            return [
+                {"external_thread_key": key, "thread_type": chat["thread_type"],
+                 "title": chat["display_name"]}
+                for key, chat in zip(keys, chats)
+            ]
+
+    _seed_owner(session)
+    settings = Settings(
+        _env_file=None, app_env="test", internal_ingress_hmac_secret="i" * 32,
+        client_session_enabled=True, personal_context_bootstrap_enabled=True,
+        personal_context_bootstrap_canary_tenant_id=DEFAULT_TENANT_ID,
+    )
+    staged = stage_selection(
+        session, settings=settings, owner_human_identity_id=OWNER_HUMAN_ID,
+        chats=chats, consent_ref="synthetic-owner-consent", processing_budget=budget,
+    )
+    assert session.scalar(select(func.count()).select_from(PersonalContextBootstrapRunRow)) == 0
+    product = PersonalContextBootstrapProductService(
+        settings=settings, client_sessions=ClientSessions(), adapter=Adapter()
+    )
+    selections = BootstrapSelectionService(product)
+    assert selections.pending(session, session_token="owner").id == staged.id
+    from attention_router.application.personal_context_bootstrap_product import (
+        PersonalContextBootstrapProductTenantForbidden,
+    )
+    with pytest.raises(PersonalContextBootstrapProductTenantForbidden):
+        selections.confirm(session, session_token="wrong-tenant",
+                           selection_id=staged.id, consent_ref="synthetic-owner-consent",
+                           processing_budget=budget)
+    with pytest.raises(PersonalContextBootstrapError):
+        selections.confirm(session, session_token="wrong-owner",
+                           selection_id=staged.id, consent_ref="synthetic-owner-consent",
+                           processing_budget=budget)
+    run = selections.confirm(
+        session, session_token="owner", selection_id=staged.id,
+        consent_ref="synthetic-owner-consent", processing_budget=budget,
+    )
+    assert run.state == "QUEUED"
+    assert run.source_selection == {"chat_keys": sorted(keys)}
+    assert run.processing_budget == budget
+    assert selections.confirm(
+        session, session_token="owner", selection_id=staged.id,
+        consent_ref="synthetic-owner-consent", processing_budget=budget,
+    ).id == run.id
+    assert session.scalar(select(func.count()).select_from(PersonalContextBootstrapRunRow)) == 1
+    for model in (OutboxMessageRow, ExecutionIntentRow, AgentExecutionIntentRow,
+                  CapabilityGrantRow, RelationshipRow):
+        assert session.scalar(select(func.count()).select_from(model)) == 0
+
+    expired = stage_selection(
+        session, settings=settings, owner_human_identity_id=OWNER_HUMAN_ID,
+        chats=chats, consent_ref="synthetic-expired", processing_budget=budget,
+        now=datetime.now(UTC) - timedelta(days=2),
+    )
+    with pytest.raises(BootstrapSelectionExpired):
+        selections.confirm(session, session_token="owner", selection_id=expired.id,
+                           consent_ref="synthetic-expired", processing_budget=budget)
+
+
 def test_bootstrap_runtime_canary_advances_only_exact_tenant(session):
     from attention_router.application.personal_context_bootstrap_runtime import (
         run_personal_context_bootstrap_runtime_cycle,
