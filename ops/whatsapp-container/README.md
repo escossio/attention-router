@@ -97,7 +97,10 @@ explicit review. A candidate requiring `--no-sandbox`, `SYS_ADMIN` or
 2. `docker compose --env-file PRIVATE_ENV -f ops/whatsapp-container/compose.yaml --profile production config --quiet`.
 3. Build images on the distributed Docker worker/CI gate for the exact PR SHA.
    Verify image labels, architecture, Chrome/Node versions and no embedded
-   state or secrets. Run synthetic browser and transport tests offline.
+   state or secrets. Run synthetic browser and transport tests offline. With
+   `about:blank`, the Transport must remain alive and its local CDP proxy must
+   work; `/ready` and a connected WhatsApp page require the authenticated
+   profile and are reserved for the reviewed cutover proof.
 4. Validate profile compatibility only with a private, isolated clone or
    snapshot. Never mount the live profile in a candidate while host Chrome is
    active. Never issue pairing, provider calls or outbound delivery in a test.

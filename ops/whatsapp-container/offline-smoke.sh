@@ -57,14 +57,15 @@ docker run -d --name "$transport" --network "$network" \
   -v "$scratch/media:/var/lib/attention-router/whatsapp-media" \
   andy-whatsapp-transport:ci >/dev/null
 
-live=no
-for _ in $(seq 1 40); do
-  if docker exec "$transport" curl -fsS --max-time 1 http://127.0.0.1:18103/live >/dev/null 2>&1; then live=yes; break; fi
+proxy_ready=no
+for _ in $(seq 1 20); do
+  if docker exec "$transport" curl -fsS --max-time 1 http://127.0.0.1:9223/json/version >/dev/null 2>&1; then proxy_ready=yes; break; fi
   sleep 1
 done
-if [[ "$live" != yes ]]; then
+sleep 3
+if [[ "$proxy_ready" != yes || "$(docker inspect --format '{{.State.Running}}' "$transport")" != true ]]; then
   docker logs --tail 40 "$transport" >&2
-  echo 'offline transport candidate failed' >&2
+  echo 'offline transport or local CDP proxy failed' >&2
   exit 1
 fi
 
