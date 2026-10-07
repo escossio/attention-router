@@ -23,6 +23,7 @@ from attention_router.application.gmail_connection import GmailConnectionService
 from attention_router.application.personal_context_bootstrap_product import (
     PersonalContextBootstrapProductService,
 )
+from attention_router.application.personal_context_bootstrap_selection import BootstrapSelectionService
 from attention_router.application.decision_pipeline import decision_to_dict
 from attention_router.application import response_review
 from attention_router.application import execution
@@ -247,6 +248,7 @@ app.include_router(build_gmail_connection_router(
 app.include_router(build_personal_context_bootstrap_router(
     get_session=get_session,
     service=personal_context_bootstrap_service,
+    selection_service=BootstrapSelectionService(personal_context_bootstrap_service),
 ))
 
 

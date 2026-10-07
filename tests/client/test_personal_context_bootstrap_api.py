@@ -136,6 +136,62 @@ def test_bootstrap_api_create_queues_owner_request_without_identity_shortcuts(se
     assert forbidden.status_code == 422
 
 
+def test_selection_api_uses_bearer_and_never_returns_chat_keys(session):
+    class SelectionService:
+        def __init__(self):
+            self.calls = []
+
+        def pending(self, _session, *, session_token):
+            self.calls.append(("pending", session_token))
+            return SimpleNamespace(
+                id="pbs_synthetic", expires_at=datetime(2026, 10, 8, tzinfo=UTC),
+                display_chats=[{"index": 4, "display_name": "Synthetic chat",
+                                "thread_type": "GROUP"}],
+                chat_keys=["private-synthetic-key"],
+            )
+
+        def confirm(self, _session, *, session_token, selection_id,
+                    consent_ref, processing_budget):
+            self.calls.append(("confirm", session_token, selection_id,
+                               consent_ref, processing_budget))
+            return _row()
+
+    selections = SelectionService()
+
+    def get_session():
+        yield session
+
+    app = FastAPI()
+    app.include_router(build_personal_context_bootstrap_router(
+        get_session=get_session, service=FakeService(),
+        selection_service=selections,
+    ))
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    pending = client.get(
+        "/api/v1/personal-context/bootstrap/selections/pending", headers=headers
+    )
+    assert pending.status_code == 200
+    assert pending.json()["selection"]["selection_id"] == "pbs_synthetic"
+    assert "private-synthetic-key" not in pending.text
+    confirmed = client.post(
+        "/api/v1/personal-context/bootstrap/selections/pbs_synthetic/confirm",
+        headers=headers,
+        json={"consent_ref": "synthetic-consent", "processing_budget": {
+            "page_size": 50, "max_messages_per_chat": 1000,
+            "max_total_messages": 5000,
+        }},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json() == {
+        "contract_version": "1", "run_id": "pcb_test",
+        "source_kind": "WHATSAPP_TEXT", "state": "QUEUED",
+    }
+    assert "private-synthetic-key" not in confirmed.text
+    assert selections.calls[0] == ("pending", TOKEN)
+    assert selections.calls[1][1] == TOKEN
+
+
 def test_bootstrap_status_pause_resume_cancel_use_same_client_session(session):
     client, service = _client(session)
 

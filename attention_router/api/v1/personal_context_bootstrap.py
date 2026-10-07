@@ -24,6 +24,13 @@ from attention_router.application.personal_context_bootstrap_product import (
     PersonalContextBootstrapProductService,
     PersonalContextBootstrapProductTenantForbidden,
 )
+from attention_router.application.personal_context_bootstrap_selection import (
+    BootstrapSelectionConflict,
+    BootstrapSelectionError,
+    BootstrapSelectionExpired,
+    BootstrapSelectionNotFound,
+    BootstrapSelectionService,
+)
 from attention_router.infrastructure.personal_context_bootstrap_models import (
     PersonalContextBootstrapRunRow,
 )
@@ -74,6 +81,33 @@ class PersonalContextBootstrapRunResponse(BaseModel):
 class PersonalContextBootstrapErrorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str = Field(min_length=1, max_length=100)
+
+
+class BootstrapSelectionConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consent_ref: str = Field(min_length=1, max_length=240)
+    processing_budget: dict[str, int]
+
+
+class BootstrapSelectionView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selection_id: str
+    expires_at: datetime
+    chats: list[dict[str, Any]]
+
+
+class BootstrapSelectionPendingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contract_version: Literal["1"] = "1"
+    selection: BootstrapSelectionView | None
+
+
+class BootstrapSelectionConfirmResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contract_version: Literal["1"] = "1"
+    run_id: str
+    source_kind: Literal["WHATSAPP_TEXT"] = "WHATSAPP_TEXT"
+    state: str
 
 
 _BEARER = HTTPBearer(
@@ -161,6 +195,7 @@ def build_personal_context_bootstrap_router(
     *,
     get_session,
     service: PersonalContextBootstrapProductService,
+    selection_service: BootstrapSelectionService | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["personal-context-bootstrap"])
 
@@ -198,12 +233,78 @@ def build_personal_context_bootstrap_router(
         elif isinstance(error, WhatsAppHistoryError):
             code = error.code
             http_status = status.HTTP_503_SERVICE_UNAVAILABLE
+        elif isinstance(error, BootstrapSelectionError):
+            code = error.code
+            if isinstance(error, BootstrapSelectionNotFound):
+                http_status = status.HTTP_404_NOT_FOUND
+            elif isinstance(error, (BootstrapSelectionConflict, BootstrapSelectionExpired)):
+                http_status = status.HTTP_409_CONFLICT
+            else:
+                http_status = status.HTTP_400_BAD_REQUEST
         else:
             raise error
         return JSONResponse(
             status_code=http_status,
             content={"code": code},
         )
+
+    if selection_service is not None:
+        @router.get(
+            "/api/v1/personal-context/bootstrap/selections/pending",
+            response_model=BootstrapSelectionPendingResponse,
+            operation_id="getPendingPersonalContextBootstrapSelection",
+        )
+        def pending_selection(
+            credentials: Annotated[
+                HTTPAuthorizationCredentials | None, Security(_BEARER)
+            ],
+            session: Session = Depends(get_session),
+        ) -> BootstrapSelectionPendingResponse | JSONResponse:
+            try:
+                row = selection_service.pending(
+                    session, session_token=_token(credentials)
+                )
+            except (ClientSessionError, PersonalContextBootstrapProductError,
+                    PersonalContextBootstrapError, BootstrapSelectionError) as error:
+                return _error(error)
+            return BootstrapSelectionPendingResponse(
+                selection=(
+                    BootstrapSelectionView(
+                        selection_id=row.id,
+                        expires_at=row.expires_at,
+                        chats=list(row.display_chats),
+                    ) if row else None
+                ),
+            )
+
+        @router.post(
+            "/api/v1/personal-context/bootstrap/selections/{selection_id}/confirm",
+            response_model=BootstrapSelectionConfirmResponse,
+            operation_id="confirmPersonalContextBootstrapSelection",
+        )
+        def confirm_selection(
+            selection_id: str,
+            payload: BootstrapSelectionConfirmRequest,
+            credentials: Annotated[
+                HTTPAuthorizationCredentials | None, Security(_BEARER)
+            ],
+            session: Session = Depends(get_session),
+        ) -> BootstrapSelectionConfirmResponse | JSONResponse:
+            try:
+                with session.begin_nested():
+                    row = selection_service.confirm(
+                        session, session_token=_token(credentials),
+                        selection_id=selection_id,
+                        consent_ref=payload.consent_ref,
+                        processing_budget=payload.processing_budget,
+                    )
+                return BootstrapSelectionConfirmResponse(
+                    run_id=row.id, state=row.state
+                )
+            except (ClientSessionError, PersonalContextBootstrapProductError,
+                    PersonalContextBootstrapError, BootstrapSelectionError,
+                    WhatsAppHistoryError) as error:
+                return _error(error)
 
     @router.post(
         "/api/v1/personal-context/bootstrap",
