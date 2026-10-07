@@ -99,8 +99,9 @@ explicit review. A candidate requiring `--no-sandbox`, `SYS_ADMIN` or
    Verify image labels, architecture, Chrome/Node versions and no embedded
    state or secrets. Run synthetic browser and transport tests offline. With
    `about:blank`, the Transport must remain alive and its local CDP proxy must
-   work; `/ready` and a connected WhatsApp page require the authenticated
-   profile and are reserved for the reviewed cutover proof.
+   work; the observer must reject the unconnected page with body capture off.
+   `/ready`, observer status output and a connected WhatsApp page require the
+   authenticated profile and are reserved for the reviewed cutover proof.
 4. Validate profile compatibility only with a private, isolated clone or
    snapshot. Never mount the live profile in a candidate while host Chrome is
    active. Never issue pairing, provider calls or outbound delivery in a test.

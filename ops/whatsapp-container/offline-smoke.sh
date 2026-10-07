@@ -78,18 +78,14 @@ docker run -d --name "$observer" --network "container:$browser" \
   andy-whatsapp-transport:ci observer >/dev/null
 
 observed=no
-for _ in $(seq 1 30); do
-  if [[ -s "$scratch/observer/status.json" ]]; then observed=yes; break; fi
+for _ in $(seq 1 20); do
+  if docker logs "$observer" 2>&1 | grep -F '"event":"observer_page_selection_blocked","reason":"ZERO_CONNECTED_PAGES"' >/dev/null; then observed=yes; break; fi
   sleep 1
 done
-if [[ "$observed" != yes ]]; then
+if [[ "$observed" != yes || "$(docker inspect --format '{{.State.Running}}' "$observer")" != true ]] \
+    || ! docker logs "$observer" 2>&1 | grep -F '"capture_body":false' >/dev/null; then
   docker logs --tail 40 "$observer" >&2
   echo 'offline observer candidate failed' >&2
   exit 1
 fi
-python3 - "$scratch/observer/status.json" <<'PY'
-import json, sys
-state=json.load(open(sys.argv[1], encoding='utf-8'))
-assert state['capture_body'] is False
-PY
 echo 'OFFLINE_WHATSAPP_CONTAINER_SMOKE=PASS'
