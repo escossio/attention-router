@@ -1,5 +1,7 @@
 # Project status
 
+- 2026-10-07: Andy Ops container observability: nova branch `fix/andy-ops-container-whatsapp-observability-v1`, sensores host-native removidos do modelo atual; Transport `/status`, Observer `status.json` e Docker read-only. Regressões targeted 16/16; amostra live read-only no candidato indica `severity=OK`, páginas 1/1. PR e deploy em andamento. Boot/AppArmor permanece follow-up separado.
+
 ## WhatsApp container runtime — second cutover PASS, reboot pending
 
 - PR #306 merged as `5e97b6b49d352ac74b2e0434fc06b1fca7ce452f` after all 11 checks passed. The cutover checkout and local Browser/Transport images used that exact merge SHA.
