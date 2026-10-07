@@ -1,6 +1,6 @@
 # Project status
 
-- 2026-10-07: Andy Ops container observability: nova branch `fix/andy-ops-container-whatsapp-observability-v1`, sensores host-native removidos do modelo atual; Transport `/status`, Observer `status.json` e Docker read-only. Regressões targeted 16/16; amostra live read-only no candidato indica `severity=OK`, páginas 1/1. PR #308: worker Python detectou contrato `_transport_projection` removido; compatibilidade restaurada, novo ciclo CI pendente. Deploy pendente. Boot/AppArmor permanece follow-up separado.
+- 2026-10-07: Andy Ops container observability corrigida em PR #308 (`fix/andy-ops-container-whatsapp-observability-v1`). Runtime live mudou somente em `transport_observability.py`, `app.js`, `index.html`, com backup `/root/andy-ops-panel-backup-20261007-container-observability`; reiniciado somente `andy-ops-panel.service`. API live: Browser container healthy/página 1, Transport READY/CONNECTED/página 1, Observer READY/página 1, `severity=OK`, divergências vazias; UI estática servida atualizada, HTTPS gestão exige autenticação (401 sem credenciais). Containers WhatsApp mantiveram IDs e health. 11 checks verdes no commit de código `95a1c96`; registro documental aguarda checks próprios. Boot/AppArmor permanece follow-up separado.
 
 ## WhatsApp container runtime — second cutover PASS, reboot pending
 
