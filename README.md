@@ -55,6 +55,15 @@ See [architecture and trust boundaries](docs/architecture/overview.md).
 Architecture governance: [decision records](docs/adr/README.md), [threat
 model](docs/security/threat-model.md), and [technical roadmap](ROADMAP.md).
 
+## WhatsApp runtime target
+
+`WHATSAPP_RUNTIME=CONTAINERIZED` is the declared target. The AGT live deployment
+remains host-native until a separately approved cutover, soak and reboot proof.
+The versioned [container candidate and rollback plan](ops/whatsapp-container/README.md)
+are in PR review; the old units are `RETIRED_HISTORICAL` and cannot be
+reintroduced as new deployment sources. No pairing or session transfer is
+performed by this declaration.
+
 ## Operational observability
 
 The AGT runtime now has an out-of-band lightweight observability layer:

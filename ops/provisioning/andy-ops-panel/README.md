@@ -88,6 +88,8 @@ Environment variables:
 - ANDY_OPS_GOACCESS_URL - optional LAN URL for the GoAccess UI;
 - ANDY_OPS_DOZZLE_URL - optional LAN URL for the Dozzle UI.
 - `ANDY_OPS_TRANSPORT_OBSERVABILITY_ENABLED` - defaults to `false`; enables the read-only AGENT / TRANSPORT probes;
+- `ANDY_OPS_WHATSAPP_RUNTIME_BACKEND` - defaults to `container`; reads the Transport status endpoint and the observer's bounded `status.json`. The panel needs no Docker socket or CDP exposure. `legacy_systemd` exists only for the pre-cutover deployment and must be removed after successful soak;
+- `ANDY_OPS_WHATSAPP_OBSERVER_STATUS_FILE` - local path to the observer's mounted status projection, without message bodies;
 - `ANDY_OPS_MESSAGE_TRACING_ENABLED` - defaults to `false`; enables bounded message-lifecycle tracing;
 - `ANDY_OPS_TRACE_DB_CONTAINER` - host-private container name required when message tracing is enabled.
 - `ANDY_OPS_NETWORK_OSI_URL` - optional URL of the authenticated Grafana ROC

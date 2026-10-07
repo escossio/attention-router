@@ -1,4 +1,9 @@
-# Runtime network namespaces
+# RETIRED_HISTORICAL — host-native runtime network namespaces
+
+This package is retained solely for private rollback and forensic history.
+It is not the canonical WhatsApp runtime target. The container candidate is
+under `ops/whatsapp-container/`; do not install this package as a new
+production deployment. AGT live remains host-native until approved cutover.
 
 This package captures the source-controlled wiring used to isolate the Browser
 and Transport runtimes in dedicated Linux network namespaces.
@@ -48,7 +53,7 @@ Resolver files remain host-owned:
 
 The source examples intentionally contain no deployable private addresses.
 
-## Deployment rule
+## Historical deployment rule — do not execute for new deployments
 
 Repository files are source of truth for logic. Host topology remains private.
 Deployment must validate the environment, install scripts and units, run

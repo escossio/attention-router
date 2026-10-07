@@ -3,7 +3,8 @@ import re
 import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-ROOT = REPO_ROOT / "ops" / "provisioning" / "runtime-network"
+ROOT = REPO_ROOT / "ops" / "historical" / "whatsapp-host-native" / "runtime-network"
+CANDIDATE = REPO_ROOT / "ops" / "whatsapp-container"
 PRIVATE_IPV4 = re.compile(
     r"(?:192\\.168\\.|10\\.\\d+\\.\\d+\\.\\d+|172\\.(?:1[6-9]|2\\d|3[01])\\.\\d+\\.\\d+)"
 )
@@ -41,7 +42,7 @@ class RuntimeNetworkContractTests(unittest.TestCase):
                 unit,
             )
 
-    def test_product_services_keep_namespace_attachment(self):
+    def test_retired_services_keep_rollback_namespace_attachment(self):
         browser = (
             ROOT / "systemd/attention-whatsapp-browser.service.d/zz-network-namespace.conf"
         ).read_text()
@@ -53,12 +54,21 @@ class RuntimeNetworkContractTests(unittest.TestCase):
         self.assertIn("NetworkNamespacePath=/run/netns/andy-transport", transport)
 
     def test_public_package_has_no_private_topology_literals(self):
-        for path in ROOT.rglob("*"):
+        for path in (*ROOT.rglob("*"), *CANDIDATE.rglob("*")):
             if not path.is_file() or "__pycache__" in path.parts:
                 continue
             text = path.read_text(errors="ignore")
             self.assertIsNone(PRIVATE_IPV4.search(text), path)
             self.assertNotRegex(text, r"\benp\d", path)
+
+    def test_container_target_replaces_manual_namespace_units(self):
+        self.assertFalse((REPO_ROOT / "ops/provisioning/runtime-network").exists())
+        self.assertIn("RETIRED_HISTORICAL", (ROOT / "README.md").read_text())
+        compose = (CANDIDATE / "compose.yaml").read_text()
+        self.assertIn("driver: macvlan", compose)
+        self.assertIn("internal: true", compose)
+        self.assertIn("network_mode: service:browser", compose)
+        self.assertNotIn("NetworkNamespacePath", compose)
 
 
 if __name__ == "__main__":
