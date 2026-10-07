@@ -28,10 +28,14 @@ docker run -d --name "$browser" --network "$network" \
   -v "$scratch/profile:/profile" andy-whatsapp-browser:ci >/dev/null
 
 healthy=no
-for _ in $(seq 1 120); do
+for attempt in $(seq 1 120); do
   state=$(docker inspect --format '{{.State.Health.Status}}' "$browser")
   if [[ "$state" == healthy ]]; then healthy=yes; break; fi
   if [[ "$state" == unhealthy ]]; then break; fi
+  if [[ "$attempt" == 10 ]]; then
+    echo 'offline browser diagnostic at 10 seconds' >&2
+    docker exec "$browser" sh -c 'ps -eo pid,ppid,stat,args | head -35; ls -la /profile | head -35; cat /proc/net/tcp | head -15' >&2 || true
+  fi
   sleep 1
 done
 if [[ "$healthy" != yes ]]; then
