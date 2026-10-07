@@ -21,7 +21,7 @@ def test_attention_salience_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0056_attention_salience_v0"]
+            ).scalars().all() == ["0057_bootstrap_selection"]
 
             schema = inspect(connection)
             assert "attention_assessments" in set(schema.get_table_names())
@@ -191,7 +191,7 @@ def test_attention_salience_refuses_destructive_downgrade(
     with engine.connect() as connection:
         assert connection.scalar(
             text("SELECT version_num FROM alembic_version")
-        ) == "0056_attention_salience_v0"
+        ) == "0057_bootstrap_selection"
         assert connection.scalar(
             text("SELECT count(*) FROM attention_assessments")
         ) == 1
