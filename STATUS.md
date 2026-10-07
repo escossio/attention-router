@@ -1,5 +1,14 @@
 # Project status
 
+## WhatsApp container cutover — rolled back after controlled attempt
+
+- PR #304 merged as `0d141e48f66b33ed03286684cf4bb2985205d788`. The clean candidate checkout was updated to that main SHA; the original legacy workspace was preserved.
+- The authorized cutover stopped the host units, verified release of the existing addresses, and took a stopped-writer private profile/spool/media/observer backup with file and metadata checks. Browser and Transport containers reached authenticated/CONNECTED, with QR absent and physical VLAN witnesses. API and Worker reached the Transport.
+- The observer exposed a real Puppeteer connection API mismatch; focused fix and test are in open PR #305. After a local observer image update it became healthy with body capture off. Namespace forwarding was disabled live and declared off in Compose on #305.
+- Recreating Browser to persist the network setting hit stale Chrome Singleton links and entered a crash loop. The immediate rollback stopped/removed all candidate containers and networks, restored the consistent profile, and restarted all eight host units. Host Browser/Transport are again healthy, CONNECTED, ready and QR absent; no pairing, logout, outbound test, MikroTik change, new production VLAN or new production IP occurred. The 15-minute soak did not complete.
+- Outbox counts and duplicate-inbound query match baseline. One new inbound file appeared in spool quarantine during recovery and was preserved for private triage. Candidate fix remains unmerged; no second cutover attempt was made in this window.
+
+
 ## WhatsApp container runtime migration — forensic audit and candidate, no live cutover
 
 - User confirmed there is no formal IPAM or reserved test IP for VLANs 210/211. Physical macvlan test status is `BLOCKED_BY_NO_RESERVED_TEST_IP`; no inferred address will be used. Read-only reconciliation found the production `.2` and `.10` only in their live host namespaces, no matching attachment in 25 Docker networks, and their existing gateways reachable by neighbor state. This does not prove Docker macvlan egress/ingress or exclude an unknown external claimant. Both candidate images are locally available from distributed-worker builds at the certified #302 source SHA. Production remains untouched.
