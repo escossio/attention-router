@@ -52,6 +52,11 @@ def _project(payload: dict[str, Any], allowed: frozenset[str]) -> dict[str, Any]
             (value is None or isinstance(value, (str, bool, int, float)))}
 
 
+def _transport_projection(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep the existing allowlisted projection contract for callers and tests."""
+    return _project(payload, SAFE_TRANSPORT_FIELDS)
+
+
 def _docker_states() -> dict[str, dict[str, Any]]:
     states = {role: {"exists": False, "running": None, "health": None, "restart_count": None,
                      "started_at": None, "image": None, "revision": None} for role in CONTAINERS}
@@ -193,7 +198,7 @@ def sample_transport_observability() -> dict[str, Any]:
                 "derived": {"severity": "DISABLED", "divergence": False, "divergences": []}, "timeline": []}
     docker = _docker_states()
     try:
-        transport = _project(_http_json(TRANSPORT_STATUS_URL), SAFE_TRANSPORT_FIELDS)
+        transport = _transport_projection(_http_json(TRANSPORT_STATUS_URL))
         transport["probe_error"] = None
     except (OSError, ValueError, TimeoutError) as error:
         transport = {"probe_error": type(error).__name__}

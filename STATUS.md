@@ -1,6 +1,6 @@
 # Project status
 
-- 2026-10-07: Andy Ops container observability: nova branch `fix/andy-ops-container-whatsapp-observability-v1`, sensores host-native removidos do modelo atual; Transport `/status`, Observer `status.json` e Docker read-only. Regressões targeted 16/16; amostra live read-only no candidato indica `severity=OK`, páginas 1/1. PR e deploy em andamento. Boot/AppArmor permanece follow-up separado.
+- 2026-10-07: Andy Ops container observability: nova branch `fix/andy-ops-container-whatsapp-observability-v1`, sensores host-native removidos do modelo atual; Transport `/status`, Observer `status.json` e Docker read-only. Regressões targeted 16/16; amostra live read-only no candidato indica `severity=OK`, páginas 1/1. PR #308: worker Python detectou contrato `_transport_projection` removido; compatibilidade restaurada, novo ciclo CI pendente. Deploy pendente. Boot/AppArmor permanece follow-up separado.
 
 ## WhatsApp container runtime — second cutover PASS, reboot pending
 
