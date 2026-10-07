@@ -518,6 +518,10 @@ function withTimeout(promise, milliseconds, fallback) {
   ]).finally(() => clearTimeout(timer));
 }
 
+function browserConnected(browser) {
+  return Boolean(browser?.isConnected?.() ?? browser?.connected);
+}
+
 class ObserverService {
   constructor({ config, puppeteer, logger = console }) {
     this.config = config;
@@ -617,7 +621,7 @@ class ObserverService {
   }
 
   async connectBrowser() {
-    if (this.browser?.isConnected?.()) return true;
+    if (browserConnected(this.browser)) return true;
     try {
       const browser = await this.puppeteer.connect({ browserURL: this.config.browserUrl });
       if (this.stopping) {
@@ -757,7 +761,7 @@ class ObserverService {
       this.noteError(error, 'BROWSER_UNAVAILABLE');
       this.status.browser_connected = false;
       this.status.listener_attached = false;
-      if (this.browser?.isConnected?.()) this.browser.disconnect();
+      if (browserConnected(this.browser)) this.browser.disconnect();
       this.browser = null;
       await this.queueStatusWrite();
       return;
@@ -874,7 +878,7 @@ class ObserverService {
     this.operational('observer_stopping', { signal });
     await this.activeOperation?.catch(() => {});
     await this.detachSelectedPage(false);
-    if (this.browser?.isConnected?.()) this.browser.disconnect();
+    if (browserConnected(this.browser)) this.browser.disconnect();
     this.browser = null;
     this.status.browser_connected = false;
     this.status.listener_attached = false;
