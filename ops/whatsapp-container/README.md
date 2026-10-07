@@ -69,6 +69,7 @@ acceptance remains a physical cutover gate.
 
 State classes: authenticated profile, cookies, IndexedDB, service workers,
 inbound pending/sending/quarantine/sent, outbound provenance ledger, media,
+the Transport's `.wwebjs_cache` in its persistent working directory,
 the API/worker's durable historical bootstrap cursors, HMAC environment
 references, observer output and release SHA are `MUST_PRESERVE`. The read-only
 Transport history endpoint itself has no separate local cursor store. Image
@@ -94,6 +95,16 @@ syscall profile, dropped Linux capabilities and
 `no-new-privileges`. The four broadened sandbox calls require
 explicit review. A candidate requiring `--no-sandbox`, `SYS_ADMIN` or
 `seccomp=unconfined` is **not certified** by this package.
+
+AGT Docker's `docker-default` AppArmor profile denied Chromium
+`userns_create` in an isolated clone test. The versioned
+`andy-whatsapp-browser.apparmor` copies the Docker 26.1.5 default template
+with only `userns,` added and a browser-specific profile name. Load it with
+`apparmor_parser -Kr ops/whatsapp-container/andy-whatsapp-browser.apparmor`
+before candidate testing; verify `docker inspect` names that profile. The
+profile affects only containers that opt into it. The Transport's Compose
+`working_dir` is its existing persistent spool mount so `whatsapp-web.js`
+can retain its relative cache while the image root remains read-only.
 
 ## Candidate validation without production takeover
 
@@ -162,8 +173,9 @@ its gated `--execute` path is only for the reviewed cutover window.
 
 - IPAM reservation/reconciliation for existing identities and Docker network
   parent behavior. No candidate physical network has been created.
-- Official Chrome sandbox under Docker default restrictions and profile clone
-  compatibility; four root-owned profile files require explicit handling.
+- Official Chrome sandbox with the browser-specific AppArmor profile and
+  authenticated-profile clone compatibility; four root-owned profile files
+  require explicit handling.
 - Distributed image build and synthetic offline run, GitHub PR checks, and
   Docker/ROC integration proof remain pending.
 - Andy Ops and the live preflight still report host units; they must switch to
