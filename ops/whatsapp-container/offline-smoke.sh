@@ -43,17 +43,17 @@ if [[ "$healthy" != yes ]]; then
   docker inspect --format 'browser={{.State.Status}} health={{.State.Health.Status}} exit={{.State.ExitCode}}' "$browser" >&2 || true
   docker exec "$browser" sh -c 'ps -eo pid,ppid,stat,args | head -35; ls -la /profile | head -35; cat /proc/net/tcp | head -15' >&2 || true
   docker logs --tail 40 "$browser" >&2
-  echo 'offline comparison probe: default Docker capabilities with empty profile' >&2
+  echo 'offline diagnostic only: default capabilities, no Docker seccomp, empty profile' >&2
+  # This disposable CI control isolates the seccomp hypothesis; never use it in Compose.
   mkdir -p "$scratch/probe-profile"
   sudo chown 1000:1000 "$scratch/probe-profile"
   docker run -d --name "$probe" --network "$network" --network-alias browser-cdp \
-    --security-opt no-new-privileges:true \
-    --security-opt "seccomp=$(pwd)/ops/whatsapp-container/chrome-seccomp.json" \
+    --security-opt no-new-privileges:true --security-opt seccomp=unconfined \
     --user 1000:1000 --shm-size 1g -e WHATSAPP_START_URL=about:blank \
     -v "$scratch/probe-profile:/profile" andy-whatsapp-browser:ci >/dev/null
   for _ in $(seq 1 20); do
     if docker exec "$probe" curl -fsS --max-time 1 http://127.0.0.1:9223/json/version >/dev/null 2>&1; then
-      echo 'default-capabilities comparison: CDP reachable' >&2
+      echo 'unconfined seccomp diagnostic: CDP reachable' >&2
       break
     fi
     sleep 1
