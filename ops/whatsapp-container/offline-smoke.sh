@@ -7,8 +7,9 @@ network="andy-wa-offline-${RANDOM}"
 browser="andy-wa-browser-offline-${RANDOM}"
 transport="andy-wa-transport-offline-${RANDOM}"
 observer="andy-wa-observer-offline-${RANDOM}"
+probe="andy-wa-browser-probe-${RANDOM}"
 cleanup() {
-  docker rm -f "$observer" "$transport" "$browser" >/dev/null 2>&1 || true
+  docker rm -f "$observer" "$transport" "$browser" "$probe" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
   sudo rm -rf "$scratch"
 }
@@ -42,6 +43,24 @@ if [[ "$healthy" != yes ]]; then
   docker inspect --format 'browser={{.State.Status}} health={{.State.Health.Status}} exit={{.State.ExitCode}}' "$browser" >&2 || true
   docker exec "$browser" sh -c 'ps -eo pid,ppid,stat,args | head -35; ls -la /profile | head -35; cat /proc/net/tcp | head -15' >&2 || true
   docker logs --tail 40 "$browser" >&2
+  echo 'offline comparison probe: default Docker capabilities with empty profile' >&2
+  mkdir -p "$scratch/probe-profile"
+  sudo chown 1000:1000 "$scratch/probe-profile"
+  docker run -d --name "$probe" --network "$network" --network-alias browser-cdp \
+    --security-opt no-new-privileges:true \
+    --security-opt "seccomp=$(pwd)/ops/whatsapp-container/chrome-seccomp.json" \
+    --user 1000:1000 --shm-size 1g -e WHATSAPP_START_URL=about:blank \
+    -v "$scratch/probe-profile:/profile" andy-whatsapp-browser:ci >/dev/null
+  for _ in $(seq 1 20); do
+    if docker exec "$probe" curl -fsS --max-time 1 http://127.0.0.1:9223/json/version >/dev/null 2>&1; then
+      echo 'default-capabilities comparison: CDP reachable' >&2
+      break
+    fi
+    sleep 1
+  done
+  docker inspect --format 'probe={{.State.Status}} health={{.State.Health.Status}} exit={{.State.ExitCode}}' "$probe" >&2 || true
+  docker exec "$probe" sh -c 'ps -eo pid,ppid,stat,wchan:24,args | head -20; ls -la /profile | head -18; cat /proc/net/tcp | head -8' >&2 || true
+  docker logs --tail 12 "$probe" >&2 || true
   echo 'offline browser candidate failed' >&2
   exit 1
 fi
