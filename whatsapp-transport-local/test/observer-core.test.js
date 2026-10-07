@@ -88,6 +88,19 @@ test('more than one CONNECTED WhatsApp page blocks selection', () => {
   assert.equal(result.connectedPageCount, 2);
 });
 
+test('observer reuses a Puppeteer browser exposing connected property', async () => {
+  let connections = 0;
+  const browser = { connected: true, once() {} };
+  const service = new ObserverService({
+    config: config(),
+    puppeteer: { async connect() { connections += 1; return browser; } },
+    logger: { log() {} },
+  });
+  assert.equal(await service.connectBrowser(), true);
+  assert.equal(await service.connectBrowser(), true);
+  assert.equal(connections, 1);
+});
+
 test('add events are normalized to the bounded diagnostic schema', () => {
   const record = normalizeObserverEvent(rawEvent(), config(), new Date('2026-09-05T12:00:00Z'));
   assert.equal(record.schema_version, 1);

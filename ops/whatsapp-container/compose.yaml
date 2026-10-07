@@ -29,6 +29,8 @@ services:
       cdp:
         aliases: [browser-cdp]
     cap_drop: [ALL]
+    sysctls:
+      net.ipv4.ip_forward: "0"
     security_opt:
       - no-new-privileges:true
       - seccomp:${WHATSAPP_CHROME_SECCOMP_PROFILE:?point to versioned profile}
@@ -82,6 +84,8 @@ services:
     tmpfs:
       - /tmp:mode=1777
     cap_drop: [ALL]
+    sysctls:
+      net.ipv4.ip_forward: "0"
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
     healthcheck:
