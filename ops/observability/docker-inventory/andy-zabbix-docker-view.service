@@ -1,0 +1,23 @@
+[Unit]
+Description=Allowlisted local Docker API view for Zabbix
+Requires=docker.service
+After=docker.service
+PartOf=docker.service
+
+[Service]
+User=root
+Group=zabbix
+ExecStart=/usr/bin/python3 /usr/local/lib/andy-docker-view/zabbix_proxy.py
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=andy-zabbix-docker
+RuntimeDirectoryMode=0750
+UMask=0007
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/andy-zabbix-docker
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

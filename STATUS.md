@@ -1,5 +1,14 @@
 # Project status
 
+## ROC Docker inventory consolidation — live rollout, review pending
+
+- Canonical containerized ROC Zabbix now has a dedicated logical Docker Engine host and the versioned control-plane template. Host Agent2 polls through the existing local read-only Docker Unix view; no Docker container IP reachability or LAN route is required.
+- The ROC runtime discovered 31 containers (28 running, 3 stopped), 25 networks, 35 attachments and 29 port entries. CPU, memory, RX and TX items have history. Four containers have two network attachments. No real inventory snapshot is committed.
+- Grafana datasource `roc-zabbix` returned numeric metrics and the plugin's Zabbix API resource returned text item/history for state, attachment/IP and ports. Explore Text rendering reported `Unknown error`; dashboard display for text remains an explicit follow-up.
+- Native Zabbix Docker template polling was disabled after private backup while native Zabbix, its template and history remain intact as legacy/auxiliary. This package records the reproducible ROC path and rollback. No Andy runtime, MikroTik, Docker network or OpenTelemetry component was changed.
+
+Updated: 2026-10-07
+
 ## Bootstrap selection standalone model registration — fix candidate
 
 - The standalone stage failure is an import-order defect: its selection model did not register all three foreign-key target tables in `Base.metadata`. The model now imports the tenant, human identity and BootstrapRun model modules explicitly, following the repository's provider authorization precedent. The stage script, migration, API contract and ticket semantics are unchanged.
