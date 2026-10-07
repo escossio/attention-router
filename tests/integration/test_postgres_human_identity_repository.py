@@ -39,7 +39,8 @@ def repository_sessions():
         connect_args={"options": "-c statement_timeout=15000 -c lock_timeout=10000"},
     )
     reset = text(
-        "TRUNCATE TABLE personal_context_bootstrap_batches, "
+        "TRUNCATE TABLE personal_context_bootstrap_selections, "
+        "personal_context_bootstrap_batches, "
         "personal_context_bootstrap_runs, provider_authorizations, "
         "client_location_snapshots, client_sessions, client_session_challenges, "
         "device_bootstrap_challenges, client_devices, client_tenant_memberships, "
