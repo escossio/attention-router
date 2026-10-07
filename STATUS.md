@@ -1,5 +1,13 @@
 # Project status
 
+## Bootstrap selection standalone model registration — fix candidate
+
+- The standalone stage failure is an import-order defect: its selection model did not register all three foreign-key target tables in `Base.metadata`. The model now imports the tenant, human identity and BootstrapRun model modules explicitly, following the repository's provider authorization precedent. The stage script, migration, API contract and ticket semantics are unchanged.
+- A fresh-process regression imports the stage entrypoint without `web.app`, resolves every selection foreign key, flushes one synthetic selection and rolls back while proving zero BootstrapRuns. It reproduced the live `NoReferencedTableError` before the fix and passes afterward. Focused bootstrap/API/schema tests, Ruff and compilation pass locally; distributed PostgreSQL and repository gates remain pending.
+- No live code, schema, ticket, history, Android artifact or provider state was changed by this candidate.
+
+Updated: 2026-10-07
+
 ## Owner-authenticated WhatsApp bootstrap selection — backend candidate
 
 - A temporary, canary-tenant and owner-bound selection can be staged from private operator files. The staging command validates the five approved indices against the private chat map, stores an expiring opaque ticket, and creates no BootstrapRun.
