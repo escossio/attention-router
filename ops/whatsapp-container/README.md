@@ -78,11 +78,13 @@ Chrome can read the staged clone as the container UID, and plan the minimum
 ownership correction only after the live writer stops. Do not blindly
 `chown -R` the profile. Chrome sandbox behavior under Docker's default
 seccomp and dropped capabilities also needs an offline candidate proof. The
-candidate vendors Playwright's Apache-2.0 [Docker seccomp profile](https://github.com/microsoft/playwright/blob/160447983070c9162459c9113e631a0eee28bb1a/utils/docker/seccomp_profile.json)
-(SHA-256 `cc3e61cabda6bbc1e53e54d27ba4d55a9d3be829b6dd1a596f4a7b31b1cc7849`)
-to allow the namespace syscalls required by Chromium while retaining a
-deny-by-default syscall profile, dropped Linux capabilities and
-`no-new-privileges`. This broadens `clone`, `setns` and `unshare` and requires
+candidate vendors the Apache-2.0 [Docker 26.1.5 default seccomp profile](https://github.com/moby/moby/blob/v26.1.5/profiles/seccomp/default.json)
+with one additional allow rule for `clone`, `setns` and `unshare`, following
+the [Playwright sandbox guidance](https://playwright.dev/docs/docker)
+(SHA-256 `7ac2cf0c0476b8f1ae3ba3afdb37ae0c2a43276adbd7fe00e86805845cdb95ad`).
+Every other Docker 26.1.5 rule is unchanged. This retains a deny-by-default
+syscall profile, dropped Linux capabilities and
+`no-new-privileges`. The three broadened namespace calls require
 explicit review. A candidate requiring `--no-sandbox`, `SYS_ADMIN` or
 `seccomp=unconfined` is **not certified** by this package.
 
