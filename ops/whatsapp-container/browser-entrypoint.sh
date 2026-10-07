@@ -21,6 +21,7 @@ done
 test -S /tmp/.X11-unix/X98
 
 google-chrome --disable-restore-session-state \
+  --no-first-run --no-default-browser-check \
   --user-data-dir="$WHATSAPP_PROFILE_DIR_IN_CONTAINER" \
   --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 \
   "$start_url" &
