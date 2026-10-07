@@ -44,7 +44,11 @@ be launched against the live profile until the reviewed cutover window.
 
 Browser and Transport retain separate L2/L3 identities and static addresses
 initially because existing VLAN egress, firewall and inbound integrations use
-them. Those addresses are supplied by private, IPAM reconciled host config;
+them. Those addresses are supplied by private host config reconciled against
+the currently assigned live namespaces. AGT has no formal IPAM or reserved
+test addresses for VLANs 210/211; absence from ARP, ping or Docker inventory
+does not authorize a new address. The physical macvlan test is
+`BLOCKED_BY_NO_RESERVED_TEST_IP` until an authoritative reservation exists.
 Git contains synthetic examples only. The additional internal bridge exists
 solely for CDP. Both containers are dual-homed for that one control flow; the
 bridge is `internal`, neither container has routing capability, and CDP is not
@@ -69,6 +73,7 @@ acceptance remains a physical cutover gate.
 
 State classes: authenticated profile, cookies, IndexedDB, service workers,
 inbound pending/sending/quarantine/sent, outbound provenance ledger, media,
+the Transport's `.wwebjs_cache` in its persistent working directory,
 the API/worker's durable historical bootstrap cursors, HMAC environment
 references, observer output and release SHA are `MUST_PRESERVE`. The read-only
 Transport history endpoint itself has no separate local cursor store. Image
@@ -95,10 +100,28 @@ syscall profile, dropped Linux capabilities and
 explicit review. A candidate requiring `--no-sandbox`, `SYS_ADMIN` or
 `seccomp=unconfined` is **not certified** by this package.
 
+AGT Docker's `docker-default` AppArmor profile denied Chromium
+`userns_create` in an isolated clone test. The versioned
+`andy-whatsapp-browser.apparmor` copies the Docker 26.1.5 default template
+with only `userns,` added and a browser-specific profile name. Load it with
+`apparmor_parser -Kr ops/whatsapp-container/andy-whatsapp-browser.apparmor`
+before candidate testing; verify `docker inspect` names that profile. The
+profile affects only containers that opt into it. The Transport's Compose
+`working_dir` is its existing persistent spool mount so `whatsapp-web.js`
+can retain its relative cache while the image root remains read-only.
+
+On AGT, an online clone of the active profile (not a consistent backup) opened
+under the pinned Chrome 155 image with this AppArmor profile, dropped
+capabilities and the versioned seccomp profile. CDP answered and the clone's
+`Local State`, IndexedDB and Local Storage were readable. The isolated test
+started at `about:blank` and never contacted WhatsApp Web; authenticated
+session reuse is therefore still **unproven**. The test container, internal
+network and temporarily loaded AppArmor profile were removed afterward.
+
 ## Candidate validation without production takeover
 
 1. Populate a root-only Compose env file from `compose.env.example`, using
-   IPAM approved allocations and the exact production source/Chrome versions.
+   the reconciled live assignments and exact production source/Chrome versions.
    Never commit the filled file. Use synthetic empty state directories and
    `WHATSAPP_START_URL=about:blank` for offline checks.
 2. `docker compose --env-file PRIVATE_ENV -f ops/whatsapp-container/compose.yaml --profile production config --quiet`.
@@ -112,13 +135,16 @@ explicit review. A candidate requiring `--no-sandbox`, `SYS_ADMIN` or
 4. Validate profile compatibility only with a private, isolated clone or
    snapshot. Never mount the live profile in a candidate while host Chrome is
    active. Never issue pairing, provider calls or outbound delivery in a test.
-5. Verify IPAM and actual VLAN parent semantics. The existing host namespace
-   addresses may only be released in the reviewed cutover window.
+5. Reconcile live address ownership read-only and verify actual VLAN parent
+   semantics. Do not choose test IPs by inference. Physical macvlan proof with
+   another IP remains blocked without an authoritative reservation. The live
+   namespace addresses may only be released in the reviewed cutover window.
 
 ## Cutover runbook — requires separate operator authorization
 
 Preconditions: certified PR head/checks; offline candidate PASS; current
-`CONNECTED`/`ready` and QR absent; IPAM reconciliation PASS; private complete
+`CONNECTED`/`ready` and QR absent; read-only live IP ownership reconciliation;
+an explicit review of the blocked physical test; private complete
 configuration backup; spool baseline; tested rollback commands; no second
 profile writer; Chrome sandbox validated. Expected interruption is at least
 the Chrome/Transport restart interval, with extra time for a consistent profile
@@ -160,12 +186,16 @@ its gated `--execute` path is only for the reviewed cutover window.
 
 ## Open gates
 
-- IPAM reservation/reconciliation for existing identities and Docker network
-  parent behavior. No candidate physical network has been created.
-- Official Chrome sandbox under Docker default restrictions and profile clone
-  compatibility; four root-owned profile files require explicit handling.
-- Distributed image build and synthetic offline run, GitHub PR checks, and
-  Docker/ROC integration proof remain pending.
+- Physical Docker macvlan acceptance is `BLOCKED_BY_NO_RESERVED_TEST_IP`:
+  no formal IPAM or reserved lab IP exists for either VLAN. Existing live IPs
+  are occupied and may be used only after their host writers/netns stop in an
+  authorized cutover window. No candidate physical network has been created.
+- Chrome sandbox, CDP and profile format opened on an isolated clone with the
+  browser-specific AppArmor profile. Authenticated session reuse remains
+  unproven; four root-owned live profile files require explicit cutover handling.
+- Candidate images were built on a distributed worker and the synthetic
+  offline gate passed. Corrective PR checks and Docker/ROC live integration
+  proof remain pending.
 - Andy Ops and the live preflight still report host units; they must switch to
   container evidence before the host units can be retired.
 - The existing observer was configured to capture message bodies. The target

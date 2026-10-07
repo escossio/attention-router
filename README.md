@@ -60,7 +60,7 @@ model](docs/security/threat-model.md), and [technical roadmap](ROADMAP.md).
 `WHATSAPP_RUNTIME=CONTAINERIZED` is the declared target. The AGT live deployment
 remains host-native until a separately approved cutover, soak and reboot proof.
 The versioned [container candidate and rollback plan](ops/whatsapp-container/README.md)
-are in PR review; the old units are `RETIRED_HISTORICAL` and cannot be
+were merged in PR #302; the old units are `RETIRED_HISTORICAL` and cannot be
 reintroduced as new deployment sources. No pairing or session transfer is
 performed by this declaration.
 
