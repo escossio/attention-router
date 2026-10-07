@@ -62,8 +62,10 @@ LAN route, MikroTik change or host-created netns in the target.
 
 State classes: authenticated profile, cookies, IndexedDB, service workers,
 inbound pending/sending/quarantine/sent, outbound provenance ledger, media,
-history cursors, HMAC environment references, observer output and release SHA
-are `MUST_PRESERVE`. Image layers, Xvfb display socket and CDP proxy state are
+the API/worker's durable historical bootstrap cursors, HMAC environment
+references, observer output and release SHA are `MUST_PRESERVE`. The read-only
+Transport history endpoint itself has no separate local cursor store. Image
+layers, Xvfb display socket and CDP proxy state are
 `REGENERABLE`. Chrome `Singleton*` links and PID files are `EPHEMERAL`, but
 must be examined only after the old Chrome exits. The retired HA LocalAuth is
 `LEGACY` and remains untouched. No secret, session, spool payload or real
@@ -133,6 +135,9 @@ old netns/proxies, Xvfb, Chrome, observer and Transport in dependency order;
 verify `CONNECTED`, no QR, inbound and spool baseline. Never log out or pair.
 The old unit definitions and overrides are in the root-only cutover bundle.
 Do not mask/delete units until the soak and rollback proof pass.
+The versioned `ops/historical/whatsapp-host-native/rollback.sh --dry-run`
+checks backup and installed unit availability without changing live state;
+its gated `--execute` path is only for the reviewed cutover window.
 
 ## Open gates
 
