@@ -44,7 +44,11 @@ be launched against the live profile until the reviewed cutover window.
 
 Browser and Transport retain separate L2/L3 identities and static addresses
 initially because existing VLAN egress, firewall and inbound integrations use
-them. Those addresses are supplied by private, IPAM reconciled host config;
+them. Those addresses are supplied by private host config reconciled against
+the currently assigned live namespaces. AGT has no formal IPAM or reserved
+test addresses for VLANs 210/211; absence from ARP, ping or Docker inventory
+does not authorize a new address. The physical macvlan test is
+`BLOCKED_BY_NO_RESERVED_TEST_IP` until an authoritative reservation exists.
 Git contains synthetic examples only. The additional internal bridge exists
 solely for CDP. Both containers are dual-homed for that one control flow; the
 bridge is `internal`, neither container has routing capability, and CDP is not
@@ -117,7 +121,7 @@ network and temporarily loaded AppArmor profile were removed afterward.
 ## Candidate validation without production takeover
 
 1. Populate a root-only Compose env file from `compose.env.example`, using
-   IPAM approved allocations and the exact production source/Chrome versions.
+   the reconciled live assignments and exact production source/Chrome versions.
    Never commit the filled file. Use synthetic empty state directories and
    `WHATSAPP_START_URL=about:blank` for offline checks.
 2. `docker compose --env-file PRIVATE_ENV -f ops/whatsapp-container/compose.yaml --profile production config --quiet`.
@@ -131,13 +135,16 @@ network and temporarily loaded AppArmor profile were removed afterward.
 4. Validate profile compatibility only with a private, isolated clone or
    snapshot. Never mount the live profile in a candidate while host Chrome is
    active. Never issue pairing, provider calls or outbound delivery in a test.
-5. Verify IPAM and actual VLAN parent semantics. The existing host namespace
-   addresses may only be released in the reviewed cutover window.
+5. Reconcile live address ownership read-only and verify actual VLAN parent
+   semantics. Do not choose test IPs by inference. Physical macvlan proof with
+   another IP remains blocked without an authoritative reservation. The live
+   namespace addresses may only be released in the reviewed cutover window.
 
 ## Cutover runbook — requires separate operator authorization
 
 Preconditions: certified PR head/checks; offline candidate PASS; current
-`CONNECTED`/`ready` and QR absent; IPAM reconciliation PASS; private complete
+`CONNECTED`/`ready` and QR absent; read-only live IP ownership reconciliation;
+an explicit review of the blocked physical test; private complete
 configuration backup; spool baseline; tested rollback commands; no second
 profile writer; Chrome sandbox validated. Expected interruption is at least
 the Chrome/Transport restart interval, with extra time for a consistent profile
@@ -179,8 +186,10 @@ its gated `--execute` path is only for the reviewed cutover window.
 
 ## Open gates
 
-- IPAM reservation/reconciliation for existing identities and Docker network
-  parent behavior. No candidate physical network has been created.
+- Physical Docker macvlan acceptance is `BLOCKED_BY_NO_RESERVED_TEST_IP`:
+  no formal IPAM or reserved lab IP exists for either VLAN. Existing live IPs
+  are occupied and may be used only after their host writers/netns stop in an
+  authorized cutover window. No candidate physical network has been created.
 - Official Chrome sandbox with the browser-specific AppArmor profile and
   authenticated-profile clone compatibility; four root-owned profile files
   require explicit handling.
