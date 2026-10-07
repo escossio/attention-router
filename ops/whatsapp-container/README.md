@@ -83,6 +83,36 @@ must be examined only after the old Chrome exits. The retired HA LocalAuth is
 `LEGACY` and remains untouched. No secret, session, spool payload or real
 inventory is committed.
 
+### Browser profile lifecycle
+
+On Linux, [Chromium's ProcessSingleton](https://chromium.googlesource.com/chromium/src/+/HEAD/chrome/browser/process_singleton_posix.cc)
+writes three symlinks in its profile: `SingletonLock` points
+to `hostname-PID`, `SingletonSocket` points to a Unix socket under `/tmp`, and
+`SingletonCookie` binds that socket to the profile. Chrome refuses to open a
+profile when an unreachable lock names a different hostname. The first
+container start used a profile with the old host links removed after the host
+writer stopped; a subsequent Compose recreate retained links naming the
+previous container's hostname and entered a crash loop. A normal Docker
+restart can also retain an unbound socket inode in its writable `/tmp` layer.
+
+Compose gives Browser a stable hostname. Before Chrome starts,
+`browser-profile-guard.sh` takes a persistent `flock` on the profile's
+`.andy-browser-writer.lock`; another cooperating candidate fails closed.
+With that lock held, the guard accepts a clean profile or removes exactly the
+three known Singleton symlinks only when the lock names this hostname, its PID
+is absent in the current namespace, and its socket has no live listener.
+Unknown artifacts, a foreign hostname, a live PID or an uncertain socket
+block startup. It logs `SINGLETON_STATE=CLEAN`, `ACTIVE`, `STALE_REMOVED` or
+`AMBIGUOUS_BLOCKED`. The guard never removes arbitrary profile files. Its
+lock does not replace the cutover gate that stops and verifies the old
+host-native Browser before the production profile is mounted.
+
+The private stopped-writer profile clone passed first start, Docker restart,
+Compose stop/start, force-recreate, down/up and three further recreates with
+CDP, health, one writer and zero crash loops. A second candidate mounting the
+same clone failed on `flock` before Chrome started. CI repeats the Browser
+lifecycle with a synthetic profile and no provider network.
+
 The active profile has four root-owned files (including `Local State` and
 Chrome preferences/session metadata) despite its normal runtime UID. The
 operator must record their original ownership in the private backup, prove

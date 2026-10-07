@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -g 1000 andy && useradd -u 1000 -g 1000 -m andy \
     && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 COPY ops/whatsapp-container/browser-entrypoint.sh /usr/local/bin/browser-entrypoint
+COPY ops/whatsapp-container/browser-profile-guard.sh /usr/local/bin/browser-profile-guard.sh
 RUN chmod 0755 /usr/local/bin/browser-entrypoint
 USER 1000:1000
 ENV HOME=/home/andy DISPLAY=:98 XDG_RUNTIME_DIR=/tmp/andy-runtime

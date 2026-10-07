@@ -9,6 +9,8 @@ case "$start_url" in
 esac
 test -d "$WHATSAPP_PROFILE_DIR_IN_CONTAINER"
 test -w "$WHATSAPP_PROFILE_DIR_IN_CONTAINER"
+source /usr/local/bin/browser-profile-guard.sh
+acquire_profile_guard "$WHATSAPP_PROFILE_DIR_IN_CONTAINER"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 0700 "$XDG_RUNTIME_DIR"
 
