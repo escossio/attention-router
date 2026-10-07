@@ -1,0 +1,146 @@
+name: andy-whatsapp-runtime
+
+services:
+  browser:
+    profiles: [production]
+    container_name: andy-whatsapp-browser
+    build:
+      context: ../..
+      dockerfile: ops/whatsapp-container/Dockerfile.browser
+      args:
+        CHROME_VERSION: ${WHATSAPP_CHROME_VERSION:?pin the currently certified Chrome version}
+        SOURCE_SHA: ${WHATSAPP_IMAGE_SOURCE_SHA:?}
+    image: ${WHATSAPP_BROWSER_IMAGE:?set browser image tag}
+    user: "${WHATSAPP_UID:?}:${WHATSAPP_GID:?}"
+    environment:
+      WHATSAPP_PROFILE_DIR_IN_CONTAINER: /profile
+      WHATSAPP_START_URL: ${WHATSAPP_START_URL:-https://web.whatsapp.com/}
+    volumes:
+      - type: bind
+        source: ${WHATSAPP_PROFILE_DIR:?}
+        target: /profile
+        bind:
+          create_host_path: false
+    shm_size: 1gb
+    networks:
+      browser_wire:
+        ipv4_address: ${WHATSAPP_BROWSER_IP:?}
+      cdp:
+        aliases: [browser-cdp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://127.0.0.1:9223/json/version >/dev/null && pgrep -x socat >/dev/null && pgrep -x Xvfb >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  transport:
+    profiles: [production]
+    container_name: andy-whatsapp-transport
+    build:
+      context: ../..
+      dockerfile: ops/whatsapp-container/Dockerfile.transport
+      args:
+        SOURCE_SHA: ${WHATSAPP_IMAGE_SOURCE_SHA:?}
+    image: ${WHATSAPP_TRANSPORT_IMAGE:?set transport image tag}
+    user: "${WHATSAPP_UID:?}:${WHATSAPP_GID:?}"
+    env_file:
+      - ${WHATSAPP_TRANSPORT_ENV_FILE:?}
+    environment:
+      ATTENTION_TRANSPORT_SOURCE_SHA: ${WHATSAPP_TRANSPORT_SOURCE_SHA:?}
+      BROWSER_DEBUG_URL: http://127.0.0.1:9223
+      BROWSER_DEBUG_HOST: 127.0.0.1
+      BROWSER_DEBUG_PORT: "9223"
+    volumes:
+      - type: bind
+        source: ${WHATSAPP_SPOOL_DIR:?}
+        target: /var/lib/attention-router/whatsapp-transport
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${WHATSAPP_MEDIA_DIR:?}
+        target: /var/lib/attention-router/whatsapp-media
+        bind:
+          create_host_path: false
+    networks:
+      transport_wire:
+        ipv4_address: ${WHATSAPP_TRANSPORT_IP:?}
+      cdp: {}
+    depends_on:
+      browser:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://$${LOCAL_TRANSPORT_HTTP_HOST:-127.0.0.1}:$${LOCAL_TRANSPORT_HTTP_PORT:-18103}/ready >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  observer:
+    profiles: [production]
+    container_name: andy-whatsapp-observer
+    image: ${WHATSAPP_TRANSPORT_IMAGE:?set transport image tag}
+    user: "${WHATSAPP_UID:?}:${WHATSAPP_GID:?}"
+    command: [observer]
+    env_file:
+      - ${WHATSAPP_OBSERVER_ENV_FILE:?}
+    environment:
+      ATTENTION_WHATSAPP_OBSERVER_BROWSER_URL: http://127.0.0.1:9223
+      ATTENTION_WHATSAPP_OBSERVER_ENTRYPOINT: /app/src/observer.js
+      ATTENTION_WHATSAPP_OBSERVER_CAPTURE_BODY: "false"
+    volumes:
+      - type: bind
+        source: ${WHATSAPP_OBSERVER_DIR:?}
+        target: /var/lib/attention-router/whatsapp-observer
+        bind:
+          create_host_path: false
+    network_mode: service:browser
+    depends_on:
+      browser:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const s=require('/var/lib/attention-router/whatsapp-observer/status.json'); process.exit(s.service_state==='READY'&&s.browser_connected&&Date.now()-Date.parse(s.generated_at)<90000?0:1)"
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+networks:
+  cdp:
+    driver: bridge
+    internal: true
+  browser_wire:
+    driver: macvlan
+    driver_opts:
+      parent: ${WHATSAPP_BROWSER_PARENT:?}
+    ipam:
+      config:
+        - subnet: ${WHATSAPP_BROWSER_SUBNET:?}
+          gateway: ${WHATSAPP_BROWSER_GATEWAY:?}
+  transport_wire:
+    driver: macvlan
+    driver_opts:
+      parent: ${WHATSAPP_TRANSPORT_PARENT:?}
+    ipam:
+      config:
+        - subnet: ${WHATSAPP_TRANSPORT_SUBNET:?}
+          gateway: ${WHATSAPP_TRANSPORT_GATEWAY:?}

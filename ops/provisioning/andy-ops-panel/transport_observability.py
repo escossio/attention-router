@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 from typing import Any
@@ -28,14 +29,21 @@ BROWSER_DEBUG_URL = os.environ.get(
 API_READY_URL = os.environ.get(
     "ANDY_OPS_ATTENTION_API_READY_URL", "http://127.0.0.1:28110/health/ready"
 ).strip()
+RUNTIME_BACKEND = os.environ.get(
+    "ANDY_OPS_WHATSAPP_RUNTIME_BACKEND", "container"
+).strip().casefold()
+OBSERVER_STATUS_FILE = Path(os.environ.get(
+    "ANDY_OPS_WHATSAPP_OBSERVER_STATUS_FILE",
+    "/var/lib/attention-router/whatsapp-observer/status.json",
+))
 TRANSPORT_UNIT = os.environ.get(
-    "ANDY_OPS_WHATSAPP_TRANSPORT_UNIT", "attention-whatsapp-transport.service"
+    "ANDY_OPS_WHATSAPP_TRANSPORT_UNIT", ""
 )
 BROWSER_UNIT = os.environ.get(
-    "ANDY_OPS_WHATSAPP_BROWSER_UNIT", "attention-whatsapp-browser.service"
+    "ANDY_OPS_WHATSAPP_BROWSER_UNIT", ""
 )
 OBSERVER_UNIT = os.environ.get(
-    "ANDY_OPS_WHATSAPP_OBSERVER_UNIT", "attention-whatsapp-observer.service"
+    "ANDY_OPS_WHATSAPP_OBSERVER_UNIT", ""
 )
 
 
@@ -235,6 +243,30 @@ def _observer_probe(records: list[dict[str, Any]]) -> dict[str, Any]:
     return latest
 
 
+def _observer_file_probe() -> dict[str, Any]:
+    try:
+        payload = json.loads(OBSERVER_STATUS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("observer status is not an object")
+    except (OSError, ValueError, json.JSONDecodeError):
+        payload = {}
+    observed_at = payload.get("last_event_at")
+    age = _age_seconds(observed_at)
+    return {
+        "active": payload.get("service_state") in {"RUNNING", "READY", "CONNECTED"},
+        "active_state": payload.get("service_state") or "unknown",
+        "observed_at": observed_at,
+        "age_seconds": age,
+        "fresh": age is not None and age <= 30,
+        "browser_connected": payload.get("browser_connected") is True,
+        "whatsapp_page_count": payload.get("whatsapp_page_count"),
+        "app_state": payload.get("app_state"),
+        "collection_event": None,
+        "message_type": None,
+        "from_me": None,
+    }
+
+
 def _safe_journal_message(message: str) -> str:
     value = re.sub(r"\b\d{5,}(?=@(?:c\.us|lid)\b)", "[redacted]", message)
     value = re.sub(r"https?://\S+", "[redacted-url]", value)
@@ -404,9 +436,14 @@ def sample_transport_observability() -> dict[str, Any]:
             "timeline": [],
         }
 
-    browser_unit = _systemd_unit(BROWSER_UNIT)
-    transport_unit = _systemd_unit(TRANSPORT_UNIT)
-    observer_unit = _systemd_unit(OBSERVER_UNIT)
+    if RUNTIME_BACKEND == "legacy_systemd":
+        browser_state = _systemd_unit(BROWSER_UNIT)
+        transport_state = _systemd_unit(TRANSPORT_UNIT)
+        observer_state = _systemd_unit(OBSERVER_UNIT)
+    else:
+        browser_state = {}
+        transport_state = {}
+        observer_state = {}
 
     try:
         raw_transport = _http_json(TRANSPORT_STATUS_URL, timeout=1.0)
@@ -418,7 +455,25 @@ def sample_transport_observability() -> dict[str, Any]:
         transport = {}
         transport_error = type(error).__name__
 
-    page = _browser_page_probe()
+    observer = _observer_file_probe() if RUNTIME_BACKEND != "legacy_systemd" else {}
+    page = _browser_page_probe() if RUNTIME_BACKEND == "legacy_systemd" else {
+        "debug_reachable": observer.get("browser_connected") is True,
+        "whatsapp_page_count": observer.get("whatsapp_page_count"),
+        "native_state": observer.get("app_state"),
+        "auth_state": None,
+        "has_synced": None,
+        "sync_handler_present": None,
+        "wwebjs_present": None,
+    }
+    if RUNTIME_BACKEND != "legacy_systemd":
+        browser_state = {
+            "active": page.get("debug_reachable") is True,
+            "active_state": "active" if page.get("debug_reachable") else "unknown",
+        }
+        transport_state = {
+            "active": transport_error is None,
+            "active_state": "active" if transport_error is None else "unknown",
+        }
 
     try:
         api_payload = _http_json(API_READY_URL, timeout=1.0)
@@ -429,26 +484,30 @@ def sample_transport_observability() -> dict[str, Any]:
         api_ready = False
         api_error = type(error).__name__
 
-    observer_records = _journal_records(OBSERVER_UNIT, limit=120)
-    observer = _observer_probe(observer_records)
-    transport_records = _journal_records(TRANSPORT_UNIT, limit=180)
+    if RUNTIME_BACKEND == "legacy_systemd":
+        observer_records = _journal_records(OBSERVER_UNIT, limit=120)
+        observer = _observer_probe(observer_records)
+        transport_records = _journal_records(TRANSPORT_UNIT, limit=180)
+        timeline = _transport_timeline(transport_records)
+    else:
+        timeline = []
     derived = _derive_state(page, transport, observer, api_ready)
 
     return {
         "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
         "enabled": True,
-        "browser": {**browser_unit, **page},
+        "browser": {**browser_state, **page},
         "transport": {
-            **transport_unit,
+            **transport_state,
             **transport,
             "probe_error": transport_error,
         },
-        "observer": {**observer_unit, **observer},
+        "observer": {**observer_state, **observer},
         "api": {
             "ready": api_ready,
             "status": api_payload.get("status") if isinstance(api_payload, dict) else None,
             "probe_error": api_error,
         },
         "derived": derived,
-        "timeline": _transport_timeline(transport_records),
+        "timeline": timeline,
     }

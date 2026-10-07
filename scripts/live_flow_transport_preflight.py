@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from urllib.parse import urlsplit
 from urllib.request import urlopen
@@ -19,28 +20,22 @@ def _get(url: str) -> dict:
         return json.load(response)
 
 
-def _systemd_state() -> tuple[bool, int]:
+def _container_state() -> tuple[bool, int]:
+    name = os.environ.get("ANDY_WHATSAPP_TRANSPORT_CONTAINER", "andy-whatsapp-transport")
     result = subprocess.run(
-        ["systemctl", "show", "attention-whatsapp-transport.service",
-         "-p", "ActiveState", "-p", "MainPID", "--value"],
-        capture_output=True, text=True, check=False,
+        ["docker", "inspect", "--format", "{{json .State}}", name],
+        capture_output=True, text=True, check=False, timeout=3,
     )
-    values = result.stdout.splitlines()
-    if len(values) < 2:
+    if result.returncode != 0:
         return False, 0
     try:
-        pid = int(values[1])
-    except ValueError:
-        pid = 0
-    return result.returncode == 0 and values[0] == "active" and pid > 0, pid
-
-
-def _listener_present(host: str, port: int) -> bool:
-    result = subprocess.run(
-        ["ss", "-ltn", f"sport = :{port}"],
-        capture_output=True, text=True, check=False,
-    )
-    return result.returncode == 0 and f"{host}:{port}" in result.stdout
+        state = json.loads(result.stdout)
+        pid = int(state.get("Pid") or 0)
+        return (state.get("Running") is True
+                and state.get("Health", {}).get("Status") == "healthy"
+                and pid > 0), pid
+    except (ValueError, TypeError, AttributeError):
+        return False, 0
 
 
 def main() -> int:
@@ -61,16 +56,13 @@ def main() -> int:
 
     status = _get(f"{parsed.scheme}://{host}:{port}/status")
     ready = _get(f"{parsed.scheme}://{host}:{port}/ready")
-    systemd_active, pid = _systemd_state()
-    listener = _listener_present(host, port)
+    container_healthy, pid = _container_state()
     print("RETIRED_HA_TRANSPORT_TARGET_ACTIVE=NO")
-    print(f"SYSTEMD_ACTIVE={'YES' if systemd_active else 'NO'}")
+    print(f"CONTAINER_HEALTHY={'YES' if container_healthy else 'NO'}")
     print(f"TRANSPORT_PID={pid}")
-    print(f"LISTENER_18103={'YES' if listener else 'NO'}")
-    print(f"CURRENT_TRANSPORT_PROCESS={'RUNNING' if systemd_active else 'UNKNOWN'}")
+    print(f"CURRENT_TRANSPORT_PROCESS={'RUNNING' if container_healthy else 'UNKNOWN'}")
     healthy = all((
-        systemd_active,
-        listener,
+        container_healthy,
         ready.get("status") == "ready",
         status.get("service_state") == "ready",
         status.get("browser_debug_reachable") is True,
