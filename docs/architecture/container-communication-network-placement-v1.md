@@ -102,13 +102,16 @@ address.
 
 ## IPAM allocation authority
 
-IPAM is the authoritative system for operational VLAN, subnet, gateway and IP
-reservations.
+Use IPAM as the authoritative system for operational VLAN, subnet, gateway
+and IP reservations where it exists. AGT currently has no formal IPAM or
+reserved test IPs on WhatsApp VLANs 210/211.
 
-Architecture may propose candidate ranges for discussion, but a candidate is not
-an allocation until it has been checked and reserved in IPAM.
+Architecture may propose candidate ranges for discussion, but a candidate is
+not an allocation until an authoritative reservation exists. Without one, do
+not choose an address from absence of ping, ARP or Docker inventory.
 
-Required order after the communication/network-placement decision:
+Where IPAM exists, the required order after the communication/network-placement
+decision is:
 
 1. query IPAM for current allocation/capacity;
 2. reserve the VLAN/subnet/gateway/IP objects in IPAM;
@@ -120,12 +123,16 @@ Do not allocate by arithmetic sequence alone (for example, "the previous VLAN is
 217, therefore use 218") without checking IPAM first.
 
 The public repository should not become a duplicate private address inventory.
-Keep private allocation details in IPAM; Git may carry the role, topology
-contract, and a non-secret reservation/reference needed to prove that allocation
-was governed.
+Keep private allocation details in the authoritative system; Git may carry the
+role, topology contract and a non-secret reservation/reference when available.
 
 If runtime state and IPAM disagree, stop deployment and reconcile the source of
 truth before creating another allocation.
+
+Without IPAM, existing live assignments may be reconciled read-only and reused
+only after the current holder releases them in an authorized cutover window.
+The lack of a reserved test address blocks physical macvlan testing before
+that window; it does not justify guessing a temporary address.
 
 ## Least-reachability principle
 

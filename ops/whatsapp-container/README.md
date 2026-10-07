@@ -190,11 +190,12 @@ its gated `--execute` path is only for the reviewed cutover window.
   no formal IPAM or reserved lab IP exists for either VLAN. Existing live IPs
   are occupied and may be used only after their host writers/netns stop in an
   authorized cutover window. No candidate physical network has been created.
-- Official Chrome sandbox with the browser-specific AppArmor profile and
-  authenticated-profile clone compatibility; four root-owned profile files
-  require explicit handling.
-- Distributed image build and synthetic offline run, GitHub PR checks, and
-  Docker/ROC integration proof remain pending.
+- Chrome sandbox, CDP and profile format opened on an isolated clone with the
+  browser-specific AppArmor profile. Authenticated session reuse remains
+  unproven; four root-owned live profile files require explicit cutover handling.
+- Candidate images were built on a distributed worker and the synthetic
+  offline gate passed. Corrective PR checks and Docker/ROC live integration
+  proof remain pending.
 - Andy Ops and the live preflight still report host units; they must switch to
   container evidence before the host units can be retired.
 - The existing observer was configured to capture message bodies. The target
