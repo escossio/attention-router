@@ -79,12 +79,12 @@ ownership correction only after the live writer stops. Do not blindly
 `chown -R` the profile. Chrome sandbox behavior under Docker's default
 seccomp and dropped capabilities also needs an offline candidate proof. The
 candidate vendors the Apache-2.0 [Docker 26.1.5 default seccomp profile](https://github.com/moby/moby/blob/v26.1.5/profiles/seccomp/default.json)
-with one additional allow rule for `clone`, `setns` and `unshare`, following
+with one additional allow rule for `clone`, `setns`, `unshare` and `chroot`, following
 the [Playwright sandbox guidance](https://playwright.dev/docs/docker)
-(SHA-256 `7ac2cf0c0476b8f1ae3ba3afdb37ae0c2a43276adbd7fe00e86805845cdb95ad`).
+(SHA-256 `4c611e66c0cb4c3450c1c00072e9f16e87daad318989ff70583467149d24cd7f`).
 Every other Docker 26.1.5 rule is unchanged. This retains a deny-by-default
 syscall profile, dropped Linux capabilities and
-`no-new-privileges`. The three broadened namespace calls require
+`no-new-privileges`. The four broadened sandbox calls require
 explicit review. A candidate requiring `--no-sandbox`, `SYS_ADMIN` or
 `seccomp=unconfined` is **not certified** by this package.
 

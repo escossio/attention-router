@@ -56,8 +56,8 @@
 	],
 	"syscalls": [
 		{
-			"comment": "Allow Chromium user namespace sandbox",
-			"names": ["clone", "setns", "unshare"],
+			"comment": "Allow Chromium namespace and chroot sandbox",
+			"names": ["clone", "setns", "unshare", "chroot"],
 			"action": "SCMP_ACT_ALLOW",
 			"args": [],
 			"includes": {},
