@@ -106,6 +106,14 @@ profile affects only containers that opt into it. The Transport's Compose
 `working_dir` is its existing persistent spool mount so `whatsapp-web.js`
 can retain its relative cache while the image root remains read-only.
 
+On AGT, an online clone of the active profile (not a consistent backup) opened
+under the pinned Chrome 155 image with this AppArmor profile, dropped
+capabilities and the versioned seccomp profile. CDP answered and the clone's
+`Local State`, IndexedDB and Local Storage were readable. The isolated test
+started at `about:blank` and never contacted WhatsApp Web; authenticated
+session reuse is therefore still **unproven**. The test container, internal
+network and temporarily loaded AppArmor profile were removed afterward.
+
 ## Candidate validation without production takeover
 
 1. Populate a root-only Compose env file from `compose.env.example`, using
