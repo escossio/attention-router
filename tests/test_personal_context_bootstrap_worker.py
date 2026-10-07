@@ -55,6 +55,12 @@ def test_bootstrap_worker_is_default_off_and_interval_bounded(session, monkeypat
         "personal_context_bootstrap_enabled",
         True,
     )
+    result, last = worker.process_personal_context_bootstrap_runtime_if_due(
+        session,
+        now_monotonic=100.0,
+        last_run_monotonic=None,
+    )
+    assert result is None and last is None and adapter_builds == []
     monkeypatch.setattr(
         worker.settings,
         "personal_context_bootstrap_interval_seconds",
@@ -101,6 +107,8 @@ def test_bootstrap_worker_is_default_off_and_interval_bounded(session, monkeypat
     assert calls[-1]["run_limit"] == 3
     assert calls[-1]["canary_tenant_id"] == "tenant-canary"
     assert adapter_builds[-1]["snapshot_limit"] == 80
+    assert adapter_builds[-1]["max_scan_messages"] == 1000
+    assert adapter_builds[-1]["hmac_secret"] == "h" * 32
 
     result, same_last = worker.process_personal_context_bootstrap_runtime_if_due(
         session,

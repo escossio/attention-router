@@ -1,13 +1,7 @@
-"""Read-only production HistoryAdapter for local whatsapp-web.js history.
-
-V0 intentionally treats the provider as LIMIT_ONLY. A per-chat snapshot is
-bounded and fingerprinted. Resuming a partial page re-fetches the same bounded
-window and fails closed if it changed instead of inventing cursor semantics.
-"""
+"""Read-only, bounded adapter for local whatsapp-web.js history."""
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -35,13 +29,8 @@ class WhatsAppHistorySnapshotChanged(WhatsAppHistoryError):
     code = "WHATSAPP_HISTORY_SNAPSHOT_CHANGED"
 
 
-def _canonical_json(value: object) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
+class WhatsAppHistoryScanLimitExceeded(WhatsAppHistoryError):
+    code = "WHATSAPP_HISTORY_SCAN_LIMIT_EXCEEDED"
 
 
 def _parse_timestamp(value: object) -> datetime:
@@ -59,7 +48,6 @@ def _parse_timestamp(value: object) -> datetime:
 class WhatsAppHistoryAdapter:
     """Bounded, restart-safe adapter over the local transport history surface."""
 
-    CURSOR_PREFIX = "whv0."
     MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
     def __init__(
@@ -69,6 +57,7 @@ class WhatsAppHistoryAdapter:
         hmac_secret: str | None,
         timeout_seconds: float = 5.0,
         snapshot_limit: int = 100,
+        max_scan_messages: int = 1000,
         urlopen=None,
         now=None,
     ):
@@ -80,12 +69,14 @@ class WhatsAppHistoryAdapter:
             or parsed.fragment
         ):
             raise WhatsAppHistoryConfigurationError()
-        if timeout_seconds <= 0 or not 1 <= snapshot_limit <= 100:
+        if (timeout_seconds <= 0 or not 1 <= snapshot_limit <= 100
+                or not snapshot_limit <= max_scan_messages <= 10000):
             raise WhatsAppHistoryConfigurationError()
         self.base_url = base_url.rstrip("/")
         self.hmac_secret = hmac_secret or ""
         self.timeout_seconds = timeout_seconds
         self.snapshot_limit = snapshot_limit
+        self.max_scan_messages = max_scan_messages
         self._urlopen = urlopen or urllib_request.urlopen
         self._now = now or time.time
 
@@ -105,7 +96,8 @@ class WhatsAppHistoryAdapter:
         }
 
     def _get_json(self, url: str) -> dict[str, Any]:
-        path = urllib_parse.urlparse(url).path
+        parsed = urllib_parse.urlparse(url)
+        path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
         request = urllib_request.Request(
             url,
             method="GET",
@@ -118,7 +110,11 @@ class WhatsAppHistoryAdapter:
             ) as response:
                 body = response.read(self.MAX_RESPONSE_BYTES + 1)
         except urllib_error.HTTPError as exc:
-            if exc.code in {401, 403, 404}:
+            if exc.code == 409:
+                raise WhatsAppHistorySnapshotChanged() from None
+            if exc.code == 413:
+                raise WhatsAppHistoryScanLimitExceeded() from None
+            if exc.code in {400, 401, 403, 404}:
                 raise WhatsAppHistoryContractError() from None
             raise WhatsAppHistoryError() from None
         except (OSError, TimeoutError, urllib_error.URLError):
@@ -205,81 +201,6 @@ class WhatsAppHistoryAdapter:
             },
         }
 
-    @classmethod
-    def _encode_cursor(
-        cls,
-        *,
-        chat_key: str,
-        snapshot_limit: int,
-        fingerprint: str,
-        offset: int,
-    ) -> str:
-        raw = _canonical_json(
-            {
-                "v": 1,
-                "chat_key": chat_key,
-                "snapshot_limit": snapshot_limit,
-                "fingerprint": fingerprint,
-                "offset": offset,
-            }
-        )
-        token = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-        return cls.CURSOR_PREFIX + token
-
-    @classmethod
-    def _decode_cursor(cls, value: str) -> dict[str, Any]:
-        if not isinstance(value, str) or not value.startswith(cls.CURSOR_PREFIX):
-            raise WhatsAppHistoryContractError()
-        token = value[len(cls.CURSOR_PREFIX):]
-        try:
-            raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
-            decoded = json.loads(raw.decode("utf-8"))
-        except Exception as exc:
-            raise WhatsAppHistoryContractError() from exc
-        if not isinstance(decoded, dict) or decoded.get("v") != 1:
-            raise WhatsAppHistoryContractError()
-        return decoded
-
-    def _snapshot(self, chat_key: str) -> tuple[list[dict[str, Any]], str]:
-        quoted = urllib_parse.quote(chat_key, safe="")
-        url = f"{self.base_url}/{quoted}?limit={self.snapshot_limit}"
-        payload = self._get_json(url)
-        if (
-            payload.get("pagination_model") != "LIMIT_ONLY"
-            or payload.get("requested_limit") != self.snapshot_limit
-        ):
-            raise WhatsAppHistoryContractError()
-        chat = self._normalize_chat(payload.get("chat"))
-        if chat["external_thread_key"] != chat_key:
-            raise WhatsAppHistoryContractError()
-        raw_messages = payload.get("messages")
-        if not isinstance(raw_messages, list) or len(raw_messages) > self.snapshot_limit:
-            raise WhatsAppHistoryContractError()
-        messages = [
-            self._normalize_message(item, chat_key)
-            for item in raw_messages
-        ]
-        ids = [item["source_message_id"] for item in messages]
-        if len(ids) != len(set(ids)):
-            raise WhatsAppHistoryContractError()
-        messages.sort(
-            key=lambda item: (
-                item["sent_at"],
-                item["source_message_id"],
-            )
-        )
-        fingerprint_payload = [
-            {
-                **item,
-                "sent_at": item["sent_at"].isoformat(),
-            }
-            for item in messages
-        ]
-        fingerprint = hashlib.sha256(
-            _canonical_json(fingerprint_payload)
-        ).hexdigest()
-        return messages, fingerprint
-
     def fetch_messages(
         self,
         chat_key: str,
@@ -296,39 +217,34 @@ class WhatsAppHistoryAdapter:
         ):
             raise WhatsAppHistoryContractError()
 
-        snapshot, fingerprint = self._snapshot(chat_key)
-        text_messages = [
-            item for item in snapshot
-            if item["text"] is not None
-        ]
-
-        offset = 0
+        if cursor is not None and (not isinstance(cursor, str) or not cursor
+                                   or len(cursor) > 2048):
+            raise WhatsAppHistoryContractError()
+        quoted = urllib_parse.quote(chat_key, safe="")
+        query = {"limit": limit, "max_scan_messages": self.max_scan_messages}
         if cursor is not None:
-            decoded = self._decode_cursor(cursor)
-            if (
-                decoded.get("chat_key") != chat_key
-                or decoded.get("snapshot_limit") != self.snapshot_limit
-                or decoded.get("fingerprint") != fingerprint
-                or isinstance(decoded.get("offset"), bool)
-                or not isinstance(decoded.get("offset"), int)
-                or decoded["offset"] < 0
-                or decoded["offset"] > len(text_messages)
-            ):
-                raise WhatsAppHistorySnapshotChanged()
-            offset = decoded["offset"]
-
-        page = text_messages[offset:offset + limit]
-        next_offset = offset + len(page)
-        next_cursor = (
-            self._encode_cursor(
-                chat_key=chat_key,
-                snapshot_limit=self.snapshot_limit,
-                fingerprint=fingerprint,
-                offset=next_offset,
-            )
-            if next_offset < len(text_messages)
-            else None
+            query["cursor"] = cursor
+        payload = self._get_json(
+            f"{self.base_url}/{quoted}?{urllib_parse.urlencode(query)}"
         )
+        if (payload.get("pagination_model") != "OPAQUE_CURSOR_SNAPSHOT_V1"
+                or payload.get("requested_limit") != limit):
+            raise WhatsAppHistoryContractError()
+        chat = self._normalize_chat(payload.get("chat"))
+        if chat["external_thread_key"] != chat_key:
+            raise WhatsAppHistoryContractError()
+        raw_messages = payload.get("messages")
+        if not isinstance(raw_messages, list) or len(raw_messages) > limit:
+            raise WhatsAppHistoryContractError()
+        page = [self._normalize_message(item, chat_key) for item in raw_messages]
+        ids = [item["source_message_id"] for item in page]
+        if len(ids) != len(set(ids)):
+            raise WhatsAppHistoryContractError()
+        next_cursor = payload.get("next_cursor")
+        if next_cursor is not None and (not isinstance(next_cursor, str)
+                                        or not next_cursor or len(next_cursor) > 2048
+                                        or not page):
+            raise WhatsAppHistoryContractError()
         return {
             "messages": page,
             "next_cursor": next_cursor,
@@ -341,4 +257,5 @@ __all__ = [
     "WhatsAppHistoryContractError",
     "WhatsAppHistoryError",
     "WhatsAppHistorySnapshotChanged",
+    "WhatsAppHistoryScanLimitExceeded",
 ]

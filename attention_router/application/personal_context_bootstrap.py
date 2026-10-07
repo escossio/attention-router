@@ -120,7 +120,7 @@ def _normalized_budget(value: dict[str, Any] | None) -> dict[str, int]:
 
     constraints = {
         "page_size": (1, 200),
-        "max_messages_per_chat": (1, 1000),
+        "max_messages_per_chat": (1, 10000),
         "max_total_messages": (1, 5000),
     }
     for key, (minimum, maximum) in constraints.items():

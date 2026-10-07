@@ -192,8 +192,43 @@ function createServer(config, status, client = null, deps = {}) {
         return;
       }
       const chatId = decodeURIComponent(url.pathname.slice(`${config.historyPath}/`.length));
-      const limit = Math.min(Number(url.searchParams.get('limit') || 50), config.historyMaxPageSize);
-      fetchHistoryMessages(client, chatId, limit).then((result) => respondJson(res, 200, { status: 'ok', ...result })).catch((error) => respondJson(res, error.code === 'CHAT_NOT_FOUND' ? 404 : 503, { status: 'history_read_failed' }));
+      const limit = Number(url.searchParams.get('limit') || 50);
+      const scanLimit = Number(url.searchParams.get('max_scan_messages') || config.historyMaxScanMessages || 1000);
+      const configuredScan = config.historyMaxScanMessages || 1000;
+      const configuredPage = config.historyMaxPageSize || 100;
+      if (!Number.isInteger(limit) || limit < 1 || limit > configuredPage || limit > 100
+        || !Number.isInteger(scanLimit) || scanLimit < 1 || scanLimit > configuredScan) {
+        respondJson(res, 400, { status: 'history_read_failed', code: 'HISTORY_LIMIT_INVALID' });
+        return;
+      }
+      const cursor = url.searchParams.get('cursor');
+      const timeout = Math.min(Math.max(config.historyTimeoutMs || 15000, 1000), 60000);
+      let timer;
+      Promise.race([
+        fetchHistoryMessages(client, chatId, limit, cursor, scanLimit),
+        new Promise((_, reject) => { timer = setTimeout(() => {
+          const error = new Error('HISTORY_TIMEOUT');
+          error.code = 'HISTORY_TIMEOUT';
+          reject(error);
+        }, timeout); }),
+      ]).then((result) => {
+        const body = JSON.stringify({ status: 'ok', ...result });
+        if (Buffer.byteLength(body) > 2 * 1024 * 1024) {
+          respondJson(res, 413, { status: 'history_read_failed', code: 'HISTORY_RESPONSE_TOO_LARGE' });
+        } else {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(body);
+        }
+      }).catch((error) => {
+        const code = ['CHAT_NOT_FOUND', 'HISTORY_CURSOR_INVALID', 'HISTORY_CURSOR_STALE',
+          'HISTORY_SCAN_LIMIT_EXCEEDED', 'HISTORY_MESSAGE_ID_REQUIRED',
+          'HISTORY_MESSAGE_ID_DUPLICATE', 'HISTORY_TIMEOUT'].includes(error.code)
+          ? error.code : 'HISTORY_READ_FAILED';
+        const statusCode = code === 'CHAT_NOT_FOUND' ? 404
+          : code.startsWith('HISTORY_CURSOR_') ? 409
+            : code === 'HISTORY_SCAN_LIMIT_EXCEEDED' || code === 'HISTORY_RESPONSE_TOO_LARGE' ? 413 : 503;
+        respondJson(res, statusCode, { status: 'history_read_failed', code });
+      }).finally(() => clearTimeout(timer));
       return;
     }
     if (url.pathname === config.livePath) {

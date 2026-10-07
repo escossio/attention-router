@@ -1,5 +1,14 @@
 # Project status
 
+## WhatsApp deep historical bootstrap — branch candidate (#255)
+
+- `feat/whatsapp-deep-history-bootstrap-255` starts at `7ec01f3e151e08ca966a97412f449c630763f2e6` and adds bounded, HMAC-authenticated opaque cursor pagination to the read-only local history surface.
+- The first page freezes an upper source message ID and a snapshot fingerprint. Restarted reads exclude later appends and fail closed if the anchor or frozen content changes. The Python adapter passes the provider cursor through to the existing durable BootstrapBatch checkpoint. Product creation and worker processing now require an exact canary tenant; the Python history clients require the dedicated history HMAC secret.
+- Defaults remain bounded: 100 messages per response, 1,000 per scan, 2 MiB response, 15-second transport timeout. The product budget can span multiple pages and batches. No live configuration, service, database, or real WhatsApp history was changed or read.
+- Focused Python/affected API, worker, memory and archive regressions: 59 passed. The full Node transport suite passed 255 tests. The exact-SHA distributed PostgreSQL run passed 463 tests without degradation. Ruff, compileall, generated SDK check, synthetic identity contract and diff check passed. A standalone API/memory test selection exposed an existing model-import-order fixture dependency; the affected selection passed when bootstrap models were collected with it. All required GitHub checks passed on [PR #294](https://github.com/escossio/attention-router/pull/294). Live first-owner proof remains pending separate authorization.
+
+Updated: 2026-10-06
+
 ## Channel Sync Deployment V1 — candidate (#265)
 
 - Isolated branch starts at `428f9bd29ba283ac5eb6102d0fcc097fb60ac979`, after #268 IPAM authority passed all checks and merged.

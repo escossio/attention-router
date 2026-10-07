@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 
-const { capabilities, fetchHistoryMessages, listHistoryChats, mapMessage, signHistoryRequest, verifyHistoryHmac } = require('../src/history');
+const { capabilities, decodeHistoryCursor, fetchHistoryMessages, listHistoryChats, mapMessage, signHistoryRequest, verifyHistoryHmac } = require('../src/history');
 const { createServer } = require('../src/server');
 
 function fakeClient(calls) {
@@ -28,13 +28,19 @@ function fakeClient(calls) {
       }];
     },
   };
-  return {
+  const client = {
     info: { wid: { _serialized: 'me@c.us' } },
     getChats: async () => { calls.push(['getChats']); return [chat]; },
     getChatById: async (id) => { calls.push(['getChatById', id]); return id === 'contact024@example.com' ? chat : null; },
-    sendMessage: async () => { throw new Error('MUTATION_CALLED'); },
-    sendSeen: async () => { throw new Error('MUTATION_CALLED'); },
   };
+  for (const method of ['sendMessage', 'sendSeen', 'sendStateTyping', 'sendStateRecording',
+    'clearState', 'archiveChat', 'pinChat', 'muteChat', 'deleteMessage', 'react',
+    'forward', 'markChatUnread', 'syncHistory', 'sendPresenceAvailable',
+    'sendPresenceUnavailable']) {
+    client[method] = async () => { throw new Error('MUTATION_CALLED'); };
+    chat[method] = async () => { throw new Error('MUTATION_CALLED'); };
+  }
+  return client;
 }
 
 test('history capabilities are explicit for whatsapp-web.js v1.34.7', () => {
@@ -45,8 +51,8 @@ test('history capabilities are explicit for whatsapp-web.js v1.34.7', () => {
     can_fetch_timestamps: true,
     can_fetch_reply_references: 'PARTIAL',
     can_fetch_captions: 'PARTIAL',
-    can_paginate_history: 'PARTIAL',
-    pagination_model: 'LIMIT_ONLY',
+    can_paginate_history: true,
+    pagination_model: 'OPAQUE_CURSOR_SNAPSHOT_V1',
     can_distinguish_from_me: true,
     can_distinguish_direct_vs_group: true,
     can_get_stable_source_message_id: true,
@@ -62,7 +68,7 @@ test('history adapter only calls read APIs and preserves group sender', async ()
   assert.equal(result.messages[0].external_sender_key, 'person-a@c.us');
   assert.equal(result.messages[0].source_message_id, 'message-1');
   assert.equal(result.messages[0].reply_reference, 'message-0');
-  assert.deepEqual(calls, [['getChats'], ['getChatById', 'contact024@example.com'], ['fetchMessages', 10]]);
+  assert.deepEqual(calls, [['getChats'], ['getChatById', 'contact024@example.com'], ['fetchMessages', 1001]]);
 });
 
 test('history HMAC is path-bound and read-only endpoint credentials are verifiable', () => {
@@ -71,6 +77,69 @@ test('history HMAC is path-bound and read-only endpoint credentials are verifiab
   assert.equal(verifyHistoryHmac(req, { historyHmacSecret: 'test-history-secret', historyMaxSkewSeconds: 300 }), true);
   req.url = '/internal/history/chats/other';
   assert.equal(verifyHistoryHmac(req, { historyHmacSecret: 'test-history-secret', historyMaxSkewSeconds: 300 }), false);
+  for (const changed of ['?limit=3&cursor=a&max_scan_messages=10', '?limit=2&cursor=b&max_scan_messages=10', '?limit=2&cursor=a&max_scan_messages=11']) {
+    const target = '/internal/history/chats/one?limit=2&cursor=a&max_scan_messages=10';
+    const signed = signHistoryRequest(target, 'test-history-secret');
+    const attempt = { url: `/internal/history/chats/one${changed}`, headers: Object.fromEntries(Object.entries(signed).map(([key, value]) => [key.toLowerCase(), value])) };
+    assert.equal(verifyHistoryHmac(attempt, { historyHmacSecret: 'test-history-secret' }), false);
+  }
+});
+
+function pagedClient(messages, calls = []) {
+  const chat = { id: { _serialized: 'chat-a' }, isGroup: true, name: 'Synthetic',
+    fetchMessages: async ({ limit }) => { calls.push(['fetchMessages', limit]); return messages.slice(-limit); } };
+  return { getChats: async () => [chat], getChatById: async () => chat, calls };
+}
+
+function messages(count) {
+  return Array.from({ length: count }, (_, i) => ({ id: { _serialized: `m${i + 1}` },
+    timestamp: 1700000000 + i, body: `synthetic ${i + 1}`, type: 'chat', fromMe: false }));
+}
+
+test('three pages freeze the first upper bound across append and use one read each', async () => {
+  const source = messages(6);
+  const client = pagedClient(source);
+  const first = await fetchHistoryMessages(client, 'chat-a', 2, null, 10);
+  assert.deepEqual(first.messages.map((item) => item.source_message_id), ['m1', 'm2']);
+  assert.equal(decodeHistoryCursor(first.next_cursor).through, 'm6');
+  source.push(messages(7)[6]);
+  const second = await fetchHistoryMessages(client, 'chat-a', 2, first.next_cursor, 10);
+  const third = await fetchHistoryMessages(client, 'chat-a', 2, second.next_cursor, 10);
+  assert.deepEqual(second.messages.map((item) => item.source_message_id), ['m3', 'm4']);
+  assert.deepEqual(third.messages.map((item) => item.source_message_id), ['m5', 'm6']);
+  assert.equal(third.next_cursor, null);
+  assert.deepEqual(client.calls, Array(3).fill(['fetchMessages', 11]));
+});
+
+test('stale, oversized, missing and duplicate IDs fail closed', async () => {
+  const source = messages(6);
+  const client = pagedClient(source);
+  const first = await fetchHistoryMessages(client, 'chat-a', 2, null, 10);
+  source.splice(5, 1);
+  await assert.rejects(fetchHistoryMessages(client, 'chat-a', 2, first.next_cursor, 10), /HISTORY_CURSOR_STALE/);
+  source.push(messages(6)[5]);
+  source.splice(1, 1);
+  await assert.rejects(fetchHistoryMessages(client, 'chat-a', 2, first.next_cursor, 10), /HISTORY_CURSOR_STALE/);
+  await assert.rejects(fetchHistoryMessages(client, 'chat-a', 2, null, 4), /HISTORY_SCAN_LIMIT_EXCEEDED/);
+  source[0].id = null;
+  await assert.rejects(fetchHistoryMessages(client, 'chat-a', 2, null, 10), /HISTORY_MESSAGE_ID_REQUIRED/);
+  source[0].id = source[1].id;
+  await assert.rejects(fetchHistoryMessages(client, 'chat-a', 2, null, 10), /HISTORY_MESSAGE_ID_DUPLICATE/);
+});
+
+test('history above 100 yields every frozen ID exactly once', async () => {
+  const source = messages(120);
+  const client = pagedClient(source);
+  const seen = [];
+  let cursor = null;
+  do {
+    const page = await fetchHistoryMessages(client, 'chat-a', 20, cursor, 200);
+    seen.push(...page.messages.map((item) => item.source_message_id));
+    cursor = page.next_cursor;
+  } while (cursor);
+  assert.deepEqual(seen, source.map((message) => message.id._serialized));
+  assert.equal(new Set(seen).size, 120);
+  assert.equal(client.calls.length, 6);
 });
 
 test('history endpoint is authenticated, bounded, and read-only', async () => {
