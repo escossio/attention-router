@@ -1,5 +1,13 @@
 # Project status
 
+## WhatsApp container runtime — second cutover PASS, reboot pending
+
+- PR #306 merged as `5e97b6b49d352ac74b2e0434fc06b1fca7ce452f` after all 11 checks passed. The cutover checkout and local Browser/Transport images used that exact merge SHA.
+- On 2026-10-07 UTC, the authorized second cutover stopped the eight host-native units, proved exclusive release of their addresses, and verified a fresh stopped-writer backup of profile, spool, media, observer state, unit files and metadata. The old host Chrome Singleton links were removed only after proving their PID and socket listener dead; the four root-owned profile files were adapted after backup.
+- Browser started authenticated with QR absent, then passed one real Compose force-recreate on the same persistent profile. The new container logged `SINGLETON_STATE=STALE_REMOVED`, kept one profile writer, CDP, session, VLAN 210 address and IPv4 forwarding off, with zero crash loops. Transport reached healthy/ready/CONNECTED on VLAN 211 with QR absent and zero disconnects; API and Worker reached its status endpoint. Observer reached READY with one connected page and body capture off. TCP Brain captured both VLANs without kernel drops.
+- The complete 15-minute soak passed: all three containers remained healthy with zero restarts; seven natural inbound events reached the backend once each with no duplicate IDs, the physical spool and outbox counts stayed at baseline, and ROC Zabbix discovered all three containers with numeric CPU, memory, RX and TX metrics.
+- The eight replaced host-native units are inactive, disabled and masked. Their original unit files remain in the private cutover checkpoint for rollback; `andy-transport-compat18103.service` was audited separately and left inactive/disabled. No pairing, logout, outbound test, MikroTik change, new production VLAN/IP or reboot occurred. Reboot certification and definitive historical-file removal require later authorization.
+
 ## WhatsApp Browser persistent-profile lifecycle — certified clone, PR candidate
 
 - PR #305 merged as `3cb4aa685e49a0e77cfe66ac5989a5657dadced4` after all 11 checks passed. The first cutover remains rolled back; host-native Browser and Transport are still active.
