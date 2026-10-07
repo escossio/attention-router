@@ -15,6 +15,7 @@ services:
     environment:
       WHATSAPP_PROFILE_DIR_IN_CONTAINER: /profile
       WHATSAPP_START_URL: ${WHATSAPP_START_URL:-https://web.whatsapp.com/}
+    dns: ["${WHATSAPP_BROWSER_DNS:?set private browser VLAN resolver}"]
     volumes:
       - type: bind
         source: ${WHATSAPP_PROFILE_DIR:?}
@@ -56,6 +57,7 @@ services:
       BROWSER_DEBUG_URL: http://127.0.0.1:9223
       BROWSER_DEBUG_HOST: 127.0.0.1
       BROWSER_DEBUG_PORT: "9223"
+    dns: ["${WHATSAPP_TRANSPORT_DNS:?set private transport VLAN resolver}"]
     volumes:
       - type: bind
         source: ${WHATSAPP_SPOOL_DIR:?}

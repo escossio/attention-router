@@ -51,6 +51,13 @@ bridge is `internal`, neither container has routing capability, and CDP is not
 published on the transport VLAN. The Transport's local proxy preserves the
 existing localhost-only CDP trust check. There is no host port publication,
 LAN route, MikroTik change or host-created netns in the target.
+Browser and Transport currently use distinct private resolvers through their
+host unit overrides. The Compose environment must supply their corresponding
+resolver addresses separately; verify DNS and egress from each VLAN during
+the reviewed cutover. The present Browser VLAN interface is a raw VLAN child
+and the Transport uses a macvlan base with a VLAN child; Docker macvlan on a
+VLAN parent changes that link arrangement and MAC. Its switch/firewall
+acceptance remains a physical cutover gate.
 
 ## Containers and persistent state
 
