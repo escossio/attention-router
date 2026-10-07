@@ -77,8 +77,14 @@ operator must record their original ownership in the private backup, prove
 Chrome can read the staged clone as the container UID, and plan the minimum
 ownership correction only after the live writer stops. Do not blindly
 `chown -R` the profile. Chrome sandbox behavior under Docker's default
-seccomp and dropped capabilities also needs an offline candidate proof. A
-candidate requiring `--no-sandbox` is **not certified** by this package.
+seccomp and dropped capabilities also needs an offline candidate proof. The
+candidate vendors Playwright's Apache-2.0 [Docker seccomp profile](https://github.com/microsoft/playwright/blob/160447983070c9162459c9113e631a0eee28bb1a/utils/docker/seccomp_profile.json)
+(SHA-256 `cc3e61cabda6bbc1e53e54d27ba4d55a9d3be829b6dd1a596f4a7b31b1cc7849`)
+to allow the namespace syscalls required by Chromium while retaining a
+deny-by-default syscall profile, dropped Linux capabilities and
+`no-new-privileges`. This broadens `clone`, `setns` and `unshare` and requires
+explicit review. A candidate requiring `--no-sandbox`, `SYS_ADMIN` or
+`seccomp=unconfined` is **not certified** by this package.
 
 ## Candidate validation without production takeover
 

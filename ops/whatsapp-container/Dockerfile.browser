@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update \
     && apt-get install -y --no-install-recommends "google-chrome-stable=${CHROME_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
-RUN groupadd -g 1000 andy && useradd -u 1000 -g 1000 -m andy
+RUN groupadd -g 1000 andy && useradd -u 1000 -g 1000 -m andy \
+    && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 COPY ops/whatsapp-container/browser-entrypoint.sh /usr/local/bin/browser-entrypoint
 RUN chmod 0755 /usr/local/bin/browser-entrypoint
 USER 1000:1000

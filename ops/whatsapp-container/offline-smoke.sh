@@ -21,7 +21,9 @@ docker network create --internal "$network" >/dev/null
 
 docker run -d --name "$browser" --network "$network" \
   --network-alias browser-cdp --cap-drop ALL \
-  --security-opt no-new-privileges:true --user 1000:1000 \
+  --security-opt no-new-privileges:true \
+  --security-opt "seccomp=$(pwd)/ops/whatsapp-container/chrome-seccomp.json" \
+  --user 1000:1000 \
   --shm-size 1g -e WHATSAPP_START_URL=about:blank \
   -v "$scratch/profile:/profile" andy-whatsapp-browser:ci >/dev/null
 

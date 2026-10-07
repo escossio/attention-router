@@ -28,7 +28,9 @@ services:
       cdp:
         aliases: [browser-cdp]
     cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:${WHATSAPP_CHROME_SECCOMP_PROFILE:?point to versioned profile}
     restart: unless-stopped
     healthcheck:
       test: [CMD-SHELL, "curl -fsS http://127.0.0.1:9223/json/version >/dev/null && pgrep -x socat >/dev/null && pgrep -x Xvfb >/dev/null"]
