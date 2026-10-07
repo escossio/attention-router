@@ -1,0 +1,5 @@
+services:
+  worker:
+    restart: unless-stopped
+    environment:
+      AGENT_EXECUTION_ENABLED: "true"
