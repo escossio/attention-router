@@ -34,7 +34,7 @@ def ready_preflight(monkeypatch, tmp_path):
     profile.write_bytes(b'profile')
     install = tmp_path / 'install'
     install.mkdir()
-    (install / profile.name).write_bytes(b'profile')
+    (install / 'andy-whatsapp-browser.apparmor').write_bytes(b'profile')
     (install / 'compose.yaml').write_text('services: {}')
     mounted = tmp_path / 'browser-profile'
     mounted.mkdir()

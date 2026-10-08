@@ -102,9 +102,10 @@ def parent_up(parent: str) -> bool:
 def preflight() -> tuple[dict[str, str], Path]:
     require(run('systemctl', 'is-active', 'docker.service').strip() == 'active', 'DOCKER_INACTIVE')
     require(run('systemctl', 'is-active', 'apparmor.service').strip() == 'active', 'APPARMOR_SERVICE_INACTIVE')
-    require(PROFILE.is_file() and (INSTALL / PROFILE.name).is_file(), 'APPARMOR_PROFILE_MISSING')
+    bundled_profile = INSTALL / 'andy-whatsapp-browser.apparmor'
+    require(PROFILE.is_file() and bundled_profile.is_file(), 'APPARMOR_PROFILE_MISSING')
     require(hashlib.sha256(PROFILE.read_bytes()).digest() ==
-            hashlib.sha256((INSTALL / PROFILE.name).read_bytes()).digest(), 'APPARMOR_PROFILE_MISMATCH')
+            hashlib.sha256(bundled_profile.read_bytes()).digest(), 'APPARMOR_PROFILE_MISMATCH')
     require(loaded_profile(), 'APPARMOR_PROFILE_NOT_LOADED')
     for unit in LEGACY:
         require(is_masked(unit), f'LEGACY_NOT_MASKED:{unit}')
