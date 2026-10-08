@@ -9,3 +9,4 @@ datasources:
     jsonData:
       allowedHosts:
         - http://roc-flow-reader:8080
+        - http://roc-flow-map:8080

@@ -1,0 +1,31 @@
+services:
+  flow-map:
+    build:
+      context: ..
+      dockerfile: map/Dockerfile
+    image: attention-router-flow-map:v1
+    container_name: andy-roc-flow-map
+    restart: unless-stopped
+    read_only: true
+    user: "18089:18089"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    environment:
+      PGPASSFILE: /run/secrets/zabbix_pgpass
+      ROC_ZABBIX_HOST: roc-zabbix-db
+      TEMPO_URL: http://roc-tempo:3200
+    volumes:
+      - type: bind
+        source: /etc/andy/flow-map/zabbix_pgpass
+        target: /run/secrets/zabbix_pgpass
+        read_only: true
+    networks:
+      monitoring:
+        aliases: [roc-flow-map]
+networks:
+  monitoring:
+    external: true
+    name: andy-roc-monitoring
