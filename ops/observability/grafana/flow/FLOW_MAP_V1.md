@@ -72,3 +72,13 @@ trace; do not provision an empty or synthetic live panel.
 Checks: `python3 -m pytest -q tests/test_grafana_flow_reader.py
 tests/test_grafana_flow_map.py`. Real runtime read-only smoke is separate
 from deterministic tests. No real inventory snapshot is committed.
+
+## Staged Grafana panel
+
+The unprovisioned `node_graph_panel.py` defines the Infinity 4.0.0
+formats `node-graph-nodes` and `node-graph-edges`. Both queries
+target a *future* `/map` endpoint using the selected trace and time
+window. The checked-in dashboard JSON stays untouched until a
+properly authorized, read-only adapter can supply **current Zabbix history**.
+No database credentials, raw Docker socket, arbitrary trace attributes or
+unverified green health status may be handed to the existing Tempo Reader.

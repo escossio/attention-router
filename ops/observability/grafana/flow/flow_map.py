@@ -167,6 +167,10 @@ def build_flow_map(
         edge_rows[key] = {
             "id": key, "source": source, "target": target, "relationship": kind,
             "mainStat": main_stat, "secondaryStat": secondary_stat,
+            "detail__relationship": kind,
+            "detail__sensor_quality": (
+                secondary_stat if kind == "NETWORK_OBSERVED" else "NOT_APPLICABLE"
+            ),
         }
 
     for pair in expected_edges:
