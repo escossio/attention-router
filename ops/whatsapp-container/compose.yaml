@@ -36,7 +36,7 @@ services:
       - no-new-privileges:true
       - seccomp:${WHATSAPP_CHROME_SECCOMP_PROFILE:?point to versioned profile}
       - apparmor:andy-whatsapp-browser
-    restart: unless-stopped
+    restart: "on-failure:5"
     healthcheck:
       test: [CMD-SHELL, "curl -fsS http://127.0.0.1:9223/json/version >/dev/null && pgrep -x socat >/dev/null && pgrep -x Xvfb >/dev/null"]
       interval: 20s
@@ -88,7 +88,7 @@ services:
     sysctls:
       net.ipv4.ip_forward: "0"
     security_opt: [no-new-privileges:true]
-    restart: unless-stopped
+    restart: "on-failure:5"
     healthcheck:
       test: [CMD-SHELL, "curl -fsS http://$${LOCAL_TRANSPORT_HTTP_HOST:-127.0.0.1}:$${LOCAL_TRANSPORT_HTTP_PORT:-18103}/ready >/dev/null"]
       interval: 20s
@@ -123,7 +123,7 @@ services:
       - /tmp:mode=1777
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    restart: unless-stopped
+    restart: "on-failure:5"
     healthcheck:
       test:
         - CMD
