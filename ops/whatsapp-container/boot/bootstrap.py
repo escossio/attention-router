@@ -113,10 +113,19 @@ def preflight() -> tuple[dict[str, str], Path]:
     observer = inspect('observer')
     env_path = private_env_path(browser)
     env = read_env(env_path)
-    require(env.get('WHATSAPP_BROWSER_PARENT') == 'enp1s0.210' and
-            env.get('WHATSAPP_TRANSPORT_PARENT') == 'enp1s0.211', 'VLAN_PARENT_CONFIG_MISMATCH')
-    for parent in ('enp1s0.210', 'enp1s0.211'):
-        require(parent_up(parent), f'VLAN_PARENT_NOT_UP:{parent}')
+    parents = {'browser': env.get('WHATSAPP_BROWSER_PARENT') or '',
+               'transport': env.get('WHATSAPP_TRANSPORT_PARENT') or ''}
+    require(parents['browser'].endswith('.210') and parents['transport'].endswith('.211'),
+            'VLAN_PARENT_CONFIG_MISMATCH')
+    for role, item in (('browser', browser), ('transport', transport)):
+        parent = parents[role]
+        require(parent_up(parent), f'VLAN_PARENT_NOT_UP:{role}')
+        networks = (item.get('NetworkSettings') or {}).get('Networks') or {}
+        wire = [name for name in networks if name.endswith(f'_{role}_wire')]
+        require(len(wire) == 1, f'VLAN_DOCKER_NETWORK_MISSING:{role}')
+        network = json.loads(run('docker', 'network', 'inspect', wire[0]))[0]
+        require((network.get('Options') or {}).get('parent') == parent,
+                f'VLAN_DOCKER_PARENT_MISMATCH:{role}')
     profile = mount_source(browser, '/profile')
     require(profile == Path(env.get('WHATSAPP_PROFILE_DIR', '')), 'PROFILE_MOUNT_MISMATCH')
     require((profile / '.andy-browser-writer.lock').is_file(), 'PROFILE_WRITER_GUARD_MISSING')

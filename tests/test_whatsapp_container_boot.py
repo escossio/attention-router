@@ -40,10 +40,10 @@ def ready_preflight(monkeypatch, tmp_path):
     mounted.mkdir()
     (mounted / '.andy-browser-writer.lock').touch()
     env_file = tmp_path / 'compose.env'
-    env_file.write_text('WHATSAPP_BROWSER_PARENT=enp1s0.210\nWHATSAPP_TRANSPORT_PARENT=enp1s0.211\nWHATSAPP_PROFILE_DIR=' + str(mounted))
+    env_file.write_text('WHATSAPP_BROWSER_PARENT=synthetic-parent.210\nWHATSAPP_TRANSPORT_PARENT=synthetic-parent.211\nWHATSAPP_PROFILE_DIR=' + str(mounted))
     monkeypatch.setattr(boot, 'PROFILE', profile)
     monkeypatch.setattr(boot, 'INSTALL', install)
-    monkeypatch.setattr(boot, 'run', lambda *a, **k: 'active' if a[:2] == ('systemctl', 'is-active') else '')
+    monkeypatch.setattr(boot, 'run', lambda *a, **k: 'active' if a[:2] == ('systemctl', 'is-active') else '[{"Options":{"parent":"synthetic-parent.210"}}]' if 'network' in a and 'browser' in a[-1] else '[{"Options":{"parent":"synthetic-parent.211"}}]' if 'network' in a else '')
     monkeypatch.setattr(boot, 'loaded_profile', lambda: True)
     monkeypatch.setattr(boot, 'is_masked', lambda unit: True)
     monkeypatch.setattr(boot, 'parent_up', lambda parent: True)
@@ -51,6 +51,7 @@ def ready_preflight(monkeypatch, tmp_path):
     monkeypatch.setattr(boot, 'mount_source', lambda item, dest: mounted)
     def fake_inspect(role):
         return {'Config': {'Labels': {}}, 'Mounts': [], 'AppArmorProfile': 'andy-whatsapp-browser',
+                'NetworkSettings': {'Networks': {f'project_{role}_wire': {}}} if role != 'observer' else {'Networks': {}},
                 'HostConfig': {'RestartPolicy': {'Name': 'on-failure', 'MaximumRetryCount': 5}, 'ReadonlyRootfs': role == 'transport',
                                'Privileged': False, 'PortBindings': {},
                                'NetworkMode': 'container:browser' if role == 'observer' else 'default'}}
@@ -60,7 +61,7 @@ def ready_preflight(monkeypatch, tmp_path):
 
 def test_preflight_accepts_synthetic_ready_state(monkeypatch, tmp_path):
     ready_preflight(monkeypatch, tmp_path)
-    assert boot.preflight()[0]['WHATSAPP_BROWSER_PARENT'] == 'enp1s0.210'
+    assert boot.preflight()[0]['WHATSAPP_BROWSER_PARENT'] == 'synthetic-parent.210'
 
 
 def test_preflight_fails_if_profile_missing(monkeypatch, tmp_path):
@@ -79,7 +80,7 @@ def test_preflight_fails_if_profile_not_loaded(monkeypatch, tmp_path):
 
 def test_preflight_fails_if_vlan_parent_missing(monkeypatch, tmp_path):
     ready_preflight(monkeypatch, tmp_path)
-    monkeypatch.setattr(boot, 'parent_up', lambda parent: parent != 'enp1s0.211')
+    monkeypatch.setattr(boot, 'parent_up', lambda parent: parent != 'synthetic-parent.211')
     with pytest.raises(boot.BootError, match='VLAN_PARENT_NOT_UP'):
         boot.preflight()
 
