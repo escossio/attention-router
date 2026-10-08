@@ -9,3 +9,5 @@ Use `trace_id=latest` or paste a canonical trace ID; the dashboard has a certifi
 `build_dashboard.py EXISTING_JSON OUTPUT_JSON` preserves the existing Zabbix/legacy panels and can be rerun on the generated definition. The checked-in JSON is deployable without regeneration. Focused tests: `pytest -q tests/test_grafana_flow_reader.py`.
 
 Rollback: restore the dashboard backup and reload dashboard provisioning, remove only the `roc-flow` datasource provisioning file and datasource, then stop this reader with `docker compose -f compose.yaml down`. Keep the existing Tempo/Zabbix datasource definitions and all functional OTel services unchanged.
+
+Flow Map V1 experimental read-only projection contract: [FLOW_MAP_V1.md](FLOW_MAP_V1.md). No Grafana panel/runtime changes are applied by this slice.

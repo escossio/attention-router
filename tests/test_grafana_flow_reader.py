@@ -129,3 +129,46 @@ def test_renderer_preserves_legacy_panels_when_run_again():
     assert regenerated["panels"][-1]["panels"] == current["panels"][-1]["panels"]
     assert len(regenerated["panels"][-1]["panels"]) == 10
     assert regenerated["uid"] == current["uid"]
+
+
+def test_tempo_search_leading_zero_id_survives_latest_and_recent():
+    short_id = "a" * 31
+    normalized = "0" + short_id
+    raw = span("attention.message", "c" * 16, outcome="ACCEPTED")
+    raw["traceId"] = short_id
+    class FakeTempo(reader.Tempo):
+        def __init__(self):
+            super().__init__("http://unused")
+            self.paths = []
+
+        def recent(self, start, end):
+            return [{"traceID": short_id}]
+
+        def get(self, path, ttl=10):
+            self.paths.append(path)
+            assert path == "/api/traces/" + normalized
+            return trace([raw])
+
+    tempo = FakeTempo()
+    result = tempo.view("latest", 0, 1)
+    assert result["metadata"][0]["trace_id"] == normalized
+    assert result["metadata"][0]["outcome"] == "ACCEPTED"
+    recent = tempo.recent_view(0, 1)
+    assert recent["traces"][0]["trace_id"] == normalized
+    assert tempo.paths == ["/api/traces/" + normalized] * 2
+
+
+def test_trace_id_validation_remains_bounded_and_rejects_malformed():
+    assert reader.identifier("a" * 31) == "0" + "a" * 31
+    assert reader.identifier("A" * 31) == "0" + "a" * 31
+    assert reader.identifier("b" * 15, 16) == "0" + "b" * 15
+    assert reader.identifier("0" * 32) == ""
+    for invalid in ("x" * 31, "../", "a" * 33, "a-b", "", None):
+        assert reader.identifier(invalid) == ""
+    class NeverFetch(reader.Tempo):
+        def get(self, *args, **kwargs):
+            raise AssertionError("invalid input reached Tempo")
+    for bad in ("../", "a" * 33, "0" * 32):
+        import pytest
+        with pytest.raises(ValueError, match="invalid trace id"):
+            NeverFetch("http://unused").trace(bad)

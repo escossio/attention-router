@@ -75,11 +75,13 @@ UUID = re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
 
 
 def identifier(value, size=32):
-    if re.fullmatch("[0-9a-f]{" + str(size) + "}", value or ""):
-        return value
+    # Tempo search may omit leading zero nybbles from a valid 128-bit trace ID.
+    # Normalize before lookups and correlation; never accept non-hex or oversized IDs.
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{1," + str(size) + "}", value):
+        return value.lower().zfill(size) if int(value, 16) else ""
     try:
-        value = base64.b64decode(value, validate=True).hex()
-        return value if len(value) == size else ""
+        decoded = base64.b64decode(value, validate=True).hex()
+        return decoded if len(decoded) == size and int(decoded, 16) else ""
     except (ValueError, TypeError):
         return ""
 
@@ -289,6 +291,7 @@ class Tempo:
             return result
 
     def trace(self, trace_id):
+        trace_id = identifier(trace_id)
         if not ID.fullmatch(trace_id):
             raise ValueError("invalid trace id")
         return decode_trace(self.get("/api/traces/" + trace_id))
