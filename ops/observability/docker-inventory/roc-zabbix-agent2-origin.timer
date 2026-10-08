@@ -1,0 +1,12 @@
+[Unit]
+Description=Reconcile exact Zabbix Server source IP after container changes
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+Unit=roc-zabbix-agent2-origin.service
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
