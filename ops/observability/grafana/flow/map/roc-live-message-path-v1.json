@@ -1,0 +1,203 @@
+{
+  "id": null,
+  "uid": "roc-live-message-path-v1",
+  "title": "Andy · Live Message Path V1",
+  "description": "Mapa lógico de serviço; saúde via Zabbix com timestamp, percurso via Tempo, rede somente quando houver evidência independente. NOT_REACHED != falha; UNKNOWN != DOWN.",
+  "tags": [
+    "andy",
+    "roc",
+    "flow-map",
+    "evidence-first"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 0,
+  "refresh": "30s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "trace_id",
+        "type": "textbox",
+        "label": "Trace canônico",
+        "query": "latest",
+        "current": {
+          "text": "latest",
+          "value": "latest"
+        },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 110,
+      "type": "nodeGraph",
+      "title": "Andy Live Message Path · evidence-first",
+      "description": "Nodes = observed Zabbix Docker entities, health with freshness; edges = declared topology or validated OTel relationship. TCP witness never implies correlation with selected trace. This panel must NOT be provisioned before /map is live and verified.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 18
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-flow"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "node-graph-nodes",
+          "parser": "backend",
+          "url": "http://roc-flow-map:8080/map?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+          "root_selector": "nodes",
+          "columns": [
+            {
+              "selector": "id",
+              "text": "id",
+              "type": "string"
+            },
+            {
+              "selector": "title",
+              "text": "title",
+              "type": "string"
+            },
+            {
+              "selector": "subTitle",
+              "text": "subTitle",
+              "type": "string"
+            },
+            {
+              "selector": "mainStat",
+              "text": "mainStat",
+              "type": "string"
+            },
+            {
+              "selector": "secondaryStat",
+              "text": "secondaryStat",
+              "type": "string"
+            },
+            {
+              "selector": "color",
+              "text": "color",
+              "type": "string"
+            },
+            {
+              "selector": "detail__health_source",
+              "text": "detail__health_source",
+              "type": "string"
+            },
+            {
+              "selector": "detail__evidence",
+              "text": "detail__evidence",
+              "type": "string"
+            },
+            {
+              "selector": "detail__host",
+              "text": "detail__host",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-flow"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "node-graph-edges",
+          "parser": "backend",
+          "url": "http://roc-flow-map:8080/map?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}",
+          "root_selector": "edges",
+          "columns": [
+            {
+              "selector": "id",
+              "text": "id",
+              "type": "string"
+            },
+            {
+              "selector": "source",
+              "text": "source",
+              "type": "string"
+            },
+            {
+              "selector": "target",
+              "text": "target",
+              "type": "string"
+            },
+            {
+              "selector": "mainStat",
+              "text": "mainStat",
+              "type": "string"
+            },
+            {
+              "selector": "secondaryStat",
+              "text": "secondaryStat",
+              "type": "string"
+            },
+            {
+              "selector": "detail__relationship",
+              "text": "detail__relationship",
+              "type": "string"
+            },
+            {
+              "selector": "detail__sensor_quality",
+              "text": "detail__sensor_quality",
+              "type": "string"
+            },
+            {
+              "selector": "color",
+              "text": "color",
+              "type": "string"
+            },
+            {
+              "selector": "strokeDasharray",
+              "text": "strokeDasharray",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "nodes": {},
+        "edges": {}
+      }
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "links": [
+    {
+      "title": "ROC-E2E · Operational Flow",
+      "type": "link",
+      "url": "/d/roc-e2e-operational/roc-e2e-operational-flow",
+      "targetBlank": false
+    }
+  ]
+}

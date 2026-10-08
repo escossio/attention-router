@@ -7,7 +7,7 @@ from __future__ import annotations
 
 FLOW = {"type": "yesoreyeram-infinity-datasource", "uid": "roc-flow"}
 URL = (
-    "http://roc-flow-reader:8080/map"
+    "http://roc-flow-map:8080/map"
     "?trace_id=${trace_id:percentencode}&start=${__from}&end=${__to}"
 )
 NODE_FIELDS = (
@@ -16,7 +16,7 @@ NODE_FIELDS = (
 )
 EDGE_FIELDS = (
     "id", "source", "target", "mainStat", "secondaryStat",
-    "detail__relationship", "detail__sensor_quality",
+    "detail__relationship", "detail__sensor_quality", "color", "strokeDasharray",
 )
 
 

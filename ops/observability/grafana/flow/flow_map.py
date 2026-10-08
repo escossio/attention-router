@@ -171,6 +171,12 @@ def build_flow_map(
             "detail__sensor_quality": (
                 secondary_stat if kind == "NETWORK_OBSERVED" else "NOT_APPLICABLE"
             ),
+            "color": (
+                "gray" if kind == "EXPECTED_TOPOLOGY" else
+                "orange" if kind == "SPAN_LINK" else
+                "cyan" if kind == "PARENT_CHILD" else "yellow"
+            ),
+            "strokeDasharray": "4,4" if kind == "EXPECTED_TOPOLOGY" else "",
         }
 
     for pair in expected_edges:

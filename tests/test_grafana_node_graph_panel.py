@@ -25,7 +25,7 @@ def test_staged_nodegraph_queries_use_installed_infinity4_format():
 
 def test_nodegraph_requires_actual_source_and_no_fake_fallback():
     p = module.panel()
-    assert all("/map?" in q["url"] for q in p["targets"])
+    assert all("http://roc-flow-map:8080/map?" in q["url"] for q in p["targets"])
     assert all(q["source"] == "url" for q in p["targets"])
     assert not any(q.get("data") for q in p["targets"])
     node_columns = {x["selector"] for x in p["targets"][0]["columns"]}
@@ -45,3 +45,21 @@ def test_dashboard_remains_unmodified_and_staged_panel_has_unique_id():
             if "panels" in x:
                 yield from flatten(x["panels"])
     assert module.panel()["id"] not in set(flatten(data["panels"]))
+
+
+def test_separate_dashboard_uid_and_no_original_mutation():
+    import json
+    import sys
+    path = BASE / "ops/observability/grafana/flow/map/build_dashboard.py"
+    sp = importlib.util.spec_from_file_location("new_map_dash", path)
+    folder = str(FILE.parent)
+    sys.path.insert(0, folder)
+    d = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(d)
+    j = d.build()
+    assert j["uid"] == "roc-live-message-path-v1"
+    assert j["panels"][0]["type"] == "nodeGraph"
+    assert j["templating"]["list"][0]["query"] == "latest"
+    assert j["refresh"] == "30s"
+    loaded = json.loads((BASE / "ops/observability/grafana/flow/map/roc-live-message-path-v1.json").read_text())
+    assert loaded == j
