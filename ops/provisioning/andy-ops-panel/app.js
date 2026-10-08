@@ -324,19 +324,19 @@ function renderTransport(obs) {
     severity === "OK" ? "live" : severity === "CRITICAL" ? "offline" : "ready"
   );
 
-  $("#wa-page-state").textContent = derived.page_state || "UNKNOWN";
-  $("#wa-browser-unit").textContent = browser.active ? "ACTIVE" : String(browser.active_state || "UNKNOWN").toUpperCase();
-  $("#wa-browser-debug").textContent = browser.debug_reachable ? "REACHABLE" : "UNREACHABLE";
-  $("#wa-page-count").textContent = browser.whatsapp_page_count ?? "—";
-  $("#wa-auth-state").textContent = browser.auth_state || "—";
-  $("#wa-has-synced").textContent = browser.has_synced === true ? "TRUE" : browser.has_synced === false ? "FALSE" : "—";
-  $("#wa-sync-handler").textContent = browser.sync_handler_present === true ? "PRESENT" : browser.sync_handler_present === false ? "ABSENT" : "—";
+  $("#wa-page-state").textContent = browser.healthy ? "HEALTHY" : "UNKNOWN / DEGRADED";
+  $("#wa-browser-unit").textContent = obs.runtime || "UNKNOWN";
+  $("#wa-browser-debug").textContent = browser.debug_reachable === true ? "REACHABLE (TRANSPORT)" : browser.debug_reachable === false ? "UNREACHABLE" : "UNKNOWN";
+  $("#wa-page-count").textContent = `${derived.transport_page_count ?? "—"} / ${derived.observer_page_count ?? "—"}`;
+  $("#wa-auth-state").textContent = observer.app_state || "UNKNOWN";
+  $("#wa-has-synced").textContent = observer.browser_connected === true ? "CONNECTED" : observer.browser_connected === false ? "DISCONNECTED" : "UNKNOWN";
+  $("#wa-sync-handler").textContent = derived.evidence_completeness || "UNKNOWN";
 
   $("#wa-client-state").textContent = transport.client_state || "UNKNOWN";
-  $("#wa-transport-unit").textContent = transport.active ? "ACTIVE" : String(transport.active_state || "UNKNOWN").toUpperCase();
+  $("#wa-transport-unit").textContent = transport.running ? "CONTAINER HEALTHY" : "CONTAINER UNKNOWN / DEGRADED";
   $("#wa-transport-ready").textContent = transport.ready === true ? "READY" : "NOT READY";
   $("#wa-wwebjs-connected").textContent = transport.wwebjs_connected === true ? "CONNECTED" : "NOT CONNECTED";
-  $("#wa-transport-pid").textContent = transport.pid || "—";
+  $("#wa-transport-pid").textContent = obs.legacy?.state || "—";
 
   const authorityReady = transport.owner_command_authority_ready === true;
   $("#wa-authority-state").textContent = authorityReady ? "AUTHORIZED" : "NOT AUTHORIZED";
@@ -347,8 +347,8 @@ function renderTransport(obs) {
 
   const flowReady = transport.ready === true && api.ready === true;
   $("#wa-flow-state").textContent = flowReady ? "FLOW READY" : "FLOW DEGRADED";
-  $("#wa-observer-state").textContent = observer.active ? (observer.fresh ? "ACTIVE / FRESH" : "ACTIVE") : "OFFLINE";
-  $("#wa-observer-age").textContent = fmtAge(observer.age_seconds);
+  $("#wa-observer-state").textContent = observer.service_state || "UNKNOWN";
+  $("#wa-observer-age").textContent = fmtAge(observer.message_activity_age_seconds);
   $("#wa-inbound-count").textContent = transport.inbound_seen_count ?? "—";
   $("#wa-api-ready").textContent = api.ready ? "READY" : "NOT READY";
 

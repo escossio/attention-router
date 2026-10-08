@@ -1,5 +1,7 @@
 # Project status
 
+- 2026-10-07: Andy Ops container observability corrigida em PR #308 (`fix/andy-ops-container-whatsapp-observability-v1`). Runtime live mudou somente em `transport_observability.py`, `app.js`, `index.html`, com backup `/root/andy-ops-panel-backup-20261007-container-observability`; reiniciado somente `andy-ops-panel.service`. API live: Browser container healthy/página 1, Transport READY/CONNECTED/página 1, Observer READY/página 1, `severity=OK`, divergências vazias; UI estática servida atualizada, HTTPS gestão exige autenticação (401 sem credenciais). Containers WhatsApp mantiveram IDs e health. 11 checks verdes no commit de código `95a1c96`; registro documental aguarda checks próprios. Boot/AppArmor permanece follow-up separado.
+
 ## WhatsApp container runtime — second cutover PASS, reboot pending
 
 - PR #306 merged as `5e97b6b49d352ac74b2e0434fc06b1fca7ce452f` after all 11 checks passed. The cutover checkout and local Browser/Transport images used that exact merge SHA.

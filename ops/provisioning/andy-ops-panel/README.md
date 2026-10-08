@@ -145,3 +145,7 @@ A dispatch is shown as `RUNNING` only when a live AGT/worker process reports tha
 ## V1 runtime proof
 
 The original V1 was validated on the engineering control plane with live CPU sampling from all four nodes, real hwmon temperature data where available, distributed-CI history, persistent Desktop Commander tool history, a systemd-managed service, health checks and a headless Chrome render test.
+
+## WhatsApp container observability
+
+Andy Ops reads the Transport `/status`, the Observer bind-mounted `status.json`, and read-only `docker inspect`/`docker logs` for the three WhatsApp containers. The panel process needs read access to Docker and `/var/lib/attention-router/whatsapp-observer/status.json`. Host CDP and retired systemd units are not operational sensors. Missing page evidence is reported as `OBSERVABILITY_GAP`, never as a measured zero. Docker logs are projected to a fixed event-name allowlist; message bodies and credentials are not returned. The boot/AppArmor orchestration issue remains a separate follow-up.

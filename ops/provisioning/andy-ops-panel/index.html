@@ -104,7 +104,7 @@
         <div>
           <span class="section-label">TRUST / STATE OBSERVABILITY</span>
           <h2>WhatsApp transport · estados independentes</h2>
-          <p>Compara a página real do WhatsApp, o estado interno do whatsapp-web.js, autoridade do owner, observer e backend. Divergências são tratadas como sinal operacional de primeira classe.</p>
+          <p>Compara estados atuais dos containers, Transport, Observer e backend. Divergências são tratadas como sinal operacional de primeira classe.</p>
         </div>
         <div id="transport-overall-state" class="source-state">AGUARDANDO</div>
       </section>
@@ -114,12 +114,12 @@
           <span class="section-label">BROWSER / PÁGINA</span>
           <strong id="wa-page-state">—</strong>
           <dl>
-            <div><dt>Browser unit</dt><dd id="wa-browser-unit">—</dd></div>
-            <div><dt>CDP</dt><dd id="wa-browser-debug">—</dd></div>
-            <div><dt>Páginas WA</dt><dd id="wa-page-count">—</dd></div>
-            <div><dt>AuthStore</dt><dd id="wa-auth-state">—</dd></div>
-            <div><dt>hasSynced</dt><dd id="wa-has-synced">—</dd></div>
-            <div><dt>Sync handler</dt><dd id="wa-sync-handler">—</dd></div>
+            <div><dt>Runtime</dt><dd id="wa-browser-unit">—</dd></div>
+            <div><dt>CDP via Transport</dt><dd id="wa-browser-debug">—</dd></div>
+            <div><dt>Páginas WA (T / O)</dt><dd id="wa-page-count">—</dd></div>
+            <div><dt>App state</dt><dd id="wa-auth-state">—</dd></div>
+            <div><dt>Observer</dt><dd id="wa-has-synced">—</dd></div>
+            <div><dt>Topologia</dt><dd id="wa-sync-handler">—</dd></div>
           </dl>
         </article>
 
@@ -130,7 +130,7 @@
             <div><dt>Service</dt><dd id="wa-transport-unit">—</dd></div>
             <div><dt>/ready</dt><dd id="wa-transport-ready">—</dd></div>
             <div><dt>WWEBJS</dt><dd id="wa-wwebjs-connected">—</dd></div>
-            <div><dt>PID</dt><dd id="wa-transport-pid">—</dd></div>
+            <div><dt>Legacy</dt><dd id="wa-transport-pid">—</dd></div>
           </dl>
         </article>
 
@@ -150,7 +150,7 @@
           <strong id="wa-flow-state">—</strong>
           <dl>
             <div><dt>Observer</dt><dd id="wa-observer-state">—</dd></div>
-            <div><dt>Último evento</dt><dd id="wa-observer-age">—</dd></div>
+            <div><dt>Atividade de mensagem</dt><dd id="wa-observer-age">—</dd></div>
             <div><dt>Inbound seen</dt><dd id="wa-inbound-count">—</dd></div>
             <div><dt>API</dt><dd id="wa-api-ready">—</dd></div>
           </dl>
