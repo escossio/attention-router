@@ -89,10 +89,18 @@ class MapProjection:
         start, end = (start // 10) * 10, (end // 10) * 10
         if end <= start or end - start > MAX_REQUEST_SECONDS:
             raise InvalidSelection("invalid time window")
-        # Reuse native Tempo canonical+inbound projection; no message bodies.
-        trace_view = self.tempo.view(trace_id, start, end)
+        # Zabbix is the structural authority: Tempo outage must never
+        # delete the topology or create fabricated NOT_REACHED stages.
         containers, attachments = self.zabbix.read()
-        return flow_map.build_flow_map(
+        try:
+            trace_view = self.tempo.view(trace_id, start, end)
+            trace_status = (
+                "OBSERVED" if trace_view.get("metadata") else "NO_TRACE_OBSERVED"
+            )
+        except Exception:
+            trace_view = {}
+            trace_status = "UNAVAILABLE"
+        result = flow_map.build_flow_map(
             service_entities=SERVICE_ENTITIES,
             container_samples=containers,
             attachment_samples=attachments,
@@ -103,6 +111,16 @@ class MapProjection:
             max_age_s=MAX_AGE_SECONDS,
             network_sensor_healthy=False,
         )
+        result["source_status"] = {
+            "zabbix": "OBSERVED" if containers else "NO_INVENTORY_EVIDENCE",
+            "tempo": trace_status,
+            "tcp_brain": "NOT_INTEGRATED",
+        }
+        result["evidence_completeness"] = (
+            "PARTIAL" if trace_status != "OBSERVED" or not containers else
+            "ZABBIX_AND_TRACE_OBSERVED"
+        )
+        return result
 
 
 class Handler(BaseHTTPRequestHandler):

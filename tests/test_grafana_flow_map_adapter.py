@@ -217,3 +217,24 @@ def test_unavailable_inventory_never_returns_stale_cached_green():
             assert "unavailable" in str(exc)
         else:
             raise AssertionError("missing evidence accepted")
+
+
+def test_tempo_outage_keeps_zabbix_topology_without_fake_reached():
+    class FailedTempo:
+        def view(self, *args):
+            raise RuntimeError("Tempo temporarily unavailable")
+    now = 1700000000
+    m = bridge.MapProjection(
+        zabbix=bridge.ZabbixView(fake_connector(sample_rows(now),[])),
+        tempo=FailedTempo(),
+    )
+    with patch.object(bridge.time, "time", return_value=now):
+        data = m.view("latest",None,None)
+    assert len(data["nodes"]) == 3
+    assert [n["mainStat"] for n in data["nodes"]] == [
+        "HEALTHY", "HEALTHY", "UNKNOWN"
+    ]
+    assert all(n["participation"] == "UNSELECTED" for n in data["nodes"])
+    assert all(e["relationship"] == "EXPECTED_TOPOLOGY" for e in data["edges"])
+    assert data["source_status"]["tempo"] == "UNAVAILABLE"
+    assert data["evidence_completeness"] == "PARTIAL"

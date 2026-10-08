@@ -19,6 +19,9 @@ a Andy, o runtime WhatsApp, o TCP Brain ou o Zabbix Agent2.
   read-only no container em `/run/secrets/zabbix_pgpass`; não vai para env.
 - Tempo → Reader Python reaproveitado, trace selecionado com limite 24h.
 - A regra `UNKNOWN` prevalece se o dado Zabbix está velho/faltando.
+- Falha do Tempo não destrói o esqueleto Zabbix: o mapa conserva os nós,
+  sinaliza `tempo=UNAVAILABLE` e deixa a participação `UNSELECTED`.
+  Falha do próprio Zabbix responde 503 em vez de criar saúde sintética.
 - Rede TCP Brain não é ligada automaticamente: V1 informa somente ligações
   declaradas e OTel parent/child / SPAN_LINK realmente observado. Relação
   física sem testemunha continua `EXPECTED_ONLY`.
