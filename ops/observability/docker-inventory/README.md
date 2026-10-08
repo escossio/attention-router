@@ -90,3 +90,46 @@ Verify Docker user/group/socket permissions, 405 mutation rejection, 403
 unknown-route rejection, inspect projection and absence of Docker TCP listeners.
 Use disposable synthetic fixtures for any future identity-change regression;
 do not commit real container names, subnets, addresses or inventory snapshots.
+
+## ROC Agent2 source reconciliation (follow-up 2026-10-08)
+
+The ROC Server's `andy-roc-edge` address is not reserved. After a Docker
+reboot it may change, while the host Agent2's passive `Server=` directive
+continues authorizing the old IP. In the observed incident it authorized the
+ROC **Web** container instead of the actual ROC **Server**, breaking Docker LLD
+updates even while `zabbix_agent2 -t` on the host worked.
+
+Recovery was verified using the Server's actual IPv4 route to host `10.45.0.2`
+and `zabbix_get` from within that Server. A one-address-only change restored
+fresh ROC discovery history without touching WhatsApp.
+
+The new `reconcile_agent2_origin.py` is a proposed idempotent fail-closed
+guard. It reads only the existing allowlisted Unix Docker API view, checks the
+sole running Compose `attention-router-roc-e2e/roc-zabbix-server` identity,
+and authorizes only its `andy-roc-edge` IPv4 in addition to loopback. If the
+source cannot be trusted, it restricts Agent2 to loopback only. No Docker
+mutation, subnets, wildcard addresses, container environment, or application
+payload are accessed.
+
+**Not automatically installed.** Dry-run manually with
+`python3 ops/observability/docker-inventory/reconcile_agent2_origin.py`
+and require `IN_SYNC` at the currently validated deployment. A future,
+separately authorized installation should:
+
+1. Back up `/etc/zabbix/zabbix_agent2.conf` privately; ensure it currently
+   contains only loopback and one ROC Server IP (otherwise abort).
+2. Install the script under `/usr/local/lib/andy-docker-view/`, then install
+   `roc-zabbix-agent2-origin.service` and `.timer` under `/etc/systemd/system/`.
+3. Validate a dry-run, service unit restrictions, active Docker read-only proxy,
+   and syntax check. Enable only the timer when tested.
+4. Prove idempotence without an Agent2 restart, then force a **synthetic**
+   identity/IP fixture in tests (not a live container recreate) to verify
+   reauthorization. Live reboot/cutover testing remains separately authorized.
+5. Validate actual passive `zabbix_get` from the ROC Server, fresh Zabbix
+   `history_text.clock` for container discovery and no active surprise alerts.
+6. For rollback, disable/stop the new timer and unit, then restore the private
+   config backup *only after rechecking current Server source*.
+
+A failure to find a verifiable server closes the remote allowlist to
+loopback; an unexpected non-managed `Server=` directive is never rewritten.
+No sensitive snapshots or backups are committed.

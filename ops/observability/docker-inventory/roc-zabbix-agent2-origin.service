@@ -1,0 +1,17 @@
+[Unit]
+Description=Reconcile exact Zabbix Server source IP in host Agent2 allowlist
+After=docker.service andy-zabbix-docker-view.service
+Wants=docker.service andy-zabbix-docker-view.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/andy-docker-view/reconcile_agent2_origin.py --apply
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/zabbix
+UMask=0077
+TimeoutStartSec=55s
