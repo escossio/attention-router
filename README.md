@@ -4,22 +4,28 @@
 [![CodeQL](https://github.com/escossio/attention-router/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/escossio/attention-router/security/code-scanning)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Attention Router is a contextual agent runtime for controlled, policy-aware autonomous interactions.** Andy is its principal conversational agent: context-aware assistance with explicit limits on what an agent may do.
+**Agents propose. Policy authorizes. Evidence confirms.**
 
-**Status: public prerelease.**
+Attention Router is an open-source, policy-aware agent runtime that separates what an AI model proposes from what the system may execute. Independent policy and human-control boundaries govern external effects; execution and confirmed delivery are recorded as different states. Andy is its principal conversational agent.
+
+**Explore:** [Project website](https://escossio.github.io/attention-router/) · [Illustrated 90-second demo](docs/demo.md) · [Architecture and trust boundaries](docs/architecture/overview.md) · [Local quick start](#quick-start-local-core-no-providers)
+
+**Status: public prerelease.** The public demo is scripted, synthetic and provider-free. It illustrates the architecture; it does not execute a live authorization flow or establish production readiness.
 
 ## Why
 
-A useful agent needs more than a generated reply. It must identify the conversation, carry relevant context, respect human control, authorize effects, and distinguish a proposed response from one actually delivered.
+A plausible model-generated response is not permission to act. Useful agent infrastructure must answer three different questions: **What was proposed? Was it authorized? What actually happened?**
 
-Attention Router makes those boundaries explicit and auditable. WhatsApp is an integration, not the product's entire architecture.
+Attention Router separates context and proposals from policy/autonomy decisions, human review, execution intents and delivery evidence. Idempotency and outbox mechanisms address retried work; ambiguous external delivery is not treated as a confirmed success. WhatsApp is an integration, not the product's entire architecture.
 
 ## Demo
 
-Watch the [60–90 second public architecture demo](docs/assets/demo/attention-router-demo.mp4)
-or view its [poster](docs/assets/demo/attention-router-demo-poster.png). It is
-synthetic and offline; the [demo guide](docs/demo.md) explains the flow and
-reproduction command.
+Watch the [60–90 second illustrated architecture demo](docs/assets/demo/attention-router-demo.mp4)
+or view its [poster](docs/assets/demo/attention-router-demo-poster.png). It is a
+**scripted, synthetic, offline walkthrough**, not an end-to-end run of the live
+authorization or delivery pipeline. The [demo guide](docs/demo.md) explains its
+scope and reproduction command; the [architecture document](docs/architecture/overview.md)
+describes the actual authority boundaries.
 
 ## Current capabilities
 
@@ -57,12 +63,14 @@ model](docs/security/threat-model.md), and [technical roadmap](ROADMAP.md).
 
 ## WhatsApp runtime target
 
-`WHATSAPP_RUNTIME=CONTAINERIZED` is the declared target. The AGT live deployment
-remains host-native until a separately approved cutover, soak and reboot proof.
-The versioned [container candidate and rollback plan](ops/whatsapp-container/README.md)
-were merged in PR #302; the old units are `RETIRED_HISTORICAL` and cannot be
-reintroduced as new deployment sources. No pairing or session transfer is
-performed by this declaration.
+`WHATSAPP_RUNTIME=CONTAINERIZED` is the declared target. The
+[operational status](STATUS.md) records an authorized Browser/Transport/Observer
+container cutover on 2026-10-07 and a successful 15-minute soak; reboot
+certification remained pending at that checkpoint. The
+[container candidate and rollback plan](ops/whatsapp-container/README.md)
+documents the controlled transition. Operational acceptance on AGT is
+**separate from public prerelease certification**; neither establishes universal
+provider support or production readiness.
 
 ## Operational observability
 
