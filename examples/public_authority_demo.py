@@ -58,7 +58,10 @@ def main() -> None:
     print(f"{'SCENARIO':<23} {'DECISION':<19} REASON")
     for scenario, decision in evaluate_scenarios():
         print(f"{scenario.name:<23} {decision.result.value:<19} {decision.reason_code}")
-    print("SCOPE: core authority decision only; no agent, database, approval persistence or delivery")
+    print(
+        "SCOPE: core authority decision only; "
+        "no agent, database, approval persistence or delivery"
+    )
 
 
 if __name__ == "__main__":
