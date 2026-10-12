@@ -92,6 +92,12 @@ The AGT host has reproducible out-of-band provisioning packages for the [GitHub 
 
 ## Distributed CI acceleration
 
+**Engineering evidence:** [Explore the five GitHub Actions workflows, eleven
+checks on PR #313, exact-SHA distributed validation and CI Agent boundaries](docs/engineering-evidence.md).
+The linked case study (PT-BR + English summary) distinguishes historical
+benchmarks from current worker allocation.
+
+
 A self-managed heterogeneous CI control plane accelerates the PostgreSQL integration gate by profiling test duration and weighting work across two bare-metal workers and one KVM virtualized worker. On the measured 403-test suite, distributed worker wall time fell from a 286-second initial single-worker baseline to **99 seconds**; the complete control-plane invocation finished in about **103 seconds**.
 
 The lab executes explicit commit SHAs with disposable worktrees and synthetic PostgreSQL instances. Its aggregated result is published by the `andy-github-control-plane` App as the required `distributed-postgres` check, so the PostgreSQL suite is not rerun on a GitHub-hosted runner. GitHub Actions and CodeQL continue to certify the remaining repository-native gates. See the [heterogeneous distributed CI lab](ops/provisioning/distributed-ci-lab/README.md) for architecture, benchmark evidence and security boundaries.
