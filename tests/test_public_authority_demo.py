@@ -17,7 +17,10 @@ EXPECTED = {
 
 def test_all_cases_call_actual_authority_evaluator():
     results = evaluate_scenarios()
-    actual = {scenario.name: (decision.result, decision.reason_code) for scenario, decision in results}
+    actual = {
+        scenario.name: (decision.result, decision.reason_code)
+        for scenario, decision in results
+    }
     assert actual == EXPECTED
     assert any(s.side_effect and d.result is AuthorityResult.REQUIRES_APPROVAL for s, d in results)
     assert any(not s.side_effect and d.result is AuthorityResult.ALLOW for s, d in results)
