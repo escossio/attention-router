@@ -6,7 +6,7 @@ There is no stable public release or security-support SLA yet. The supported pub
 
 ## Private reporting and coordinated disclosure
 
-Do not report exploitable details in a public issue or pull request. Use GitHub private vulnerability reporting **only when it is enabled**. The public reporting channel is not yet configured; until then, request a private channel from the maintainer without disclosing exploit details. Configuring and testing that channel is a publication gate.
+Do not report exploitable details in a public issue or pull request. GitHub **private vulnerability reporting is enabled** for this repository (verified via the repository API on 2026-10-12). Report findings privately through [Report a vulnerability](https://github.com/escossio/attention-router/security/advisories/new). If the reporting interface is unavailable, request a private channel from the maintainer without posting exploit details publicly.
 
 Include affected revision, impact and a minimal synthetic reproduction. Coordinate disclosure while the issue is assessed and remediated. Do not test against other people's accounts or a live deployment without permission. No response-time guarantee is currently offered.
 
