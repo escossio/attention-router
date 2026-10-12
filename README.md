@@ -27,6 +27,11 @@ authorization or delivery pipeline. The [demo guide](docs/demo.md) explains its
 scope and reproduction command; the [architecture document](docs/architecture/overview.md)
 describes the actual authority boundaries.
 
+**Executable authority decision:** [Run a seven-scenario evaluation of the
+real core authority function](docs/authority-demo.md), without an LLM or external
+effects. It tests the pure decision boundary, **not** authenticated approval,
+outbox execution, or real-world delivery.
+
 ## Current capabilities
 
 - Structured inbound processing, tenant/contact scope and idempotent event handling.
