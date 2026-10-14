@@ -56,5 +56,17 @@ def test_ci_image_reproduces_versioned_dispatcher_without_host_package():
     assert "COPY ops/provisioning/github-app-control-plane/distributed_postgres_check.py " in image
     assert "COPY ops/provisioning/github-app-control-plane/distributed_shadow_checks.py " in image
     assert "COPY ops/provisioning/github-app-control-plane/probe.py " in image
+    assert "COPY ops/provisioning/github-app-control-plane/publisher-containers/preflight.py " in image
+    assert "useradd -u 10001 -g 10001 -d /home/ci" in image
     assert "ADD /" not in image
     assert "github-webhook" not in image.lower()
+
+
+def test_preflight_is_nonpublishing_and_opt_in_for_database_write():
+    source = (D / "preflight.py").read_text()
+    assert "--sqlite-write" in source
+    assert "--github-auth" in source
+    assert "--worker" in source
+    assert "create_check(" not in source
+    assert "complete_check(" not in source
+    assert "PREFLIGHT_PASS" in source
