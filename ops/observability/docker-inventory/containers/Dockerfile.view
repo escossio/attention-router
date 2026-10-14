@@ -1,0 +1,8 @@
+# The only ROC observation process allowed to access the Docker daemon.
+# No networking, restricted Unix-socket HTTP API, and no Docker mutation API.
+FROM python:3.13-alpine
+WORKDIR /opt/roc
+COPY zabbix_proxy.py /opt/roc/zabbix_proxy.py
+RUN chmod 0444 /opt/roc/zabbix_proxy.py
+USER 0:1995
+CMD ["python", "-B", "-u", "/opt/roc/zabbix_proxy.py"]
