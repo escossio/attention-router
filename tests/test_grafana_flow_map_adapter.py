@@ -101,6 +101,7 @@ def test_read_only_view_and_selected_metadata_columns():
     result=bridge.ZabbixView(fake_connector(sample_rows(1700000000), calls)).read()
     assert len(result[0])==3 and len(result[1])==1
     assert calls[0]["user"]==bridge.DB_ROLE
+    assert calls[0]["host"] == "roc-db"
     assert calls[0]["options"].find("default_transaction_read_only=on")>=0
     assert calls[0]["passfile"]=="/run/secrets/zabbix_pgpass"
     assert bridge.QUERY.startswith("SELECT kind,clock,value FROM public.roc_flow_map_v1_inventory")
@@ -296,3 +297,10 @@ def test_http_route_contract_with_invalid_timestamps_and_sources():
     status, result = get("/invalid", projector)
     assert status == 404
     assert projector.calls == [("latest", 1000, 2000)]
+
+
+def test_compose_uses_existing_roc_db_alias():
+    # Docker network and actual container identity are audited in the runbook.
+    compose=(FOLDER / "map/compose.yaml").read_text()
+    assert "ROC_ZABBIX_HOST: roc-db" in compose
+    assert "ROC_ZABBIX_HOST: roc-zabbix-db" not in compose
