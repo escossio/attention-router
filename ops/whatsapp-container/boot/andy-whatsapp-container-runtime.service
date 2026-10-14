@@ -1,0 +1,23 @@
+[Unit]
+Description=Ordered WhatsApp container runtime bootstrap
+After=apparmor.service docker.service network-online.target local-fs.target
+Requires=apparmor.service docker.service
+Wants=network-online.target
+RequiresMountsFor=/srv/projetos/attention-router-runtime /var/lib/attention-router
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/andy-whatsapp-container-runtime/bootstrap.py converge
+ExecStop=/usr/local/lib/andy-whatsapp-container-runtime/bootstrap.py stop
+TimeoutStartSec=300
+TimeoutStopSec=180
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

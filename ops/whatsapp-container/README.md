@@ -1,8 +1,6 @@
-# WhatsApp runtime container migration candidate
+# WhatsApp container runtime
 
-`WHATSAPP_RUNTIME=CONTAINERIZED` is the **target contract**. Deployment phase is
-`PRE_CUTOVER`: AGT production still runs the host units. This package must not
-be launched against the live profile until the reviewed cutover window.
+The AGT production runtime was cut over on 2026-10-07. Browser, Transport and Observer now run in the existing containers. Boot provisioning and ordered lifecycle are documented in [`boot/README.md`](boot/README.md); the reboot certification remains a separate step. The history below describes the earlier migration candidate.
 
 ## Provenance and forensics
 
