@@ -37,8 +37,11 @@ must not mount the App key.
    A live native receiver may continue accepting into the original DB while
    publishers drain. Before stopping that receiver, prove a write-freeze
    mechanism that returns non-2xx for unpersisted deliveries **and** a tested
-   durable buffer/replay or verified GitHub redelivery window. If either
-   proof is absent, remain NO-GO. Do not switch a route to the pilot DB.
+   durable buffer/replay path. [GitHub does not automatically redeliver failed
+   webhooks](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries);
+   its App JWT delivery API may be used only as a separately tested recovery
+   check. If either proof is absent, remain NO-GO. Do not switch a
+   route to the pilot DB.
 4. Certify UID 10001 access to a *current* isolated snapshot, App signing,
    strict SSH, Registry/profiles/log persistence, and `BEGIN IMMEDIATE`
    followed by rollback on the copy. Never mass-chown production SQLite,
