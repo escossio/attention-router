@@ -1,0 +1,34 @@
+name: attention-router-roc-docker-inventory
+
+services:
+  roc-interface-operator:
+    image: python:3.13-alpine
+    container_name: andy-roc-interface-operator
+    profiles: [operator]
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 40
+    mem_limit: 96m
+    environment:
+      ROC_ZABBIX_API_URL: http://roc-zabbix-web:8080/api_jsonrpc.php
+      ZABBIX_ADMIN_USER: ${ZABBIX_ADMIN_USER:?from ROC private env}
+      ZABBIX_ADMIN_PASSWORD: ${ZABBIX_ADMIN_PASSWORD:?from ROC private env}
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./host_interface.py:/opt/roc/host_interface.py:ro
+      - interface_backup:/var/lib/roc-migration
+    networks:
+      - monitoring
+    entrypoint: ["python", "-B", "/opt/roc/host_interface.py"]
+    command: ["--check"]
+
+volumes:
+  interface_backup:
+    name: attention-router-roc-interface-backups
+
+networks:
+  monitoring:
+    external: true
+    name: andy-roc-monitoring

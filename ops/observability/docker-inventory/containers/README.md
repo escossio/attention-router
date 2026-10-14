@@ -112,3 +112,34 @@ container efêmero na namespace sem rede). Um novo host físico só precisa
 dispor do Docker socket correto: por padrão `/var/run/docker.sock`, com
 opção de implantação `ROC_DOCKER_SOCKET_PATH` se diferir. Isso não torna
 um Docker Engine indisponível acessível nem suprime controle de autenticação.
+
+## Cutover declarativo pela API (sem comandos SQL nem instalações no host)
+
+O utilitário `host_interface.py` roda em um **container efêmero**
+(`operator.compose.yaml`, profile `operator`) na rede ROC. Ele possui
+`--check`, `--apply` com pré-condição de IP explícita e `--rollback`,
+sempre limitado à interface principal de agente do host lógico existente.
+A ferramenta não cria, deleta ou substitui o host Zabbix; portanto histórico,
+LLD, tags e templates permanecem intactos. O backup da interface é criado
+em volume persistente Docker `attention-router-roc-interface-backups`,
+com permissão 0600 e não é versionado em Git. Nenhuma senha é salva no backup.
+
+O operador deve usar o arquivo privado de variáveis ROC existente (somente
+no host autorizado) para injetar autenticação **apenas no job efêmero**:
+
+```sh
+docker compose --env-file /private/roc.env \
+  -f ops/observability/docker-inventory/containers/operator.compose.yaml \
+  run --rm roc-interface-operator --check
+```
+
+Após verificar o IP real exibido no `--check`, executar `--apply` com
+`--expect-ip` igual ao valor exato apresentado. **Não automatizar um IP
+deduzido de exemplos**. Para reversão, executar `--rollback` somente após
+verificar a identidade atual e confirmar que a origem salva ainda representa
+um destino existente. O arquivo privado de variáveis deve ser preservado
+como dado do stack, não copiado para o Git nem embutido na imagem.
+
+Nunca iniciar o operator em um deployment normal: ele pertence ao profile
+`operator` e só executa por comando explícito. O ROC nunca depende
+desse operador para funcionar.
