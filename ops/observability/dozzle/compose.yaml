@@ -1,0 +1,62 @@
+name: attention-router-dozzle-v1
+services:
+  roc-dozzle-view:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    image: attention-router-roc-dozzle-view:v1
+    container_name: andy-roc-dozzle-view
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    pids_limit: 80
+    mem_limit: 96m
+    cpus: 0.35
+    volumes:
+      - type: bind
+        source: ${ROC_DOCKER_SOCKET_PATH:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        read_only: true
+      - type: bind
+        source: ${DOZZLE_CLASSES_FILE:?private group-mapping file required}
+        target: /etc/attention-router/docker-ops-classes.json
+        read_only: true
+      - type: volume
+        source: dozzle_filtered_socket
+        target: /run/andy-dozzle-view
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect('/run/andy-dozzle-view/docker.sock');s.sendall(b'GET /_ping HTTP/1.0'+bytes([13,10,13,10])); assert b'200 OK' in s.recv(128)"]
+      interval: 15s
+      timeout: 4s
+      retries: 4
+
+  dozzle:
+    image: amir20/dozzle@sha256:7c4fb7f8124f5dea15ade881535cc19cc9a03e66639fd28154ff43a93b78944b
+    container_name: ${DOZZLE_CONTAINER_NAME:-attention-dozzle}
+    depends_on:
+      roc-dozzle-view:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    pids_limit: 110
+    mem_limit: 256m
+    environment:
+      DOCKER_HOST: unix:///run/andy-dozzle-view/docker.sock
+    volumes:
+      - type: volume
+        source: dozzle_filtered_socket
+        target: /run/andy-dozzle-view
+        read_only: true
+    ports:
+      - "${DOZZLE_LISTEN_HOST:-127.0.0.1}:${DOZZLE_HTTP_PORT:-18080}:8080"
+
+volumes:
+  dozzle_filtered_socket:
+networks:
+  default:
+    driver: bridge
