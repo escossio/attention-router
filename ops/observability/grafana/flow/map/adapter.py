@@ -48,7 +48,7 @@ class ZabbixView:
             raise RuntimeError("psycopg unavailable")
         # PostgreSQL role has SELECT on the view ONLY; connection is also read-only.
         with self.connector(
-            host=os.environ.get("ROC_ZABBIX_HOST", "roc-zabbix-db"),
+            host=os.environ.get("ROC_ZABBIX_HOST", "roc-db"),
             dbname="zabbix",
             user=DB_ROLE,
             passfile=os.environ.get("PGPASSFILE", "/run/secrets/zabbix_pgpass"),

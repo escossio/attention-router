@@ -17,6 +17,13 @@ a Andy, o runtime WhatsApp, o TCP Brain ou o Zabbix Agent2.
 - O segredo Postgres permanece **fora do Git** em
   `/etc/andy/flow-map/zabbix_pgpass`, UID 18089, mode 0400. É montado
   read-only no container em `/run/secrets/zabbix_pgpass`; não vai para env.
+- O hostname PostgreSQL dentro da rede `andy-roc-monitoring` é
+  **`roc-db`** (alias efetivamente anunciado pelo container
+  `andy-roc-zabbix-db`). Não usar `roc-zabbix-db`: ele não resolve.
+  O primeiro campo do passfile privado deve ser exatamente `roc-db`.
+  Quando o role e a visão já existirem, **não repetir o provisionamento
+  `--apply`**. Reconciliar somente esse campo, preservar a senha e o
+  modo `0400`, e testar o acesso do UID 18089.
 - Tempo → Reader Python reaproveitado, trace selecionado com limite 24h.
 - A regra `UNKNOWN` prevalece se o dado Zabbix está velho/faltando.
 - Falha do Tempo não destrói o esqueleto Zabbix: o mapa conserva os nós,
