@@ -1,17 +1,21 @@
 FROM debian:bookworm-slim
 
 ARG CHROME_VERSION=155.0.8059.39-1
+ARG CHROME_DEB_SHA256=c58aa0f2cd66179c9f050e062c882d27aa9b9f8c2b7c73fee3498560b5ed0b38
 ARG SOURCE_SHA=unknown
 LABEL org.opencontainers.image.source="https://github.com/escossio/attention-router" \
       org.opencontainers.image.revision="${SOURCE_SHA}"
+# The official APT index may stop listing an older pinned Chrome release.
+# Fetch exactly the same archived Google package, and verify its immutable SHA256.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg socat tini xvfb xauth fontconfig fonts-liberation procps \
-    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
-      | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
-    && printf '%s\n' 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main' \
-      > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends "google-chrome-stable=${CHROME_VERSION}" \
+      ca-certificates curl socat tini xvfb xauth fontconfig fonts-liberation procps \
+    && curl --fail --location --silent --show-error --retry 3 \
+      "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_VERSION}_amd64.deb" \
+      -o /tmp/google-chrome-stable.deb \
+    && echo "${CHROME_DEB_SHA256}  /tmp/google-chrome-stable.deb" | sha256sum --check --status \
+    && apt-get install -y --no-install-recommends /tmp/google-chrome-stable.deb \
+    && test "$(dpkg-query -W -f='${Version}' google-chrome-stable)" = "${CHROME_VERSION}" \
+    && rm -f /tmp/google-chrome-stable.deb \
     && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g 1000 andy && useradd -u 1000 -g 1000 -m andy \
     && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
