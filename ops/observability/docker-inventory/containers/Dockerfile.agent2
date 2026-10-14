@@ -1,0 +1,12 @@
+# Dedicated Docker Engine observer; NOT the host OS agent.
+FROM zabbix/zabbix-agent2:alpine-7.4.14
+USER 0
+RUN apk add --no-cache python3
+COPY zabbix_inventory.py /opt/roc/zabbix_inventory.py
+COPY containers/agent2.conf /etc/zabbix/zabbix_agent2.conf
+COPY containers/docker-inventory.conf /etc/zabbix/zabbix_agent2.d/roc-docker-inventory.conf
+COPY containers/docker-plugin.conf /etc/zabbix/zabbix_agent2.d/plugins.d/roc-docker.conf
+RUN chmod 0444 /opt/roc/zabbix_inventory.py /etc/zabbix/zabbix_agent2.conf /etc/zabbix/zabbix_agent2.d/roc-docker-inventory.conf /etc/zabbix/zabbix_agent2.d/plugins.d/roc-docker.conf
+USER 1997:1995
+ENTRYPOINT ["/usr/sbin/zabbix_agent2"]
+CMD ["--foreground", "-c", "/etc/zabbix/zabbix_agent2.conf"]

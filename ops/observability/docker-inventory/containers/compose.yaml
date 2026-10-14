@@ -1,0 +1,78 @@
+name: attention-router-roc-docker-inventory
+
+services:
+  roc-docker-view:
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile.view
+    image: attention-router-roc-docker-view:v1
+    container_name: andy-roc-docker-view
+    network_mode: none
+    user: "0:1995"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 80
+    mem_limit: 96m
+    cpus: 0.4
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      # IMPORTANT: :ro on a Docker socket does NOT revoke Docker API write
+      # authority. The read-only API allowlist is enforced by zabbix_proxy.py.
+      - type: bind
+        source: ${ROC_DOCKER_SOCKET_PATH:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        read_only: true
+      - type: volume
+        source: docker_view_socket
+        target: /run/andy-zabbix-docker
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect('/run/andy-zabbix-docker/docker.sock'); s.sendall(b'GET /_ping HTTP/1.0'+bytes([13,10,13,10])); assert b'200 OK' in s.recv(128); s.close()"
+      interval: 15s
+      timeout: 3s
+      retries: 4
+
+  roc-agent2:
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile.agent2
+    image: attention-router-roc-agent2:v1
+    container_name: andy-roc-agent2
+    depends_on:
+      roc-docker-view:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    user: "1997:1995"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 96
+    mem_limit: 128m
+    cpus: 0.7
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=16m,uid=1997,gid=1995,mode=1777
+      - /var/lib/zabbix:rw,nosuid,noexec,size=16m,uid=1997,gid=1995,mode=0700
+    volumes:
+      - type: volume
+        source: docker_view_socket
+        target: /run/andy-zabbix-docker
+        read_only: true
+    networks:
+      monitoring:
+        aliases: [roc-agent2]
+
+volumes:
+  docker_view_socket:
+
+networks:
+  monitoring:
+    name: andy-roc-monitoring
+    external: true
