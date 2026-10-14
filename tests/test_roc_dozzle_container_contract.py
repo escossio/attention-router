@@ -18,6 +18,7 @@ def test_two_services_one_filtered_socket_no_direct_access():
     assert proxy["network_mode"] == "none"
     assert "ports" not in proxy
     assert web["ports"][0].endswith(":8080")
+    assert "DOZZLE_CONTAINER_NAME" in web["container_name"]
     assert web["image"].startswith("amir20/dozzle@sha256:")
     for service in services.values():
         assert service["read_only"] is True
