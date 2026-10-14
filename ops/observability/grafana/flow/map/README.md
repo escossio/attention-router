@@ -35,7 +35,7 @@ a Andy, o runtime WhatsApp, o TCP Brain ou o Zabbix Agent2.
 2. Fazer backup privado do estado de ACL/role/view atual antes da operação.
    Criar o role DB restrito e a visão versionada, com GRANT SELECT somente
    ao role. Testar que SELECT em `items` e `history_text` é negado.
-3. Criar PG passfile fora de Git, legível exclusivamente para UID 65534
+3. Criar PG passfile fora de Git, legível exclusivamente para UID 18089
    do container. Jamais imprimir senha ou conteúdo do passfile.
 4. Build e start apenas `andy-roc-flow-map` com Compose separado. Testar
    `/health`, `/map?trace_id=latest`, entradas inválidas e falha de origem.
