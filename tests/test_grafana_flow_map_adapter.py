@@ -238,3 +238,61 @@ def test_tempo_outage_keeps_zabbix_topology_without_fake_reached():
     assert all(e["relationship"] == "EXPECTED_TOPOLOGY" for e in data["edges"])
     assert data["source_status"]["tempo"] == "UNAVAILABLE"
     assert data["evidence_completeness"] == "PARTIAL"
+
+
+def test_http_route_contract_with_invalid_timestamps_and_sources():
+    # Exercise the actual handler without opening a socket or touching services.
+    import io
+    from types import SimpleNamespace
+
+    class Projector:
+        def __init__(self, error=None):
+            self.error = error
+            self.calls = []
+
+        def view(self, trace_id, start, end):
+            self.calls.append((trace_id, start, end))
+            if self.error:
+                raise self.error
+            return {"nodes": [], "edges": [], "trace_id": trace_id}
+
+    def get(path, projector):
+        handler = object.__new__(bridge.Handler)
+        handler.path = path
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "GET " + path + " HTTP/1.1"
+        handler.log_request = lambda *_args: None
+        handler.command = "GET"
+        handler.close_connection = True
+        handler.wfile = io.BytesIO()
+        handler.server = SimpleNamespace(projector=projector)
+        handler.send_error = lambda code, *_: handler.wfile.write(
+            ("HTTP " + str(code)).encode()
+        )
+        handler.do_GET()
+        raw = handler.wfile.getvalue()
+        if raw.startswith(b"HTTP "):
+            return int(raw[5:8]), {}
+        header, payload = raw.split(b"\r\n\r\n", 1)
+        code = int(header.split(b" ")[1])
+        return code, bridge.json.loads(payload)
+
+    projector = Projector()
+    status, health = get("/health", projector)
+    assert status == 200 and health["purpose"] == "roc.flow-map.v1"
+    status, result = get("/map?trace_id=latest&start=1000&end=2000", projector)
+    assert status == 200 and result["nodes"] == []
+    assert projector.calls == [("latest", 1000, 2000)]
+    for bad in (
+        "/map?start=invalid",
+        "/map?start=123&start=456",
+        "/map?unknown=1",
+    ):
+        status, result = get(bad, projector)
+        assert status == 400, (bad, status)
+        assert result["error"] == "INVALID_SELECTION"
+    status, result = get("/map", Projector(RuntimeError("private upstream error")))
+    assert status == 503 and result == {"error": "OBSERVABILITY_SOURCE_UNAVAILABLE"}
+    status, result = get("/invalid", projector)
+    assert status == 404
+    assert projector.calls == [("latest", 1000, 2000)]

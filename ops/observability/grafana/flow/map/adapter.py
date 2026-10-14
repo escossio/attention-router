@@ -139,8 +139,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not set(args) <= {"trace_id", "start", "end"}:
                     raise InvalidSelection("unsupported parameter")
                 tid = args.get("trace_id", ["latest"])[0]
-                start = int(args["start"][0]) if "start" in args else None
-                end = int(args["end"][0]) if "end" in args else None
+                try:
+                    start = int(args["start"][0]) if "start" in args else None
+                    end = int(args["end"][0]) if "end" in args else None
+                except ValueError as exc:
+                    raise InvalidSelection("non-numeric timestamp") from exc
                 result = self.server.projector.view(tid, start, end)
             else:
                 self.send_error(404)
