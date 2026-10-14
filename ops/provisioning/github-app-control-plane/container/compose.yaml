@@ -1,0 +1,41 @@
+name: attention-router-github-control
+services:
+  webhook:
+    build: .
+    image: attention-router-github-webhook:v1
+    container_name: andy-github-webhook-container
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    init: true
+    pids_limit: 48
+    mem_limit: 192m
+    cpus: 0.50
+    environment:
+      GITHUB_WEBHOOK_HOST: 0.0.0.0
+      GITHUB_WEBHOOK_PORT: "18104"
+      GITHUB_WEBHOOK_REPOSITORY: ${GITHUB_WEBHOOK_REPOSITORY:?single source repo required}
+      GITHUB_WEBHOOK_REPOSITORIES: ${GITHUB_WEBHOOK_REPOSITORIES:?repository allowlist required}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:?installation id required}
+      GITHUB_WEBHOOK_MAX_BODY: "1048576"
+      STATE_DIRECTORY: /state
+      CREDENTIALS_DIRECTORY: /run/webhook-credentials
+      PYTHONDONTWRITEBYTECODE: "1"
+    ports:
+      - "${GITHUB_WEBHOOK_BIND_HOST:-127.0.0.1}:${GITHUB_WEBHOOK_BIND_PORT:-18104}:18104"
+    volumes:
+      - type: bind
+        source: ${GITHUB_WEBHOOK_DB_DIR:?state directory must be explicitly configured}
+        target: /state
+      - type: bind
+        source: ${GITHUB_WEBHOOK_SECRET_DIR:?private secret directory must be explicitly configured}
+        target: /run/webhook-credentials
+        read_only: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:18104/health',timeout=3); assert r.status==200"]
+      interval: 15s
+      timeout: 4s
+      retries: 4
+      start_period: 15s
