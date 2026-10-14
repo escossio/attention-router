@@ -5,34 +5,44 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import func, select
 
+from attention_router.application.personal_context import build_personal_context
 from attention_router.application.personal_context_corrections import (
-    ContextPatternCorrectionError,
-    PATTERN_CORRECTION_PREDICATE,
-    invalidate_context_pattern_hypothesis,
+    PatternCorrectionError,
+    correct_context_pattern_hypothesis,
 )
 from attention_router.application.personal_context_hypotheses import (
     ContextHypothesisPersistenceError,
+    PATTERN_CORRECTION_PREDICATE,
+    PATTERN_CORRECTION_SOURCE_QUALITY,
     persist_context_pattern_hypothesis,
 )
 from attention_router.application.personal_context_patterns import (
     detect_temporal_recurrence_hypotheses,
 )
+from attention_router.application.personal_context_runtime import (
+    PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION,
+    run_personal_context_runtime_cycle,
+)
+from attention_router.application.platform.capability_pack import (
+    provision_internal_providers,
+)
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.hashing import stable_hash
-from attention_router.infrastructure import human_identity_models as _human_identity_models  # noqa: F401
 from attention_router.infrastructure.models import (
+    ExecutionIntentRow,
     FactRow,
     InboundEventRow,
     MemoryClaimRow,
+    OutboxMessageRow,
     TenantRow,
     TimelineEventRow,
 )
 from attention_router.infrastructure.repository import upsert_actor_binding
 
 
-ACTOR = "owner-pattern-correction"
-EXTERNAL_ACTOR = "owner-pattern-correction-external"
+ACTOR = "owner-v1h"
+EXTERNAL = "owner-v1h@c.us"
 
 
 def _ensure_tenant(session) -> None:
@@ -57,57 +67,54 @@ def _install_owner(session) -> None:
     upsert_actor_binding(
         session,
         "wwebjs",
-        EXTERNAL_ACTOR,
+        EXTERNAL,
         ACTOR,
         "owner",
-        metadata={"owner": True},
+        metadata={
+            "owner": True,
+            "owner_channel_role": "PRIMARY_OWNER_WHATSAPP",
+        },
         tenant_id=DEFAULT_TENANT_ID,
     )
 
 
-def _event(session, occurred_at: datetime) -> None:
-    session.add(
-        TimelineEventRow(
-            id=new_id(),
-            tenant_id=DEFAULT_TENANT_ID,
-            canonical_event_id=None,
-            actor_id=ACTOR,
-            relationship_id=None,
-            resource_id=None,
-            event_type="LOCATION_ARRIVAL",
-            event_ref={"pattern_key": "gym-arrival"},
-            occurred_at=occurred_at,
-            visibility="PRIVATE",
-            provenance="android-location",
-            metadata_json={},
-        )
-    )
-    session.flush()
-
-
-def _persisted_hypothesis(session, stamp: datetime):
-    for days in (2, 1, 0):
-        _event(session, stamp - timedelta(days=days))
-    hypothesis = detect_temporal_recurrence_hypotheses(
-        session,
+def _timeline_event(session, occurred_at: datetime) -> TimelineEventRow:
+    row = TimelineEventRow(
+        id=new_id(),
         tenant_id=DEFAULT_TENANT_ID,
+        canonical_event_id=None,
         actor_id=ACTOR,
-        now=stamp,
-    )[0]
-    claim, _ = persist_context_pattern_hypothesis(
-        session,
-        hypothesis=hypothesis,
-        now=stamp,
+        relationship_id=None,
+        resource_id=None,
+        event_type="LOCATION_ARRIVAL",
+        event_ref={"pattern_key": "gym-arrival"},
+        occurred_at=occurred_at,
+        visibility="PRIVATE",
+        provenance="android-location",
+        metadata_json={},
     )
-    return hypothesis, claim
+    session.add(row)
+    session.flush()
+    return row
 
 
-def _correction_event(session, stamp: datetime, *, actor_id: str = EXTERNAL_ACTOR):
+def _initial_timeline(session, stamp: datetime) -> None:
+    for days_ago in (2, 1, 0):
+        _timeline_event(session, stamp - timedelta(days=days_ago))
+
+
+def _owner_event(
+    session,
+    *,
+    stamp: datetime,
+    external_event_id: str,
+    authenticated: bool = True,
+) -> InboundEventRow:
     payload = {
-        "actor_id": actor_id,
-        "content": "isso nao e uma rotina",
+        "actor_id": EXTERNAL,
+        "content": "isso não é uma rotina",
         "event_origin": "OWNER_COMMAND",
-        "owner_authenticated": True,
+        "owner_authenticated": authenticated,
         "metadata": {
             "from_me": True,
             "owner_self_chat": True,
@@ -119,7 +126,7 @@ def _correction_event(session, stamp: datetime, *, actor_id: str = EXTERNAL_ACTO
         id=new_id(),
         tenant_id=DEFAULT_TENANT_ID,
         source="wwebjs",
-        external_event_id=new_id(),
+        external_event_id=external_event_id,
         event_type="message",
         payload=payload,
         payload_hash=stable_hash(payload),
@@ -138,46 +145,327 @@ def _correction_event(session, stamp: datetime, *, actor_id: str = EXTERNAL_ACTO
     return row
 
 
-def test_owner_correction_supersedes_inference_and_blocks_resurrection(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, inferred = _persisted_hypothesis(session, stamp)
-    correction_event = _correction_event(session, stamp + timedelta(minutes=1))
+def _active_pattern(session) -> MemoryClaimRow:
+    row = session.scalar(
+        select(MemoryClaimRow).where(
+            MemoryClaimRow.predicate
+            == "context.pattern.temporal_recurrence",
+            MemoryClaimRow.status == "ACTIVE",
+        )
+    )
+    assert row is not None
+    return row
 
-    correction, changed = invalidate_context_pattern_hypothesis(
+
+def test_owner_correction_suppresses_pattern_and_invalidates_delivery(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    _install_owner(session)
+    _initial_timeline(session, stamp)
+    provision_internal_providers(session, DEFAULT_TENANT_ID)
+
+    first = run_personal_context_runtime_cycle(
+        session,
+        now=stamp,
+        delivery_enabled=True,
+    )
+    assert first.hypotheses_persisted == 1
+    assert first.recommendations_enqueued == 1
+
+    pattern = _active_pattern(session)
+    hypothesis_id = pattern.context["hypothesis_id"]
+    recommendation = session.scalar(
+        select(MemoryClaimRow).where(
+            MemoryClaimRow.predicate == "context.recommendation.proactive",
+            MemoryClaimRow.status == "ACTIVE",
+        )
+    )
+    outbox = session.scalar(
+        select(OutboxMessageRow).where(
+            OutboxMessageRow.action_type
+            == PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION
+        )
+    )
+    assert recommendation is not None
+    assert outbox is not None
+    assert outbox.status == "PENDING"
+
+    correction_event = _owner_event(
+        session,
+        stamp=stamp + timedelta(minutes=1),
+        external_event_id="v1h-correction-1",
+    )
+    outcome = correct_context_pattern_hypothesis(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+        hypothesis_id=hypothesis_id,
+        correction_event=correction_event,
+    )
+
+    session.refresh(pattern)
+    session.refresh(recommendation)
+    session.refresh(outbox)
+    correction = session.get(MemoryClaimRow, outcome.correction_claim_id)
+
+    assert outcome.changed is True
+    assert pattern.status == "SUPERSEDED"
+    assert recommendation.status == "SUPERSEDED"
+    assert outbox.status == "CANCELED"
+    assert correction is not None
+    assert correction.status == "ACTIVE"
+    assert correction.predicate == PATTERN_CORRECTION_PREDICATE
+    assert correction.source_quality == PATTERN_CORRECTION_SOURCE_QUALITY
+    assert correction.object_json["evidence_class"] == "EXPLICITLY_CONFIRMED"
+    assert correction.object_json["grants_authority"] is False
+    assert correction.supersedes_claim_id == pattern.id
+    assert correction.context["correction_inbound_event_id"] == (
+        correction_event.id
+    )
+    assert session.scalar(select(func.count()).select_from(FactRow)) == 0
+
+    second = run_personal_context_runtime_cycle(
+        session,
+        now=stamp + timedelta(minutes=2),
+        delivery_enabled=True,
+    )
+    assert second.hypotheses_detected == 1
+    assert second.hypotheses_persisted == 0
+    assert second.recommendations_built == 0
+    assert second.recommendations_enqueued == 0
+
+    snapshot = build_personal_context(
+        session,
+        DEFAULT_TENANT_ID,
+        now=stamp + timedelta(minutes=2),
+    )
+    active_ids = {item.claim_id for item in snapshot.claims}
+    assert pattern.id not in active_ids
+    assert correction.id in active_ids
+
+    replay = correct_context_pattern_hypothesis(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+        hypothesis_id=hypothesis_id,
+        correction_event=correction_event,
+    )
+    assert replay.changed is False
+    assert replay.correction_claim_id == correction.id
+
+
+def test_unauthenticated_owner_correction_fails_closed(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    _install_owner(session)
+    _initial_timeline(session, stamp)
+    hypothesis = detect_temporal_recurrence_hypotheses(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_id=ACTOR,
+        now=stamp,
+    )[0]
+    pattern, _ = persist_context_pattern_hypothesis(
+        session,
+        hypothesis=hypothesis,
+        now=stamp,
+    )
+    event = _owner_event(
+        session,
+        stamp=stamp + timedelta(minutes=1),
+        external_event_id="v1h-correction-unauth",
+        authenticated=False,
+    )
+
+    with pytest.raises(
+        PatternCorrectionError,
+        match="PATTERN_CORRECTION_OWNER_AUTHORITY_UNAVAILABLE",
+    ):
+        correct_context_pattern_hypothesis(
+            session,
+            tenant_id=DEFAULT_TENANT_ID,
+            actor_key=ACTOR,
+            hypothesis_id=hypothesis.hypothesis_id,
+            correction_event=event,
+        )
+
+    session.refresh(pattern)
+    assert pattern.status == "ACTIVE"
+    assert session.scalar(
+        select(func.count())
+        .select_from(MemoryClaimRow)
+        .where(MemoryClaimRow.predicate == PATTERN_CORRECTION_PREDICATE)
+    ) == 0
+
+
+def test_three_post_correction_observations_allow_relearning(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    _install_owner(session)
+    _initial_timeline(session, stamp)
+    hypothesis = detect_temporal_recurrence_hypotheses(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_id=ACTOR,
+        now=stamp,
+    )[0]
+    original, _ = persist_context_pattern_hypothesis(
+        session,
+        hypothesis=hypothesis,
+        now=stamp,
+    )
+    correction_event = _owner_event(
+        session,
+        stamp=stamp + timedelta(minutes=1),
+        external_event_id="v1h-correction-relearn",
+    )
+    outcome = correct_context_pattern_hypothesis(
         session,
         tenant_id=DEFAULT_TENANT_ID,
         actor_key=ACTOR,
         hypothesis_id=hypothesis.hypothesis_id,
         correction_event=correction_event,
-        now=stamp + timedelta(minutes=1),
     )
-    session.refresh(inferred)
+    correction = session.get(MemoryClaimRow, outcome.correction_claim_id)
+    assert correction is not None
 
-    assert changed is True
-    assert inferred.status == "SUPERSEDED"
-    assert correction.predicate == PATTERN_CORRECTION_PREDICATE
-    assert correction.source_quality == "USER_DECLARED"
-    assert correction.object_json["evidence_class"] == "USER_DECLARED"
-    assert correction.object_json["grants_authority"] is False
-    assert correction.context["corrected_claim_id"] == inferred.id
-    assert correction.context["correction_event_id"] == correction_event.id
-
-    detected_again = detect_temporal_recurrence_hypotheses(
-        session,
-        tenant_id=DEFAULT_TENANT_ID,
-        actor_id=ACTOR,
-        now=stamp + timedelta(minutes=2),
-    )[0]
     with pytest.raises(
         ContextHypothesisPersistenceError,
-        match="PATTERN_HYPOTHESIS_SUPPRESSED_BY_OWNER_CORRECTION",
+        match="PATTERN_HYPOTHESIS_OWNER_CORRECTED",
     ):
         persist_context_pattern_hypothesis(
             session,
-            hypothesis=detected_again,
+            hypothesis=hypothesis,
             now=stamp + timedelta(minutes=2),
         )
+
+    for days_after in (1, 2, 3):
+        _timeline_event(session, stamp + timedelta(days=days_after))
+
+    relearned_hypothesis = detect_temporal_recurrence_hypotheses(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_id=ACTOR,
+        now=stamp + timedelta(days=3),
+    )[0]
+    relearned, changed = persist_context_pattern_hypothesis(
+        session,
+        hypothesis=relearned_hypothesis,
+        now=stamp + timedelta(days=3),
+    )
+
+    session.refresh(correction)
+    assert changed is True
+    assert relearned.id != original.id
+    assert relearned.status == "ACTIVE"
+    assert relearned.supersedes_claim_id == correction.id
+    assert correction.status == "SUPERSEDED"
+    assert relearned.context["occurrence_count"] >= 6
+
+
+def test_correction_retires_only_same_tenant_execution_intent(session):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    _install_owner(session)
+    _initial_timeline(session, stamp)
+    provision_internal_providers(session, DEFAULT_TENANT_ID)
+    result = run_personal_context_runtime_cycle(
+        session,
+        now=stamp,
+        delivery_enabled=False,
+    )
+    assert result.recommendations_persisted == 1
+
+    pattern = _active_pattern(session)
+    recommendation = session.scalar(
+        select(MemoryClaimRow).where(
+            MemoryClaimRow.predicate == "context.recommendation.proactive",
+            MemoryClaimRow.status == "ACTIVE",
+        )
+    )
+    assert recommendation is not None
+    recommendation_id = recommendation.context["recommendation_id"]
+
+    same_scope = {
+        "tenant_id": DEFAULT_TENANT_ID,
+        "recommendation_id": recommendation_id,
+        "recommendation_claim_id": recommendation.id,
+    }
+    same_tenant_intent = ExecutionIntentRow(
+        id=new_id(),
+        idempotency_key="v1h-same-tenant-intent",
+        scope=same_scope,
+        scope_fingerprint=stable_hash(same_scope),
+        provenance={"origin": "test"},
+        state="PREPARED",
+        created_at=stamp,
+        frozen_at=None,
+        retired_at=None,
+        authority_profile_id=None,
+        expires_at=stamp + timedelta(days=1),
+    )
+    other_scope = {
+        "tenant_id": "tenant-other",
+        "recommendation_id": recommendation_id,
+        "recommendation_claim_id": recommendation.id,
+    }
+    other_tenant_intent = ExecutionIntentRow(
+        id=new_id(),
+        idempotency_key="v1h-other-tenant-intent",
+        scope=other_scope,
+        scope_fingerprint=stable_hash(other_scope),
+        provenance={"origin": "test"},
+        state="PREPARED",
+        created_at=stamp,
+        frozen_at=None,
+        retired_at=None,
+        authority_profile_id=None,
+        expires_at=stamp + timedelta(days=1),
+    )
+    session.add_all([same_tenant_intent, other_tenant_intent])
+    session.flush()
+
+    event = _owner_event(
+        session,
+        stamp=stamp + timedelta(minutes=1),
+        external_event_id="v1h-correction-intent-isolation",
+    )
+    outcome = correct_context_pattern_hypothesis(
+        session,
+        tenant_id=DEFAULT_TENANT_ID,
+        actor_key=ACTOR,
+        hypothesis_id=pattern.context["hypothesis_id"],
+        correction_event=event,
+    )
+
+    session.refresh(same_tenant_intent)
+    session.refresh(other_tenant_intent)
+    assert same_tenant_intent.state == "RETIRED"
+    assert same_tenant_intent.id in outcome.retired_execution_intent_ids
+    assert other_tenant_intent.state == "PREPARED"
+    assert other_tenant_intent.id not in outcome.retired_execution_intent_ids
+
+
+def test_correction_invalidates_recommendations_from_entire_hypothesis_lineage(
+    session,
+):
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    _install_owner(session)
+    _initial_timeline(session, stamp)
+    provision_internal_providers(session, DEFAULT_TENANT_ID)
+
+    first = run_personal_context_runtime_cycle(
+        session,
+        now=stamp,
+        delivery_enabled=True,
+    )
+    assert first.hypotheses_persisted == 1
+    assert first.recommendations_enqueued == 1
+
+    _timeline_event(session, stamp + timedelta(hours=23))
+    second = run_personal_context_runtime_cycle(
+        session,
+        now=stamp + timedelta(hours=23),
+        delivery_enabled=True,
+    )
+    assert second.hypotheses_persisted == 1
+    assert second.recommendations_enqueued == 1
 
     active_patterns = session.scalars(
         select(MemoryClaimRow).where(
@@ -185,284 +473,56 @@ def test_owner_correction_supersedes_inference_and_blocks_resurrection(session):
             MemoryClaimRow.status == "ACTIVE",
         )
     ).all()
-    assert active_patterns == []
+    assert len(active_patterns) == 1
+    hypothesis_id = active_patterns[0].context["hypothesis_id"]
 
+    active_recommendations = session.scalars(
+        select(MemoryClaimRow).where(
+            MemoryClaimRow.predicate == "context.recommendation.proactive",
+            MemoryClaimRow.status == "ACTIVE",
+        )
+    ).all()
+    assert len(active_recommendations) == 2
+    assert len({row.context["source_claim_id"] for row in active_recommendations}) == 2
 
-def test_exact_correction_event_replay_is_idempotent(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, _ = _persisted_hypothesis(session, stamp)
-    event = _correction_event(session, stamp + timedelta(minutes=1))
+    pending_outbox = session.scalars(
+        select(OutboxMessageRow).where(
+            OutboxMessageRow.action_type
+            == PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION,
+            OutboxMessageRow.status == "PENDING",
+        )
+    ).all()
+    assert len(pending_outbox) == 2
 
-    first, first_changed = invalidate_context_pattern_hypothesis(
+    correction_event = _owner_event(
+        session,
+        stamp=stamp + timedelta(hours=23, minutes=1),
+        external_event_id="v1h-correction-lineage",
+    )
+    outcome = correct_context_pattern_hypothesis(
         session,
         tenant_id=DEFAULT_TENANT_ID,
         actor_key=ACTOR,
-        hypothesis_id=hypothesis.hypothesis_id,
-        correction_event=event,
-    )
-    second, second_changed = invalidate_context_pattern_hypothesis(
-        session,
-        tenant_id=DEFAULT_TENANT_ID,
-        actor_key=ACTOR,
-        hypothesis_id=hypothesis.hypothesis_id,
-        correction_event=event,
+        hypothesis_id=hypothesis_id,
+        correction_event=correction_event,
     )
 
-    assert first_changed is True
-    assert second_changed is False
-    assert second.id == first.id
-
-
-def test_correction_from_unbound_actor_fails_closed(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, inferred = _persisted_hypothesis(session, stamp)
-    event = _correction_event(
-        session,
-        stamp + timedelta(minutes=1),
-        actor_id="forged-owner",
-    )
-
-    with pytest.raises(
-        ContextPatternCorrectionError,
-        match="PATTERN_CORRECTION_ACTOR_MISMATCH",
-    ):
-        invalidate_context_pattern_hypothesis(
-            session,
-            tenant_id=DEFAULT_TENANT_ID,
-            actor_key=ACTOR,
-            hypothesis_id=hypothesis.hypothesis_id,
-            correction_event=event,
+    assert len(outcome.invalidated_recommendation_ids) == 2
+    assert len(outcome.canceled_outbox_ids) == 2
+    assert session.scalar(
+        select(func.count())
+        .select_from(MemoryClaimRow)
+        .where(
+            MemoryClaimRow.predicate == "context.recommendation.proactive",
+            MemoryClaimRow.status == "ACTIVE",
         )
-
-    session.refresh(inferred)
-    assert inferred.status == "ACTIVE"
-
-
-def test_owner_correction_creates_no_authoritative_fact(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, _ = _persisted_hypothesis(session, stamp)
-    event = _correction_event(session, stamp + timedelta(minutes=1))
-    before = session.scalar(select(func.count()).select_from(FactRow))
-
-    correction, changed = invalidate_context_pattern_hypothesis(
-        session,
-        tenant_id=DEFAULT_TENANT_ID,
-        actor_key=ACTOR,
-        hypothesis_id=hypothesis.hypothesis_id,
-        correction_event=event,
-    )
-
-    after = session.scalar(select(func.count()).select_from(FactRow))
-    assert changed is True
-    assert after == before
-    assert correction.object_json["grants_authority"] is False
-    assert correction.object_json["recommendation_ready"] is False
-
-
-def test_unauthenticated_owner_correction_fails_closed(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, inferred = _persisted_hypothesis(session, stamp)
-    event = _correction_event(session, stamp + timedelta(minutes=1))
-    payload = {
-        **event.payload,
-        "owner_authenticated": False,
-    }
-    event.payload = payload
-    event.payload_hash = stable_hash(payload)
-    session.flush()
-
-    with pytest.raises(
-        ContextPatternCorrectionError,
-        match="PATTERN_CORRECTION_OWNER_AUTHORITY_UNAVAILABLE",
-    ):
-        invalidate_context_pattern_hypothesis(
-            session,
-            tenant_id=DEFAULT_TENANT_ID,
-            actor_key=ACTOR,
-            hypothesis_id=hypothesis.hypothesis_id,
-            correction_event=event,
+    ) == 0
+    assert session.scalar(
+        select(func.count())
+        .select_from(OutboxMessageRow)
+        .where(
+            OutboxMessageRow.action_type
+            == PERSONAL_CONTEXT_RECOMMENDATION_OUTBOX_ACTION,
+            OutboxMessageRow.status == "PENDING",
         )
-
-    session.refresh(inferred)
-    assert inferred.status == "ACTIVE"
-
-
-def test_expired_correction_allows_reinference(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, _ = _persisted_hypothesis(session, stamp)
-    event = _correction_event(session, stamp + timedelta(minutes=1))
-    correction, _ = invalidate_context_pattern_hypothesis(
-        session,
-        tenant_id=DEFAULT_TENANT_ID,
-        actor_key=ACTOR,
-        hypothesis_id=hypothesis.hypothesis_id,
-        correction_event=event,
-        now=stamp + timedelta(minutes=1),
-        ttl=timedelta(hours=1),
-    )
-
-    later = stamp + timedelta(hours=2)
-    detected = detect_temporal_recurrence_hypotheses(
-        session,
-        tenant_id=DEFAULT_TENANT_ID,
-        actor_id=ACTOR,
-        now=later,
-    )[0]
-    claim, changed = persist_context_pattern_hypothesis(
-        session,
-        hypothesis=detected,
-        now=later,
-    )
-
-    assert changed is True
-    assert claim.status == "ACTIVE"
-    assert claim.context["hypothesis_id"] == hypothesis.hypothesis_id
-    session.refresh(correction)
-    assert correction.valid_until is not None
-
-
-def test_three_fresh_occurrences_requalify_pattern_before_correction_expiry(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, _ = _persisted_hypothesis(session, stamp)
-    correction_at = stamp + timedelta(minutes=1)
-    event = _correction_event(session, correction_at)
-    correction, _ = invalidate_context_pattern_hypothesis(
-        session,
-        tenant_id=DEFAULT_TENANT_ID,
-        actor_key=ACTOR,
-        hypothesis_id=hypothesis.hypothesis_id,
-        correction_event=event,
-        now=correction_at,
-    )
-
-    for days in (1, 2, 3):
-        _event(session, stamp + timedelta(days=days))
-
-    evaluation_time = stamp + timedelta(days=3, minutes=1)
-    detected = detect_temporal_recurrence_hypotheses(
-        session,
-        tenant_id=DEFAULT_TENANT_ID,
-        actor_id=ACTOR,
-        now=evaluation_time,
-    )[0]
-    claim, changed = persist_context_pattern_hypothesis(
-        session,
-        hypothesis=detected,
-        now=evaluation_time,
-    )
-    session.refresh(correction)
-
-    assert changed is True
-    assert claim.status == "ACTIVE"
-    assert claim.context["hypothesis_id"] == hypothesis.hypothesis_id
-    assert correction.status == "SUPERSEDED"
-    assert correction.valid_until is not None
-
-
-def test_bound_other_owner_cannot_correct_this_persons_hypothesis(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, inferred = _persisted_hypothesis(session, stamp)
-    upsert_actor_binding(
-        session,
-        "wwebjs",
-        "other-owner-external",
-        "other-owner",
-        "owner",
-        metadata={"owner": True},
-        tenant_id=DEFAULT_TENANT_ID,
-    )
-    event = _correction_event(
-        session,
-        stamp + timedelta(minutes=1),
-        actor_id="other-owner-external",
-    )
-
-    with pytest.raises(
-        ContextPatternCorrectionError,
-        match="PATTERN_CORRECTION_ACTOR_MISMATCH",
-    ):
-        invalidate_context_pattern_hypothesis(
-            session,
-            tenant_id=DEFAULT_TENANT_ID,
-            actor_key=ACTOR,
-            hypothesis_id=hypothesis.hypothesis_id,
-            correction_event=event,
-        )
-
-    session.refresh(inferred)
-    assert inferred.status == "ACTIVE"
-
-
-def test_cross_tenant_correction_fails_closed(session):
-    _install_owner(session)
-    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-    hypothesis, inferred = _persisted_hypothesis(session, stamp)
-    other_tenant = "other-personal-context-tenant"
-    if session.get(TenantRow, other_tenant) is None:
-        now = now_utc()
-        session.add(
-            TenantRow(
-                id=other_tenant,
-                slug=other_tenant,
-                name=other_tenant,
-                status="ACTIVE",
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        session.flush()
-
-    payload = {
-        "actor_id": EXTERNAL_ACTOR,
-        "content": "isso nao e uma rotina",
-        "event_origin": "OWNER_COMMAND",
-        "owner_authenticated": True,
-        "metadata": {
-            "from_me": True,
-            "owner_self_chat": True,
-            "from_me_classification": "OWNER_COMMAND",
-            "final_from_me_classification": "OWNER_COMMAND",
-        },
-    }
-    event = InboundEventRow(
-        id=new_id(),
-        tenant_id=other_tenant,
-        source="wwebjs",
-        external_event_id=new_id(),
-        event_type="message",
-        payload=payload,
-        payload_hash=stable_hash(payload),
-        received_at=stamp + timedelta(minutes=1),
-        processed_at=None,
-        interaction_id=None,
-        status="RECEIVED",
-        error=None,
-        correlation_id=new_id(),
-        lineage_classification="ORGANIC",
-        scenario_run_id=None,
-        scenario_step_run_id=None,
-    )
-    session.add(event)
-    session.flush()
-
-    with pytest.raises(
-        ContextPatternCorrectionError,
-        match="PATTERN_CORRECTION_TENANT_MISMATCH",
-    ):
-        invalidate_context_pattern_hypothesis(
-            session,
-            tenant_id=DEFAULT_TENANT_ID,
-            actor_key=ACTOR,
-            hypothesis_id=hypothesis.hypothesis_id,
-            correction_event=event,
-        )
-
-    session.refresh(inferred)
-    assert inferred.status == "ACTIVE"
+    ) == 0

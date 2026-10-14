@@ -20,6 +20,9 @@ from attention_router.infrastructure.models import (
 
 PATTERN_CLAIM_SOURCE_QUALITY: Final = "DERIVED_PATTERN"
 PATTERN_CLAIM_PREDICATE: Final = "context.pattern.temporal_recurrence"
+PATTERN_CORRECTION_SOURCE_QUALITY: Final = "EXPLICITLY_CONFIRMED"
+PATTERN_CORRECTION_PREDICATE: Final = "context.pattern.owner_correction"
+PATTERN_RELEARN_MIN_POST_CORRECTION_OCCURRENCES: Final = 3
 MIN_PERSISTED_PATTERN_CONFIDENCE: Final = 0.75
 MIN_PERSISTED_PATTERN_SUPPORT_RATIO: Final = 0.60
 
@@ -66,8 +69,6 @@ def _memory_actor(
 def _timeline_signature(row: TimelineEventRow) -> tuple[str, str] | None:
     if row.resource_id:
         return "RESOURCE", row.resource_id
-    if row.relationship_id:
-        return "RELATIONSHIP", row.relationship_id
     pattern_key = (row.event_ref or {}).get("pattern_key")
     if isinstance(pattern_key, str) and pattern_key.strip():
         return "PATTERN_KEY", pattern_key.strip()
@@ -228,6 +229,55 @@ def _active_same_hypothesis(
     ]
 
 
+def _active_owner_correction(
+    session: Session,
+    *,
+    actor_id: str,
+    hypothesis_id: str,
+) -> MemoryClaimRow | None:
+    rows = session.scalars(
+        select(MemoryClaimRow)
+        .where(
+            MemoryClaimRow.subject_actor_id == actor_id,
+            MemoryClaimRow.predicate == PATTERN_CORRECTION_PREDICATE,
+            MemoryClaimRow.status == "ACTIVE",
+            MemoryClaimRow.source_quality == PATTERN_CORRECTION_SOURCE_QUALITY,
+        )
+        .order_by(MemoryClaimRow.updated_at.desc(), MemoryClaimRow.id.desc())
+    ).all()
+    matching = [
+        row
+        for row in rows
+        if (row.context or {}).get("hypothesis_id") == hypothesis_id
+    ]
+    if len(matching) > 1:
+        raise ContextHypothesisPersistenceError(
+            "PATTERN_HYPOTHESIS_CORRECTION_CONFLICT"
+        )
+    return matching[0] if matching else None
+
+
+def _post_correction_evidence_count(
+    correction: MemoryClaimRow,
+    evidence: tuple[TimelineEventRow, ...],
+) -> int:
+    context = correction.context or {}
+    corrected_at_raw = context.get("corrected_at")
+    if isinstance(corrected_at_raw, str):
+        try:
+            corrected_at = _utc(datetime.fromisoformat(corrected_at_raw))
+        except ValueError as exc:
+            raise ContextHypothesisPersistenceError(
+                "PATTERN_HYPOTHESIS_CORRECTION_TIMESTAMP_INVALID"
+            ) from exc
+    else:
+        corrected_at = _utc(correction.last_observed_at)
+
+    return sum(
+        1 for row in evidence if _utc(row.occurred_at) > corrected_at
+    )
+
+
 def persist_context_pattern_hypothesis(
     session: Session,
     *,
@@ -252,44 +302,6 @@ def persist_context_pattern_hypothesis(
         tenant_id=hypothesis.tenant_id,
         actor_key=hypothesis.actor_id,
     )
-    corrections = session.scalars(
-        select(MemoryClaimRow)
-        .where(
-            MemoryClaimRow.subject_actor_id == actor.id,
-            MemoryClaimRow.predicate == "context.pattern.owner_correction",
-            MemoryClaimRow.source_quality == "USER_DECLARED",
-            MemoryClaimRow.status == "ACTIVE",
-        )
-        .order_by(MemoryClaimRow.updated_at.desc(), MemoryClaimRow.id.desc())
-    ).all()
-    active_corrections = [
-        row
-        for row in corrections
-        if (row.context or {}).get("hypothesis_id") == hypothesis.hypothesis_id
-        and row.valid_until is not None
-        and _utc(row.valid_until) > stamp
-    ]
-    if len(active_corrections) > 1:
-        raise ContextHypothesisPersistenceError(
-            "PATTERN_CORRECTION_ACTIVE_CONFLICT"
-        )
-    requalifying_correction: MemoryClaimRow | None = None
-    if active_corrections:
-        correction = active_corrections[0]
-        correction_at = _utc(
-            correction.valid_from
-            or correction.first_observed_at
-            or stamp
-        )
-        post_correction_evidence = sum(
-            _utc(row.occurred_at) > correction_at
-            for row in evidence
-        )
-        if post_correction_evidence < 3:
-            raise ContextHypothesisPersistenceError(
-                "PATTERN_HYPOTHESIS_SUPPRESSED_BY_OWNER_CORRECTION"
-            )
-        requalifying_correction = correction
 
     active = _active_same_hypothesis(
         session,
@@ -301,8 +313,37 @@ def persist_context_pattern_hypothesis(
             "PATTERN_HYPOTHESIS_ACTIVE_CONFLICT"
         )
 
+    correction = _active_owner_correction(
+        session,
+        actor_id=actor.id,
+        hypothesis_id=hypothesis.hypothesis_id,
+    )
+    if correction is not None and active:
+        raise ContextHypothesisPersistenceError(
+            "PATTERN_HYPOTHESIS_CORRECTION_CONFLICT"
+        )
+    if correction is not None:
+        required = (correction.object_json or {}).get(
+            "required_post_correction_occurrences",
+            PATTERN_RELEARN_MIN_POST_CORRECTION_OCCURRENCES,
+        )
+        if (
+            not isinstance(required, int)
+            or required < PATTERN_RELEARN_MIN_POST_CORRECTION_OCCURRENCES
+        ):
+            raise ContextHypothesisPersistenceError(
+                "PATTERN_HYPOTHESIS_CORRECTION_POLICY_INVALID"
+            )
+        if _post_correction_evidence_count(correction, evidence) < required:
+            raise ContextHypothesisPersistenceError(
+                "PATTERN_HYPOTHESIS_OWNER_CORRECTED"
+            )
+        correction.status = "SUPERSEDED"
+        correction.valid_until = stamp
+        correction.updated_at = now_utc()
+
     fingerprint = _snapshot_fingerprint(hypothesis)
-    previous = active[0] if active else None
+    previous = active[0] if active else correction
     if (
         previous is not None
         and (previous.context or {}).get("snapshot_fingerprint")
@@ -319,14 +360,6 @@ def persist_context_pattern_hypothesis(
             else replacement_time
         )
         previous.updated_at = now_utc()
-
-    if requalifying_correction is not None:
-        requalifying_correction.status = "SUPERSEDED"
-        requalifying_correction.valid_until = min(
-            _utc(requalifying_correction.valid_until),
-            stamp,
-        )
-        requalifying_correction.updated_at = now_utc()
 
     claim = MemoryClaimRow(
         id=new_id(),
@@ -384,5 +417,8 @@ __all__ = [
     "MIN_PERSISTED_PATTERN_SUPPORT_RATIO",
     "PATTERN_CLAIM_PREDICATE",
     "PATTERN_CLAIM_SOURCE_QUALITY",
+    "PATTERN_CORRECTION_PREDICATE",
+    "PATTERN_CORRECTION_SOURCE_QUALITY",
+    "PATTERN_RELEARN_MIN_POST_CORRECTION_OCCURRENCES",
     "persist_context_pattern_hypothesis",
 ]
