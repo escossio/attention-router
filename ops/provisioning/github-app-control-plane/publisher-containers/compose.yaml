@@ -1,0 +1,64 @@
+name: attention-router-github-ci
+
+x-publisher-defaults: &publisher
+  image: attention-router-github-ci-publisher:v1
+  build:
+    context: ../../../..
+    dockerfile: ops/provisioning/github-app-control-plane/publisher-containers/Dockerfile.ci
+  user: "10001:10001"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+  init: true
+  pids_limit: 250
+  mem_limit: 1024m
+  cpus: 1.5
+  environment:
+    PYTHONDONTWRITEBYTECODE: "1"
+    HOME: /home/ci
+    ANDY_CI_PROFILE_ROOT: /ci-profiles
+    ANDY_CI_LOG_ROOT: /var/log/andy-ci
+    ANDY_CI_BASE: /usr/local/lib/andy-ci
+    ANDY_CI_HOST_REGISTRY_DB: /var/lib/andy-ci/host-registry.sqlite3
+  volumes:
+    - type: bind
+      source: ${GITHUB_CI_STATE_DIR:?shared SQLite backing directory required}
+      target: /var/lib/andy-github-app
+    - type: bind
+      source: ${GITHUB_CI_REGISTRY_DIR:?host registry directory required}
+      target: /var/lib/andy-ci
+    - type: bind
+      source: ${GITHUB_CI_LOG_DIR:?persistent CI log directory required}
+      target: /var/log/andy-ci
+    - type: bind
+      source: ${GITHUB_CI_PROFILES_DIR:?CI profile directory required}
+      target: /ci-profiles
+    - type: bind
+      source: ${GITHUB_CI_CONFIG_DIR:?private GitHub App config and key directory required}
+      target: /etc/andy-github-app
+      read_only: true
+    - type: bind
+      source: ${GITHUB_CI_SSH_DIR:?dedicated SSH identity + known_hosts directory required}
+      target: /home/ci/.ssh
+      read_only: true
+    - type: bind
+      source: ${GITHUB_CI_CAPACITY_FILE:?versioned worker capacity file required}
+      target: /usr/local/lib/andy-ci/worker-capacity.json
+      read_only: true
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=1777
+    - /home/ci/.cache:rw,nosuid,nodev,size=24m,uid=10001,gid=10001,mode=0700
+
+services:
+  postgres-publisher:
+    <<: *publisher
+    container_name: andy-github-distributed-postgres-oci
+    profiles: [activate-after-drain]
+    command: ["python", "-B", "-u", "/usr/local/lib/andy-github-app/distributed_postgres_check.py", "daemon"]
+
+  shadow-publisher:
+    <<: *publisher
+    container_name: andy-github-distributed-shadow-oci
+    profiles: [activate-after-drain]
+    command: ["python", "-B", "-u", "/usr/local/lib/andy-github-app/distributed_shadow_checks.py", "daemon"]
