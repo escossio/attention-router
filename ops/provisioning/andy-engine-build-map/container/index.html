@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Andy Engine — Build &amp; Capability Map</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="title-block">
+      <p class="eyebrow">ANDY ENGINE</p>
+      <h1>Build &amp; Capability Map</h1>
+      <p class="subtitle">Mapa técnico de dependências, progresso e fronteiras da engine.</p>
+    </div>
+
+    <div class="current-summary" aria-live="polite">
+      <span class="summary-label">CURRENT STAGE</span>
+      <strong id="current-stage">Carregando…</strong>
+    </div>
+  </header>
+
+  <main>
+    <section id="demo-notice" class="demo-notice" hidden>
+      <strong>DADOS DEMO</strong>
+      <span>Esta árvore é somente uma demonstração visual. Não representa o roadmap real da Andy.</span>
+    </section>
+
+    <section class="metrics" aria-label="Resumo do mapa">
+      <div class="metric"><span>COMPLETED</span><strong id="metric-completed">—</strong></div>
+      <div class="metric"><span>BLOCKED</span><strong id="metric-blocked">—</strong></div>
+      <div class="metric"><span>REMAINING</span><strong id="metric-remaining">—</strong></div>
+      <div class="metric"><span>TOTAL</span><strong id="metric-total">—</strong></div>
+    </section>
+
+    <section class="map-shell" aria-labelledby="map-heading">
+      <div class="map-toolbar">
+        <div>
+          <p class="section-kicker">DEPENDENCY TREE</p>
+          <h2 id="map-heading">Construção da engine</h2>
+        </div>
+
+        <nav class="filters" aria-label="Filtros do mapa">
+          <button class="filter-button is-active" data-filter="all" type="button">ALL</button>
+          <button class="filter-button" data-filter="current" type="button">CURRENT PATH</button>
+          <button class="filter-button" data-filter="completed" type="button">COMPLETED</button>
+          <button class="filter-button" data-filter="pending" type="button">PENDING / BLOCKED</button>
+        </nav>
+      </div>
+
+      <div class="legend" aria-label="Legenda de estados">
+        <span><i class="status-dot completed"></i>Completed</span>
+        <span><i class="status-dot current"></i>Current</span>
+        <span><i class="status-dot ready"></i>Ready</span>
+        <span><i class="status-dot blocked"></i>Blocked</span>
+        <span><i class="status-dot pending"></i>Pending</span>
+        <span><i class="status-dot not-started"></i>Not started</span>
+      </div>
+
+      <div id="map-viewport" class="map-viewport" tabindex="0" aria-label="Árvore de dependências; role horizontalmente quando necessário">
+        <div id="tree-canvas" class="tree-canvas">
+          <svg id="dependency-layer" class="dependency-layer" aria-hidden="true">
+            <defs>
+              <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 Z"></path>
+              </marker>
+            </defs>
+          </svg>
+          <div id="tree" class="tree" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <p class="map-hint">Clique em uma etapa para abrir detalhes. Linhas tracejadas indicam dependências entre ramos.</p>
+    </section>
+
+    <section id="error-panel" class="error-panel" hidden role="alert"></section>
+  </main>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="detail-drawer" class="detail-drawer" aria-hidden="true" aria-labelledby="detail-name">
+    <button id="drawer-close" class="drawer-close" type="button" aria-label="Fechar detalhes">×</button>
+    <p id="detail-id" class="detail-id"></p>
+    <h2 id="detail-name"></h2>
+    <span id="detail-status" class="status-pill"></span>
+    <p id="detail-description" class="detail-description"></p>
+
+    <dl class="detail-grid">
+      <div><dt>Etapa pai</dt><dd id="detail-parent"></dd></div>
+      <div><dt>Marco</dt><dd id="detail-milestone"></dd></div>
+      <div><dt>Dependências</dt><dd id="detail-dependencies"></dd></div>
+      <div><dt>Libera</dt><dd id="detail-unlocks"></dd></div>
+      <div class="detail-wide"><dt>Critério de conclusão</dt><dd id="detail-criteria"></dd></div>
+      <div class="detail-wide"><dt>Resultado / prova</dt><dd id="detail-completion"></dd></div>
+    </dl>
+  </aside>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
