@@ -1,0 +1,30 @@
+name: attention-router-engine-map
+services:
+  engine-map:
+    build: .
+    image: attention-router-engine-map:v1
+    container_name: andy-engine-build-map
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    pids_limit: 48
+    mem_limit: 84m
+    cpus: 0.3
+    environment:
+      ENGINE_MAP_LISTEN_ADDRESS: 0.0.0.0
+      ENGINE_MAP_LISTEN_PORT: "18120"
+      PYTHONDONTWRITEBYTECODE: "1"
+    ports:
+      - "${ENGINE_MAP_BIND_HOST:-127.0.0.1}:${ENGINE_MAP_BIND_PORT:-18120}:18120"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:18120/healthz',timeout=3); assert r.status==200"
+      interval: 15s
+      timeout: 4s
+      retries: 4
+      start_period: 15s

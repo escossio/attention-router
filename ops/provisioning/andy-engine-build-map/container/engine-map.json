@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "project": {
+    "name": "Andy Engine",
+    "subtitle": "Build & Capability Map",
+    "current_stage": "REAL_HUMAN_APPROVAL_READY",
+    "demo": false
+  },
+  "stages": [
+    {
+      "id": "AUTHORITY_BRIDGE_PROVED",
+      "name": "Authority Bridge — Runtime + Migration",
+      "description": "Bridge production ExecutionIntent → AgentExecutionIntent → ScenarioRun provada em PostgreSQL, incluindo atomicidade, concorrência, downgrade e roundtrip 0025↔0026.",
+      "status": "COMPLETED",
+      "parent": null,
+      "depends_on": [],
+      "completion_criteria": "",
+      "completion_summary": "Runtime adversarial reproduzível em duas DBs fresh. Migration M01–M12 PASS em duas execuções reproduzíveis. 0025 intacta e 0027 ausente.",
+      "unlocks": ["LEGACY_SYNTHETIC_REGRESSION"],
+      "milestone": null
+    },
+    {
+      "id": "LEGACY_SYNTHETIC_REGRESSION",
+      "name": "R2.3B — Legacy / Synthetic Regression",
+      "description": "Provar que os novos caminhos production não quebraram response-review, autonomy, ScenarioRun legacy e synthetic v1.",
+      "status": "COMPLETED",
+      "parent": "AUTHORITY_BRIDGE_PROVED",
+      "depends_on": ["AUTHORITY_BRIDGE_PROVED"],
+      "completion_criteria": "",
+      "completion_summary": "Response-review, autonomy, legacy ScenarioRun e synthetic v1 preservados; production bridge não captura nem promove caminhos legacy.",
+      "unlocks": ["PROOF_FINALIZATION"],
+      "milestone": null
+    },
+    {
+      "id": "PROOF_FINALIZATION",
+      "name": "R2.3C — Proof Finalization",
+      "description": "Formalizar métricas T03/S01, executar secret scan, revisar o diff, regressões finais proporcionais, commits e atualização factual do STATUS.",
+      "status": "COMPLETED",
+      "parent": "LEGACY_SYNTHETIC_REGRESSION",
+      "depends_on": ["LEGACY_SYNTHETIC_REGRESSION"],
+      "completion_criteria": "",
+      "completion_summary": "Concurrency metrics formalized, full diff reviewed, secret scan/static checks passed, source/tests/status committed and worktree closed cleanly.",
+      "unlocks": ["SEMANTIC_ADVERSARIAL_PROOF"],
+      "milestone": null
+    },
+    {
+      "id": "SEMANTIC_ADVERSARIAL_PROOF",
+      "name": "6I.1B — Semantic Authority Proof",
+      "description": "Provar que a projeção operacional não pode ampliar ou alterar a autoridade semanticamente congelada no ExecutionIntent aprovado.",
+      "status": "COMPLETED",
+      "parent": "PROOF_FINALIZATION",
+      "depends_on": ["PROOF_FINALIZATION"],
+      "completion_criteria": "",
+      "completion_summary": "Projection authority proved bounded by frozen ExecutionIntent semantics across target, audience, capability, limits, safety, policy, inputs, expiry and fingerprint.",
+      "unlocks": ["HUMAN_APPROVAL_INTEGRATION"],
+      "milestone": null
+    },
+    {
+      "id": "HUMAN_APPROVAL_INTEGRATION",
+      "name": "Integrar Confirmação Humana Real",
+      "description": "Integração local/control-plane provada entre ExecutionIntent, HEA e Meta/WhatsApp; o canário real depende primeiro de cenário production e deploy controlado.",
+      "status": "COMPLETED",
+      "parent": "SEMANTIC_ADVERSARIAL_PROOF",
+      "depends_on": ["SEMANTIC_ADVERSARIAL_PROOF"],
+      "completion_criteria": "",
+      "completion_summary": "ExecutionIntent↔HEA exact binding, Meta interactive decision path, approval/denial validation and APPROVED→STOP behavior proved locally; real canary requires production scenario preparation and controlled runtime deployment first.",
+      "unlocks": ["PRODUCTION_SCENARIO_PREPARATION"],
+      "milestone": null
+    },
+    {
+      "id": "REAL_HUMAN_APPROVAL_READY",
+      "name": "Confirmação Humana Real Operacional",
+      "description": "A Andy consegue apresentar uma ação concreta ao humano, receber Aprovar ou Negar, validar identidade, contexto, fingerprint e autoridade, registrar a decisão e parar com segurança.",
+      "status": "CURRENT",
+      "parent": "CONTROLLED_RUNTIME_DEPLOYMENT",
+      "depends_on": ["CONTROLLED_RUNTIME_DEPLOYMENT"],
+      "completion_criteria": "",
+      "completion_summary": "",
+      "unlocks": ["FIRST_CONTROLLED_EXECUTION"],
+      "milestone": "REAL_INTERACTION_READY"
+    },
+    {
+      "id": "PRODUCTION_SCENARIO_PREPARATION",
+      "name": "Preparar Primeiro Cenário Production",
+      "description": "Criar a primeira versão production-only do cenário elegível, com authority profile, safety/execution class, target binding, recipient endpoint, audience e expiry.",
+      "status": "COMPLETED",
+      "parent": "HUMAN_APPROVAL_INTEGRATION",
+      "depends_on": ["HUMAN_APPROVAL_INTEGRATION"],
+      "completion_criteria": "",
+      "completion_summary": "Production-only conversation.reply authority graph provisioned and proved in isolated PostgreSQL; no live provisioning applied.",
+      "unlocks": ["CONTROLLED_RUNTIME_DEPLOYMENT"],
+      "milestone": null
+    },
+    {
+      "id": "CONTROLLED_RUNTIME_DEPLOYMENT",
+      "name": "Deploy Controlado da Cadeia Production",
+      "description": "Preparar runtime imutável, aplicar 0026 de forma controlada, validar saúde e confirmar ausência de dados ou efeitos inesperados.",
+      "status": "COMPLETED",
+      "parent": "PRODUCTION_SCENARIO_PREPARATION",
+      "depends_on": ["PRODUCTION_SCENARIO_PREPARATION"],
+      "completion_criteria": "",
+      "completion_summary": "Canonical live DB migrated to 0026 and runtime deployed from immutable candidate with fail-closed execution/delivery flags; SCN-PE-029 v2 static production authority provisioned with zero recipient, target, canary data or Meta outbound.",
+      "unlocks": ["REAL_HUMAN_APPROVAL_READY"],
+      "milestone": null
+    },
+    {
+      "id": "FIRST_CONTROLLED_EXECUTION",
+      "name": "Primeira Execução Controlada",
+      "description": "Após confirmação humana real e todas as gates posteriores, permitir pela primeira vez que uma intenção autorizada atravesse a cadeia de execução controlada.",
+      "status": "PENDING",
+      "parent": "REAL_HUMAN_APPROVAL_READY",
+      "depends_on": ["REAL_HUMAN_APPROVAL_READY"],
+      "completion_criteria": "",
+      "completion_summary": "",
+      "unlocks": [],
+      "milestone": "FIRST_CONTROLLED_EXECUTION"
+    }
+  ]
+}
