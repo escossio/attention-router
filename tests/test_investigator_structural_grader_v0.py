@@ -79,6 +79,7 @@ def test_interrupted_replay_with_partial_evidence_is_structurally_valid():
         None, "limited", 1, "QUERY_BUDGET_EXCEEDED",
         partial_evidence=original.partial_evidence,
     )
+    audit[-1] = (limited.investigation_id, limited.event.correlation_id, "limited")
     grade = assess_replay_structure(
         limited, audit, expected_seed_sha256=original.event.digest, max_queries=1,
     )
@@ -98,3 +99,13 @@ def test_empty_seed_does_not_fail_literal_audit_guard():
         result, audit, expected_seed_sha256=empty.digest, max_queries=1,
     )
     assert grade.checks["no_literal_event_in_audit"]
+
+
+def test_inconsistent_terminal_audit_must_fail():
+    result, audit = _sample()
+    audit[-1] = (result.investigation_id, result.event.correlation_id, "failed")
+    grade = assess_replay_structure(
+        result, audit, expected_seed_sha256=result.event.digest, max_queries=3,
+    )
+    assert not grade.passed
+    assert not grade.checks["audit_scope"]
