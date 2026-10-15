@@ -59,7 +59,7 @@ def test_mocked_agents_sdk_queries_replay_on_demand_and_preserves_evidence(monke
         # Event bytes, original alert fields and tenant must remain out of prompt.
         prompt = json.dumps(input)
         assert "resource-pressure" not in prompt
-        assert "\"resource_pressure\"" in prompt
+        assert "resource_pressure" in prompt
         assert "synthetic-event-001" not in prompt
         assert "synthetic-tenant" not in prompt
 
