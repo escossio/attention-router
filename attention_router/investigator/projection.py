@@ -66,7 +66,8 @@ class IncidentProjection:
         if number is not None:
             if isinstance(number, bool) or not isinstance(number, (int, float)):
                 raise ValueError("INVALID_PROJECTION_VALUE")
-            if not math.isfinite(number):
+            # A finite upper bound also avoids float overflow on huge Python ints.
+            if abs(number) > 1e18 or not math.isfinite(number):
                 raise ValueError("INVALID_PROJECTION_VALUE")
             if self.unit == "none":
                 raise ValueError("INVALID_PROJECTION_UNIT")
