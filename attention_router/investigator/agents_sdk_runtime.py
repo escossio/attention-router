@@ -20,6 +20,7 @@ class HypothesisReport(BaseModel):
     statement: str
     evidence_indexes: list[int] = Field(default_factory=list)
     uncertainty: str = "unverified"
+    status: Literal["OPEN", "SUPPORTED", "REFUTED", "UNRESOLVED"] = "UNRESOLVED"
 
 
 class InvestigatorReport(BaseModel):
@@ -132,14 +133,13 @@ class AgentsSDKInvestigatorRuntime:
             conclusion = Conclusion(
                 summary=report.conclusion_summary,
                 evidence_indexes=tuple(report.conclusion_evidence_indexes),
-                limitations=tuple(report.limitations) + (
-                    f"classification:{report.conclusion_classification}",
-                ),
+                limitations=tuple(report.limitations),
+                classification=report.conclusion_classification,
             )
         return Findings(
             evidence=tuple(observed),
             hypotheses=tuple(
-                Hypothesis(item.statement, tuple(item.evidence_indexes), item.uncertainty)
+                Hypothesis(item.statement, tuple(item.evidence_indexes), item.uncertainty, item.status)
                 for item in report.hypotheses
             ),
             conclusion=conclusion,
