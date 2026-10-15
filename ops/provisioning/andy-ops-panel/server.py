@@ -33,6 +33,8 @@ def _observability_url(name: str) -> str | None:
     raw = os.environ.get(name, "").strip()
     if not raw:
         return None
+    if raw in {"/observability/goaccess/", "/observability/dozzle/"}:
+        return raw
     parsed = urlsplit(raw)
     if (parsed.scheme not in {"http", "https"} or not parsed.netloc
             or parsed.username or parsed.password
@@ -46,16 +48,20 @@ def _observability_url(name: str) -> str | None:
 GOACCESS_URL = _observability_url("ANDY_OPS_GOACCESS_URL")
 DOZZLE_URL = _observability_url("ANDY_OPS_DOZZLE_URL")
 NETWORK_OSI_URL = _observability_url("ANDY_OPS_NETWORK_OSI_URL")
+FLOW_E2E_URL = _observability_url("ANDY_OPS_FLOW_E2E_URL")
+LIVE_MESSAGE_URL = _observability_url("ANDY_OPS_LIVE_MESSAGE_URL")
 OBSERVABILITY_CONFIG = {
     "goaccess_url": GOACCESS_URL,
     "dozzle_url": DOZZLE_URL,
     "network_osi_url": NETWORK_OSI_URL,
+    "flow_e2e_url": FLOW_E2E_URL,
+    "live_message_url": LIVE_MESSAGE_URL,
 }
 FRAME_SOURCES = sorted(
     {
         f"{parsed.scheme}://{parsed.netloc}"
         for value in OBSERVABILITY_CONFIG.values()
-        if value
+        if value and urlsplit(value).netloc
         for parsed in [urlsplit(value)]
     }
 )
