@@ -219,3 +219,37 @@ def test_store_rejects_sqlite_and_non_ephemeral_database_name():
     with pytest.raises(ProofStoreDenied, match="DISPOSABLE_POSTGRES_REQUIRED"):
         DisposablePgSeedStore(engine, "inv_v0_0123456789ab")
     engine.dispose()
+
+
+def test_two_instances_racing_same_nonce_admit_only_one(proof):
+    store, engine = proof
+    signed = _signed(_binding(), nonce="racingNonce1234")
+
+    def try_stage(_index):
+        try:
+            _gateway(store).stage_signed(signed)
+            return "ACCEPTED"
+        except ProofStoreDenied as exc:
+            return str(exc)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(try_stage, (1, 2)))
+    assert sorted(outcomes) == ["ACCEPTED", "REPLAY_DENIED"]
+    assert _count(engine, store.schema, "investigation_seeds") == 1
+    assert _count(engine, store.schema, "admission_nonces") == 1
+    assert _count(engine, store.schema, "investigation_audit") == 1
+
+
+def test_changed_tenant_binding_for_same_principal_cannot_overwrite_seed(proof):
+    store, engine = proof
+    first = _gateway(store, _binding()).stage_signed(_signed(_binding()))
+    other = _binding(tenant="synthetic-tenant-b")
+    with pytest.raises(ProofStoreDenied, match="EVENT_IDENTITY_CONFLICT"):
+        _gateway(store, other).stage_signed(
+            _signed(other, nonce="nonce12345679"),
+        )
+    assert _count(engine, store.schema, "investigation_seeds") == 1
+    assert _count(engine, store.schema, "admission_nonces") == 1
+    assert store.read_seed(
+        seed_id=first.seed.seed_id, tenant_id="synthetic-tenant-b",
+    ) is None
