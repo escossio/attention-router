@@ -61,7 +61,11 @@ def assess_replay_structure(
         "observations_retained": all(item in investigation.partial_evidence for item in evidence),
         "hypothesis_references_valid": hypotheses_valid,
         "conclusion_references_valid": conclusion_valid,
-        "audit_scope": bool(own_events) and own_events[0] == "started",
+        "audit_scope": (
+            len(own_events) >= 2
+            and own_events[0] == "started"
+            and own_events[-1] == investigation.status
+        ),
         "no_literal_event_in_audit": not decoded or decoded not in repr(own_events),
     }
     return StructuralAssessment(passed=all(checks.values()), checks=checks)
