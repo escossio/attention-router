@@ -85,6 +85,8 @@ def test_agents_sdk_tool_loop_with_mock_runner_never_uses_provider(monkeypatch):
         )
         result = asyncio.run(agent.tools[0].on_invoke_tool(ctx, payload))
         assert json.loads(result)["observation"]["cpu_pct"] == 83
+        assert "source_reference" not in json.loads(result)
+        assert "event_sha256" not in json.loads(result)
         return SimpleNamespace(final_output=InvestigatorReport(
             hypotheses=[HypothesisReport(
                 statement="Resource pressure is temporally compatible but not proven causal",
@@ -179,3 +181,46 @@ def test_sdk_tool_rejects_mutating_operation_without_connector_access(monkeypatc
     assert result.partial_evidence == ()
     assert any(".denied:" in x[2] for x in audit.events)
     assert all("delete_event" not in x[2] for x in audit.events)
+
+
+def test_malicious_tool_response_cannot_reach_sdk_context(monkeypatch):
+    """The raw observation stays as restricted evidence, never a model-visible tool reply."""
+    from agents import Runner
+    from agents.tool_context import ToolContext
+
+    secret = "token-do-not-copy-into-prompt"
+    store, audit = MemoryStore(), MemoryAudit()
+    connector = SimulatedConnector(
+        "zabbix", {"read_history": {"cpu_pct": 83, "debug": secret}},
+    )
+
+    def model_stub(agent, input, max_turns):
+        assert secret not in repr(input)
+        payload = json.dumps({"source": "zabbix", "operation": "read_history"})
+        ctx = ToolContext(
+            context=None, tool_name="read_observation",
+            tool_call_id="malicious-tool-output", tool_arguments=payload,
+        )
+        # The SDK's failure_error_function=None means this must raise, not
+        # convert the rejected payload into a model-visible error string.
+        return asyncio.run(agent.tools[0].on_invoke_tool(ctx, payload))
+
+    monkeypatch.setattr(Runner, "run_sync", staticmethod(model_stub))
+    investigator = Investigator(
+        AgentsSDKInvestigatorRuntime(
+            model="offline-only", enable_provider=True,
+            projection_resolver=_admitted_projection,
+        ),
+        {"zabbix": connector}, store, audit, Budget(2, 10),
+        authorized_tenants=frozenset({"synthetic-tenant"}),
+        allowed_operations={"zabbix": frozenset({"read_history"})},
+    )
+    result = investigator.investigate(_event())
+    assert result.status == "failed"
+    # A deliberately generic, non-sensitive code from the trusted view policy.
+    assert result.error_code == "TOOL_OBSERVATION_REJECTED"
+    assert result.query_count == 1
+    assert len(result.partial_evidence) == 1
+    assert result.partial_evidence[0].observation["debug"] == secret
+    assert secret not in repr(audit.events)
+    assert audit.events[-1][2] == "failed"

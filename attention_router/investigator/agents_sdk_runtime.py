@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .model import Conclusion, Evidence, Findings, Hypothesis, Query, SourceEvent
 from .ports import QueryAccess
 from .projection import IncidentProjection
+from .tool_view import project_tool_observation
 
 
 class HypothesisReport(BaseModel):
@@ -82,12 +83,14 @@ class AgentsSDKInvestigatorRuntime:
             evidence = queries.read(Query(source, operation))
             if not evidence.source_reference.startswith("synthetic:"):
                 raise ValueError("UNSANITIZED_TOOL_EVIDENCE")
+            # Never pass source_reference, arbitrary logs or the full observation
+            # into LLM context. Every (source, operation) needs a strict view.
+            safe_view = project_tool_observation(source, operation, evidence.observation)
             payload = {
                 "evidence_index": len(observed),
                 "source": source,
                 "operation": operation,
-                "source_reference": evidence.source_reference,
-                "observation": evidence.observation,
+                "observation": safe_view,
             }
             encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True)
             if len(encoded.encode("utf-8")) > self.max_tool_response_bytes:
