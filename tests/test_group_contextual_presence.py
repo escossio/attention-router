@@ -1,4 +1,6 @@
 from datetime import timedelta
+from io import BytesIO
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -68,8 +70,12 @@ def test_observe_notice_contextual_and_off_gates(session, monkeypatch):
     assert state.notice_sent_at is not None
     assert sent == [notice.id]
 
+    with pytest.raises(ValueError, match="GROUP_NOTICE_DELIVERY_UNCONFIRMED"):
+        group.set_group_mode(session, group_id=GROUP, tenant_id=DEFAULT_TENANT_ID, mode="CONTEXTUAL")
+    monkeypatch.setattr(group, "_notice_delivery_confirmed", lambda _key: True)
     group.set_group_mode(session, group_id=GROUP, tenant_id=DEFAULT_TENANT_ID, mode="CONTEXTUAL")
     session.commit()
+    assert state.notice_confirmed_at is not None
     monkeypatch.setattr(group, "run_andy", lambda _context: agent_result("Agentes interpretam contexto e seguem limites claros."))
     inbound(session, 2, "Andy, consegue explicar agentes?")
     assert group.process_group_contextual_cycle(session) == 1
@@ -123,3 +129,25 @@ def test_stale_group_message_cannot_trigger_send(session, monkeypatch):
     assert group.process_group_contextual_cycle(session) == 1
     record = session.scalar(select(GroupContextualEventRow))
     assert record.reason_code == "GROUP_STALE_EVENT"
+
+
+def test_notice_delivery_gate_requires_authenticated_device_ack(monkeypatch):
+    monkeypatch.setattr(settings, "local_history_hmac_secret", "synthetic-history-secret-32-bytes-long")
+    monkeypatch.setattr(settings, "whatsapp_history_url", "http://127.0.0.1:18103/internal/history/chats")
+    observed = []
+
+    def response(ack):
+        def open_request(req, timeout):
+            observed.append((req.full_url, req.get_header("X-attention-signature"), timeout))
+            return BytesIO(json.dumps({
+                "status": "SENT", "ack": ack, "delivery_confirmed": ack >= 2,
+                "message_reference_present": True,
+            }).encode())
+        return open_request
+
+    monkeypatch.setattr(group.request, "urlopen", response(1))
+    assert not group._notice_delivery_confirmed("group:notice:synthetic")
+    monkeypatch.setattr(group.request, "urlopen", response(2))
+    assert group._notice_delivery_confirmed("group:notice:synthetic")
+    assert all(item[0].endswith("/internal/delivery/group%3Anotice%3Asynthetic") for item in observed)
+    assert all(item[1].startswith("sha256=") for item in observed)

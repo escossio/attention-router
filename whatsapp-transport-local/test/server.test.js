@@ -51,6 +51,22 @@ function postJson(port, path, body, secret, extraHeaders = {}) {
   });
 }
 
+function getSignedJson(port, path, secret) {
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = `sha256=${crypto.createHmac('sha256', secret).update(`${timestamp}.GET.${path}`).digest('hex')}`;
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path, method: 'GET',
+      headers: { 'x-attention-timestamp': timestamp, 'x-attention-signature': signature } }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve({ statusCode: res.statusCode,
+        body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 test('signed group sends require exact private allowlist, policy marker and Andy label', async (t) => {
   const secret = 'unit-test-outbound-secret-32-bytes-minimum';
   const config = createConfig({ LOCAL_TRANSPORT_HTTP_PORT: '0', EXTERNAL_DELIVERY_ENABLED: 'true',
@@ -75,6 +91,43 @@ test('signed group sends require exact private allowlist, policy marker and Andy
   assert.equal(sends, 0);
   assert.equal((await postJson(port, '/internal/send', base, secret)).body.status, 'sent');
   assert.equal(sends, 1);
+});
+
+test('group delivery evidence requires authenticated ACK at device level', async (t) => {
+  const secret = 'unit-test-outbound-secret-32-bytes-minimum';
+  const provenanceDir = fs.mkdtempSync(pathModule.join(os.tmpdir(), 'attention-group-ack-'));
+  t.after(() => fs.rmSync(provenanceDir, { recursive: true, force: true }));
+  const config = createConfig({ LOCAL_TRANSPORT_HTTP_PORT: '0', EXTERNAL_DELIVERY_ENABLED: 'true',
+    HISTORY_READ_ONLY_ENABLED: 'true', LOCAL_HISTORY_HMAC_SECRET: secret,
+    LOCAL_OUTBOUND_HMAC_SECRET: secret, LOCAL_OUTBOUND_PROVENANCE_DIR: provenanceDir,
+    GROUP_CONTEXTUAL_PRESENCE_GROUP_ID: '12345@g.us' });
+  const status = createStatus(config, { service_state: 'ready', browser_debug_reachable: true,
+    wwebjs_connected: true, ready: true, client_state: 'CONNECTED' });
+  const server = createServer(config, status, {
+    async sendMessage() { return { id: { _serialized: 'synthetic-reference' }, ack: 1 }; },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const port = server.address().port;
+  const key = 'group:contextual:synthetic-event';
+  const path = `/internal/delivery/${encodeURIComponent(key)}`;
+  const sent = await postJson(port, '/internal/send', {
+    idempotency_key: key, external_actor_id: '12345@g.us',
+    text: '[Andy • IA] Resposta sintética.', message_type: 'text',
+    group_policy: 'GROUP_CONTEXTUAL_PRESENCE',
+  }, secret);
+  assert.equal(sent.body.status, 'sent');
+  assert.equal((await request(port, path)).statusCode, 503);
+  const before = await getSignedJson(port, path, secret);
+  assert.equal(before.body.ack, 1);
+  assert.equal(before.body.delivery_confirmed, false);
+  const { createOutboundProvenanceLedger } = require('../src/outbound-provenance');
+  const ledger = createOutboundProvenanceLedger(config);
+  assert.equal(ledger.markAck('synthetic-reference', 2), true);
+  const after = await getSignedJson(port, path, secret);
+  assert.equal(after.body.ack, 2);
+  assert.equal(after.body.delivery_confirmed, true);
+  assert.equal((await getSignedJson(port, '/internal/delivery/group%3Acontextual%3Aunknown', secret)).statusCode, 404);
 });
 
 test('status server exposes live ready and status read-only', async () => {

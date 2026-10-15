@@ -31,7 +31,7 @@ def main() -> None:
                 OutboxMessageRow.status == "DONE",
             )).all()
             sent_count = sum((row.payload or {}).get("external_actor_id") == group_id for row in sent)
-            print(f"mode={state.mode} observed={len(observed)} sent={sent_count} notice_sent={state.notice_sent_at is not None}")
+            print(f"mode={state.mode} observed={len(observed)} sent={sent_count} notice_sent={state.notice_sent_at is not None} notice_confirmed={state.notice_confirmed_at is not None}")
             return
         if args.command == "notice":
             row = enqueue_group_notice(session, group_id=group_id)

@@ -572,6 +572,7 @@ class GroupContextualPresenceRow(Base):
     cursor_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cursor_id: Mapped[str | None] = mapped_column(String(64))
     notice_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notice_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     __table_args__ = (
         CheckConstraint("mode in ('OFF','OBSERVE','MENTION_ONLY','CONTEXTUAL')", name="ck_group_presence_mode"),

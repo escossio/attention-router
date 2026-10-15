@@ -1,7 +1,12 @@
 """Bounded group observation, proposal and separately authorized outbox path."""
 
+import hashlib
+import hmac
+import json
 from datetime import timedelta, timezone
 from time import monotonic
+import time
+from urllib import parse, request
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
@@ -40,6 +45,36 @@ def _aware(value):
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
+def _generation_token(state: GroupContextualPresenceRow) -> str:
+    return _aware(state.observe_after).isoformat()
+
+
+def _notice_delivery_confirmed(idempotency_key: str) -> bool:
+    secret = settings.local_history_hmac_secret
+    endpoint = parse.urlsplit(settings.whatsapp_history_url)
+    if (not secret or endpoint.scheme != "http" or not endpoint.netloc
+            or endpoint.path != "/internal/history/chats" or endpoint.query or endpoint.fragment):
+        return False
+    path = f"/internal/delivery/{parse.quote(idempotency_key, safe='')}"
+    timestamp = str(int(time.time()))
+    signature = hmac.new(secret.encode(), f"{timestamp}.GET.{path}".encode(), hashlib.sha256).hexdigest()
+    url = parse.urlunsplit((endpoint.scheme, endpoint.netloc, path, "", ""))
+    try:
+        req = request.Request(url, headers={
+            "X-Attention-Timestamp": timestamp,
+            "X-Attention-Signature": f"sha256={signature}",
+        })
+        with request.urlopen(req, timeout=settings.whatsapp_history_timeout_seconds) as response:
+            body = response.read(4097)
+            if len(body) > 4096:
+                return False
+            data = json.loads(body)
+    except (OSError, ValueError, TimeoutError):
+        return False
+    return (isinstance(data, dict) and data.get("status") == "SENT" and data.get("delivery_confirmed") is True
+            and data.get("message_reference_present") is True and data.get("ack", -1) >= 2)
+
+
 def set_group_mode(session: Session, *, group_id: str, tenant_id: str, mode: str) -> GroupContextualPresenceRow:
     """Private operator action. OFF takes effect on the next authority read."""
     if group_id != settings.group_contextual_presence_group_id or not group_id.endswith("@g.us"):
@@ -67,11 +102,22 @@ def set_group_mode(session: Session, *, group_id: str, tenant_id: str, mode: str
         raise ValueError("GROUP_OBSERVE_REQUIRED")
     if mode in {"MENTION_ONLY", "CONTEXTUAL"} and row.notice_sent_at is None:
         raise ValueError("GROUP_NOTICE_REQUIRED")
+    if mode in {"MENTION_ONLY", "CONTEXTUAL"} and row.notice_confirmed_at is None:
+        key = f"group:notice:{row.id}:{_generation_token(row)}"
+        notice = session.scalar(select(OutboxMessageRow).where(
+            OutboxMessageRow.idempotency_key == key,
+            OutboxMessageRow.action_type == NOTICE_ACTION,
+            OutboxMessageRow.status == "DONE",
+        ))
+        if notice is None or not _notice_delivery_confirmed(key):
+            raise ValueError("GROUP_NOTICE_DELIVERY_UNCONFIRMED")
+        row.notice_confirmed_at = now
     if row.mode == "OFF" and mode == "OBSERVE":
         row.observe_after = now
         row.cursor_at = None
         row.cursor_id = None
         row.notice_sent_at = None
+        row.notice_confirmed_at = None
     row.mode = mode
     row.updated_at = now
     audit(session, None, "group_contextual.mode_changed", {"mode": mode}, origin="group_contextual", tenant_id=tenant_id)
@@ -94,7 +140,7 @@ def enqueue_group_notice(session: Session, *, group_id: str) -> OutboxMessageRow
     event = session.get(InboundEventRow, observed.inbound_event_id) if observed else None
     if event is None or event.interaction_id is None:
         raise ValueError("GROUP_OBSERVATION_REQUIRED")
-    key = f"group:notice:{row.id}:{row.observe_after.isoformat()}"
+    key = f"group:notice:{row.id}:{_generation_token(row)}"
     existing = session.scalar(select(OutboxMessageRow).where(OutboxMessageRow.idempotency_key == key))
     if existing:
         return existing
@@ -104,7 +150,7 @@ def enqueue_group_notice(session: Session, *, group_id: str) -> OutboxMessageRow
         action_type=NOTICE_ACTION, destination="wwebjs",
         payload={"external_actor_id": group_id, "message_type": "text", "text": NOTICE_TEXT,
                  "group_policy": "GROUP_CONTEXTUAL_NOTICE", "source_event_id": event.id,
-                 "observe_after": row.observe_after.isoformat()},
+                 "observe_after": _generation_token(row)},
         status="PENDING", created_at=now, available_at=now,
         idempotency_key=key, correlation_id=event.correlation_id, causation_id=event.id,
     )
@@ -174,7 +220,7 @@ def authorize_outbox(session: Session, outbox: OutboxMessageRow, *, session_read
     if outbox.action_type == NOTICE_ACTION:
         if state.mode != "OBSERVE" or state.notice_sent_at is not None:
             return "GROUP_NOTICE_GATE_DENIED"
-        if payload.get("observe_after") != state.observe_after.isoformat():
+        if payload.get("observe_after") != _generation_token(state):
             return "GROUP_NOTICE_STALE"
         return "ALLOW" if session_ready and payload.get("text") == NOTICE_TEXT else "GROUP_NOTICE_INVALID"
     if outbox.action_type != ACTION or payload.get("group_policy") != "GROUP_CONTEXTUAL_PRESENCE":
@@ -198,7 +244,7 @@ def authorize_outbox(session: Session, outbox: OutboxMessageRow, *, session_read
     return authorize_group_response(GroupAuthorityInput(
         configured_group_id=settings.group_contextual_presence_group_id,
         destination=group_id, mode=state.mode, session_ready=session_ready,
-        notice_sent=state.notice_sent_at is not None,
+        notice_sent=state.notice_confirmed_at is not None,
         from_me=((event.payload or {}).get("metadata") or {}).get("from_me") is True,
         source_event_id=event.id, interaction_id=event.interaction_id,
         kind=str(payload.get("relevance_kind") or ""),
@@ -287,7 +333,7 @@ def process_group_contextual_cycle(session: Session, *, limit: int = 30) -> int:
                         configured_group_id=settings.group_contextual_presence_group_id,
                         destination=state.group_id, mode=state.mode,
                         session_ready=probe_transport_ready() if state.mode != "OBSERVE" else False,
-                        notice_sent=state.notice_sent_at is not None,
+                        notice_sent=state.notice_confirmed_at is not None,
                         from_me=False, source_event_id=event.id,
                         interaction_id=event.interaction_id, kind=kind,
                         proposed_text=clean, confidence=output.confidence,

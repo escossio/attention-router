@@ -24,6 +24,7 @@ def upgrade() -> None:
         sa.Column("cursor_at", sa.DateTime(timezone=True)),
         sa.Column("cursor_id", sa.String(64)),
         sa.Column("notice_sent_at", sa.DateTime(timezone=True)),
+        sa.Column("notice_confirmed_at", sa.DateTime(timezone=True)),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint("mode in ('OFF','OBSERVE','MENTION_ONLY','CONTEXTUAL')", name="ck_group_presence_mode"),
         sa.CheckConstraint("group_id like '%@g.us'", name="ck_group_presence_group_id"),
