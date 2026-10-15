@@ -103,6 +103,17 @@ function createServer(config, status, client = null, deps = {}) {
           payload.external_actor_id && payload.destination
           && payload.external_actor_id !== payload.destination,
         );
+        const isGroupDestination = typeof destination === 'string' && destination.endsWith('@g.us');
+        if (isGroupDestination && (
+          destination !== config.groupContextualPresenceId
+          || !['GROUP_CONTEXTUAL_PRESENCE', 'GROUP_CONTEXTUAL_NOTICE'].includes(payload.group_policy)
+          || payload.message_type !== 'text'
+          || typeof payload.text !== 'string'
+          || !payload.text.startsWith('[Andy • IA]')
+        )) {
+          respondJson(res, 403, { status: 'group_destination_denied' });
+          return;
+        }
         const voice = payload.message_type === 'ptt';
         const payloadValid = voice ? Boolean(payload.media_ref) : typeof payload.text === 'string';
         if (!key || !destination || destinationConflict || !payloadValid || !client || !isReady(status)) {

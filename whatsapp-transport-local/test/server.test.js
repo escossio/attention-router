@@ -51,6 +51,32 @@ function postJson(port, path, body, secret, extraHeaders = {}) {
   });
 }
 
+test('signed group sends require exact private allowlist, policy marker and Andy label', async (t) => {
+  const secret = 'unit-test-outbound-secret-32-bytes-minimum';
+  const config = createConfig({ LOCAL_TRANSPORT_HTTP_PORT: '0', EXTERNAL_DELIVERY_ENABLED: 'true',
+    LOCAL_OUTBOUND_HMAC_SECRET: secret, GROUP_CONTEXTUAL_PRESENCE_GROUP_ID: '12345@g.us' });
+  const status = createStatus(config, { service_state: 'ready', browser_debug_reachable: true,
+    wwebjs_connected: true, ready: true, client_state: 'CONNECTED' });
+  let sends = 0;
+  const client = { async sendMessage() { sends += 1; return { id: { _serialized: 'synthetic-reference' } }; } };
+  const ledger = { available: true,
+    begin() { return { record: { status: 'PENDING' }, replay: false }; },
+    markSent() {}, markFailed() {} };
+  const server = createServer(config, status, client, { outboundProvenance: ledger });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const port = server.address().port;
+  const base = { idempotency_key: 'synthetic-group-1', external_actor_id: '12345@g.us',
+    text: '[Andy • IA] Resposta sintética.', message_type: 'text',
+    group_policy: 'GROUP_CONTEXTUAL_PRESENCE' };
+  assert.equal((await postJson(port, '/internal/send', { ...base, external_actor_id: 'other@g.us' }, secret)).statusCode, 403);
+  assert.equal((await postJson(port, '/internal/send', { ...base, group_policy: null }, secret)).statusCode, 403);
+  assert.equal((await postJson(port, '/internal/send', { ...base, text: 'Sem identificação' }, secret)).statusCode, 403);
+  assert.equal(sends, 0);
+  assert.equal((await postJson(port, '/internal/send', base, secret)).body.status, 'sent');
+  assert.equal(sends, 1);
+});
+
 test('status server exposes live ready and status read-only', async () => {
   const config = createConfig({ LOCAL_TRANSPORT_HTTP_PORT: '0' });
   const status = createStatus(config, {
