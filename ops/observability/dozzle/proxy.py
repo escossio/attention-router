@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import threading
 from socketserver import ThreadingMixIn, UnixStreamServer
 from urllib.parse import urlsplit
 
@@ -109,7 +110,37 @@ class Handler(BaseHTTPRequestHandler):
             upstream.close()
 
 class Server(ThreadingMixIn,UnixStreamServer):
+    # Read-only API is heavy on long-lived Docker log/stats streams.
+    # Bound threads explicitly instead of allowing ThreadingMixIn to exhaust
+    # Docker's pids cgroup and break its own health endpoint.
     daemon_threads = True
+    request_queue_size = 128
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.max_clients = max(4, int(os.environ.get('DOZZLE_VIEW_MAX_CLIENTS', '192')))
+        self._capacity = threading.BoundedSemaphore(self.max_clients)
+
+    def process_request(self, request, client_address):
+        if not self._capacity.acquire(blocking=False):
+            try:
+                request.sendall(b'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._capacity.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._capacity.release()
 
 if __name__=='__main__':
     os.umask(0o077)
