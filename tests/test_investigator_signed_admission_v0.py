@@ -128,3 +128,13 @@ def test_two_independent_process_simulations_do_not_share_replay_state():
     envelope = _envelope(binding)
     first, second = _authority(binding), _authority(binding)
     assert first.admit(envelope).digest == second.admit(envelope).digest
+
+
+@pytest.mark.parametrize("clock", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_clock_is_not_accepted(clock):
+    binding = _binding()
+    authority = SyntheticAdmission(
+        {binding.principal_id: binding}, now=lambda: clock,
+    )
+    with pytest.raises(AdmissionRejected, match="ADMISSION_REJECTED"):
+        authority.admit(_envelope(binding))
