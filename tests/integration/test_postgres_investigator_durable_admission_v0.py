@@ -253,3 +253,78 @@ def test_changed_tenant_binding_for_same_principal_cannot_overwrite_seed(proof):
     assert store.read_seed(
         seed_id=first.seed.seed_id, tenant_id="synthetic-tenant-b",
     ) is None
+
+
+# F01 — fault after synthetic HMAC admission and before any PostgreSQL call.
+# This deliberately observes a known gap; no remediation is made in this PR.
+def test_f01_after_hmac_before_db_consumes_nonce_without_durable_seed(
+    proof, monkeypatch,
+):
+    from attention_router.investigator.signed_admission import AdmissionRejected
+
+    store, engine = proof
+    binding = _binding()
+    signed = _signed(binding, nonce="f01Nonce123456")
+    admission = SyntheticAdmission(
+        {binding.principal_id: binding}, now=lambda: _NOW,
+    )
+    gateway = DisposableSignedStage(admission, store)
+
+    def fail_before_database(**_kwargs):
+        raise RuntimeError("F01_SYNTHETIC_BEFORE_DB")
+
+    # Only this one staging attempt is sabotaged; there is no PostgreSQL
+    # mutation, host restart, network disconnect, or operational credential.
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "stage_verified", fail_before_database)
+        with pytest.raises(RuntimeError, match="F01_SYNTHETIC_BEFORE_DB"):
+            gateway.stage_signed(signed)
+
+    for table in ("investigation_seeds", "admission_nonces", "investigation_audit"):
+        assert _count(engine, store.schema, table) == 0
+
+    # Reusing the SAME verifier and SAME valid envelope exposes the split:
+    # memory consumed the nonce, while PostgreSQL has no accepted event.
+    with pytest.raises(AdmissionRejected, match="ADMISSION_REJECTED"):
+        gateway.stage_signed(signed)
+    assert _count(engine, store.schema, "investigation_seeds") == 0
+
+    # A fresh verifier has no local nonce and can commit the same fixture.
+    # This difference is evidence of a per-instance continuity gap, not a fix.
+    restored = _gateway(store, binding).stage_signed(signed)
+    assert restored.may_start_new_investigation
+    assert _count(engine, store.schema, "investigation_seeds") == 1
+    assert _count(engine, store.schema, "admission_nonces") == 1
+    assert _count(engine, store.schema, "investigation_audit") == 1
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="AR-INV-GAP-001: same-instance retry after precommit failure is not recoverable",
+)
+def test_f01_required_same_instance_retry_after_abort_is_recoverable(
+    proof, monkeypatch,
+):
+    """Normative desired behavior, explicitly XFAIL until reviewed separately."""
+    store, engine = proof
+    binding = _binding()
+    signed = _signed(binding, nonce="f01Retry123456")
+    admission = SyntheticAdmission(
+        {binding.principal_id: binding}, now=lambda: _NOW,
+    )
+    gateway = DisposableSignedStage(admission, store)
+
+    def fail_before_database(**_kwargs):
+        raise RuntimeError("F01_SYNTHETIC_BEFORE_DB")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "stage_verified", fail_before_database)
+        with pytest.raises(RuntimeError, match="F01_SYNTHETIC_BEFORE_DB"):
+            gateway.stage_signed(signed)
+
+    assert _count(engine, store.schema, "investigation_seeds") == 0
+    # Required eventual contract: retry with the SAME valid envelope in the
+    # SAME instance must be safe and yield one receipt (NOT implemented).
+    receipt = gateway.stage_signed(signed)
+    assert receipt.may_start_new_investigation
+    assert _count(engine, store.schema, "investigation_seeds") == 1
