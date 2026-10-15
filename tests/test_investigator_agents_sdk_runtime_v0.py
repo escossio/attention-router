@@ -217,7 +217,8 @@ def test_malicious_tool_response_cannot_reach_sdk_context(monkeypatch):
     )
     result = investigator.investigate(_event())
     assert result.status == "failed"
-    assert result.error_code == "RUNTIME_OR_CONNECTOR_FAILED"
+    # A deliberately generic, non-sensitive code from the trusted view policy.
+    assert result.error_code == "TOOL_OBSERVATION_REJECTED"
     assert result.query_count == 1
     assert len(result.partial_evidence) == 1
     assert result.partial_evidence[0].observation["debug"] == secret
