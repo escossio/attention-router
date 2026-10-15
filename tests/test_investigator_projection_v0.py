@@ -50,6 +50,7 @@ def test_projection_exposes_typed_symptom_but_not_raw_event():
     assert '"target_role": "ci_worker"' in payload
     assert event.original.decode() not in payload
     assert event.tenant_id not in payload
+    assert event.digest not in payload
     assert event.source_event_id not in payload
     assert "private-opaque-secret" not in payload
 
