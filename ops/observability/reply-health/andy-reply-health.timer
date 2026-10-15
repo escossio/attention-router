@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor Andy automatic WhatsApp reply evidence every two minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/2:00
+AccuracySec=10s
+Persistent=true
+Unit=andy-reply-health.service
+
+[Install]
+WantedBy=timers.target
