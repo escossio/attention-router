@@ -86,6 +86,8 @@ def test_unknown_quote_and_invalid_limits_never_authorize_model():
     gate = _gate()
     with pytest.raises(ModelBudgetDenied, match="MODEL_QUOTE_REQUIRED"):
         gate.reserve("call", None)
+    with pytest.raises(ModelBudgetDenied, match="MODEL_QUOTE_REQUIRED"):
+        gate.reserve("call", ModelUsage(10, 5, 0))
     with pytest.raises(ValueError, match="MODEL_LIMIT_INVALID"):
         ModelLimits(100, 0, 500, max_calls=3)
     assert gate.spent == ModelUsage(0, 0, 0)
