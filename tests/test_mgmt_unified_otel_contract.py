@@ -49,6 +49,13 @@ class MgmtUnifiedContract(unittest.TestCase):
         self.assertIn("port", text)
         self.assertIn("443", text)
 
+    def test_sibling_admin_hosts_enforce_https(self):
+        for host in ("grafana", "zabbix"):
+            fragment = (PORTAL / f"{host}-https-redirect.apache.fragment.conf").read_text()
+            self.assertIn("RewriteCond %{HTTP:X-Forwarded-Proto} ^http$", fragment)
+            self.assertIn(f"https://{host}.escossio.com%{{REQUEST_URI}}", fragment)
+            self.assertIn("[R=308,L,NE]", fragment)
+
     def test_dozzle_uses_filtered_socket_and_base_path(self):
         compose = (PORTAL / "compose.mgmt-dozzle.yaml").read_text()
         self.assertIn("DOZZLE_BASE: /observability/dozzle", compose)
