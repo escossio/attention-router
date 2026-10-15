@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from hashlib import sha256
 import hmac
+import math
 import re
 from threading import Lock
 from time import time
@@ -121,7 +122,11 @@ class SyntheticAdmission:
         if binding is None:
             _deny()
         now = self._now()
-        if type(now) not in (int, float) or abs(now - envelope.issued_at) > _MAX_CLOCK_SKEW:
+        if type(now) not in (int, float):
+            _deny()
+        if type(now) is float and not math.isfinite(now):
+            _deny()
+        if abs(now - envelope.issued_at) > _MAX_CLOCK_SKEW:
             _deny()
 
         expected = hmac.new(
