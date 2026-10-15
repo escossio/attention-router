@@ -435,3 +435,10 @@ the assets and `docs/demo.md`.
 - Read-only SQLite audit: 28691 deliveries, both publisher cursors 28691, no PENDING; historical RUNNING jobs 261 (PR #206, PostgreSQL) and 554/555 (PR #303, transport/docker) predate the current daemons. PR #206 is merged; its remote `distributed-postgres` check ID 111063041596 remains in progress. PR #303 is open on the same SHA, but its transport/docker check names are absent from that SHA. No production row or check was changed.
 - Added a read-only queue metadata diagnostic, three synthetic tests, and a coordinated cutover/rollback runbook. Targeted tests 3/3 and Ruff passed in the existing virtualenv; direct read-only production audit returned `needs_review=true`. First test attempt under system Python could not run because `pytest` was absent.
 - Cutover gate remains NO-GO: job dispositions need idempotent review; durable ingress buffering/replay, complete publisher cycle and rollback have not been certified. No native unit, Cloudflare route, live SQLite, credentials or worker was changed. Backup of this STATUS before the update: `/root/attention-router-github-ci-recovery-20261014/STATUS.before.md`.
+
+## Investigador Operacional V0 — preparação estrutural (2026-10-15)
+
+- Branch `feat/operational-investigator-v0-structure`: módulo isolado `attention_router/investigator` com evento original imutável, escopo de tenant, correlação, consultas, evidências, hipóteses e conclusões distintas.
+- Portas somente-leitura para conectores, runtime de agente, auditoria e futura persistência isolada. Simulações cobrem Zabbix, Tempo, PostgreSQL, Linux, CI distribuído e catálogo AFO. Nenhum conector real, migração, serviço ou configuração operacional foi adicionado.
+- Runner de produção e formato contratual final dependem da frente paralela. O protocolo de runtime permite adaptar o Agents SDK já usado no projeto sem escolher prematuramente Codex SDK ou app-server.
+- Validação local curta: 6 testes sintéticos passaram com `pytest --noconftest`; Ruff passou. A suíte normal local depende das dependências completas do projeto e será exercitada pela CI. PostgreSQL completo segue exclusivamente pelo pool distribuído.
