@@ -125,7 +125,8 @@ def direct_test():
     payload = {"chat_id": target, "text":
         "ANDY OPS | TESTE DE CANAL\nBot e destinatario conectados. "
         "Proxima etapa: evento do Zabbix e recuperacao."}
-    if topic: payload["message_thread_id"] = int(topic)
+    if topic:
+        payload["message_thread_id"] = int(topic)
     telegram_api(token, "sendMessage", payload)
     print("TELEGRAM_DIRECT_TEST_ACCEPTED")
 
