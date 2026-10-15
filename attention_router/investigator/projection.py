@@ -79,7 +79,6 @@ class IncidentProjection:
             raise ValueError("PROJECTION_EVENT_MISMATCH")
         return {
             "mode": "synthetic_read_only_v0",
-            "event_sha256": self.event_sha256,
             "symptom": self.symptom,
             "severity": self.severity,
             "observed_at": self.observed_at,
