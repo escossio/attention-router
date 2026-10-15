@@ -90,6 +90,8 @@ def test_signed_event_is_durable_before_any_investigation(proof):
     assert snap.original == envelope.original
     assert snap.payload_sha256 == sha256(envelope.original).hexdigest()
     assert snap.tenant_id == binding.tenant_id
+    assert repr(snap).find("original synthetic bytes") == -1
+    assert binding.tenant_id not in repr(snap)
     assert store.audit_codes(seed_id=snap.seed_id, tenant_id=binding.tenant_id) == (
         "SEED_ADMITTED",
     )
