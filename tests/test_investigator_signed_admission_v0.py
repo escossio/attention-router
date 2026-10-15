@@ -145,3 +145,37 @@ def test_signed_envelope_repr_omits_payload_and_mac():
     displayed = repr(envelope)
     assert "private-payload-synthetic" not in displayed
     assert envelope.signature_hex not in displayed
+
+
+def test_signed_gateway_admits_before_invoking_investigator():
+    from attention_router.investigator.model import Query
+    from attention_router.investigator.service import Budget, Investigator
+    from attention_router.investigator.simulated import (
+        MemoryAudit, MemoryStore, ScriptedRuntime, SimulatedConnector,
+    )
+    from attention_router.investigator.synthetic_gateway import SyntheticInvestigationGateway
+
+    binding = _binding()
+    store, audit = MemoryStore(), MemoryAudit()
+    investigator = Investigator(
+        ScriptedRuntime((Query("zabbix", "inspect"),)),
+        {"zabbix": SimulatedConnector("zabbix", {"inspect": {"state": "synthetic"}})},
+        store, audit, Budget(2, 5),
+        authorized_tenants=frozenset({binding.tenant_id}),
+        allowed_operations={"zabbix": frozenset({"inspect"})},
+    )
+    gateway = SyntheticInvestigationGateway(_authority(binding), investigator)
+
+    with pytest.raises(AdmissionRejected):
+        gateway.investigate_signed(replace(_envelope(binding), original=b"tampered"))
+    # An invalid signature must not start an investigation or touch tools.
+    assert store.records == []
+    assert audit.events == []
+
+    result = gateway.investigate_signed(_envelope(binding))
+    assert result.status == "completed"
+    assert result.event.tenant_id == binding.tenant_id
+    assert result.event.source == binding.source
+    assert result.query_count == 1
+    assert len(store.records) == 1
+    assert audit.events[-1][2] == "completed"
