@@ -5,12 +5,9 @@ Runs from AGT01; never restarts services, writes logs, or sends user messages.
 All metric items are Zabbix trapper items provisioned by provision.py.
 """
 import json
-import os
 import re
 import subprocess
 import time
-import urllib.error
-from dataclasses import dataclass
 from pathlib import Path
 
 NODES = {
