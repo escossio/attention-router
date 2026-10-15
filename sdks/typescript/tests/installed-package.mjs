@@ -13,10 +13,28 @@ function run(command, args, cwd = temporary) {
   execFileSync(command, args, { cwd, stdio: "inherit" });
 }
 
+// npm 10 yields an array; npm 12 yields an object keyed by package name.
+// Both must contain exactly one complete pack entry. Never skip file checks.
+function onePackEntry(result) {
+  assert(result && typeof result === "object", "npm pack JSON must be an object or array");
+  const entries = Array.isArray(result) ? result : Object.values(result);
+  assert.equal(entries.length, 1, "npm pack must describe exactly one package");
+  const [entry] = entries;
+  assert(entry && typeof entry === "object" && !Array.isArray(entry), "invalid npm pack entry");
+  assert.equal(entry.name, "@attention-router/integration-sdk");
+  assert.equal(typeof entry.filename, "string");
+  assert(Array.isArray(entry.files), "npm pack metadata must contain a files array");
+  return entry;
+}
+
 try {
-  const packed = JSON.parse(execFileSync("npm", [
+  // Exercise the two verified CLI output schemas independently of installed npm.
+  const fixture = { name: "@attention-router/integration-sdk", filename: "fixture.tgz", files: [] };
+  assert.equal(onePackEntry([fixture]), fixture);
+  assert.equal(onePackEntry({ "@attention-router/integration-sdk": fixture }), fixture);
+  const packed = onePackEntry(JSON.parse(execFileSync("npm", [
     "pack", "--ignore-scripts", "--json", "--pack-destination", temporary,
-  ], { cwd: packageDir, encoding: "utf8" }))[0];
+  ], { cwd: packageDir, encoding: "utf8" })));
   assert(packed.files.some(file => file.path === "dist/_schema.json"));
   assert(packed.files.some(file => file.path === "dist/index.d.ts"));
   assert(packed.files.every(file => /^(dist\/|package.json$|README.md$|LICENSE$)/.test(file.path)));
