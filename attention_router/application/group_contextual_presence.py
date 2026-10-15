@@ -132,10 +132,17 @@ def _window(session: Session, state: GroupContextualPresenceRow, before: Inbound
         if not text:
             continue
         participant = metadata.get("group_participant_id")
-        speaker = "proprietário/Andy" if metadata.get("from_me") is True else (
-            f"participante-{stable_hash(str(participant))[:8]}" if participant else "participante-desconhecido"
-        )
-        turns.append({"role": "user", "content": f"{speaker}: {text}"})
+        if metadata.get("from_me") is True:
+            speaker = {
+                "OWNER_MANUAL_OUTBOUND_OBSERVED": "proprietário",
+                "ROUTER_AUTOMATED_OUTBOUND_OBSERVED": "Andy",
+            }.get(payload.get("event_origin"), "conta conectada (origem incerta)")
+        else:
+            speaker = f"participante-{stable_hash(str(participant))[:8]}" if participant else "participante-desconhecido"
+        reference = stable_hash(row.external_event_id)[:8]
+        quoted = metadata.get("quoted_message_id")
+        reply_to = f" resposta-a-{stable_hash(str(quoted))[:8]}" if quoted else ""
+        turns.append({"role": "user", "content": f"mensagem-{reference}{reply_to} {speaker}: {text}"})
     return turns[-12:]
 
 
