@@ -40,15 +40,18 @@ def assess_replay_structure(
     findings = investigation.findings
     evidence = () if findings is None else findings.evidence
     referents = set(range(len(evidence)))
-    hypotheses_valid = (
-        findings is not None
-        and all(set(item.evidence_indexes) <= referents for item in findings.hypotheses)
-    )
-    conclusion_valid = (
-        findings is not None
-        and (findings.conclusion is None
-             or set(findings.conclusion.evidence_indexes) <= referents)
-    )
+    # Interrupted/blocked sessions legitimately have no final Findings yet.
+    if findings is None:
+        hypotheses_valid = investigation.status in {"limited", "blocked", "failed"}
+        conclusion_valid = hypotheses_valid
+    else:
+        hypotheses_valid = all(
+            set(item.evidence_indexes) <= referents for item in findings.hypotheses
+        )
+        conclusion_valid = (
+            findings.conclusion is None
+            or set(findings.conclusion.evidence_indexes) <= referents
+        )
 
     checks = {
         "original_event_digest": investigation.event.digest == expected_seed_sha256,
@@ -59,6 +62,6 @@ def assess_replay_structure(
         "hypothesis_references_valid": hypotheses_valid,
         "conclusion_references_valid": conclusion_valid,
         "audit_scope": bool(own_events) and own_events[0] == "started",
-        "no_raw_event_in_audit": decoded not in repr(own_events),
+        "no_literal_event_in_audit": not decoded or decoded not in repr(own_events),
     }
     return StructuralAssessment(passed=all(checks.values()), checks=checks)
