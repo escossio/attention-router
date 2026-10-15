@@ -85,6 +85,8 @@ def test_agents_sdk_tool_loop_with_mock_runner_never_uses_provider(monkeypatch):
         )
         result = asyncio.run(agent.tools[0].on_invoke_tool(ctx, payload))
         assert json.loads(result)["observation"]["cpu_pct"] == 83
+        assert "source_reference" not in json.loads(result)
+        assert "event_sha256" not in json.loads(result)
         return SimpleNamespace(final_output=InvestigatorReport(
             hypotheses=[HypothesisReport(
                 statement="Resource pressure is temporally compatible but not proven causal",
