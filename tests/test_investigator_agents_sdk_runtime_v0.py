@@ -8,8 +8,9 @@ from attention_router.investigator.agents_sdk_runtime import (
     AgentsSDKInvestigatorRuntime, HypothesisReport, InvestigatorReport,
 )
 from attention_router.investigator.model import SourceEvent
-
 from attention_router.investigator.projection import IncidentProjection
+from attention_router.investigator.service import Budget, Investigator
+from attention_router.investigator.simulated import MemoryAudit, MemoryStore, SimulatedConnector
 
 
 def _admitted_projection(event):
@@ -24,9 +25,6 @@ def _admitted_projection(event):
         observed_value=91,
         unit="percent",
     )
-
-from attention_router.investigator.service import Budget, Investigator
-from attention_router.investigator.simulated import MemoryAudit, MemoryStore, SimulatedConnector
 
 
 def _event():
