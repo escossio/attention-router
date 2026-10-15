@@ -19,10 +19,21 @@ from .ports import AgentRuntime, AuditSink, InvestigationStore, ReadOnlyConnecto
 class Budget:
     max_queries: int
     max_seconds: float
+    # Serialized observation + reference sizes; measured after each read and
+    # before retaining a model-visible copy. Does not cap connector IO itself.
+    max_evidence_bytes: int = 16384
+    max_total_evidence_bytes: int = 65536
 
     def __post_init__(self) -> None:
         if self.max_queries < 1 or self.max_seconds <= 0:
             raise ValueError("INVALID_BUDGET")
+        if (
+            type(self.max_evidence_bytes) is not int
+            or type(self.max_total_evidence_bytes) is not int
+            or self.max_evidence_bytes < 1
+            or self.max_total_evidence_bytes < 1
+        ):
+            raise ValueError("INVALID_EVIDENCE_BUDGET")
 
 
 class BudgetExceeded(RuntimeError):
@@ -52,6 +63,7 @@ class _BoundedQueries:
         self.started = monotonic()
         self.count = 0
         self.observed = []
+        self.observed_bytes = 0
 
     def _record(self, event: str) -> None:
         self.audit.record(self.investigation_id, self.correlation_id, event)
@@ -92,9 +104,30 @@ class _BoundedQueries:
             result = connector.read(deepcopy(query))
             if result.query != query:
                 raise ValueError("EVIDENCE_QUERY_MISMATCH")
-            # A private, independent copy is retained before the model sees a result.
+            # Account for the entire evidence payload before making a retained
+            # copy. No raw payload or serialized data enters the audit events.
+            try:
+                encoded = json.dumps(
+                    {"observation": result.observation,
+                     "source_reference": result.source_reference},
+                    ensure_ascii=True, allow_nan=False, separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("EVIDENCE_ENCODING_INVALID") from None
+
+            size = len(encoded)
+            if size > self.budget.max_evidence_bytes:
+                raise BudgetExceeded("EVIDENCE_BYTES_PER_QUERY_EXCEEDED")
+            if self.observed_bytes + size > self.budget.max_total_evidence_bytes:
+                raise BudgetExceeded("EVIDENCE_BYTES_TOTAL_EXCEEDED")
+            # A private, independent copy is retained before the model sees it.
             snapshot = deepcopy(result)
             self.observed.append(snapshot)
+            self.observed_bytes += size
+        except BudgetExceeded:
+            self._record(f"query.{serial}.limited:{fingerprint}")
+            raise
         except Exception:
             self._record(f"query.{serial}.failed:{fingerprint}")
             raise
