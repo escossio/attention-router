@@ -74,7 +74,9 @@ class ModelUsageGate:
         """
         if not isinstance(call_id, str) or not (1 <= len(call_id) <= 128):
             raise ModelBudgetDenied("MODEL_CALL_ID_INVALID")
-        if not isinstance(ceiling, ModelUsage):
+        if not isinstance(ceiling, ModelUsage) or ceiling.cost_micro_usd == 0:
+            # An unknown or zero-valued price estimate is not a safe default.
+            # Explicit free-tier policy would need a separately reviewed flag.
             raise ModelBudgetDenied("MODEL_QUOTE_REQUIRED")
         with self._lock:
             if self._terminal_reason:
