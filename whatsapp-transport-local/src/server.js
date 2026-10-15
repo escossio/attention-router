@@ -103,6 +103,17 @@ function createServer(config, status, client = null, deps = {}) {
           payload.external_actor_id && payload.destination
           && payload.external_actor_id !== payload.destination,
         );
+        const isGroupDestination = typeof destination === 'string' && destination.endsWith('@g.us');
+        if (isGroupDestination && (
+          destination !== config.groupContextualPresenceId
+          || !['GROUP_CONTEXTUAL_PRESENCE', 'GROUP_CONTEXTUAL_NOTICE'].includes(payload.group_policy)
+          || payload.message_type !== 'text'
+          || typeof payload.text !== 'string'
+          || !payload.text.startsWith('[Andy • IA]')
+        )) {
+          respondJson(res, 403, { status: 'group_destination_denied' });
+          return;
+        }
         const voice = payload.message_type === 'ptt';
         const payloadValid = voice ? Boolean(payload.media_ref) : typeof payload.text === 'string';
         if (!key || !destination || destinationConflict || !payloadValid || !client || !isReady(status)) {
@@ -152,7 +163,7 @@ function createServer(config, status, client = null, deps = {}) {
                 )
                 : await client.sendMessage(destination, payload.text);
               reference = message?.id?._serialized || message?.id?.id || `accepted-${now()}`;
-              outboundProvenance.markSent(provenance, reference);
+              outboundProvenance.markSent(provenance, reference, message?.ack);
               deliveries.set(key, reference);
               sendSpan.setResult('DELIVERED');
               sendSpan.setHttpStatus(200);
@@ -176,6 +187,34 @@ function createServer(config, status, client = null, deps = {}) {
     if (req.method !== 'GET') {
       res.writeHead(405, { allow: 'GET' });
       res.end();
+      return;
+    }
+    if (url.pathname.startsWith('/internal/delivery/')) {
+      if (!config.historyReadOnlyEnabled || !verifyHistoryHmac(req, config) || !client || !isReady(status)) {
+        respondJson(res, 503, { status: 'delivery_not_ready_or_unauthorized' });
+        return;
+      }
+      let key;
+      try { key = decodeURIComponent(url.pathname.slice('/internal/delivery/'.length)); } catch {
+        respondJson(res, 400, { status: 'invalid_delivery_key' });
+        return;
+      }
+      if (!key.startsWith('group:contextual:') && !key.startsWith('group:notice:')) {
+        respondJson(res, 403, { status: 'delivery_scope_denied' });
+        return;
+      }
+      const record = outboundProvenance.statusForKey?.(key);
+      if (!record || !record.peer_identifiers?.includes(config.groupContextualPresenceId)) {
+        respondJson(res, 404, { status: 'delivery_unknown' });
+        return;
+      }
+      respondJson(res, 200, {
+        status: record.status,
+        ack: Number.isInteger(record.ack) ? record.ack : null,
+        ack_at: record.ack_at || null,
+        delivery_confirmed: Number.isInteger(record.ack) && record.ack >= 2,
+        message_reference_present: Boolean(record.message_reference),
+      });
       return;
     }
     if (config.historyReadOnlyEnabled && url.pathname === config.historyPath) {

@@ -21,7 +21,7 @@ def test_obligation_expectation_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0057_bootstrap_selection"]
+            ).scalars().all() == ["0058_group_contextual_presence"]
 
             schema = inspect(connection)
             assert {
@@ -234,7 +234,7 @@ def test_obligation_expectation_refuses_destructive_downgrade(
     with engine.connect() as connection:
         assert connection.scalar(
             text("SELECT version_num FROM alembic_version")
-        ) == "0057_bootstrap_selection"
+        ) == "0058_group_contextual_presence"
         assert connection.scalar(
             text("SELECT count(*) FROM recurring_obligation_definitions")
         ) == 1

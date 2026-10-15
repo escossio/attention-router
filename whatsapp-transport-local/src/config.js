@@ -92,6 +92,7 @@ function createConfig(env = process.env) {
     externalDeliveryEnabled: parseBoolean(env.EXTERNAL_DELIVERY_ENABLED, false),
     hmacSecret: env.INTERNAL_INGRESS_HMAC_SECRET || '',
     outboundHmacSecret: env.LOCAL_OUTBOUND_HMAC_SECRET || env.INTERNAL_INGRESS_HMAC_SECRET || '',
+    groupContextualPresenceId: env.GROUP_CONTEXTUAL_PRESENCE_GROUP_ID || '',
     outboundMaxBodyBytes: parseInteger(env.LOCAL_OUTBOUND_MAX_BODY_BYTES, 16 * 1024),
     outboundPath: env.LOCAL_OUTBOUND_PATH || '/internal/send',
     statusPath: env.LOCAL_TRANSPORT_STATUS_PATH || '/status',
