@@ -88,6 +88,7 @@ def test_agents_sdk_tool_loop_with_mock_runner_never_uses_provider(monkeypatch):
     assert result.query_count == 1 and len(result.partial_evidence) == 1
     assert result.findings is not None
     assert result.findings.conclusion.evidence_indexes == (0,)
+    assert result.findings.conclusion.classification == "INDICATIVE"
     assert result.findings.evidence == result.partial_evidence
     assert any(".observed:" in x[2] for x in audit.events)
     assert store.records == [result]
