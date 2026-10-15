@@ -138,3 +138,10 @@ def test_non_finite_clock_is_not_accepted(clock):
     )
     with pytest.raises(AdmissionRejected, match="ADMISSION_REJECTED"):
         authority.admit(_envelope(binding))
+
+
+def test_signed_envelope_repr_omits_payload_and_mac():
+    envelope = _envelope(original=b"private-payload-synthetic")
+    displayed = repr(envelope)
+    assert "private-payload-synthetic" not in displayed
+    assert envelope.signature_hex not in displayed
