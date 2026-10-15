@@ -67,3 +67,6 @@ class Investigation:
     status: str
     query_count: int
     error_code: str | None = None
+    # Provenance-backed tool observations stay available if the model fails or hits a limit.
+    # A production store must restrict access; tool payloads must not enter generic logs.
+    partial_evidence: tuple[Evidence, ...] = ()
