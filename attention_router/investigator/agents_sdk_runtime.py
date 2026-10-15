@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Callable, Literal
 
 from pydantic import BaseModel, Field
 
 from .model import Conclusion, Evidence, Findings, Hypothesis, Query, SourceEvent
 from .ports import QueryAccess
+from .projection import IncidentProjection
 
 
 class HypothesisReport(BaseModel):
@@ -52,6 +53,8 @@ class AgentsSDKInvestigatorRuntime:
     enable_provider: bool = False
     max_turns: int = 8
     max_tool_response_bytes: int = 4096
+    # Injected by the trusted admission boundary, never calculated by the model.
+    projection_resolver: Callable[[SourceEvent], IncidentProjection] | None = None
 
     def __post_init__(self) -> None:
         if not self.model.strip() or self.max_turns < 1 or self.max_tool_response_bytes < 1:
@@ -60,6 +63,13 @@ class AgentsSDKInvestigatorRuntime:
     def investigate(self, event: SourceEvent, queries: QueryAccess) -> Findings:
         if not self.enable_provider:
             raise RuntimeError("INVESTIGATOR_PROVIDER_DISABLED")
+
+        if self.projection_resolver is None:
+            raise ValueError("PROJECTION_ADMISSION_REQUIRED")
+        projection = self.projection_resolver(event)
+        if not isinstance(projection, IncidentProjection):
+            raise ValueError("PROJECTION_TYPE_INVALID")
+        input_payload = projection.for_event(event)
 
         # Lazy imports prevent SDK construction in normal application startup.
         from agents import Agent, AgentOutputSchema, Runner, function_tool
@@ -92,14 +102,8 @@ class AgentsSDKInvestigatorRuntime:
             tools=[read_observation],
             output_type=AgentOutputSchema(InvestigatorReport, strict_json_schema=False),
         )
-        # Intentionally no event.original, tenant_id or credential in the prompt.
-        # A future event projection must pass through an explicit privacy review.
-        input_payload = {
-            "source": event.source,
-            "content_type": event.content_type,
-            "event_sha256": event.digest,
-            "mode": "synthetic_read_only_v0",
-        }
+        # The model sees typed symptom fields from the injected admission projection.
+        # It never sees event.original, raw log text, tenant or host identifiers.
         response = Runner.run_sync(
             agent,
             input=[{"role": "user", "content": json.dumps(input_payload, sort_keys=True)}],
