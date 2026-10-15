@@ -1,8 +1,9 @@
 """PostgreSQL admission + initial audit proof in a disposable test database only.
 
-This module cannot open a production database: it accepts solely the project's
-explicitly named ephemeral test database. It creates NO tables or migrations.
-DDL is confined to tests and never added to Alembic/main application metadata.
+This module refuses ordinary production database URLs by requiring the
+explicit ephemeral test naming convention. That check is defense-in-depth,
+not proof of the destination: callers must also use the disposable pg_url
+fixture. It creates NO tables or migrations; DDL exists only in tests.
 """
 
 from __future__ import annotations
