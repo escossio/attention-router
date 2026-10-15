@@ -17,6 +17,7 @@ from attention_router.investigator.agents_sdk_runtime import (
 from attention_router.investigator.service import Budget, Investigator
 from attention_router.investigator.simulated import MemoryAudit, MemoryStore
 from evals.investigator_v0.manifest import load_public_synthetic_case
+from evals.investigator_v0.structural_grader import assess_replay_structure
 
 
 CASE = (
@@ -104,6 +105,11 @@ def test_mocked_agents_sdk_queries_replay_on_demand_and_preserves_evidence(monke
     assert len([a for a in audit.events if ".requested:" in a[2]]) == 3
     assert len([a for a in audit.events if ".observed:" in a[2]]) == 3
     assert store.records == [result]
+    assessment = assess_replay_structure(
+        result, audit.events, expected_seed_sha256=event.digest, max_queries=6,
+    )
+    assert assessment.passed, assessment.checks
+    assert assessment.causal_proof == "NOT_EVALUATED"
 
 
 def test_real_provider_stays_disabled_in_replay_without_mock_or_key(monkeypatch):
