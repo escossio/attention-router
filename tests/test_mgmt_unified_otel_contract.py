@@ -38,6 +38,7 @@ class MgmtUnifiedContract(unittest.TestCase):
         self.assertIn("Alias /dominios/ ${MGMT_DOMAINS_DIR}/", text)
         self.assertIn("Options -Indexes", text)
         self.assertIn("Require valid-user", text)
+        self.assertIn("RequestHeader unset Authorization", text)
         self.assertIn("${MGMT_GOACCESS_WS_ORIGIN}", text)
         self.assertIn("${MGMT_PORTAL_ORIGIN}", text)
         self.assertNotIn("10.45.0.2", text)
