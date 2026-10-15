@@ -14,9 +14,10 @@ function run(command, args, cwd = temporary) {
 }
 
 try {
-  const packed = JSON.parse(execFileSync("npm", [
+  const packResult = JSON.parse(execFileSync("npm", [
     "pack", "--ignore-scripts", "--json", "--pack-destination", temporary,
-  ], { cwd: packageDir, encoding: "utf8" }))[0];
+  ], { cwd: packageDir, encoding: "utf8" }));
+  const packed = Array.isArray(packResult) ? packResult[0] : Object.values(packResult)[0];
   assert(packed.files.some(file => file.path === "dist/_schema.json"));
   assert(packed.files.some(file => file.path === "dist/index.d.ts"));
   assert(packed.files.every(file => /^(dist\/|package.json$|README.md$|LICENSE$)/.test(file.path)));
