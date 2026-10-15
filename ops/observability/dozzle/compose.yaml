@@ -8,11 +8,13 @@ services:
     container_name: andy-roc-dozzle-view
     user: "0:0"
     network_mode: none
+    environment:
+      DOZZLE_VIEW_MAX_CLIENTS: "192"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
-    pids_limit: 80
+    pids_limit: 256
     mem_limit: 96m
     cpus: 0.35
     volumes:
