@@ -12,14 +12,14 @@ Fluxo lógico:
 1. Origem admitida (ainda simulada na V0) → preserva bytes do evento original e metadados de autenticidade separados.
 2. Camada de admissão → valida identidade e escopo e produz projeção tipada de poucos campos; não deve confiar em instruções contidas em logs/eventos.
 3. Broker → verifica vínculo entre SHA-256 da projeção e bytes do evento e oferece apenas ferramentas de leitura autorizadas.
-4. Agente → recebe projeção e consulta as ferramentas que considerar relevantes. Respostas das ferramentas continuam sendo dados não confiáveis.
+4. Agente → recebe apenas os campos contextuais permitidos da projeção, **sem o hash interno**, e consulta as ferramentas que considerar relevantes. Respostas das ferramentas continuam sendo dados não confiáveis.
 5. Conclusão → só pode citar evidências realmente coletadas, com classe de incerteza explícita.
 
 ## Campos mínimos da proposta V0
 
 | Campo | Tipo/limites | Exposição ao agente |
 | --- | --- | --- |
-| `event_sha256` | SHA-256 hex de 64 caracteres, associado ao seed | Sim, apenas fingerprint, não prova de autenticidade |
+| `event_sha256` | SHA-256 hex de 64 caracteres, associado ao seed | **Não**: fica no broker/admissão para verificar o vínculo; não é necessário no prompt |
 | `symptom` | enum: resource_pressure, service_unavailable, latency_increase, disk_pressure, network_degradation, unknown | Sim |
 | `severity` | enum: info, warning, high, critical, unknown | Sim |
 | `observed_at` | timestamp ISO 8601 com fuso | Sim |
