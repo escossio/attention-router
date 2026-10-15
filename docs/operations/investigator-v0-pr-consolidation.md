@@ -44,3 +44,16 @@ O stack pode provar estrutura, contratos, fidelidade de dados sintéticos, ferra
 ## Operação e reversão
 
 Zero containers/VMs extras implantados por esses PRs. MikroTik fica sob gestão do operador, sem mudanças automatizadas. O AGT permanece intocado até autorização operacional específica, credenciais mínimas e rollback revisado. O incidente CI02 na #345 é mantido como candidato ao teste cego, sem isolamento prematuro do worker.
+
+## Paralelização após o PR #352
+
+Duas evoluções foram abertas **em paralelo**, sem dependência direta entre si:
+
+| Frente | PR | Base comum | Estado lógico |
+| --- | --- | --- | --- |
+| Origem/tenant autenticados em fixture | #353 | branch de #352 | HMAC sintético, binding server-owned e nonce em memória; **sem admissão real/durável** |
+| Quotas de modelo offline | #354 | branch de #352 | Reservar/medir tokens e custo fictício; **sem integração com SDK/provedor** |
+
+Estas PRs são **irmãs**, não empilhadas uma sobre a outra. Para consolidar ambas, escolher uma ordem de integração após revisão, verificar os diffs e rodar CI sobre o SHA reconciliado. Não presumir que aprovação isolada de cada head certifica a união.
+
+Os contratos de auditoria durável, origem confiável e orçamento de modelo permanecem documentais no #344. Nenhuma migração PostgreSQL ou acesso a endpoints privados foi iniciado.
