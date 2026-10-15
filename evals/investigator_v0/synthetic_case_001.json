@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "case_id": "synthetic-resource-observation-001",
+  "seed": {
+    "source": "synthetic-zabbix",
+    "original_utf8": "{\"event_id\":\"synthetic-event-001\",\"host\":\"synthetic-node\",\"kind\":\"resource-pressure\",\"observed_at\":\"2030-01-02T11:30:00Z\",\"value\":91}",
+    "content_type": "application/json",
+    "tenant_id": "synthetic-tenant",
+    "source_event_id": "synthetic-event-001"
+  },
+  "tools": {
+    "zabbix": {
+      "read_event": {
+        "event_id": "synthetic-event-001",
+        "severity": "warning",
+        "observed_at": "2030-01-02T11:30:00Z"
+      },
+      "read_history": {
+        "series": [
+          {
+            "time": "2030-01-02T11:28:00Z",
+            "value": 63
+          },
+          {
+            "time": "2030-01-02T11:30:00Z",
+            "value": 91
+          },
+          {
+            "time": "2030-01-02T11:32:00Z",
+            "value": 62
+          }
+        ]
+      }
+    },
+    "tempo": {
+      "read_trace": {
+        "matched_spans": [],
+        "coverage": "partial",
+        "observed_at": "2030-01-02T11:31:00Z"
+      }
+    },
+    "distributed_ci": {
+      "read_jobs": {
+        "jobs": [
+          {
+            "job_id": "synthetic-job-8",
+            "started_at": "2030-01-02T11:28:30Z",
+            "ended_at": "2030-01-02T11:31:40Z",
+            "worker": "synthetic-node"
+          }
+        ],
+        "data_class": "metadata-only"
+      }
+    }
+  }
+}
