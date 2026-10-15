@@ -65,6 +65,7 @@ def test_projection_exposes_typed_symptom_but_not_raw_event():
         ({"observed_value": float("nan")}, "INVALID_PROJECTION_VALUE"),
         ({"observed_value": float("inf")}, "INVALID_PROJECTION_VALUE"),
         ({"observed_value": True}, "INVALID_PROJECTION_VALUE"),
+        ({"observed_value": 10**2000}, "INVALID_PROJECTION_VALUE"),
         ({"unit": "bytes"}, "INVALID_PROJECTION_UNIT"),
     ],
 )
