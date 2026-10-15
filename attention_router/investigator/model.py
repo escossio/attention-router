@@ -43,6 +43,7 @@ class Hypothesis:
     statement: str
     evidence_indexes: tuple[int, ...]
     uncertainty: str
+    status: str = "UNRESOLVED"
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class Conclusion:
     summary: str
     evidence_indexes: tuple[int, ...]
     limitations: tuple[str, ...] = ()
+    classification: str = "UNKNOWN"
 
 
 @dataclass(frozen=True)
