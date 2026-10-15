@@ -57,3 +57,11 @@ Duas evoluções foram abertas **em paralelo**, sem dependência direta entre si
 Estas PRs são **irmãs**, não empilhadas uma sobre a outra. Para consolidar ambas, escolher uma ordem de integração após revisão, verificar os diffs e rodar CI sobre o SHA reconciliado. Não presumir que aprovação isolada de cada head certifica a união.
 
 Os contratos de auditoria durável, origem confiável e orçamento de modelo permanecem documentais no #344. Nenhuma migração PostgreSQL ou acesso a endpoints privados foi iniciado.
+
+## Persistência transacional em PostgreSQL descartável
+
+O PR #355 deriva **somente da frente #353**, que contém a admissão HMAC sintética; não incorpora automaticamente a frente irmã #354 (quotas do modelo). Isso é intencional para manter revisões independentes. Uma futura reconciliação dos dois ramos deve ocorrer em SHA novo, com testes repetidos.
+
+O PR #355 introduz store SQLAlchemy e testes marcados `postgres`, ligados ao banco descartável criado pela fixture `pg_url`. Nenhuma alteração de Alembic, do schema da aplicação ou do AGT foi autorizada. O teste prova seed+nonce+audit na mesma transação, verificação após reconexão, replay entre instâncias, conflitos, concorrência e isolamento tenant. Não estabelece durabilidade física depois de crash, backup, replicação ou prontidão de produção.
+
+**Gate de CI:** criar um arquivo de teste PostgreSQL pode exigir reprofile da lista do scheduler; se ocorrer, registrar `REPROFILE_REQUIRED` e não executar a suíte pesada no control plane. Reprofile/alteração do worker pool exige fluxo próprio. A certificação do PR #355 vale apenas para o seu SHA e somente depois dos checks concluídos.
