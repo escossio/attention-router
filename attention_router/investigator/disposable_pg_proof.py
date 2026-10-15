@@ -7,7 +7,7 @@ DDL is confined to tests and never added to Alembic/main application metadata.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 import re
 from uuid import uuid4
@@ -46,10 +46,10 @@ class StagedSeed:
 @dataclass(frozen=True)
 class SeedSnapshot:
     seed_id: str
-    tenant_id: str
+    tenant_id: str = field(repr=False)
     source: str
     source_event_id: str
-    original: bytes
+    original: bytes = field(repr=False)
     payload_sha256: str
 
 
