@@ -83,7 +83,8 @@ def test_signed_event_is_durable_before_any_investigation(proof):
     assert _count(engine, store.schema, "investigation_seeds") == 1
     assert _count(engine, store.schema, "admission_nonces") == 1
     assert _count(engine, store.schema, "investigation_audit") == 1
-    # A separate connection sees the committed bytes, hash, tenant and audit.
+    # Dispose pooled connections: a new connection must see the committed seed.
+    engine.dispose()
     snap = store.read_seed(seed_id=receipt.seed.seed_id, tenant_id=binding.tenant_id)
     assert snap is not None
     assert snap.original == envelope.original
