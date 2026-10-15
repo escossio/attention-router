@@ -1,3 +1,4 @@
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -102,3 +103,17 @@ def test_injection_is_data_and_own_stop_disables_cycle(session, monkeypatch):
     session.refresh(state)
     assert state.mode == "OFF"
     assert session.scalars(select(OutboxMessageRow)).all() == []
+
+
+def test_stale_group_message_cannot_trigger_send(session, monkeypatch):
+    monkeypatch.setattr(settings, "group_contextual_presence_enabled", True)
+    monkeypatch.setattr(settings, "group_contextual_presence_group_id", GROUP)
+    monkeypatch.setattr(group, "run_andy", lambda _context: pytest.fail("stale event reached model"))
+    group.set_group_mode(session, group_id=GROUP, tenant_id=DEFAULT_TENANT_ID, mode="OBSERVE")
+    session.commit()
+    inbound(session, 21, "Andy, o que é um agente?")
+    after_six_minutes = group.now_utc() + timedelta(minutes=6)
+    monkeypatch.setattr(group, "now_utc", lambda: after_six_minutes)
+    assert group.process_group_contextual_cycle(session) == 1
+    record = session.scalar(select(GroupContextualEventRow))
+    assert record.reason_code == "GROUP_STALE_EVENT"

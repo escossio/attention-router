@@ -47,6 +47,6 @@ Use the current worker container name after deployment. The mode change is persi
 
 ## Evidence and limits
 
-- `group_contextual_events` stores outcome, reason, latency and a proposal hash, without duplicating message text. The model prompt uses at most 12 text messages from the last 30 minutes after the OBSERVE watermark. The existing inbound store retains source events under its established retention policy.
+- `group_contextual_events` stores outcome, reason, latency and a proposal hash, without duplicating message text. The model prompt uses at most 12 group text messages from the last 30 minutes after the OBSERVE watermark. Events older than five minutes are observed but cannot trigger a reply. The existing inbound store retains source events under its established retention policy.
 - Each group intervention is labelled `[Andy • IA]`. A generated proposal has no direct send capability. The outbox rechecks authorization, and the Transport rejects other groups, missing policy markers, unlabelled text and non-text group sends.
 - A signed Transport `sent`/`already_sent` response confirms acceptance by the existing session and returns a provider message reference. It does not, alone, prove delivery to every group participant. Do not report that stronger claim without independent acknowledgement evidence.

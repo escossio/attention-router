@@ -119,9 +119,10 @@ def _window(session: Session, state: GroupContextualPresenceRow, before: Inbound
         InboundEventRow.tenant_id == state.tenant_id,
         InboundEventRow.source == "wwebjs",
         InboundEventRow.event_type == "message",
+        InboundEventRow.payload["actor_id"].as_string() == state.group_id,
         InboundEventRow.received_at >= floor,
         InboundEventRow.received_at <= before.received_at,
-    ).order_by(InboundEventRow.received_at.desc(), InboundEventRow.id.desc()).limit(100)).all()
+    ).order_by(InboundEventRow.received_at.desc(), InboundEventRow.id.desc()).limit(12)).all()
     turns = []
     for row in reversed(rows):
         payload = row.payload or {}
@@ -211,6 +212,7 @@ def process_group_contextual_cycle(session: Session, *, limit: int = 30) -> int:
         InboundEventRow.tenant_id == state.tenant_id,
         InboundEventRow.source == "wwebjs",
         InboundEventRow.event_type == "message",
+        InboundEventRow.payload["actor_id"].as_string() == state.group_id,
         InboundEventRow.received_at >= state.observe_after,
     )
     if state.cursor_at is not None and state.cursor_id is not None:
@@ -241,6 +243,8 @@ def process_group_contextual_cycle(session: Session, *, limit: int = 30) -> int:
             reason = "GROUP_STOP_REQUESTED"
         elif from_me:
             reason = "GROUP_OWN_MESSAGE"
+        elif now_utc() - _aware(event.received_at) > timedelta(minutes=5):
+            reason = "GROUP_STALE_EVENT"
         elif kind and event.interaction_id:
             try:
                 context = AllowedAgentContext(
