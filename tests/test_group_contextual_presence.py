@@ -76,6 +76,12 @@ def test_observe_notice_contextual_and_off_gates(session, monkeypatch):
     pending = session.scalar(select(OutboxMessageRow).where(OutboxMessageRow.action_type == group.ACTION))
     assert pending is not None
     assert pending.payload["text"].startswith("[Andy • IA]")
+    original_payload = dict(pending.payload)
+    pending.payload = {**original_payload, "text": "Unlabelled response"}
+    session.flush()
+    assert group.authorize_outbox(session, pending, session_ready=True) == "GROUP_LABEL_REQUIRED"
+    pending.payload = original_payload
+    session.flush()
     group.set_group_mode(session, group_id=GROUP, tenant_id=DEFAULT_TENANT_ID, mode="OFF")
     session.commit()
     services.process_outbox(session)

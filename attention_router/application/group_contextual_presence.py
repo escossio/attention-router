@@ -103,7 +103,8 @@ def enqueue_group_notice(session: Session, *, group_id: str) -> OutboxMessageRow
         id=new_id(), interaction_id=event.interaction_id,
         action_type=NOTICE_ACTION, destination="wwebjs",
         payload={"external_actor_id": group_id, "message_type": "text", "text": NOTICE_TEXT,
-                 "group_policy": "GROUP_CONTEXTUAL_NOTICE", "source_event_id": event.id},
+                 "group_policy": "GROUP_CONTEXTUAL_NOTICE", "source_event_id": event.id,
+                 "observe_after": row.observe_after.isoformat()},
         status="PENDING", created_at=now, available_at=now,
         idempotency_key=key, correlation_id=event.correlation_id, causation_id=event.id,
     )
@@ -168,17 +169,26 @@ def authorize_outbox(session: Session, outbox: OutboxMessageRow, *, session_read
         return "GROUP_NOT_ALLOWLISTED"
     if not settings.group_contextual_presence_enabled or not settings.external_delivery_enabled:
         return "GROUP_DELIVERY_DISABLED"
+    if outbox.destination != "wwebjs" or payload.get("message_type") != "text":
+        return "GROUP_ACTION_INVALID"
     if outbox.action_type == NOTICE_ACTION:
         if state.mode != "OBSERVE" or state.notice_sent_at is not None:
             return "GROUP_NOTICE_GATE_DENIED"
+        if payload.get("observe_after") != state.observe_after.isoformat():
+            return "GROUP_NOTICE_STALE"
         return "ALLOW" if session_ready and payload.get("text") == NOTICE_TEXT else "GROUP_NOTICE_INVALID"
     if outbox.action_type != ACTION or payload.get("group_policy") != "GROUP_CONTEXTUAL_PRESENCE":
         return "GROUP_ACTION_INVALID"
+    if not str(payload.get("text") or "").startswith(f"{LABEL} "):
+        return "GROUP_LABEL_REQUIRED"
     event = session.get(InboundEventRow, payload.get("source_event_id"))
     if event is None or event.tenant_id != state.tenant_id or event.interaction_id != outbox.interaction_id:
         return "GROUP_SOURCE_INVALID"
     if (event.payload or {}).get("actor_id") != group_id:
         return "GROUP_SOURCE_INVALID"
+    if (_aware(event.received_at) < _aware(state.observe_after)
+            or now_utc() - _aware(event.received_at) > timedelta(minutes=5)):
+        return "GROUP_STALE_EVENT"
     duplicate = session.scalar(select(OutboxMessageRow.id).where(
         OutboxMessageRow.id != outbox.id,
         OutboxMessageRow.action_type == ACTION,
