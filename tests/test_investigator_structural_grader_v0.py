@@ -70,3 +70,31 @@ def test_invalid_conclusion_reference_cannot_pass_structural_gate():
     assert not grade.passed
     assert not grade.checks["conclusion_references_valid"]
     assert grade.causal_proof == "NOT_EVALUATED"
+
+
+def test_interrupted_replay_with_partial_evidence_is_structurally_valid():
+    original, audit = _sample()
+    limited = Investigation(
+        original.investigation_id, original.event,
+        None, "limited", 1, "QUERY_BUDGET_EXCEEDED",
+        partial_evidence=original.partial_evidence,
+    )
+    grade = assess_replay_structure(
+        limited, audit, expected_seed_sha256=original.event.digest, max_queries=1,
+    )
+    assert grade.passed, grade.checks
+    assert grade.causal_proof == "NOT_EVALUATED"
+
+
+def test_empty_seed_does_not_fail_literal_audit_guard():
+    original, audit = _sample()
+    empty = SourceEvent("synthetic", b"", "text/plain", "synthetic-tenant",
+                        correlation_id=original.event.correlation_id)
+    result = Investigation(
+        original.investigation_id, empty, original.findings, "completed", 1,
+        partial_evidence=original.partial_evidence,
+    )
+    grade = assess_replay_structure(
+        result, audit, expected_seed_sha256=empty.digest, max_queries=1,
+    )
+    assert grade.checks["no_literal_event_in_audit"]
