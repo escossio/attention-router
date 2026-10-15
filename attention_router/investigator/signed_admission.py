@@ -61,8 +61,8 @@ class SignedEnvelope:
     nonce: str
     content_type: str
     source_event_id: str
-    original: bytes
-    signature_hex: str
+    original: bytes = field(repr=False)
+    signature_hex: str = field(repr=False)
 
 
 def _length_prefixed(parts: tuple[bytes, ...]) -> bytes:
