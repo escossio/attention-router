@@ -15,6 +15,7 @@ from attention_router.investigator.agents_sdk_runtime import (
     InvestigatorReport,
 )
 from attention_router.investigator.service import Budget, Investigator
+from attention_router.investigator.projection import IncidentProjection
 from attention_router.investigator.simulated import MemoryAudit, MemoryStore
 from evals.investigator_v0.manifest import load_public_synthetic_case
 from evals.investigator_v0.structural_grader import assess_replay_structure
@@ -32,10 +33,23 @@ def test_mocked_agents_sdk_queries_replay_on_demand_and_preserves_evidence(monke
 
     event, connectors, grants = load_public_synthetic_case(CASE)
     store, audit = MemoryStore(), MemoryAudit()
+    def admitted_projection(incident):
+        # Admission fixture chosen independently of incident.original bytes.
+        return IncidentProjection(
+            event_sha256=incident.digest,
+            symptom="resource_pressure",
+            severity="warning",
+            observed_at="2030-01-02T11:30:00Z",
+            target_role="ci_worker",
+            observed_value=91,
+            unit="percent",
+        )
+
     runtime = AgentsSDKInvestigatorRuntime(
         model="offline-stub-only",
         enable_provider=True,
         max_turns=6,
+        projection_resolver=admitted_projection,
     )
 
     def fake_run(agent, input, max_turns):
@@ -45,6 +59,7 @@ def test_mocked_agents_sdk_queries_replay_on_demand_and_preserves_evidence(monke
         # Event bytes, original alert fields and tenant must remain out of prompt.
         prompt = json.dumps(input)
         assert "resource-pressure" not in prompt
+        assert "\"resource_pressure\"" in prompt
         assert "synthetic-event-001" not in prompt
         assert "synthetic-tenant" not in prompt
 
