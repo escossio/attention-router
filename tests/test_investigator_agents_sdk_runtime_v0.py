@@ -8,6 +8,23 @@ from attention_router.investigator.agents_sdk_runtime import (
     AgentsSDKInvestigatorRuntime, HypothesisReport, InvestigatorReport,
 )
 from attention_router.investigator.model import SourceEvent
+
+from attention_router.investigator.projection import IncidentProjection
+
+
+def _admitted_projection(event):
+    # Fixture-only metadata supplied by an external admission seam.
+    # No parsing of event.original and no production authenticity claim.
+    return IncidentProjection(
+        event_sha256=event.digest,
+        symptom="resource_pressure",
+        severity="warning",
+        observed_at="2030-01-02T11:30:00Z",
+        target_role="ci_worker",
+        observed_value=91,
+        unit="percent",
+    )
+
 from attention_router.investigator.service import Budget, Investigator
 from attention_router.investigator.simulated import MemoryAudit, MemoryStore, SimulatedConnector
 
@@ -59,6 +76,8 @@ def test_agents_sdk_tool_loop_with_mock_runner_never_uses_provider(monkeypatch):
         assert len(agent.tools) == 1
         assert "private bytes" not in repr(input)
         assert "synthetic-tenant" not in repr(input)
+        assert "resource_pressure" in repr(input)
+        assert "observed_value" in repr(input)
         payload = json.dumps({"source": "zabbix", "operation": "read_history"})
         ctx = ToolContext(
             context=None,
@@ -81,7 +100,7 @@ def test_agents_sdk_tool_loop_with_mock_runner_never_uses_provider(monkeypatch):
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(simulated_sdk_run))
     investigator, store, audit = _investigator(AgentsSDKInvestigatorRuntime(
-        model="test-offline-model", enable_provider=True, max_turns=4,
+        model="test-offline-model", enable_provider=True, projection_resolver=_admitted_projection, max_turns=4,
     ))
     result = investigator.investigate(_event())
     assert result.status == "completed"
@@ -105,7 +124,7 @@ def test_agents_sdk_rejects_model_invented_evidence(monkeypatch):
         )),
     ))
     investigator, _, _ = _investigator(AgentsSDKInvestigatorRuntime(
-        model="test-offline-model", enable_provider=True,
+        model="test-offline-model", enable_provider=True, projection_resolver=_admitted_projection,
     ))
     result = investigator.investigate(_event())
     assert result.status == "failed"
@@ -128,7 +147,7 @@ def test_agents_sdk_has_no_unrestricted_tools_or_transport(monkeypatch):
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(fake_run))
     investigator, _, _ = _investigator(AgentsSDKInvestigatorRuntime(
-        model="test-offline-model", enable_provider=True,
+        model="test-offline-model", enable_provider=True, projection_resolver=_admitted_projection,
     ))
     result = investigator.investigate(_event())
     assert result.status == "completed"
@@ -155,7 +174,7 @@ def test_sdk_tool_rejects_mutating_operation_without_connector_access(monkeypatc
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(fake_runner))
     investigator, _, audit = _investigator(AgentsSDKInvestigatorRuntime(
-        model="test-offline-model", enable_provider=True,
+        model="test-offline-model", enable_provider=True, projection_resolver=_admitted_projection,
     ))
     result = investigator.investigate(_event())
     assert result.query_count == 1
