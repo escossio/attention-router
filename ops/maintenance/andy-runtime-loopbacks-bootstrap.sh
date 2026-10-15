@@ -18,7 +18,7 @@ MAP='/etc/andy/runtime-loopbacks-v1.map'
 SYNC='/usr/local/sbin/andy-runtime-loopbacks-v1.sh'
 UNIT='/etc/systemd/system/andy-runtime-loopbacks-v1.service'
 TIMER='/etc/systemd/system/andy-runtime-loopbacks-v1.timer'
-ROS_SSH=(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o HostName=10.45.0.1 -o HostKeyAlias=192.168.88.1 mikrotik-core)
+ROS_SSH=(ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o HostName=10.45.0.1 -o HostKeyAlias=192.168.88.1 mikrotik-core)
 
 # Nome do container | Docker network | IP de transporte | loopback exclusivo /32.
 # O segundo ingress da VLAN 212 usa 200.0.0.19/32, pois .212 ja tem dono.
@@ -36,7 +36,7 @@ andy-investigator-v0-net-stage|andy-vlan219-investigator-stage|10.77.10.74|200.0
 MAPEOF
 )
 
-ros() { "${ROS_SSH[@]}" "$1"; }
+ros() { "${ROS_SSH[@]}" "$1" </dev/null; }
 fail() { echo "ERRO: $*" >&2; exit 1; }
 
 # Confere os nove runtimes ANTES de qualquer escrita.
@@ -183,9 +183,14 @@ done <<< "$MAP_CONTENT"
 
 # Verificacao final: mapeamento do loopback e rotas host exatas.
 "$SYNC"
+route_verified=0
 while IFS='|' read -r name net addr loop; do
   cidr="$loop/32"
   [[ "$(ros ":put [:len [/ip route find where dst-address=\"$cidr\"]]" | tr -d '\r\n')" == 1 ]] || fail "rota nao confirmada $cidr"
+  via=$(ros ":put [/ip route get [find where dst-address=\"$cidr\"] gateway]" | tr -d '\r\n')
+  [[ "$via" == "$addr" ]] || fail "rota $cidr com next-hop divergente: $via"
+  ((route_verified+=1))
 done <<< "$MAP_CONTENT"
-echo 'SUCESSO: loopbacks /32 e rotas individuais conferidos; nenhum runtime reiniciado.'
+[[ "$route_verified" -eq 10 ]] || fail "foram verificadas somente $route_verified/10 rotas; aborto sem alegar sucesso"
+echo 'SUCESSO: 10 loopbacks /32 e 10 rotas individuais conferidos; nenhum runtime reiniciado.'
 echo 'NOTA: 219 e apenas staging de REDE, ainda nao e o motor Agents SDK.'
