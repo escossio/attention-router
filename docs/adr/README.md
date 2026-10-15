@@ -29,3 +29,4 @@ futuros não são evidência de funcionalidade implementada.
 - [00011 — Meta WhatsApp inbound adapter](0011-meta-whatsapp-inbound-adapter.md)
 - [0012–0019 — Authority, evidence, memory, providers and browser trust](0012-policy-outside-model-authority.md)
 - [0020 — Neutral ingress and authenticated tenant binding (proposed)](0020-neutral-ingress-and-authenticated-tenant-binding.md)
+- [0021 — Operational Investigator V0 (accepted direction)](0021-operational-investigator-v0.md)
