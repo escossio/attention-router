@@ -134,3 +134,31 @@ def test_agents_sdk_has_no_unrestricted_tools_or_transport(monkeypatch):
     assert result.status == "completed"
     assert result.findings.conclusion is None
     assert result.findings.hypotheses[0].uncertainty.startswith("No observed evidence")
+
+
+def test_sdk_tool_rejects_mutating_operation_without_connector_access(monkeypatch):
+    import pytest
+    from agents import Runner
+    from agents.tool_context import ToolContext
+
+    def fake_runner(agent, input, max_turns):
+        payload = json.dumps({"source": "zabbix", "operation": "delete_event"})
+        ctx = ToolContext(
+            context=None,
+            tool_name="read_observation",
+            tool_call_id="attempt-write",
+            tool_arguments=payload,
+        )
+        with pytest.raises(Exception):
+            asyncio.run(agent.tools[0].on_invoke_tool(ctx, payload))
+        return SimpleNamespace(final_output=InvestigatorReport())
+
+    monkeypatch.setattr(Runner, "run_sync", staticmethod(fake_runner))
+    investigator, _, audit = _investigator(AgentsSDKInvestigatorRuntime(
+        model="test-offline-model", enable_provider=True,
+    ))
+    result = investigator.investigate(_event())
+    assert result.query_count == 1
+    assert result.partial_evidence == ()
+    assert any(".denied:" in x[2] for x in audit.events)
+    assert all("delete_event" not in x[2] for x in audit.events)
