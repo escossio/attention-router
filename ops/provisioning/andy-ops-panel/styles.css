@@ -232,3 +232,16 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 1.4rem 2rem; }
 .network-table th, .network-table td { padding: 11px 9px; text-align: left; border-bottom: 1px solid #25362f; white-space: nowrap; }
 .network-table th { color: #91a99b; font-size: 11px; letter-spacing: .06em; }
 @media (max-width: 760px) { .network-summary { grid-template-columns: 1fr; } .network-content { padding: 8px; } }
+
+/* Investigator: typed metadata only; never render raw model/tool payloads. */
+.investigator-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; margin-top: .85rem; }
+.investigator-timeline { display: grid; }
+.investigator-event { display: grid; grid-template-columns: 6.5rem minmax(10rem, .8fr) minmax(10rem, 1.6fr); gap: .85rem; align-items: center; padding: .7rem 1rem; border-bottom: 1px solid #142018; font-size: .8rem; }
+.investigator-event:last-child { border-bottom: 0; }
+.investigator-event strong { color: var(--text); }
+.investigator-event span:last-child { color: #b8c7bb; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .investigator-summary { grid-template-columns: 1fr; }
+  .investigator-event { grid-template-columns: 5rem minmax(0, 1fr); }
+  .investigator-event span:last-child { grid-column: 2; }
+}
