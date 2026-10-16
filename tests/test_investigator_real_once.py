@@ -64,6 +64,45 @@ def test_parent_invokes_hard_supervisor_and_timeout_is_not_a_conclusion(monkeypa
     assert "synthetic-test-key" not in journal.read_text()
 
 
+def test_parent_recovers_private_known_usage_after_hard_timeout(monkeypatch, tmp_path):
+    key = tmp_path / "key"
+    key.write_text("synthetic-test-key")
+    key.chmod(0o600)
+    result, journal = _paths(tmp_path)
+
+    def timed_out_after_response(argv, *, deadline_seconds, env, cwd):
+        snapshot = argv[argv.index("--usage-snapshot") + 1]
+        run_id = argv[argv.index("--run-id") + 1]
+        one._write_usage_snapshot(
+            one.Path(snapshot), run_id,
+            ModelUsage(40, 15, one.PRICING.cost_micro_usd(40, 15)),
+        )
+        return SimpleNamespace(timed_out=True, exit_code=None)
+
+    monkeypatch.setattr(one, "run_with_deadline", timed_out_after_response)
+    assert one._parent(key, result, journal) == 124
+    summary = json.loads(result.read_text())
+    assert summary["usage_state"] == "partial"
+    assert summary["usage"] == {
+        "input_tokens": 40, "output_tokens": 15,
+        "cost_micro_usd": one.PRICING.cost_micro_usd(40, 15),
+    }
+    assert summary["status"] == "timeout" and summary["conclusion"] is None
+    assert (tmp_path / "result.json.usage.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_usage_snapshot_wrong_run_or_cost_remains_unknown(tmp_path):
+    path = tmp_path / "snapshot.json"
+    actual = str(uuid4())
+    one._write_usage_snapshot(path, actual, ModelUsage(40, 15, one.PRICING.cost_micro_usd(40, 15)))
+    assert one._read_usage_snapshot(path, str(uuid4())) is None
+    path.write_text(json.dumps({
+        "run_id": actual, "input_tokens": 40, "output_tokens": 15,
+        "cost_micro_usd": 0,
+    }))
+    assert one._read_usage_snapshot(path, actual) is None
+
+
 def test_supervisor_really_kills_isolated_child_on_deadline():
     outcome = run_with_deadline(
         [sys.executable, "-c", "import time; time.sleep(2)"],
@@ -172,6 +211,7 @@ def test_child_persists_known_partial_usage_after_runner_error(monkeypatch, tmp_
     key.write_text("synthetic-test-key")
     key.chmod(0o600)
     result, journal = _paths(tmp_path)
+    snapshot = tmp_path / "usage.json"
 
     def failed_after_response(agent, input, max_turns):
         context = SimpleNamespace(usage=SimpleNamespace(
@@ -181,7 +221,8 @@ def test_child_persists_known_partial_usage_after_runner_error(monkeypatch, tmp_
         raise RuntimeError("synthetic tool failure")
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(failed_after_response))
-    assert one._child(key, result, journal, str(uuid4())) == one.EXIT["failed"]
+    run_id = str(uuid4())
+    assert one._child(key, result, journal, run_id, snapshot) == one.EXIT["failed"]
     summary = json.loads(result.read_text())
     assert summary["usage_state"] == "partial"
     assert summary["usage"] == {
@@ -190,6 +231,9 @@ def test_child_persists_known_partial_usage_after_runner_error(monkeypatch, tmp_
     }
     assert summary["status"] == "failed" and summary["limited"] is True
     assert summary["conclusion"] is None
+    assert one._read_usage_snapshot(snapshot, run_id) == ModelUsage(
+        40, 15, one.PRICING.cost_micro_usd(40, 15),
+    )
     assert "synthetic-test-key" not in result.read_text() + journal.read_text()
 
 def test_supervised_run_id_rejects_untrusted_non_uuid4():

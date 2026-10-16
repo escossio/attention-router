@@ -94,6 +94,7 @@ class AgentsSDKInvestigatorRuntime:
     model_usage_gate: ModelUsageGate | None = None
     model_quote: ModelUsage | None = None
     model_pricing: ModelPricing | None = None
+    usage_observer: Callable[[ModelUsage], None] | None = None
     # Bounded OpenAI SDK v0.22.2 call attempts (not an overall run timeout).
     model_attempt_timeout_seconds: float = 15.0
     max_output_tokens_per_attempt: int = 512
@@ -198,6 +199,8 @@ class AgentsSDKInvestigatorRuntime:
                 measured = runtime._usage_from_totals(context.usage)
                 if measured is not None:
                     self.measured = measured
+                    if runtime.usage_observer is not None:
+                        runtime.usage_observer(measured)
 
         usage_hooks = _UsageHooks()
 

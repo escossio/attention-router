@@ -124,6 +124,60 @@ def _write_summary(path: Path, data: dict[str, object]) -> None:
         raise
 
 
+def _write_usage_snapshot(path: Path, run_id: str, usage: ModelUsage) -> None:
+    if not _outside_repo(path) or path.is_symlink():
+        raise ValueError("USAGE_PRIVATE_PATH_REQUIRED")
+    directory = path.parent.stat()
+    if directory.st_uid != os.geteuid() or directory.st_mode & 0o077:
+        raise ValueError("USAGE_PRIVATE_DIRECTORY_REQUIRED")
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({
+                "run_id": run_id,
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cost_micro_usd": usage.cost_micro_usd,
+            }, handle, separators=(",", ":"), sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        dir_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _read_usage_snapshot(path: Path, run_id: str) -> ModelUsage | None:
+    if not _private_file(path):
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 512:
+                return None
+            data = json.loads(os.read(fd, 513))
+        finally:
+            os.close(fd)
+        if set(data) != {"run_id", "input_tokens", "output_tokens", "cost_micro_usd"} \
+                or data["run_id"] != run_id:
+            return None
+        usage = ModelUsage(data["input_tokens"], data["output_tokens"], data["cost_micro_usd"])
+        if usage.input_tokens + usage.output_tokens == 0 or usage.cost_micro_usd != PRICING.cost_micro_usd(
+            usage.input_tokens, usage.output_tokens,
+        ):
+            return None
+        return usage
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 def _admit():
     event, connectors, allowed = load_public_synthetic_case(CASE)
     manifest = json.loads(CASE.read_text(encoding="utf-8"))
@@ -153,7 +207,10 @@ def _preflight(key_file: Path) -> bool:
     return True
 
 
-def _child(key_file: Path, result_file: Path, journal_file: Path, run_id: str) -> int:
+def _child(
+    key_file: Path, result_file: Path, journal_file: Path, run_id: str,
+    usage_file: Path | None = None,
+) -> int:
     if not _preflight(key_file):
         _write_summary(result_file, _summary(run_id, "blocked"))
         return EXIT["blocked"]
@@ -182,6 +239,10 @@ def _child(key_file: Path, result_file: Path, journal_file: Path, run_id: str) -
         model=MODEL, enable_provider=True, max_turns=4,
         projection_resolver=lambda candidate: projection,
         model_usage_gate=gate, model_quote=QUOTE, model_pricing=PRICING,
+        usage_observer=(
+            (lambda measured: _write_usage_snapshot(usage_file, run_id, measured))
+            if usage_file is not None else None
+        ),
         model_attempt_timeout_seconds=15, max_output_tokens_per_attempt=500,
     )
     investigator = Investigator(
@@ -208,7 +269,10 @@ def _child(key_file: Path, result_file: Path, journal_file: Path, run_id: str) -
 
 def _parent(key_file: Path, result_file: Path, journal_file: Path) -> int:
     run_id = str(uuid4())
-    if not _outside_repo(result_file) or result_file.exists() or result_file.is_symlink() or not _outside_repo(journal_file) or journal_file.is_symlink():
+    usage_file = result_file.with_name(result_file.name + ".usage.json")
+    if (not _outside_repo(result_file) or result_file.exists() or result_file.is_symlink()
+            or usage_file.exists() or usage_file.is_symlink()
+            or not _outside_repo(journal_file) or journal_file.is_symlink()):
         return EXIT["blocked"]
     if not _preflight(key_file) or (journal_file.exists() and not _private_file(journal_file)):
         _write_summary(result_file, _summary(run_id, "blocked"))
@@ -216,15 +280,23 @@ def _parent(key_file: Path, result_file: Path, journal_file: Path) -> int:
     env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(CASE.parents[2]),
            "OPENAI_API_KEY_FILE": str(key_file), "PYTHONUNBUFFERED": "1"}
     argv = [sys.executable, "-m", "ops.investigator.real_once", "--child",
-            "--result", str(result_file), "--journal", str(journal_file), "--run-id", run_id]
+            "--result", str(result_file), "--journal", str(journal_file),
+            "--usage-snapshot", str(usage_file), "--run-id", run_id]
     outcome = run_with_deadline(argv, deadline_seconds=75, env=env, cwd=str(CASE.parents[2]))
+    known = _read_usage_snapshot(usage_file, run_id)
     if outcome.timed_out:
         InvestigatorJournal(journal_file).emit(run_id, "timeout")
         if not result_file.exists():
-            _write_summary(result_file, _summary(run_id, "timeout", limited=True))
+            _write_summary(result_file, _summary(
+                run_id, "timeout", usage=known,
+                usage_state="partial" if known is not None else "unknown", limited=True,
+            ))
         return EXIT["timeout"]
     if not result_file.exists():
-        _write_summary(result_file, _summary(run_id, "failed"))
+        _write_summary(result_file, _summary(
+            run_id, "failed", usage=known,
+            usage_state="partial" if known is not None else "unknown", limited=True,
+        ))
         return EXIT["failed"]
     try:
         summary = json.loads(result_file.read_text(encoding="utf-8"))
@@ -240,6 +312,7 @@ def main() -> int:
     parser.add_argument("--result", type=Path, required=True)
     parser.add_argument("--journal", type=Path, required=True)
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--usage-snapshot", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--run-id", help=argparse.SUPPRESS)
     args = parser.parse_args()
     key_file = Path(os.environ.get("OPENAI_API_KEY_FILE", ""))
@@ -248,7 +321,7 @@ def main() -> int:
             UUID(args.run_id)
         except (TypeError, ValueError):
             return EXIT["blocked"]
-        return _child(key_file, args.result, args.journal, args.run_id)
+        return _child(key_file, args.result, args.journal, args.run_id, args.usage_snapshot)
     return _parent(key_file, args.result, args.journal)
 
 
