@@ -9,16 +9,33 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from attention_router.investigator.model_usage_gate import (
+    ModelLimits, ModelUsage, ModelUsageGate,
+)
 from attention_router.investigator.agents_sdk_runtime import (
     AgentsSDKInvestigatorRuntime,
     HypothesisReport,
-    InvestigatorReport,
+    InvestigatorReport, ModelPricing,
 )
 from attention_router.investigator.service import Budget, Investigator
 from attention_router.investigator.projection import IncidentProjection
 from attention_router.investigator.simulated import MemoryAudit, MemoryStore
 from evals.investigator_v0.manifest import load_public_synthetic_case
 from evals.investigator_v0.structural_grader import assess_replay_structure
+
+
+def _guarded_runtime(**kwargs):
+    """Offline SDK test keeps pricing and reservation independent of the Runner."""
+    if kwargs.get("enable_provider"):
+        model = kwargs["model"]
+        kwargs.setdefault("model_usage_gate", ModelUsageGate(
+            ModelLimits(5000, 2000, 10000, max_calls=1),
+        ))
+        kwargs.setdefault("model_quote", ModelUsage(3000, 1000, 4000))
+        kwargs.setdefault("model_pricing", ModelPricing(
+            model, "synthetic-pricing-only", 1_000_000, 1_000_000,
+        ))
+    return AgentsSDKInvestigatorRuntime(**kwargs)
 
 
 CASE = (
@@ -45,7 +62,7 @@ def test_mocked_agents_sdk_queries_replay_on_demand_and_preserves_evidence(monke
             unit="percent",
         )
 
-    runtime = AgentsSDKInvestigatorRuntime(
+    runtime = _guarded_runtime(
         model="offline-stub-only",
         enable_provider=True,
         max_turns=6,
@@ -87,7 +104,7 @@ def test_mocked_agents_sdk_queries_replay_on_demand_and_preserves_evidence(monke
         assert third["evidence_index"] == 2
         assert third["observation"]["jobs"][0]["worker"] == "synthetic-node"
 
-        return SimpleNamespace(final_output=InvestigatorReport(
+        return SimpleNamespace(context_wrapper=SimpleNamespace(usage=SimpleNamespace(requests=1, input_tokens=21, output_tokens=13)), final_output=InvestigatorReport(
             hypotheses=[
                 HypothesisReport(
                     statement="Observed resource pressure could align with CI activity",
@@ -132,7 +149,7 @@ def test_real_provider_stays_disabled_in_replay_without_mock_or_key(monkeypatch)
     # No monkeypatch of Runner here; the default must stop before importing
     # provider/model code or performing any external call.
     store, audit = MemoryStore(), MemoryAudit()
-    runtime = AgentsSDKInvestigatorRuntime(model="offline-never-call-provider")
+    runtime = _guarded_runtime(model="offline-never-call-provider")
     investigator = Investigator(
         runtime, connectors, store, audit, Budget(4, 2),
         authorized_tenants=frozenset({event.tenant_id}),

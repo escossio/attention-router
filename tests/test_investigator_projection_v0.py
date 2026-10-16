@@ -6,7 +6,12 @@ import pytest
 
 from attention_router.investigator.model import SourceEvent
 from attention_router.investigator.projection import IncidentProjection
-from attention_router.investigator.agents_sdk_runtime import AgentsSDKInvestigatorRuntime
+from attention_router.investigator.agents_sdk_runtime import (
+    AgentsSDKInvestigatorRuntime, ModelPricing,
+)
+from attention_router.investigator.model_usage_gate import (
+    ModelLimits, ModelUsage, ModelUsageGate,
+)
 from attention_router.investigator.service import Budget, Investigator
 from attention_router.investigator.simulated import MemoryAudit, MemoryStore, SimulatedConnector
 
@@ -27,6 +32,17 @@ def _projection(event):
         target_role="ci_worker",
         observed_value=91.0,
         unit="percent",
+    )
+
+
+def _guarded_runtime(**kwargs):
+    """Exercise projection admission with synthetic quota, never a provider."""
+    return AgentsSDKInvestigatorRuntime(
+        model="offline-only", enable_provider=True,
+        model_usage_gate=ModelUsageGate(ModelLimits(100, 100, 200, max_calls=1)),
+        model_quote=ModelUsage(50, 50, 100),
+        model_pricing=ModelPricing("offline-only", "synthetic", 1_000_000, 1_000_000),
+        **kwargs,
     )
 
 
@@ -91,8 +107,7 @@ def test_cross_event_projection_rejected_before_runner(monkeypatch):
     monkeypatch.setattr(Runner, "run_sync", staticmethod(never_run))
     first = _event(b"first")
     second = _event(b"second")
-    runtime = AgentsSDKInvestigatorRuntime(
-        model="offline-only", enable_provider=True,
+    runtime = _guarded_runtime(
         projection_resolver=lambda _event: _projection(first),
     )
     result = _invoke(runtime, second)
@@ -108,7 +123,7 @@ def test_admission_projection_is_required_before_sdk_runner(monkeypatch):
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Runner invoked")),
     ))
     event = _event()
-    runtime = AgentsSDKInvestigatorRuntime(model="offline-only", enable_provider=True)
+    runtime = _guarded_runtime()
     result = _invoke(runtime, event)
     assert result.status == "failed"
     assert result.error_code == "PROJECTION_ADMISSION_REQUIRED"

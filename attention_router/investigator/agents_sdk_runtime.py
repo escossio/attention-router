@@ -9,10 +9,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Callable, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 from .model import Conclusion, Evidence, Findings, Hypothesis, Query, SourceEvent
+from .model_usage_gate import ModelBudgetDenied, ModelUsage, ModelUsageGate
 from .ports import QueryAccess
 from .projection import IncidentProjection
 from .tool_view import project_tool_observation
@@ -47,6 +49,33 @@ _INSTRUCTIONS = (
 
 
 @dataclass(frozen=True)
+class ModelPricing:
+    """Trusted, model-bound positive rates; prices are never guessed in code."""
+
+    model: str
+    revision: str
+    input_micro_usd_per_million: int
+    output_micro_usd_per_million: int
+
+    def __post_init__(self) -> None:
+        if (
+            not self.model or not self.revision or
+            any(type(v) is not int or v <= 0 for v in (
+                self.input_micro_usd_per_million,
+                self.output_micro_usd_per_million,
+            ))
+        ):
+            raise ValueError("MODEL_PRICING_REQUIRED")
+
+    def cost_micro_usd(self, input_tokens: int, output_tokens: int) -> int:
+        return (
+            input_tokens * self.input_micro_usd_per_million
+            + output_tokens * self.output_micro_usd_per_million
+            + 999_999
+        ) // 1_000_000
+
+
+@dataclass(frozen=True)
 class AgentsSDKInvestigatorRuntime:
     """Concrete SDK tool-loop adapter with an explicit no-provider default."""
 
@@ -56,10 +85,46 @@ class AgentsSDKInvestigatorRuntime:
     max_tool_response_bytes: int = 4096
     # Injected by the trusted admission boundary, never calculated by the model.
     projection_resolver: Callable[[SourceEvent], IncidentProjection] | None = None
+    # Trusted external policy injects a per-investigation gate, a conservative
+    # whole-run quote, and a versioned price schedule for the exact model.
+    # Quotas in PR #354 are reservations, NOT a preemptive provider stop.
+    model_usage_gate: ModelUsageGate | None = None
+    model_quote: ModelUsage | None = None
+    model_pricing: ModelPricing | None = None
 
     def __post_init__(self) -> None:
         if not self.model.strip() or self.max_turns < 1 or self.max_tool_response_bytes < 1:
             raise ValueError("INVALID_AGENT_CONFIG")
+        if self.enable_provider:
+            if not isinstance(self.model_usage_gate, ModelUsageGate):
+                raise ModelBudgetDenied("MODEL_QUOTA_REQUIRED")
+            if not isinstance(self.model_quote, ModelUsage) or not isinstance(
+                self.model_pricing, ModelPricing
+            ) or self.model_pricing.model != self.model:
+                raise ModelBudgetDenied("MODEL_PRICED_QUOTE_REQUIRED")
+            if self.model_quote.cost_micro_usd < self.model_pricing.cost_micro_usd(
+                self.model_quote.input_tokens, self.model_quote.output_tokens
+            ):
+                raise ModelBudgetDenied("MODEL_QUOTE_UNDERPRICED")
+
+    def _measured_usage(self, response: object) -> ModelUsage | None:
+        """Use SDK totals, never assume missing/zero usage was free."""
+        try:
+            usage = response.context_wrapper.usage
+            values = (usage.requests, usage.input_tokens, usage.output_tokens)
+        except AttributeError:
+            return None
+        if any(type(value) is not int or value < 0 for value in values):
+            return None
+        if values[0] < 1 or values[0] > self.max_turns:
+            return None
+        if values[1] == 0 and values[2] == 0:
+            return None
+        assert self.model_pricing is not None
+        return ModelUsage(
+            values[1], values[2],
+            self.model_pricing.cost_micro_usd(values[1], values[2]),
+        )
 
     def investigate(self, event: SourceEvent, queries: QueryAccess) -> Findings:
         if not self.enable_provider:
@@ -107,11 +172,25 @@ class AgentsSDKInvestigatorRuntime:
         )
         # The model sees typed symptom fields from the injected admission projection.
         # It never sees event.original, raw log text, tenant or host identifiers.
-        response = Runner.run_sync(
-            agent,
-            input=[{"role": "user", "content": json.dumps(input_payload, sort_keys=True)}],
-            max_turns=self.max_turns,
-        )
+        # Runner may perform several provider calls within max_turns. Reserve
+        # for the *whole* run before its first request. Model prices and ceilings
+        # must be authorized outside this runtime, never derived from the LLM.
+        assert self.model_usage_gate is not None
+        assert self.model_quote is not None
+        self.model_usage_gate.reserve(str_id := str(uuid4()), self.model_quote)
+        try:
+            response = Runner.run_sync(
+                agent,
+                input=[{"role": "user", "content": json.dumps(input_payload, sort_keys=True)}],
+                max_turns=self.max_turns,
+            )
+        except BaseException:
+            self.model_usage_gate.mark_failed_without_usage(str_id)
+            raise
+        measured = self._measured_usage(response)
+        self.model_usage_gate.settle(str_id, measured)
+        if measured is None:
+            raise ModelBudgetDenied("MODEL_USAGE_UNKNOWN")
         report = response.final_output
         if not isinstance(report, InvestigatorReport):
             raise ValueError("INVALID_INVESTIGATION_OUTPUT")

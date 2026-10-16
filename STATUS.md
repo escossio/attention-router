@@ -442,3 +442,10 @@ the assets and `docs/demo.md`.
 - Portas somente-leitura para conectores, runtime de agente, auditoria e futura persistência isolada. Simulações cobrem Zabbix, Tempo, PostgreSQL, Linux, CI distribuído e catálogo AFO. Nenhum conector real, migração, serviço ou configuração operacional foi adicionado.
 - Runner de produção e formato contratual final dependem da frente paralela. O protocolo de runtime permite adaptar o Agents SDK já usado no projeto sem escolher prematuramente Codex SDK ou app-server.
 - Validação local curta: 6 testes sintéticos passaram com `pytest --noconftest`; Ruff passou. A suíte normal local depende das dependências completas do projeto e será exercitada pela CI. PostgreSQL completo segue exclusivamente pelo pool distribuído.
+
+## Investigator V0 SDK budget bridge — 2026-10-16
+
+- The existing `feat/investigator-v0-sdk-budget-bridge-20261016` branch remains stacked directly on PR #354. Its pre-run reservation, versioned-price settlement, and fail-closed unknown-usage behavior are preserved.
+- A minimal guard treats an SDK response with both input and output token counts at zero as unknown usage. The existing offline case now also proves that the terminal gate prevents a second Runner call.
+- CI03 ran five focused offline test files without network access: 41 passed. Two older projection fixtures were updated to provide synthetic quota inputs while keeping their Runner prohibition and projection assertions. Ruff on the changed files passed with cache disabled. No real model request, credential change, runtime container change, network change, or merge occurred.
+- Before autonomous execution, an authorized credential must be supplied to the new app, with reviewed model-specific pricing, conservative whole-run quote, execution limits, and remaining admission/cancellation controls.
