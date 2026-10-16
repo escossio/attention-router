@@ -96,7 +96,7 @@ def test_sdk_run_aggregate_usage_is_settled_with_versioned_prices(monkeypatch):
     monkeypatch.setattr(Runner, "run_sync", staticmethod(fake_run))
     gate = _gate()
     result = _priced(gate).investigate(_event(), None)
-    assert result.hypotheses == []
+    assert result.hypotheses == ()
     assert called == [("ANDY_OPS_INVESTIGATOR_V0", 4)]
     assert gate.spent == ModelUsage(60, 45, 105)
     assert gate.terminal_reason is None
@@ -110,6 +110,7 @@ def test_sdk_run_aggregate_usage_is_settled_with_versioned_prices(monkeypatch):
     _result(requests=0),
     _result(requests=5),
     _result(requests=1, input_tokens=-1),
+    _result(requests=1, input_tokens=0, output_tokens=0),
 ])
 def test_missing_invalid_or_out_of_bound_sdk_usage_closes_gate(monkeypatch, observed):
     from agents import Runner
