@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 from time import monotonic
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from .model import Findings, Investigation, Query, SourceEvent
 from .ports import ActivitySink, AgentRuntime, AuditSink, InvestigationStore, ReadOnlyConnector
@@ -195,8 +195,20 @@ class Investigator:
             source: frozenset(ops) for source, ops in (allowed_operations or {}).items()
         }
 
-    def investigate(self, event: SourceEvent) -> Investigation:
-        investigation_id = str(uuid4())
+    def investigate(
+        self, event: SourceEvent, *, investigation_id: str | None = None,
+    ) -> Investigation:
+        if investigation_id is None:
+            investigation_id = str(uuid4())
+        else:
+            if type(investigation_id) is not str:
+                raise ValueError("INVALID_INVESTIGATION_ID")
+            try:
+                parsed_id = UUID(investigation_id)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError("INVALID_INVESTIGATION_ID") from exc
+            if parsed_id.version != 4 or str(parsed_id) != investigation_id:
+                raise ValueError("INVALID_INVESTIGATION_ID")
         queries = _BoundedQueries(
             self.connectors, self.budget, self.allowed_operations,
             self.audit, investigation_id, event.correlation_id, self.activity_sink,
