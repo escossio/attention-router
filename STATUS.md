@@ -449,3 +449,9 @@ the assets and `docs/demo.md`.
 - A minimal guard treats an SDK response with both input and output token counts at zero as unknown usage. The existing offline case now also proves that the terminal gate prevents a second Runner call.
 - CI03 ran five focused offline test files without network access: 41 passed. Two older projection fixtures were updated to provide synthetic quota inputs while keeping their Runner prohibition and projection assertions. Ruff on the changed files passed with cache disabled. No real model request, credential change, runtime container change, network change, or merge occurred.
 - Before autonomous execution, an authorized credential must be supplied to the new app, with reviewed model-specific pricing, conservative whole-run quote, execution limits, and remaining admission/cancellation controls.
+
+## Investigator V0 MGMT journal gate — 2026-10-16
+
+- PR #364 already supplies an opt-in private JSONL journal, bounded MGMT reader and native tab. A synthetic one-shot launcher now injects `InvestigatorJournal` into `Investigator`, verifies the selected VLAN 219 source identity without sending a packet, and uses only scripted connectors. It makes no model request.
+- Added offline coverage for an empty journal, stopped run with terminal event, successful launcher timeline and wrong-network refusal. The active MGMT and existing containers have not yet been changed at this source checkpoint.
+- `git diff --check` and Python compilation passed on AGT. System Python lacks pytest; focused and heavy tests are assigned to distributed CI workers. Runtime activation requires real journal records and an explicit live API verification first.

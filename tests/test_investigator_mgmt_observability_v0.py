@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 from uuid import uuid4
 
 import pytest
@@ -43,6 +45,13 @@ def test_no_journal_is_not_reported_as_running(tmp_path):
     )
     assert view["state"] == "AWAITING_EVENTS"
     assert view["age_seconds"] is None
+
+
+def test_empty_journal_is_not_reported_as_running(tmp_path):
+    file = tmp_path / "empty.jsonl"
+    file.touch(mode=0o600)
+    view = _reader().sample_investigator_activity(enabled=True, path=file)
+    assert view["state"] == "AWAITING_EVENTS" and view["events"] == []
 
 
 def test_actual_broker_queries_are_observable_without_raw_data(tmp_path):
@@ -113,6 +122,49 @@ def test_stale_run_does_not_look_active(tmp_path):
     )
     assert view["state"] == "STALE"
     assert view["age_seconds"] >= 120
+
+
+def test_stopped_run_with_terminal_record_is_not_running(tmp_path):
+    file = tmp_path / "stopped.jsonl"
+    journal = InvestigatorJournal(file)
+    run_id = str(uuid4())
+    journal.emit(run_id, "started")
+    journal.emit(run_id, "failed")
+    view = _reader().sample_investigator_activity(enabled=True, path=file)
+    assert view["state"] == "FAILED"
+
+
+def test_synthetic_launcher_writes_complete_journal_without_model(tmp_path):
+    file = tmp_path / "synthetic.jsonl"
+    command = [
+        sys.executable, "-m", "attention_router.investigator.synthetic_launcher",
+        "--journal", str(file), "--expected-source-ip", "127.0.0.1",
+        "--route-peer", "127.0.0.1",
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=15)
+    assert completed.returncode == 0, completed.stderr
+    output = json.loads(completed.stdout)
+    assert output["mode"] == "synthetic"
+    assert output["source_ip_verified"] is True
+    assert output["status"] == "completed" and output["queries"] == 2
+    view = _reader().sample_investigator_activity(enabled=True, path=file)
+    assert view["state"] == "COMPLETED" and view["run_id"] == output["run_id"]
+    assert [item["event"] for item in view["events"]] == [
+        "started", "query_requested", "query_observed",
+        "query_requested", "query_observed", "completed",
+    ]
+
+
+def test_synthetic_launcher_refuses_wrong_network_without_events(tmp_path):
+    file = tmp_path / "wrong-network.jsonl"
+    completed = subprocess.run([
+        sys.executable, "-m", "attention_router.investigator.synthetic_launcher",
+        "--journal", str(file), "--expected-source-ip", "192.0.2.1",
+        "--route-peer", "127.0.0.1",
+    ], capture_output=True, text=True, timeout=15)
+    assert completed.returncode != 0
+    assert "NETWORK_IDENTITY_MISMATCH" in completed.stderr
+    assert not file.exists()
 
 
 def test_world_readable_journal_never_leaks_events(tmp_path):

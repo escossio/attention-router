@@ -168,10 +168,25 @@ Investigador V0, sem criar outro painel nem acoplar à interface do ChatGPT.
   `ANDY_OPS_INVESTIGATOR_OBSERVABILITY_ENABLED=true` e
   `ANDY_OPS_INVESTIGATOR_JOURNAL=<arquivo absoluto fora do web root>`
   exclusivamente no arquivo privado do serviço Andy Ops.
-- O lançador autorizado do Investigador deverá injetar
-  `InvestigatorJournal(<mesmo caminho protegido>)` como `activity_sink` em
-  `Investigator(...)`, garantindo permissão de escrita restrita para o
-  contêiner/sidecar e leitura restrita pelo Andy Ops.
+- O lançador sintético `python -m attention_router.investigator.synthetic_launcher`
+  injeta `InvestigatorJournal(<mesmo caminho protegido>)` em `Investigator(...)`.
+  Ele exige `--journal`, `--expected-source-ip` e `--route-peer`, verifica a
+  origem da rota sem transmitir pacote e executa apenas `ScriptedRuntime` com
+  conectores simulados. O resultado impresso identifica explicitamente
+  `mode=synthetic`; nunca utiliza credencial ou modelo.
+- No primeiro ensaio, execute esse processo em contêiner efêmero, sem root,
+  capacidades, escrita no rootfs ou acesso a segredos, com
+  `--network container:andy-investigator-v0-net-stage`. Monte o código somente
+  para leitura e apenas o diretório privado do journal para escrita. O Andy Ops
+  lê o arquivo no host como root; o journal é criado em modo `0600` e fica fora
+  do web root. Os endereços esperados pertencem à configuração privada do host.
+- Grafo de comunicação: lançador → journal por arquivo local (obrigatório,
+  escrita de metadados); Andy Ops → journal por leitura local (obrigatório);
+  nenhum tráfego de aplicação, modelo ou ferramenta sintética pela VLAN. A
+  consulta de rota por socket UDP não envia pacote. A execução compartilha a
+  identidade L2/L3 da rede 219 existente; não requer IP próprio, IP estático,
+  bridge adicional nem nova rede. A autoridade de escrita vem apenas da
+  permissão do diretório privado, nunca da conectividade.
 - `RUNNING` exige evento recente (até 20 segundos), **não** é inferido do
   Docker PID nem do contêiner ligado. Uma execução sem heartbeat/consultas
   recentes passa a `STALE`, nunca fica verde indefinidamente.
