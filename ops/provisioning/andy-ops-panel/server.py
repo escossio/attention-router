@@ -16,6 +16,7 @@ import time
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from investigator_observability import sample_investigator_activity
 from message_tracing import sample_message_traces
 from transport_observability import sample_transport_observability
 
@@ -748,6 +749,7 @@ def _sample_loop() -> None:
             "chat": _chat_status(),
             "transport_observability": transport_observability,
             "message_traces": message_traces,
+            "investigator_activity": sample_investigator_activity(),
         }
         with _state_lock:
             _state.clear()

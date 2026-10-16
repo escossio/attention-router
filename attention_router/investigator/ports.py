@@ -25,6 +25,17 @@ class InvestigationStore(Protocol):
     def save(self, investigation: Investigation) -> None: ...
 
 
+class ActivitySink(Protocol):
+    """Optional metadata-only stream for a read-only operations dashboard."""
+
+    def emit(
+        self, run_id: str, event: str, *,
+        source: str | None = None,
+        operation: str | None = None,
+        ordinal: int | None = None,
+    ) -> None: ...
+
+
 class AuditSink(Protocol):
     """Audit metadata only; never send original event or tool response to logs."""
 

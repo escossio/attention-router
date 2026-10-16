@@ -12,7 +12,7 @@ from time import monotonic
 from uuid import uuid4
 
 from .model import Findings, Investigation, Query, SourceEvent
-from .ports import AgentRuntime, AuditSink, InvestigationStore, ReadOnlyConnector
+from .ports import ActivitySink, AgentRuntime, AuditSink, InvestigationStore, ReadOnlyConnector
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,7 @@ class _BoundedQueries:
         self, connectors: dict[str, ReadOnlyConnector], budget: Budget,
         allowed_operations: dict[str, frozenset[str]], audit: AuditSink,
         investigation_id: str, correlation_id: str,
+        activity_sink: ActivitySink | None = None,
     ) -> None:
         self.connectors = connectors
         self.budget = budget
@@ -60,6 +61,7 @@ class _BoundedQueries:
         self.audit = audit
         self.investigation_id = investigation_id
         self.correlation_id = correlation_id
+        self.activity_sink = activity_sink
         self.started = monotonic()
         self.count = 0
         self.observed = []
@@ -67,6 +69,20 @@ class _BoundedQueries:
 
     def _record(self, event: str) -> None:
         self.audit.record(self.investigation_id, self.correlation_id, event)
+
+    def _signal(self, event: str, query: Query | None = None, ordinal: int | None = None) -> None:
+        # Telemetry is best-effort and never authorizes or blocks an investigation.
+        if self.activity_sink is None:
+            return
+        try:
+            self.activity_sink.emit(
+                self.investigation_id, event,
+                source=query.source if query is not None else None,
+                operation=query.operation if query is not None else None,
+                ordinal=ordinal,
+            )
+        except Exception:
+            pass
 
     def check_time(self) -> None:
         if monotonic() - self.started >= self.budget.max_seconds:
@@ -90,14 +106,17 @@ class _BoundedQueries:
         self.count += 1
         serial = self.count
         self._record(f"query.{serial}.requested:{fingerprint}")
+        self._signal("query_requested", query, serial)
 
         # The allowlist is supplied by an external, trusted authority, not the model.
         if query.operation not in self.allowed_operations.get(query.source, frozenset()):
             self._record(f"query.{serial}.denied:{fingerprint}")
+            self._signal("query_denied", query, serial)
             raise AuthorizationDenied("OPERATION_NOT_ALLOWED")
         connector = self.connectors.get(query.source)
         if connector is None:
             self._record(f"query.{serial}.unavailable:{fingerprint}")
+            self._signal("query_failed", query, serial)
             raise ConnectorUnavailable("CONNECTOR_UNAVAILABLE")
 
         try:
@@ -127,12 +146,15 @@ class _BoundedQueries:
             self.observed_bytes += size
         except BudgetExceeded:
             self._record(f"query.{serial}.limited:{fingerprint}")
+            self._signal("query_limited", query, serial)
             raise
         except Exception:
             self._record(f"query.{serial}.failed:{fingerprint}")
+            self._signal("query_failed", query, serial)
             raise
 
         self._record(f"query.{serial}.observed:{fingerprint}")
+        self._signal("query_observed", query, serial)
         # Slow/blocking calls cannot yet be preempted, but their returned evidence
         # is not discarded if the deadline was exceeded while reading.
         self.check_time()
@@ -157,6 +179,7 @@ class Investigator:
         *,
         authorized_tenants: frozenset[str] = frozenset(),
         allowed_operations: dict[str, frozenset[str]] | None = None,
+        activity_sink: ActivitySink | None = None,
     ) -> None:
         if any(source != connector.source for source, connector in connectors.items()):
             raise ValueError("CONNECTOR_SOURCE_MISMATCH")
@@ -165,6 +188,7 @@ class Investigator:
         self.store = store
         self.audit = audit
         self.budget = budget
+        self.activity_sink = activity_sink
         # No implicit ambient tenant authority or tool access.
         self.authorized_tenants = frozenset(authorized_tenants)
         self.allowed_operations = {
@@ -175,9 +199,10 @@ class Investigator:
         investigation_id = str(uuid4())
         queries = _BoundedQueries(
             self.connectors, self.budget, self.allowed_operations,
-            self.audit, investigation_id, event.correlation_id,
+            self.audit, investigation_id, event.correlation_id, self.activity_sink,
         )
         self.audit.record(investigation_id, event.correlation_id, "started")
+        queries._signal("started")
         findings = None
         status = "completed"
         error_code = None
@@ -203,4 +228,5 @@ class Investigator:
         )
         self.store.save(result)
         self.audit.record(investigation_id, event.correlation_id, status)
+        queries._signal(status)
         return result
