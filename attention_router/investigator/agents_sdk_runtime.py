@@ -7,6 +7,7 @@ the model in V0. No AGT, Zabbix, database or CI network access is configured.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Callable, Literal
 from uuid import uuid4
@@ -91,10 +92,21 @@ class AgentsSDKInvestigatorRuntime:
     model_usage_gate: ModelUsageGate | None = None
     model_quote: ModelUsage | None = None
     model_pricing: ModelPricing | None = None
+    # Bounded OpenAI SDK v0.22.2 call attempts (not an overall run timeout).
+    model_attempt_timeout_seconds: float = 15.0
+    max_output_tokens_per_attempt: int = 512
 
     def __post_init__(self) -> None:
         if not self.model.strip() or self.max_turns < 1 or self.max_tool_response_bytes < 1:
             raise ValueError("INVALID_AGENT_CONFIG")
+        if (
+            type(self.model_attempt_timeout_seconds) not in (int, float)
+            or not math.isfinite(self.model_attempt_timeout_seconds)
+            or not 0 < self.model_attempt_timeout_seconds <= 60
+            or type(self.max_output_tokens_per_attempt) is not int
+            or not 1 <= self.max_output_tokens_per_attempt <= 2048
+        ):
+            raise ValueError("MODEL_ATTEMPT_LIMIT_INVALID")
         if self.enable_provider:
             if not isinstance(self.model_usage_gate, ModelUsageGate):
                 raise ModelBudgetDenied("MODEL_QUOTA_REQUIRED")
@@ -102,6 +114,11 @@ class AgentsSDKInvestigatorRuntime:
                 self.model_pricing, ModelPricing
             ) or self.model_pricing.model != self.model:
                 raise ModelBudgetDenied("MODEL_PRICED_QUOTE_REQUIRED")
+            if (
+                self.model_quote.input_tokens < 1
+                or self.model_quote.output_tokens < self.max_turns
+            ):
+                raise ModelBudgetDenied("MODEL_QUOTE_INCOMPLETE")
             if self.model_quote.cost_micro_usd < self.model_pricing.cost_micro_usd(
                 self.model_quote.input_tokens, self.model_quote.output_tokens
             ):
@@ -138,7 +155,7 @@ class AgentsSDKInvestigatorRuntime:
         input_payload = projection.for_event(event)
 
         # Lazy imports prevent SDK construction in normal application startup.
-        from agents import Agent, AgentOutputSchema, Runner, function_tool
+        from agents import Agent, AgentOutputSchema, ModelSettings, Runner, function_tool
 
         observed: list[Evidence] = []
 
@@ -167,6 +184,18 @@ class AgentsSDKInvestigatorRuntime:
             name="ANDY_OPS_INVESTIGATOR_V0",
             instructions=_INSTRUCTIONS,
             model=self.model,
+            # Total output allocation = per-attempt cap * max_turns, even if the
+            # LLM consumes every allowed turn. Input usage is still checked
+            # after the fact; a hard monetary ceiling is NOT guaranteed.
+            model_settings=ModelSettings(
+                max_tokens=min(
+                    self.max_output_tokens_per_attempt,
+                    self.model_quote.output_tokens // self.max_turns,
+                ),
+                timeout=float(self.model_attempt_timeout_seconds),
+                parallel_tool_calls=False,
+                store=False,
+            ),
             tools=[read_observation],
             output_type=AgentOutputSchema(InvestigatorReport, strict_json_schema=False),
         )
