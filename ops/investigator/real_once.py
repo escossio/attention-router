@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 from uuid import UUID, uuid4
@@ -44,10 +45,63 @@ def _private_file(path: Path) -> bool:
         and info.st_uid == os.geteuid()
 
 
+_SAFE_TEXT = re.compile(r"^[\w\s.,;:!?()%-]+$", re.UNICODE)
+_PRIVATE_PATTERN = re.compile(
+    r"\b\d{1,3}(?:\.\d{1,3}){3}\b|\b\d{6,}\b|"
+    r"[A-Za-z0-9_]{24,}|sk-[A-Za-z0-9_-]{8,}|\bBearer\b",
+    re.IGNORECASE,
+)
+
+
+def _safe_text(value: object, limit: int) -> str | None:
+    if type(value) is not str or any(ord(char) < 32 and not char.isspace() for char in value):
+        return None
+    clean = " ".join(value.split())
+    if not clean or len(clean) > limit or not _SAFE_TEXT.fullmatch(clean):
+        return None
+    return None if _PRIVATE_PATTERN.search(clean) else clean
+
+
+def _safe_conclusion(result, allowed: dict[str, frozenset[str]]) -> dict[str, object] | None:
+    if result.status != "completed" or result.findings is None:
+        return None
+    conclusion = result.findings.conclusion
+    if conclusion is None or conclusion.classification not in {"PROVEN", "INDICATIVE", "UNKNOWN"}:
+        return None
+    evidence = result.findings.evidence
+    if any(item not in result.partial_evidence for item in evidence):
+        return None
+    indexes = conclusion.evidence_indexes
+    if len(indexes) > 4 or any(type(i) is not int or i < 0 or i >= len(evidence) for i in indexes):
+        return None
+    refs = []
+    for index in indexes:
+        query = evidence[index].query
+        if query.operation not in allowed.get(query.source, frozenset()):
+            return None
+        refs.append({"index": index, "source": query.source, "operation": query.operation})
+    summary = _safe_text(conclusion.summary, 320)
+    limitations = [
+        _safe_text(item, 160) or "REDACTED"
+        for item in conclusion.limitations[:8]
+    ]
+    return {
+        "classification": conclusion.classification,
+        "summary": summary,
+        "summary_redacted": summary is None,
+        "limitations": limitations,
+        "limitations_truncated": len(conclusion.limitations) > 8,
+        "evidence_refs": refs,
+    }
+
+
 def _summary(run_id: str, status: str, *, query_count: int = 0,
-             usage: ModelUsage | None = None, limited: bool = False) -> dict[str, object]:
+             usage: ModelUsage | None = None, usage_state: str = "unknown",
+             conclusion: dict[str, object] | None = None,
+             limited: bool = False) -> dict[str, object]:
     return {
         "run_id": run_id, "status": status, "query_count": query_count,
+        "usage_state": usage_state, "conclusion": conclusion,
         "usage": None if usage is None else {
             "input_tokens": usage.input_tokens,
             "output_tokens": usage.output_tokens,
@@ -137,9 +191,16 @@ def _child(key_file: Path, result_file: Path, journal_file: Path, run_id: str) -
     )
     result = investigator.investigate(event, investigation_id=run_id)
     status = result.status if result.status in EXIT else "failed"
+    measured = gate.spent
+    usage = measured if measured.input_tokens + measured.output_tokens else None
+    usage_state = (
+        "partial" if usage is not None and gate.terminal_reason is not None
+        else "complete" if usage is not None else "unknown"
+    )
     _write_summary(result_file, _summary(
         run_id, status, query_count=result.query_count,
-        usage=gate.spent if gate.terminal_reason is None and gate.spent.input_tokens + gate.spent.output_tokens else None,
+        usage=usage, usage_state=usage_state,
+        conclusion=_safe_conclusion(result, allowed),
         limited=status == "limited" or gate.terminal_reason is not None,
     ))
     return EXIT[status]

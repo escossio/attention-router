@@ -49,9 +49,16 @@ class InvestigatorJournal:
             raise ValueError("INVESTIGATOR_JOURNAL_INVALID_RUN_ID")
         if event not in _EVENTS:
             raise ValueError("INVESTIGATOR_JOURNAL_INVALID_EVENT")
-        if source is not None and source not in _SOURCES:
+        # A model may supply arbitrary strings. Record the attempt and ordinal,
+        # but never copy unknown tool arguments into the metadata journal.
+        if event.startswith("query_") and (
+            type(source) is not str or source not in _SOURCES
+            or type(operation) is not str or operation not in _OPERATIONS
+        ):
+            source = operation = None
+        elif source is not None and source not in _SOURCES:
             raise ValueError("INVESTIGATOR_JOURNAL_INVALID_SOURCE")
-        if operation is not None and operation not in _OPERATIONS:
+        elif operation is not None and operation not in _OPERATIONS:
             raise ValueError("INVESTIGATOR_JOURNAL_INVALID_OPERATION")
         if ordinal is not None and (type(ordinal) is not int or not 1 <= ordinal <= 256):
             raise ValueError("INVESTIGATOR_JOURNAL_INVALID_ORDINAL")

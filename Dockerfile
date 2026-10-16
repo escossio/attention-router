@@ -21,6 +21,8 @@ COPY tests /app/tests
 COPY scripts /app/scripts
 COPY config /app/config
 COPY ops /app/ops
+COPY evals/investigator_v0/manifest.py /app/evals/investigator_v0/manifest.py
+COPY evals/investigator_v0/synthetic_case_001.json /app/evals/investigator_v0/synthetic_case_001.json
 COPY alembic.ini /app/alembic.ini
 RUN pip install --no-cache-dir -e ".[dev]"
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD sh -c 'curl -fsS http://127.0.0.1:${HTTP_PORT:-18100}/health/live || exit 1'

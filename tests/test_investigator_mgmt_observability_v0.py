@@ -91,6 +91,65 @@ def test_actual_broker_queries_are_observable_without_raw_data(tmp_path):
     assert secret not in json.dumps(projected)
 
 
+@pytest.mark.parametrize("source,operation", [
+    ("zabbix", "kill"),
+    ("private-source-token", "read_event"),
+])
+def test_unknown_or_denied_tool_attempt_remains_visible_without_arguments(
+    tmp_path, source, operation,
+):
+    secret = "secret-argument-12345"
+    file = tmp_path / "activity.jsonl"
+    investigator = Investigator(
+        ScriptedRuntime((Query(source, operation, {"token": secret}),)),
+        {"zabbix": SimulatedConnector("zabbix", {"read_event": {"severity": "warning"}})},
+        MemoryStore(), MemoryAudit(), Budget(2, 10),
+        authorized_tenants=frozenset({"synthetic-tenant"}),
+        allowed_operations={"zabbix": frozenset({"read_event"})},
+        activity_sink=InvestigatorJournal(file),
+    )
+    result = investigator.investigate(SourceEvent(
+        "synthetic-zabbix", b"event", "text/plain", "synthetic-tenant",
+    ))
+    assert result.status == "blocked" and result.query_count == 1
+    view = _reader().sample_investigator_activity(enabled=True, path=file)
+    assert view["state"] == "BLOCKED" and view["queries"] == 1
+    assert [row["event"] for row in view["events"]] == [
+        "started", "query_requested", "query_denied", "blocked",
+    ]
+    assert view["events"][1]["ordinal"] == 1
+    assert "source" not in view["events"][1]
+    assert "operation" not in view["events"][1]
+    assert secret not in file.read_text()
+    if source != "zabbix":
+        assert source not in file.read_text()
+    else:
+        assert operation not in file.read_text()
+
+
+def test_budget_rejected_attempt_is_visible_after_observed_query(tmp_path):
+    file = tmp_path / "activity.jsonl"
+    investigator = Investigator(
+        ScriptedRuntime((Query("zabbix", "inspect"), Query("zabbix", "inspect"))),
+        {"zabbix": SimulatedConnector("zabbix", {"inspect": {"state": "synthetic"}})},
+        MemoryStore(), MemoryAudit(), Budget(1, 10),
+        authorized_tenants=frozenset({"synthetic-tenant"}),
+        allowed_operations={"zabbix": frozenset({"inspect"})},
+        activity_sink=InvestigatorJournal(file),
+    )
+    result = investigator.investigate(SourceEvent(
+        "synthetic-zabbix", b"event", "text/plain", "synthetic-tenant",
+    ))
+    assert result.status == "limited" and result.query_count == 1
+    view = _reader().sample_investigator_activity(enabled=True, path=file)
+    assert view["queries"] == 2
+    assert [row["event"] for row in view["events"]] == [
+        "started", "query_requested", "query_observed",
+        "query_requested", "query_limited", "limited",
+    ]
+    assert view["events"][3]["ordinal"] == 2
+
+
 def test_invalid_or_sensitive_events_are_never_forwarded(tmp_path):
     file = tmp_path / "events.jsonl"
     good = {
