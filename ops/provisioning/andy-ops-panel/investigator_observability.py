@@ -129,6 +129,8 @@ def sample_investigator_activity(
     age = max(0, int((now - stamp).total_seconds()))
     if latest["event"] in _TERMINAL:
         state = latest["event"].upper()
+    elif latest["event"] == "started" and age <= _STALE_SECONDS:
+        state = "STARTING"
     elif age <= _STALE_SECONDS:
         state = "RUNNING"
     else:

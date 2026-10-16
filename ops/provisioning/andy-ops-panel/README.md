@@ -187,9 +187,10 @@ Investigador V0, sem criar outro painel nem acoplar à interface do ChatGPT.
   identidade L2/L3 da rede 219 existente; não requer IP próprio, IP estático,
   bridge adicional nem nova rede. A autoridade de escrita vem apenas da
   permissão do diretório privado, nunca da conectividade.
-- `RUNNING` exige evento recente (até 20 segundos), **não** é inferido do
-  Docker PID nem do contêiner ligado. Uma execução sem heartbeat/consultas
-  recentes passa a `STALE`, nunca fica verde indefinidamente.
+- `RUNNING` exige consulta ou heartbeat recente (até 20 segundos), **não** é
+  inferido do Docker PID nem do contêiner ligado. Um `started` isolado mostra
+  `STARTING`; sem heartbeat/consultas recentes passa a `STALE`, nunca fica verde
+  indefinidamente.
 - Journal ausente: `AWAITING_EVENTS`; inacessível: `UNAVAILABLE`.
   Eventual falha da telemetria não autoriza nem impede o fluxo da investigação.
 - O emitter oferece `heartbeat`, mas o launcher só poderá emiti-lo se

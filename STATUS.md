@@ -453,5 +453,5 @@ the assets and `docs/demo.md`.
 ## Investigator V0 MGMT journal gate — 2026-10-16
 
 - PR #364 already supplies an opt-in private JSONL journal, bounded MGMT reader and native tab. A synthetic one-shot launcher now injects `InvestigatorJournal` into `Investigator`, verifies the selected VLAN 219 source identity without sending a packet, and uses only scripted connectors. It makes no model request.
-- Added offline coverage for an empty journal, stopped run with terminal event, successful launcher timeline and wrong-network refusal. The active MGMT and existing containers have not yet been changed at this source checkpoint.
+- Added offline coverage for an empty journal, stopped run with terminal event, successful launcher timeline and wrong-network refusal. A lone fresh `started` is now `STARTING`, never `RUNNING`. The active MGMT and existing containers have not yet been changed at this source checkpoint.
 - `git diff --check` and Python compilation passed on AGT. System Python lacks pytest; focused and heavy tests are assigned to distributed CI workers. Runtime activation requires real journal records and an explicit live API verification first.

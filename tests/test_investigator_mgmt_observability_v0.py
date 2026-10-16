@@ -103,7 +103,7 @@ def test_invalid_or_sensitive_events_are_never_forwarded(tmp_path):
     file.write_text("\n".join(json.dumps(x) for x in (invalid, injected, good)) + "\n")
     file.chmod(0o600)
     view = _reader().sample_investigator_activity(enabled=True, path=file)
-    assert view["state"] == "RUNNING"
+    assert view["state"] == "STARTING"
     assert len(view["events"]) == 1 and view["events"][0]["event"] == "started"
     assert "SECRET" not in repr(view)
     assert "prompt" not in repr(view)
