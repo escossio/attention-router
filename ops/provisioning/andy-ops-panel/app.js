@@ -521,6 +521,73 @@ function renderMessageTraces(tracePayload) {
   });
 }
 
+const investigatorEventNames = {
+  started: "Investigação iniciada",
+  heartbeat: "Sinal de atividade",
+  query_requested: "Consulta solicitada",
+  query_observed: "Observação recebida",
+  query_denied: "Consulta negada",
+  query_failed: "Consulta falhou",
+  query_limited: "Limite de consulta",
+  completed: "Investigação concluída",
+  blocked: "Investigação bloqueada",
+  failed: "Investigação falhou",
+  limited: "Orçamento atingido",
+  cancelled: "Investigação cancelada",
+  timeout: "Tempo esgotado",
+};
+
+function renderInvestigator(obs) {
+  obs = obs || {};
+  const stateName = obs.enabled === false ? "DISABLED" : String(obs.state || "UNKNOWN");
+  const names = {
+    DISABLED: "DESABILITADO", NOT_CONFIGURED: "SEM CONFIGURAÇÃO",
+    AWAITING_EVENTS: "AGUARDANDO EVENTOS", UNAVAILABLE: "SEM TELEMETRIA",
+    RUNNING: "EM EXECUÇÃO", STALE: "SEM SINAL RECENTE",
+    COMPLETED: "CONCLUÍDO", FAILED: "FALHA", BLOCKED: "BLOQUEADO",
+    LIMITED: "LIMITE ATINGIDO", CANCELLED: "CANCELADO", TIMEOUT: "TEMPO ESGOTADO",
+  };
+  const indicator = $("#investigator-state");
+  indicator.textContent = names[stateName] || "ESTADO DESCONHECIDO";
+  indicator.className = "source-state " + (
+    stateName === "RUNNING" || stateName === "COMPLETED" ? "live"
+      : ["FAILED", "BLOCKED", "TIMEOUT", "UNAVAILABLE"].includes(stateName) ? "offline" : "ready"
+  );
+  $("#investigator-run").textContent = obs.run_id
+    ? String(obs.run_id).slice(0, 8) + "…"
+    : "—";
+  $("#investigator-age").textContent = obs.age_seconds === null || obs.age_seconds === undefined
+    ? "—" : fmtAge(obs.age_seconds);
+  $("#investigator-query-count").textContent = Number.isInteger(obs.queries) ? String(obs.queries) : "—";
+  const timeline = $("#investigator-timeline");
+  timeline.replaceChildren();
+  const events = Array.isArray(obs.events) ? obs.events : [];
+  if (!events.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = stateName === "DISABLED"
+      ? "Ative o journal privado no MGMT para acompanhar o primeiro ensaio."
+      : "Nenhum evento de investigação recebido até agora.";
+    timeline.append(empty);
+    return;
+  }
+  events.forEach((event) => {
+    const row = document.createElement("div");
+    row.className = "investigator-event";
+    const time = document.createElement("span");
+    time.className = "mono muted";
+    time.textContent = fmtTime(event.timestamp);
+    const title = document.createElement("strong");
+    title.textContent = investigatorEventNames[event.event] || "Evento";
+    const description = document.createElement("span");
+    const step = Number.isInteger(event.ordinal) ? "#" + event.ordinal + " · " : "";
+    description.textContent = step + (event.source && event.operation
+      ? event.source + " / " + event.operation : "metadados de execução");
+    row.append(time, title, description);
+    timeline.append(row);
+  });
+}
+
 function render(payload) {
   state.lastPayload = payload;
   renderNodes(payload.nodes || []);
@@ -529,6 +596,7 @@ function render(payload) {
   renderChat(payload.chat || {});
   renderTransport(payload.transport_observability || {});
   renderMessageTraces(payload.message_traces || {});
+  renderInvestigator(payload.investigator_activity || { enabled: false });
 
   $("#live-label").textContent = "AO VIVO";
   $("#last-update").textContent = "Atualizado " + fmtTime(payload.generated_at);
