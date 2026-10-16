@@ -115,13 +115,20 @@ def test_sdk_run_aggregate_usage_is_settled_with_versioned_prices(monkeypatch):
 def test_missing_invalid_or_out_of_bound_sdk_usage_closes_gate(monkeypatch, observed):
     from agents import Runner
 
-    monkeypatch.setattr(Runner, "run_sync", staticmethod(
-        lambda *args, **kwargs: observed
-    ))
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append("CALLED")
+        return observed
+
+    monkeypatch.setattr(Runner, "run_sync", staticmethod(fake_run))
     gate = _gate()
     with pytest.raises(ModelBudgetDenied, match="MODEL_USAGE_UNKNOWN"):
         _priced(gate).investigate(_event(), None)
     assert gate.terminal_reason == "MODEL_USAGE_UNKNOWN"
+    with pytest.raises(ModelBudgetDenied, match="MODEL_USAGE_UNKNOWN"):
+        _priced(gate).investigate(_event(), None)
+    assert calls == ["CALLED"]
 
 
 def test_provider_exception_does_not_return_reservation_as_free(monkeypatch):

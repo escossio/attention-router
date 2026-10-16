@@ -118,6 +118,8 @@ class AgentsSDKInvestigatorRuntime:
             return None
         if values[0] < 1 or values[0] > self.max_turns:
             return None
+        if values[1] == 0 and values[2] == 0:
+            return None
         assert self.model_pricing is not None
         return ModelUsage(
             values[1], values[2],
