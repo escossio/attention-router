@@ -149,3 +149,41 @@ The original V1 was validated on the engineering control plane with live CPU sam
 ## WhatsApp container observability
 
 Andy Ops reads the Transport `/status`, the Observer bind-mounted `status.json`, and read-only `docker inspect`/`docker logs` for the three WhatsApp containers. The panel process needs read access to Docker and `/var/lib/attention-router/whatsapp-observer/status.json`. Host CDP and retired systemd units are not operational sensors. Missing page evidence is reported as `OBSERVABILITY_GAP`, never as a measured zero. Docker logs are projected to a fixed event-name allowlist; message bodies and credentials are not returned. The boot/AppArmor orchestration issue remains a separate follow-up.
+
+## INVESTIGADOR / Execução observável (V0, opt-in)
+
+Nova aba nativa do MGMT para acompanhar a **ordem real das consultas** do
+Investigador V0, sem criar outro painel nem acoplar à interface do ChatGPT.
+
+- Eventos: início, solicitação/resultado/negação/falha de cada ferramenta,
+  término, falha, limite, timeout e heartbeat opcional.
+- Cada evento traz apenas horário UTC, ID aleatório da execução, número da
+  consulta, `source` e `operation` de listas fechadas. Não armazena parâmetros,
+  comandos shell, IP, nomes privados de host, tenant, prompt, tokens, alertas,
+  hipóteses privadas ou texto de ferramenta.
+- O painel **não** executa comandos; apenas lê um journal JSONL em arquivo
+  protegido montado/disponível no host, limitado a 64 KiB por ciclo e 32
+  eventos por execução. A atualização aproveita o `/api/status` já existente.
+- O painel fica **desabilitado por padrão**. Configure
+  `ANDY_OPS_INVESTIGATOR_OBSERVABILITY_ENABLED=true` e
+  `ANDY_OPS_INVESTIGATOR_JOURNAL=<arquivo absoluto fora do web root>`
+  exclusivamente no arquivo privado do serviço Andy Ops.
+- O lançador autorizado do Investigador deverá injetar
+  `InvestigatorJournal(<mesmo caminho protegido>)` como `activity_sink` em
+  `Investigator(...)`, garantindo permissão de escrita restrita para o
+  contêiner/sidecar e leitura restrita pelo Andy Ops.
+- `RUNNING` exige evento recente (até 20 segundos), **não** é inferido do
+  Docker PID nem do contêiner ligado. Uma execução sem heartbeat/consultas
+  recentes passa a `STALE`, nunca fica verde indefinidamente.
+- Journal ausente: `AWAITING_EVENTS`; inacessível: `UNAVAILABLE`.
+  Eventual falha da telemetria não autoriza nem impede o fluxo da investigação.
+- O emitter oferece `heartbeat`, mas o launcher só poderá emiti-lo se
+  **souber que o processo supervisionado continua vivo**. Não inventar sinal
+  de atividade para esconder travamento.
+- Não implementar controle de execução, botão de restart/kill ou API de
+  autorização nessa aba. Instrumentação não fornece poderes novos ao modelo.
+
+**Gate do primeiro ensaio:** instalar leitor no MGMT sem afetar abas existentes,
+configurar o journal privado e verificar eventos antes de iniciar o primeiro
+modelo real. Uma timeline vazia não significa investigação concluída. A aba
+mostra eventos de ferramentas e decisões **observáveis**, não raciocínio interno.
