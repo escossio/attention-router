@@ -4,13 +4,30 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+from attention_router.investigator.model_usage_gate import (
+    ModelLimits, ModelUsage, ModelUsageGate,
+)
 from attention_router.investigator.agents_sdk_runtime import (
-    AgentsSDKInvestigatorRuntime, HypothesisReport, InvestigatorReport,
+    AgentsSDKInvestigatorRuntime, HypothesisReport, InvestigatorReport, ModelPricing,
 )
 from attention_router.investigator.model import SourceEvent
 from attention_router.investigator.projection import IncidentProjection
 from attention_router.investigator.service import Budget, Investigator
 from attention_router.investigator.simulated import MemoryAudit, MemoryStore, SimulatedConnector
+
+
+def _guarded_runtime(**kwargs):
+    """Use priced, bounded synthetic quotas in every offline SDK-stub test."""
+    if kwargs.get("enable_provider"):
+        model = kwargs["model"]
+        kwargs.setdefault("model_usage_gate", ModelUsageGate(
+            ModelLimits(5000, 2000, 10000, max_calls=1),
+        ))
+        kwargs.setdefault("model_quote", ModelUsage(3000, 1000, 4000))
+        kwargs.setdefault("model_pricing", ModelPricing(
+            model, "synthetic-pricing-only", 1_000_000, 1_000_000,
+        ))
+    return AgentsSDKInvestigatorRuntime(**kwargs)
 
 
 def _admitted_projection(event):
@@ -55,7 +72,7 @@ def _investigator(runtime):
 
 def test_provider_is_disabled_by_default_without_network_or_credentials():
     investigator, store, audit = _investigator(
-        AgentsSDKInvestigatorRuntime(model="test-offline-model"),
+        _guarded_runtime(model="test-offline-model"),
     )
     result = investigator.investigate(_event())
     assert result.status == "failed"
@@ -87,7 +104,7 @@ def test_agents_sdk_tool_loop_with_mock_runner_never_uses_provider(monkeypatch):
         assert json.loads(result)["observation"]["cpu_pct"] == 83
         assert "source_reference" not in json.loads(result)
         assert "event_sha256" not in json.loads(result)
-        return SimpleNamespace(final_output=InvestigatorReport(
+        return SimpleNamespace(context_wrapper=SimpleNamespace(usage=SimpleNamespace(requests=1, input_tokens=21, output_tokens=13)), final_output=InvestigatorReport(
             hypotheses=[HypothesisReport(
                 statement="Resource pressure is temporally compatible but not proven causal",
                 evidence_indexes=[0],
@@ -99,7 +116,7 @@ def test_agents_sdk_tool_loop_with_mock_runner_never_uses_provider(monkeypatch):
         ))
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(simulated_sdk_run))
-    investigator, store, audit = _investigator(AgentsSDKInvestigatorRuntime(
+    investigator, store, audit = _investigator(_guarded_runtime(
         model="test-offline-model", enable_provider=True, projection_resolver=_admitted_projection, max_turns=4,
     ))
     result = investigator.investigate(_event())
@@ -117,13 +134,13 @@ def test_agents_sdk_rejects_model_invented_evidence(monkeypatch):
     from agents import Runner
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(
-        lambda *args, **kwargs: SimpleNamespace(final_output=InvestigatorReport(
+        lambda *args, **kwargs: SimpleNamespace(context_wrapper=SimpleNamespace(usage=SimpleNamespace(requests=1, input_tokens=21, output_tokens=13)), final_output=InvestigatorReport(
             conclusion_summary="Unsupported definitive cause",
             conclusion_evidence_indexes=[42],
             conclusion_classification="PROVEN",
         )),
     ))
-    investigator, _, _ = _investigator(AgentsSDKInvestigatorRuntime(
+    investigator, _, _ = _investigator(_guarded_runtime(
         model="test-offline-model", enable_provider=True, projection_resolver=_admitted_projection,
     ))
     result = investigator.investigate(_event())
@@ -139,14 +156,14 @@ def test_agents_sdk_has_no_unrestricted_tools_or_transport(monkeypatch):
         assert all(tool.name == "read_observation" for tool in agent.tools)
         assert not agent.handoffs
         assert not agent.mcp_servers
-        return SimpleNamespace(final_output=InvestigatorReport(
+        return SimpleNamespace(context_wrapper=SimpleNamespace(usage=SimpleNamespace(requests=1, input_tokens=21, output_tokens=13)), final_output=InvestigatorReport(
             conclusion_summary="Cannot determine cause",
             conclusion_evidence_indexes=[],
             conclusion_classification="UNKNOWN",
         ))
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(fake_run))
-    investigator, _, _ = _investigator(AgentsSDKInvestigatorRuntime(
+    investigator, _, _ = _investigator(_guarded_runtime(
         model="test-offline-model", enable_provider=True, projection_resolver=_admitted_projection,
     ))
     result = investigator.investigate(_event())
@@ -170,10 +187,10 @@ def test_sdk_tool_rejects_mutating_operation_without_connector_access(monkeypatc
         )
         with pytest.raises(Exception):
             asyncio.run(agent.tools[0].on_invoke_tool(ctx, payload))
-        return SimpleNamespace(final_output=InvestigatorReport())
+        return SimpleNamespace(context_wrapper=SimpleNamespace(usage=SimpleNamespace(requests=1, input_tokens=21, output_tokens=13)), final_output=InvestigatorReport())
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(fake_runner))
-    investigator, _, audit = _investigator(AgentsSDKInvestigatorRuntime(
+    investigator, _, audit = _investigator(_guarded_runtime(
         model="test-offline-model", enable_provider=True, projection_resolver=_admitted_projection,
     ))
     result = investigator.investigate(_event())
@@ -207,7 +224,7 @@ def test_malicious_tool_response_cannot_reach_sdk_context(monkeypatch):
 
     monkeypatch.setattr(Runner, "run_sync", staticmethod(model_stub))
     investigator = Investigator(
-        AgentsSDKInvestigatorRuntime(
+        _guarded_runtime(
             model="offline-only", enable_provider=True,
             projection_resolver=_admitted_projection,
         ),
