@@ -23,6 +23,7 @@
   <nav class="tabs" aria-label="Painéis">
     <button class="tab is-active" data-tab="compute" type="button">COMPUTE</button>
     <button class="tab" data-tab="chat" type="button">CHAT / CONSOLE</button>
+    <button class="tab" data-tab="investigator" type="button">INVESTIGADOR</button>
     <button class="tab" data-tab="transport" type="button">AGENT / TRANSPORT</button>
     <button class="tab" data-tab="goaccess" type="button">HTTP / GOACCESS</button>
     <button class="tab" data-tab="dozzle" type="button">CONTAINERS / DOZZLE</button>
@@ -197,6 +198,42 @@
           <span class="muted">somente eventos relevantes · read-only</span>
         </div>
         <div id="wa-timeline" class="transport-timeline"></div>
+      </section>
+    </section>
+
+    <section id="investigator-view" class="view" aria-label="Acompanhamento do Investigador">
+      <section class="transport-hero">
+        <div>
+          <span class="section-label">ATIVIDADE OBSERVADA · SOMENTE LEITURA</span>
+          <h2>Investigador V0 — sequência de execução</h2>
+          <p>Consultas realmente executadas, em ordem, sem depender do chat.
+             Não exibe argumentos, alertas originais, prompts ou raciocínio interno do modelo.</p>
+        </div>
+        <span id="investigator-state" class="source-state ready" aria-live="polite">DESABILITADO</span>
+      </section>
+      <section class="investigator-summary" aria-label="Resumo da investigação">
+        <article class="transport-card">
+          <span class="section-label">EXECUÇÃO</span>
+          <strong id="investigator-run">—</strong>
+        </article>
+        <article class="transport-card">
+          <span class="section-label">ÚLTIMO SINAL</span>
+          <strong id="investigator-age">—</strong>
+        </article>
+        <article class="transport-card">
+          <span class="section-label">CONSULTAS REGISTRADAS</span>
+          <strong id="investigator-query-count">0</strong>
+        </article>
+      </section>
+      <section class="history-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">JOURNAL DO INVESTIGADOR</span>
+            <h2>Ordem real das consultas</h2>
+          </div>
+          <span class="muted">eventos tipados · sem payload · sem execução de comandos</span>
+        </div>
+        <div id="investigator-timeline" class="investigator-timeline" aria-live="polite"></div>
       </section>
     </section>
 
