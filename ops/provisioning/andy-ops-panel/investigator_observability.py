@@ -85,14 +85,19 @@ def sample_investigator_activity(
     if not path or not Path(path).is_absolute():
         return {"enabled": True, "state": "NOT_CONFIGURED", "age_seconds": None, "events": [], "queries": 0}
     file_path = Path(path)
+    # Never read a journal from the static web root. The HTTP server serves
+    # that tree directly; the raw file must stay in private host storage.
+    panel_root = Path(__file__).resolve().parent
+    if panel_root == file_path or panel_root in file_path.resolve(strict=False).parents:
+        return {"enabled": True, "state": "UNAVAILABLE", "age_seconds": None, "events": [], "queries": 0}
     if file_path.is_symlink():
         return {"enabled": True, "state": "UNAVAILABLE", "age_seconds": None, "events": [], "queries": 0}
     try:
         fd = os.open(file_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode):
-                raise ValueError("NOT_REGULAR_FILE")
+            if not stat.S_ISREG(info.st_mode) or (info.st_mode & stat.S_IROTH):
+                raise ValueError("NOT_PRIVATE_REGULAR_FILE")
             with os.fdopen(fd, "rb", closefd=False) as handle:
                 handle.seek(max(info.st_size - _TAIL_BYTES, 0))
                 data = handle.read(_TAIL_BYTES)
