@@ -1,5 +1,6 @@
 """INV219: offline, no-provider test of SDK run quota admission and settlement."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -143,4 +144,24 @@ def test_provider_exception_does_not_return_reservation_as_free(monkeypatch):
         _priced(gate).investigate(_event(), None)
     assert gate.terminal_reason == "MODEL_USAGE_UNKNOWN"
     with pytest.raises(ModelBudgetDenied, match="MODEL_USAGE_UNKNOWN"):
+        _priced(gate).investigate(_event(), None)
+
+
+def test_received_response_usage_survives_later_tool_failure(monkeypatch):
+    from agents import Runner
+
+    def failed_after_response(agent, input, max_turns):
+        context = SimpleNamespace(usage=SimpleNamespace(
+            requests=1, input_tokens=40, output_tokens=15,
+        ))
+        asyncio.run(agent.hooks.on_llm_end(context, agent, None))
+        raise RuntimeError("synthetic tool failure")
+
+    monkeypatch.setattr(Runner, "run_sync", staticmethod(failed_after_response))
+    gate = _gate()
+    with pytest.raises(RuntimeError, match="synthetic tool failure"):
+        _priced(gate).investigate(_event(), None)
+    assert gate.spent == ModelUsage(40, 15, 55)
+    assert gate.terminal_reason == "MODEL_USAGE_PARTIAL"
+    with pytest.raises(ModelBudgetDenied, match="MODEL_USAGE_PARTIAL"):
         _priced(gate).investigate(_event(), None)

@@ -1,5 +1,9 @@
 # Project status
 
+- 2026-10-16: A correção independente do PR #360 (`7d412ff40933dd239cb091dd34ef9de9ad37453f`) passou a suíte completa `transport-tests` nos workers CI01 (Node 22.23.3, npm 10.9.9) e CI02 (Node 22.23.3, npm 12.2.0). O mesmo patch de `sdks/typescript/tests/installed-package.mjs` foi integrado ao PR draft #366. No SHA de código `3642b871df1e529451a2f4f4bfee5a7b76f6b322`, os quatro checks distribuídos (Python, PostgreSQL, Docker e Transport) passaram; o commit documental seguinte requer a mesma validação por SHA. Nenhum ensaio real, merge ou mudança de infraestrutura foi realizado. Registro: issue #356.
+
+- 2026-10-16: Reparo offline do Investigador V0 após INV-REAL-009 preparado em PR draft #366, baseado no #365. Instrumentação de tentativas, catálogo autorizado, snapshot privado de uso por resposta, conclusão sanitizada e empacotamento da fixture corrigidos. 131 testes focados PASS no CI01 sem rede/provider; gates distribuídos por SHA seguem obrigatórios antes de outro ensaio. Nenhuma chamada ao modelo, deploy, merge ou mudança na VLAN/MGMT/credenciais nesta etapa. Registro operacional: issue #356.
+
 - 2026-10-07: Andy Ops container observability corrigida em PR #308 (`fix/andy-ops-container-whatsapp-observability-v1`). Runtime live mudou somente em `transport_observability.py`, `app.js`, `index.html`, com backup `/root/andy-ops-panel-backup-20261007-container-observability`; reiniciado somente `andy-ops-panel.service`. API live: Browser container healthy/página 1, Transport READY/CONNECTED/página 1, Observer READY/página 1, `severity=OK`, divergências vazias; UI estática servida atualizada, HTTPS gestão exige autenticação (401 sem credenciais). Containers WhatsApp mantiveram IDs e health. 11 checks verdes no commit de código `95a1c96`; registro documental aguarda checks próprios. Boot/AppArmor permanece follow-up separado.
 
 ## WhatsApp container runtime — second cutover PASS, reboot pending

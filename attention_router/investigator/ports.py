@@ -14,6 +14,10 @@ class ReadOnlyConnector(Protocol):
 class QueryAccess(Protocol):
     def read(self, query: Query) -> Evidence: ...
 
+    def catalog(self) -> tuple[tuple[str, str], ...]:
+        """Authorized source/operation pairs only; never observations."""
+        ...
+
 
 class AgentRuntime(Protocol):
     def investigate(self, event: SourceEvent, queries: QueryAccess) -> Findings: ...

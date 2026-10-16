@@ -73,6 +73,12 @@ def test_mocked_agents_sdk_queries_replay_on_demand_and_preserves_evidence(monke
         assert max_turns == 6
         assert len(agent.tools) == 1 and agent.tools[0].name == "read_observation"
         assert not agent.handoffs and not agent.mcp_servers
+        catalog = agent.instructions
+        assert '"operation":"read_event","source":"zabbix"' in catalog
+        assert '"operation":"read_history","source":"zabbix"' in catalog
+        assert '"operation":"read_trace","source":"tempo"' in catalog
+        assert '"operation":"read_jobs","source":"distributed_ci"' in catalog
+        assert "matched_spans" not in catalog and "oracle" not in catalog
         # Event bytes, original alert fields and tenant must remain out of prompt.
         prompt = json.dumps(input)
         assert "resource-pressure" not in prompt

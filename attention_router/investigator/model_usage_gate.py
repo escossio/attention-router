@@ -106,8 +106,10 @@ class ModelUsageGate:
             self._attempted_calls += 1
             self._inflight[call_id] = ceiling
 
-    def settle(self, call_id: str, measured: ModelUsage | None) -> None:
-        """Apply measured usage; unknown usage blocks further calls, not zero cost."""
+    def settle(
+        self, call_id: str, measured: ModelUsage | None, *, complete: bool = True,
+    ) -> None:
+        """Keep known tokens even if a later response fails; never mark partial as free."""
         with self._lock:
             ceiling = self._inflight.pop(call_id, None)
             if ceiling is None:
@@ -130,6 +132,8 @@ class ModelUsageGate:
             ):
                 self._terminal_reason = "MODEL_RESERVATION_OVERRUN"
                 raise ModelBudgetDenied(self._terminal_reason)
+            if not complete:
+                self._terminal_reason = "MODEL_USAGE_PARTIAL"
 
     def mark_failed_without_usage(self, call_id: str) -> None:
         """Provider error without trustworthy usage must not release the budget."""

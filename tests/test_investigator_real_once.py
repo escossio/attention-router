@@ -1,5 +1,6 @@
 """Offline contract tests for the real one-shot boundary; no provider calls."""
 
+import asyncio
 import json
 import sys
 from types import ModuleType, SimpleNamespace
@@ -56,10 +57,50 @@ def test_parent_invokes_hard_supervisor_and_timeout_is_not_a_conclusion(monkeypa
     assert "OPENAI_API_KEY" not in seen["env"]
     assert json.loads(result.read_text()) == {
         "run_id": json.loads(result.read_text())["run_id"], "status": "timeout",
-        "query_count": 0, "usage": None, "limited": True,
+        "query_count": 0, "usage": None, "usage_state": "unknown",
+        "conclusion": None, "limited": True,
     }
     assert '"event":"timeout"' in journal.read_text()
     assert "synthetic-test-key" not in journal.read_text()
+
+
+def test_parent_recovers_private_known_usage_after_hard_timeout(monkeypatch, tmp_path):
+    key = tmp_path / "key"
+    key.write_text("synthetic-test-key")
+    key.chmod(0o600)
+    result, journal = _paths(tmp_path)
+
+    def timed_out_after_response(argv, *, deadline_seconds, env, cwd):
+        snapshot = argv[argv.index("--usage-snapshot") + 1]
+        run_id = argv[argv.index("--run-id") + 1]
+        one._write_usage_snapshot(
+            one.Path(snapshot), run_id,
+            ModelUsage(40, 15, one.PRICING.cost_micro_usd(40, 15)),
+        )
+        return SimpleNamespace(timed_out=True, exit_code=None)
+
+    monkeypatch.setattr(one, "run_with_deadline", timed_out_after_response)
+    assert one._parent(key, result, journal) == 124
+    summary = json.loads(result.read_text())
+    assert summary["usage_state"] == "partial"
+    assert summary["usage"] == {
+        "input_tokens": 40, "output_tokens": 15,
+        "cost_micro_usd": one.PRICING.cost_micro_usd(40, 15),
+    }
+    assert summary["status"] == "timeout" and summary["conclusion"] is None
+    assert (tmp_path / "result.json.usage.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_usage_snapshot_wrong_run_or_cost_remains_unknown(tmp_path):
+    path = tmp_path / "snapshot.json"
+    actual = str(uuid4())
+    one._write_usage_snapshot(path, actual, ModelUsage(40, 15, one.PRICING.cost_micro_usd(40, 15)))
+    assert one._read_usage_snapshot(path, str(uuid4())) is None
+    path.write_text(json.dumps({
+        "run_id": actual, "input_tokens": 40, "output_tokens": 15,
+        "cost_micro_usd": 0,
+    }))
+    assert one._read_usage_snapshot(path, actual) is None
 
 
 def test_supervisor_really_kills_isolated_child_on_deadline():
@@ -83,6 +124,7 @@ def test_child_synthetic_tool_call_journal_and_usage(monkeypatch, tmp_path, toke
     monkeypatch.setitem(sys.modules, "openai", openai)
     fake.set_tracing_disabled = lambda value: None
     fake.Agent = lambda **kwargs: SimpleNamespace(**kwargs)
+    fake.AgentHooks = object
     fake.AgentOutputSchema = lambda *args, **kwargs: None
     fake.ModelSettings = lambda **kwargs: SimpleNamespace(**kwargs)
     fake.function_tool = lambda **kwargs: (lambda function: SimpleNamespace(function=function))
@@ -96,10 +138,16 @@ def test_child_synthetic_tool_call_journal_and_usage(monkeypatch, tmp_path, toke
         observation = agent.tools[0].function("zabbix", "read_event")
         assert json.loads(observation)["observation"]["severity"] == "warning"
         assert "synthetic-test-key" not in repr(input)
+        report = InvestigatorReport(
+            conclusion_summary="Resource pressure remains unproven",
+            conclusion_evidence_indexes=[0],
+            conclusion_classification="INDICATIVE",
+            limitations=["Single synthetic observation"],
+        )
         return SimpleNamespace(
             context_wrapper=SimpleNamespace(usage=SimpleNamespace(
                 requests=1, input_tokens=tokens, output_tokens=tokens,
-            )), final_output=InvestigatorReport(),
+            )), final_output=report,
         )
 
     fake.Runner = SimpleNamespace(run_sync=run_sync)
@@ -111,12 +159,82 @@ def test_child_synthetic_tool_call_journal_and_usage(monkeypatch, tmp_path, toke
         "input_tokens": tokens, "output_tokens": tokens,
         "cost_micro_usd": one.PRICING.cost_micro_usd(tokens, tokens),
     }
-    assert summary == {"run_id": run_id, "status": status, "query_count": 1,
-                       "usage": expected_usage, "limited": limited}
+    assert summary["run_id"] == run_id and summary["status"] == status
+    assert summary["query_count"] == 1 and summary["usage"] == expected_usage
+    assert summary["usage_state"] == ("unknown" if tokens == 0 else "complete")
+    assert summary["limited"] is limited
+    if tokens:
+        assert summary["conclusion"] == {
+            "classification": "INDICATIVE",
+            "summary": "Resource pressure remains unproven",
+            "summary_redacted": False,
+            "limitations": ["Single synthetic observation"],
+            "limitations_truncated": False,
+            "evidence_refs": [{"index": 0, "source": "zabbix", "operation": "read_event"}],
+        }
+    else:
+        assert summary["conclusion"] is None
     events = [json.loads(line)["event"] for line in journal.read_text().splitlines()]
     assert events == ["started", "query_requested", "query_observed", status]
     assert "synthetic-test-key" not in journal.read_text() + result.read_text()
     assert result.stat().st_mode & 0o777 == 0o600
+
+
+def test_private_conclusion_redacts_sensitive_text_and_never_saves_payload():
+    from attention_router.investigator.model import (
+        Conclusion, Evidence, Findings, Investigation, Query, SourceEvent,
+    )
+
+    secret = "sk-proj-ABCDEF123456789"
+    query = Query("zabbix", "read_event", {"token": secret})
+    evidence = Evidence(query, {"debug": secret}, "synthetic:zabbix:read_event")
+    findings = Findings((evidence,), (), Conclusion(
+        secret, (0,), ("Only one sample", "https://private.example/secret"), "UNKNOWN",
+    ))
+    result = Investigation(str(uuid4()), SourceEvent(
+        "synthetic-zabbix", b"seed", "text/plain", "synthetic-tenant",
+    ), findings, "completed", 1, partial_evidence=(evidence,))
+    view = one._safe_conclusion(result, {"zabbix": frozenset({"read_event"})})
+    assert view["classification"] == "UNKNOWN"
+    assert view["summary"] is None and view["summary_redacted"] is True
+    assert view["limitations"] == ["Only one sample", "REDACTED"]
+    assert view["evidence_refs"] == [{
+        "index": 0, "source": "zabbix", "operation": "read_event",
+    }]
+    assert secret not in json.dumps(view) and "private.example" not in json.dumps(view)
+
+
+def test_child_persists_known_partial_usage_after_runner_error(monkeypatch, tmp_path):
+    from agents import Runner
+
+    key = tmp_path / "key"
+    key.write_text("synthetic-test-key")
+    key.chmod(0o600)
+    result, journal = _paths(tmp_path)
+    snapshot = tmp_path / "usage.json"
+
+    def failed_after_response(agent, input, max_turns):
+        context = SimpleNamespace(usage=SimpleNamespace(
+            requests=1, input_tokens=40, output_tokens=15,
+        ))
+        asyncio.run(agent.hooks.on_llm_end(context, agent, None))
+        raise RuntimeError("synthetic tool failure")
+
+    monkeypatch.setattr(Runner, "run_sync", staticmethod(failed_after_response))
+    run_id = str(uuid4())
+    assert one._child(key, result, journal, run_id, snapshot) == one.EXIT["failed"]
+    summary = json.loads(result.read_text())
+    assert summary["usage_state"] == "partial"
+    assert summary["usage"] == {
+        "input_tokens": 40, "output_tokens": 15,
+        "cost_micro_usd": one.PRICING.cost_micro_usd(40, 15),
+    }
+    assert summary["status"] == "failed" and summary["limited"] is True
+    assert summary["conclusion"] is None
+    assert one._read_usage_snapshot(snapshot, run_id) == ModelUsage(
+        40, 15, one.PRICING.cost_micro_usd(40, 15),
+    )
+    assert "synthetic-test-key" not in result.read_text() + journal.read_text()
 
 def test_supervised_run_id_rejects_untrusted_non_uuid4():
     from attention_router.investigator.model import SourceEvent

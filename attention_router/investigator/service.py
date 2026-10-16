@@ -67,6 +67,14 @@ class _BoundedQueries:
         self.observed = []
         self.observed_bytes = 0
 
+    def catalog(self) -> tuple[tuple[str, str], ...]:
+        return tuple(sorted(
+            (source, operation)
+            for source, operations in self.allowed_operations.items()
+            if source in self.connectors
+            for operation in operations
+        ))
+
     def _record(self, event: str) -> None:
         self.audit.record(self.investigation_id, self.correlation_id, event)
 
@@ -94,19 +102,21 @@ class _BoundedQueries:
             {"source": query.source, "operation": query.operation, "arguments": query.arguments},
             sort_keys=True, separators=(",", ":"), ensure_ascii=True,
         ).encode("utf-8")).hexdigest()[:16]
+        serial = self.count + 1
+        self._record(f"query.{serial}.requested:{fingerprint}")
+        self._signal("query_requested", query, serial)
         try:
             self.check_time()
         except BudgetExceeded:
             self._record(f"query.time_budget_rejected:{fingerprint}")
+            self._signal("query_limited", query, serial)
             raise
         if self.count >= self.budget.max_queries:
             self._record(f"query.query_budget_rejected:{fingerprint}")
+            self._signal("query_limited", query, serial)
             raise BudgetExceeded("QUERY_BUDGET_EXCEEDED")
 
         self.count += 1
-        serial = self.count
-        self._record(f"query.{serial}.requested:{fingerprint}")
-        self._signal("query_requested", query, serial)
 
         # The allowlist is supplied by an external, trusted authority, not the model.
         if query.operation not in self.allowed_operations.get(query.source, frozenset()):
