@@ -117,3 +117,19 @@ def test_child_synthetic_tool_call_journal_and_usage(monkeypatch, tmp_path, toke
     assert events == ["started", "query_requested", "query_observed", status]
     assert "synthetic-test-key" not in journal.read_text() + result.read_text()
     assert result.stat().st_mode & 0o777 == 0o600
+
+def test_supervised_run_id_rejects_untrusted_non_uuid4():
+    from attention_router.investigator.model import SourceEvent
+    from attention_router.investigator.service import Budget, Investigator
+    from attention_router.investigator.simulated import (
+        MemoryAudit, MemoryStore, ScriptedRuntime,
+    )
+
+    investigator = Investigator(
+        ScriptedRuntime(()), {}, MemoryStore(), MemoryAudit(), Budget(1, 5),
+        authorized_tenants=frozenset({"synthetic"}),
+    )
+    event = SourceEvent("synthetic", b"seed", "text/plain", "synthetic")
+    with pytest.raises(ValueError, match="INVALID_INVESTIGATION_ID"):
+        investigator.investigate(event, investigation_id="untrusted-id")
+    assert investigator.investigate(event, investigation_id=str(uuid4())).status == "completed"
