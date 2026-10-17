@@ -1,0 +1,19 @@
+# Apply only after MAESTRO TLS, routing, binding and synthetic ACK are proven.
+# Keeps the existing Relay network placement; no second attachment.
+services:
+  occurrence-relay:
+    environment:
+      MAESTRO_URL: ${MAESTRO_URL:?validated private HTTPS occurrence endpoint required}
+      MAESTRO_TOKEN_FILE: /run/secrets/maestro_token
+      MAESTRO_CA_FILE: /run/tls/maestro-ca.pem
+    volumes:
+      - type: bind
+        source: ${MAESTRO_RELAY_TOKEN_HOST_FILE:?private scoped token file required}
+        target: /run/secrets/maestro_token
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MAESTRO_RELAY_CA_HOST_FILE:?private trusted certificate required}
+        target: /run/tls/maestro-ca.pem
+        read_only: true
+        bind: {create_host_path: false}

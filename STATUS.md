@@ -1,5 +1,12 @@
 # Project status
 
+## MAESTRO standalone operational container — candidate, 2026-10-17
+
+- Branch `feat/maestro-standalone-vlan-operational-20261017` at base `c391e591257447784be8748c864272b35983b37b`: dedicated TLS-only process and Compose candidate added under `ops/maestro-standalone/`, plus an opt-in Relay overlay. The existing HTTP ingress, Relay runtime, Zabbix/Telegram, PostgreSQL and Investigator were not changed by this code step. MAESTRO remains a durable receipt receiver, not an investigation/prioritization/resolution engine.
+- Read-only live inventory found Linux VLANs 210–219, no RouterOS VLAN/interface address 220, and no Docker network 220. The available Host Registry is the distributed-CI host endpoint registry, not an IPAM reservation authority. VLAN 220 and the contiguous block therefore remain candidates; no VLAN, address, gateway or network was allocated. Private address data is not recorded here.
+- Compose expansion with synthetic values, Python compilation and `git diff --check` passed. Local Python tests could not start: the control-plane Python lacks pytest/FastAPI/SQLAlchemy. PostgreSQL/full validation belongs on distributed workers after publishing the candidate SHA. No migration 0058, binding, private certificate, MAESTRO container, Relay destination or Zabbix media action has been installed.
+- Deployment gate: authoritative reservation for VLAN/subnet/gateway/IP; private network and route proof; DB backup/revision precheck; scoped tenant binding and TLS material; HTTPS health; Relay synthetic 202/200/retry/outbox; before/after legacy health. Rollback is Relay overlay removal and MAESTRO stop, preserving outbox and DB receipts; never destructive downgrade of 0058.
+
 - 2026-10-07: Andy Ops container observability corrigida em PR #308 (`fix/andy-ops-container-whatsapp-observability-v1`). Runtime live mudou somente em `transport_observability.py`, `app.js`, `index.html`, com backup `/root/andy-ops-panel-backup-20261007-container-observability`; reiniciado somente `andy-ops-panel.service`. API live: Browser container healthy/página 1, Transport READY/CONNECTED/página 1, Observer READY/página 1, `severity=OK`, divergências vazias; UI estática servida atualizada, HTTPS gestão exige autenticação (401 sem credenciais). Containers WhatsApp mantiveram IDs e health. 11 checks verdes no commit de código `95a1c96`; registro documental aguarda checks próprios. Boot/AppArmor permanece follow-up separado.
 
 ## WhatsApp container runtime — second cutover PASS, reboot pending

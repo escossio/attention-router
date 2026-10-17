@@ -1,0 +1,56 @@
+name: andy-maestro-standalone
+
+services:
+  maestro:
+    image: ${MAESTRO_IMAGE:?pin an image built from the exact published Git SHA}
+    container_name: andy-maestro-standalone
+    command: [python, -m, attention_router.web.maestro_standalone_server]
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/tmp:mode=1777,noexec,nosuid]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    cpus: "0.50"
+    mem_limit: 256m
+    restart: unless-stopped
+    stop_grace_period: 20s
+    env_file:
+      - ${MAESTRO_RUNTIME_ENV_FILE:?private runtime env required}
+    environment:
+      MAESTRO_DATABASE_URL_FILE: /run/secrets/database_url
+      MAESTRO_HTTPS_CERTFILE: /run/tls/server.crt
+      MAESTRO_HTTPS_KEYFILE: /run/tls/server.key
+    volumes:
+      - type: bind
+        source: ${MAESTRO_DATABASE_URL_HOST_FILE:?private database URL file required}
+        target: /run/secrets/database_url
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MAESTRO_CERT_HOST_FILE:?private certificate file required}
+        target: /run/tls/server.crt
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MAESTRO_KEY_HOST_FILE:?private private-key file required}
+        target: /run/tls/server.key
+        read_only: true
+        bind: {create_host_path: false}
+    networks:
+      operational:
+        ipv4_address: ${MAESTRO_RESERVED_IP:?use only an authoritative private reservation}
+    healthcheck:
+      test: [CMD, python, -m, attention_router.web.maestro_standalone_server, --health]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: {max-size: 2m, max-file: "2"}
+
+networks:
+  operational:
+    external: true
+    name: ${MAESTRO_NETWORK_NAME:?use only a preprovisioned operational network}
