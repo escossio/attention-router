@@ -72,6 +72,24 @@ def test_registry_is_exact_static_gmail_and_constructs_without_io(deny_io):
     assert (entry.adapter.max_results, entry.adapter.max_pages) == (5, 10)
 
 
+def test_registry_accepts_attachment_mode_with_artifact_store_without_io(deny_io):
+    registry = service.build_channel_sync_registry(
+        configured(
+            enabled=True,
+            gmail_attachment_ingestion_enabled=True,
+            artifact_store_enabled=True,
+            artifact_store_root="/var/lib/attention-router/artifacts",
+        )
+    )
+    entry = registry["google.gmail"]
+    assert entry.enabled
+    assert entry.adapter.runner.settings.gmail_attachment_ingestion_enabled is True
+    assert entry.adapter.runner.settings.artifact_store_enabled is True
+    assert entry.adapter.runner.settings.artifact_store_root == (
+        "/var/lib/attention-router/artifacts"
+    )
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 def test_check_never_calls_provider_database_or_ingress(enabled, deny_io, monkeypatch, caplog):
     import attention_router.config
@@ -104,7 +122,6 @@ def test_disabled_service_exits_without_discovery_or_wait(deny_io):
     {"gmail_product_runner_ingress_url": "http://ingress.invalid:bad/api/v1/ingress/integrations/events"},
     {"gmail_product_runner_ingress_url": "http://ingress.invalid/health/live"},
     {"gmail_product_runner_ingress_url": "http://user:secret@ingress.invalid/api/v1/ingress/integrations/events"},
-    {"gmail_attachment_ingestion_enabled": True, "artifact_store_enabled": True},
 ])
 def test_invalid_configuration_fails_closed(changes, monkeypatch, deny_io, caplog):
     import attention_router.config
