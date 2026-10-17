@@ -193,10 +193,36 @@ No new historical ingestion is enabled. `HistoryAdapter -> HistoryBackfillServic
 historical bootstrap is intentionally deferred; no historyId reuse/reseed and no
 second historical engine are introduced.
 
-## Frozen follow-ups
+## Live deployment proof — 2026-10-05
 
-The precursor's `GMAIL_PRODUCT_INGRESS_FAILED` incident is a separate application
-investigation; successful health reachability does not prove event admission.
-It is not a reason to add networks or change ingress authority here. IPAM
-installation, inventory bootstrap, allocation, physical networking, live cutover
-and retirement of the legacy scheduler all require future operational work.
+The previously frozen `GMAIL_PRODUCT_INGRESS_FAILED` incident is resolved. The
+failure was not a VLAN/L2/L3 problem and did not require wider Channel Sync
+network attachment.
+
+The live Gmail runtime had been targeting the Internal Ingress listener with the
+Neutral Integration Ingress route. The request therefore reached a healthy
+application over the network but received HTTP 404 because that route belongs to
+`attention_router.web.ingress_app:app`, not
+`attention_router.web.internal_ingress_app:app`.
+
+A separate Neutral Integration Ingress deployment restored the intended surface.
+The legacy Gmail scheduler then received real HTTP 202 admissions. During the
+first Channel Sync cutover, its dedicated host-private env was found to retain
+the old ingress target; after correcting that target and force-recreating the
+container, Channel Sync completed a live cycle with `processed=1`,
+`accepted=2`, `cursor_advanced=1` and `failed=0`. A following cycle also
+completed with `failed=0`.
+
+The legacy Gmail scheduler was stopped before the successful Channel Sync run.
+ProviderAuthorization, binding, credential, OAuth scope and Gmail cursor
+semantics were preserved; no cursor reseed was performed. Integration dispatch
+remains disabled, so admitted work stays queued for a separately authorized
+frontier.
+
+Exact private addresses and host inventory remain outside Git. IPAM is still
+deferred by operator decision; the manually authorized live allocation must be
+imported during the future inventory bootstrap before IPAM becomes authoritative
+for new assignments.
+
+Full sanitized evidence and rollback/follow-up boundaries are recorded in
+[the live cutover checkpoint](../checkpoints/CHANNEL_SYNC_LIVE_CUTOVER_20261005.md).

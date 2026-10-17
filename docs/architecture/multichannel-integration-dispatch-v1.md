@@ -1,6 +1,6 @@
 # Multi-channel Integration Dispatch V1
 
-Status: implementation candidate
+Status: implementation complete; live rollout proven 2026-10-05
 
 Related:
 - #83 Multi-channel expansion
@@ -180,10 +180,11 @@ Adds:
 - `INTEGRATION_DISPATCH_ENABLED=false`
 - `INTEGRATION_DISPATCH_BATCH_SIZE=20`
 
-Dispatch remains OFF by default.
+Dispatch remains OFF by default. The live deployment now enables it explicitly
+through host-private configuration; repository defaults remain fail-closed.
 
-Neutral HTTP admission and neutral dispatch can therefore be rolled out
-independently.
+Neutral HTTP admission and neutral dispatch can therefore still be rolled out,
+disabled and rolled back independently.
 
 ## Hard boundary
 
@@ -198,7 +199,32 @@ This stage does not:
 - create capability grants;
 - create ExecutionIntentRow;
 - send replies or notifications;
-- enable the neutral ingress or dispatcher in production.
+- change live enablement automatically. Production rollout remains an explicit
+  operator-controlled deployment action.
+
+## Live rollout proof — 2026-10-05
+
+After the Gmail Channel Sync path was admitted successfully through the Neutral
+Integration Ingress, the dispatcher was validated against the real pending inbox
+before enablement.
+
+A rollback-only transaction selected 28 pending rows and produced a transient
+projection of 28 Canonical Events and 28 Timeline Events with zero BLOCKED rows.
+The same transaction produced zero decision queue rows, zero Agent execution
+intents and zero outbox messages; rollback restored the pre-probe database state.
+
+The live worker then enabled the existing gate with batch size 20. The backlog
+committed in bounded cycles of 20 and 8 with zero blocked items. Those cycles also
+reported zero Agent decisions and zero outbox processing attributable to the
+dispatch step. Continued Gmail admission was subsequently observed as fully
+processed with one Canonical Event and one Timeline Event per admitted inbox row.
+
+Channel Sync, Neutral Integration Ingress and the worker remained healthy. The
+WhatsApp Browser, Observer and Transport services remained active and were not
+restarted for this rollout.
+
+No memory, Personal Context, attachment or historical-backfill feature was
+enabled by the dispatch rollout.
 
 ## Proof
 
@@ -221,14 +247,14 @@ PostgreSQL tests cover:
 
 ## Next safe stage
 
-After this PR is integrated, the next #83 slice is the first live e-mail
-connector/provider:
+The live e-mail channel path is now proven through:
 
-native e-mail provider
--> EmailNormalizedAdapter
--> neutral HTTP ingress
--> durable inbox
--> canonical dispatcher
+`Gmail / Channel Sync -> Neutral Integration Ingress -> durable inbox -> canonical dispatcher -> Timeline`
+
+The next safe frontier is stabilization of that channel path followed by a
+separately reviewed decision about consumers of Canonical Event/Timeline data.
+Memory, Personal Context, Agent decisions, execution and external delivery must
+not be inferred from dispatch enablement and remain independently gated.
 
 Provider OAuth/credentials remain connector-side and never become Attention
 Router business authority.
