@@ -52,7 +52,7 @@ Cabeçalhos candidatos: Content-Type application/json; Authorization Bearer de s
 - Fonte canônica do tenant, vínculo de credencial por instalação, autorização de evento.
 - Contrato de recusa e código de aceite, idempotência e consistência transacional.
 - Rede mínima Zabbix → Relay → MAESTRO sem dual-homing ou alteração de VLAN injustificada.
-- Teste sintético da perda de ACK: Relay mantém evento e reenvia sem criar dois trabalhos.
+- Teste sintético da perda de ACK: `tests/test_occurrence_relay_maestro_ack_v0.py` já comprova, em receptor **simulado** com estado em memória, que o Relay conserva a pendência e reenvia a mesma chave após restart, sem duplicar trabalho no simulador. A prova real de idempotência e persistência do MAESTRO continua pendente.
 - Política de retenção e backup/restore da outbox/SQLite e integração com histórico canônico.
 
 **Decisão operacional:** manter MAESTRO_URL desabilitado no estágio. Não instalar webhook Zabbix, não conectar origem real, não expor relay fora do loopback. Não fazer merge automaticamente. O próximo gate depende de localizar/aprovar o contrato real do MAESTRO.

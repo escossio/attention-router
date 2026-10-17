@@ -22,7 +22,7 @@ MAESTRO_URL e MAESTRO_TOKEN_FILE não são configurados no estágio. Só habilit
 
 ## Testes e estágio
 
-Rodar Python unittest dirigido sem rede externa. Compilar imagem com origem SHA conhecida. Compose de stage publica entrada **só em 127.0.0.1**, sem conexão com Zabbix real ou MAESTRO. Segredo em arquivo 0400 de dono autorizado; bind persistente de dados, UID 10001. Não conectar à rede do Zabbix sem revisão da topologia.
+Rodar os testes Python dirigidos sem rede externa: `python3 -m unittest tests.test_occurrence_relay_v0 tests.test_occurrence_relay_maestro_ack_v0 -v`. A segunda suíte simula o receptor, sua indisponibilidade, o aceite seguido de perda do ACK, o reenvio idempotente e o restart da store. Ela **não é prova de que o MAESTRO real foi implementado**. Compilar imagem com origem SHA conhecida. Compose de stage publica entrada **só em 127.0.0.1**, sem conexão com Zabbix real ou MAESTRO. Segredo em arquivo 0400 de dono autorizado; bind persistente de dados, UID 10001. Não conectar à rede do Zabbix sem revisão da topologia.
 
 **Live continuity:** futuro webhook deve entregar eventos novos com ACK somente após commit do diário; **historical acceleration:** importação histórica adiada, separada do stream live para preservar cursores/idempotência.
 
