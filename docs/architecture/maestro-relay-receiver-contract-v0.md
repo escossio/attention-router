@@ -56,3 +56,16 @@ A branch no SHA `510a8154e4e1b743c5f9a4c546d77cb60c2ec1bd` concluiu o **reprofil
 O check externo `distributed-postgres` dessa rodada retornou `WAITING_FOR_DISCOVERY_CAPACITY` depois de um limite de espera, enquanto o CI03 estava ocupado pelo próprio reprofile. Isso **não** é falha funcional do receptor e **não** autoriza classificar o gate público como verde: precisa de nova execução com perfil disponível e capacidade de worker. O presente registro é evidência operacional para justificar a nova certificação, não um atalho ou autorização para merge.
 
 Nenhuma migração foi aplicada no PostgreSQL operacional do AGT; não houve habilitação da rota, credencial real nem tráfego Zabbix → MAESTRO.
+
+
+## Preflight HTTPS no CI — incrementação de contrato, sem instalação no AGT
+
+O ingresso atualmente em funcionamento utiliza uma rede de estágio própria; o contêiner Relay V0 está apenas na bridge Docker e publica sua porta de entrada no loopback do host. **Acessibilidade de rede entre os dois não está demonstrada, e não se deve conectar redes ou abrir porta pública por conveniência.** Os checks do PR #368 certificam o receptor no código, não seu acesso a partir do relay implantado.
+
+O teste de integração adicional no arquivo tests/integration/test_postgres_maestro_relay_ingress.py exerce o **mesmo aplicativo de ingresso real do repositório**, servido por uvicorn usando socket TLS vinculado a 127.0.0.1 no worker CI. Utiliza uma credencial sintética provisionada no binding do teste e PostgreSQL criado e descartado pelo fixture. Gera certificado de vida curta em diretório temporário e verifica explicitamente que o cliente sem a CA de teste não consegue se conectar. O cliente com CA confiável faz HTTP POST com envelope sintético de formato idêntico ao Relay V0 e cabeçalho Idempotency-Key.
+
+**Critérios verificáveis:** 202 após persistência; retry 200 preserva receipt_id e total de linhas; corpo divergente 409; tenant não autorizado 422; token falso 401; recuperação 202 com referência ao evento anterior. O teste é interoperabilidade HTTPS entre cliente sintético e servidor real de código, **não** prova da implantação de um endpoint MAESTRO ou execução do próprio contêiner Relay V0 pela rede real.
+
+**Gates restantes para ativação:** descoberta do endereço HTTPS privado e seu certificado emitido por autoridade confiável; comunicação mínima da rede atual do Relay para o ingress existente sem dual-homing transitivo, roteamento indesejado ou endereços inventados; acesso de runtime com binding provisionado por mecanismo aprovado; migração em base homologada após backup; recebimento autenticado com evento sintético direto do Relay implantado e prova do ACK após commit. Ainda não é permitido ligar webhooks Zabbix a essa cadeia, fazer merge ou declarar serviço operacional.
+
+Live continuity: unchanged. Historical acceleration: backfill intentionally deferred without affecting live cursors or events.

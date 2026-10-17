@@ -177,3 +177,156 @@ def test_pg_populated_maestro_receipts_block_destructive_downgrade(relay_world, 
             "0058_maestro_relay_receipts"
         )
     assert receipts(Session) == 1
+
+
+def test_loopback_https_relay_shaped_requests_commit_and_replay(relay_world, monkeypatch, tmp_path):
+    """Real TLS socket and ingress ASGI app; disposable DB, synthetic credential.
+
+    This is an interoperability gate, not proof that the separate Relay V0
+    container is connected to the production MAESTRO endpoint.
+    """
+    from datetime import timedelta
+    from ipaddress import ip_address
+    import socket
+    import ssl
+    import threading
+    import time
+    from urllib.error import HTTPError, URLError
+    from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
+
+    import uvicorn
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    Session, token, *_ = relay_world
+    # Short-lived synthetic CA trusted only by this test client.
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.now(timezone.utc)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(minutes=30))
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.IPAddress(ip_address("127.0.0.1")),
+            ]), critical=False,
+        )
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    cert_file = tmp_path / "synthetic-loopback-cert.pem"
+    key_file = tmp_path / "synthetic-loopback-key.pem"
+    cert_file.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_file.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    key_file.chmod(0o600)
+    tls_context = ssl.create_default_context(cafile=str(cert_file))
+    trusted_opener = build_opener(ProxyHandler({}), HTTPSHandler(context=tls_context))
+    untrusted_opener = build_opener(
+        ProxyHandler({}), HTTPSHandler(context=ssl.create_default_context())
+    )
+    app = create_ingress_app()
+    app.dependency_overrides[get_maestro_relay_session_factory] = lambda: Session
+    monkeypatch.setattr(settings, "maestro_relay_ingress_enabled", True)
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(5)
+    listener.setblocking(False)
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        ssl_certfile=str(cert_file),
+        ssl_keyfile=str(key_file),
+        lifespan="off",
+        access_log=False,
+        log_level="error",
+    ))
+    # uvicorn receives the already bound socket; no public network attachment.
+    task = threading.Thread(
+        target=lambda: server.run(sockets=[listener]),
+        daemon=True,
+        name="synthetic-maestro-loopback-https",
+    )
+    task.start()
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            if not task.is_alive():
+                raise AssertionError("synthetic HTTPS server did not start")
+            time.sleep(0.03)
+        assert server.started, "synthetic HTTPS server startup timeout"
+        # The certificate must NOT validate under ambient/default roots.
+        with pytest.raises(URLError):
+            untrusted_opener.open(
+                f"https://127.0.0.1:{port}/health/live", timeout=3,
+            )
+
+        def post(data, number, *, bearer=token):
+            request = Request(
+                f"https://127.0.0.1:{port}{MAESTRO_RELAY_PATH}",
+                data=body(data),
+                headers={
+                    "Authorization": "Bearer " + bearer,
+                    "Idempotency-Key": f"zabbix:{number}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with trusted_opener.open(request, timeout=3) as response:
+                    return response.status, json.load(response)
+            except HTTPError as error:
+                return error.code, json.loads(error.read())
+
+        first_status, first_body = post(envelope(), 1)
+        assert first_status == 202
+        assert first_body["status"] == "ACCEPTED"
+        assert receipts(Session) == 1  # independently reopened DB after ACK
+
+        # Client discards first ACK and retries: must not cause second receipt.
+        duplicate_status, duplicate_body = post(envelope(), 1)
+        assert duplicate_status == 200
+        assert duplicate_body["receipt_id"] == first_body["receipt_id"]
+        assert receipts(Session) == 1
+
+        mutated = envelope()
+        mutated["signal"]["severity"] = 5
+        assert post(mutated, 1)[0] == 409
+        assert post(envelope(TENANT_B), 1)[0] == 422
+        assert post(envelope(number=2), 2, bearer="untrusted-token")[0] == 401
+
+        recovered_status, recovered_body = post(envelope(number=2, status="RECOVERY"), 2)
+        assert recovered_status == 202
+        assert recovered_body["occurrence_number"] == 2
+        assert receipts(Session) == 2
+        with Session() as session:
+            records = session.scalars(
+                select(MaestroRelayReceiptRow).order_by(
+                    MaestroRelayReceiptRow.occurrence_number
+                )
+            ).all()
+            assert [r.signal_status for r in records] == ["PROBLEM", "RECOVERY"]
+            assert records[1].problem_event_id == "problem:synthetic:123"
+    finally:
+        server.should_exit = True
+        task.join(timeout=6)
+        if task.is_alive():
+            raise AssertionError("synthetic HTTPS server failed to stop")
+        listener.close()
