@@ -4,7 +4,7 @@ No new daemon, service, ticketing engine or authority. Disabled by default.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -38,6 +38,10 @@ def build_maestro_relay_router() -> APIRouter:
     @router.post(MAESTRO_RELAY_PATH, tags=["maestro-relay"])
     async def accept_relay(request: Request,
                            session_factory=Depends(get_maestro_relay_session_factory)):
+        # Never honor a transport claimed by client-supplied Forwarded headers.
+        # The dedicated TLS runner disables proxy_headers and supplies HTTPS itself.
+        if request.scope.get("scheme") != "https":
+            return _response("TLS_REQUIRED", 403)
         if not settings.maestro_relay_ingress_enabled:
             return _response("UNAVAILABLE", 503)
         if request.url.query:
@@ -100,3 +104,18 @@ def build_maestro_relay_router() -> APIRouter:
         return _response(code, status_by_code.get(code, 503))
 
     return router
+
+
+def create_maestro_tls_app() -> FastAPI:
+    """Minimal isolated ASGI app; no legacy ingress or provider routes."""
+    app = FastAPI(
+        title="MAESTRO Relay HTTPS ingress", version="0.1.0",
+        docs_url=None, redoc_url=None, openapi_url=None,
+    )
+    app.include_router(build_maestro_relay_router())
+
+    @app.get("/health/live")
+    def live():
+        return {"status": "live", "listener": "maestro-tls"}
+
+    return app
