@@ -1,5 +1,4 @@
 """Offline HTTP contract for the opt-in MAESTRO receiver (no PostgreSQL)."""
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
@@ -10,10 +9,9 @@ from attention_router.web import maestro_relay_ingress as ingress
 
 @pytest.fixture
 def client(monkeypatch):
-    app = FastAPI()
-    app.include_router(ingress.build_maestro_relay_router())
+    app = ingress.create_maestro_tls_app()
     app.dependency_overrides[ingress.get_maestro_relay_session_factory] = lambda: object()
-    with TestClient(app) as test_client:
+    with TestClient(app, base_url="https://testserver") as test_client:
         yield test_client
 
 
@@ -81,3 +79,14 @@ def test_no_query_string_authority(client, monkeypatch):
         headers={"Authorization": "Bearer fake", "Idempotency-Key": "zabbix:1"},
     )
     assert response.status_code == 400
+
+
+def test_http_scheme_never_reaches_admission(monkeypatch):
+    app = ingress.create_maestro_tls_app()
+    monkeypatch.setattr(settings, "maestro_relay_ingress_enabled", True)
+    with TestClient(app, base_url="http://testserver") as client:
+        response = client.post(ingress.MAESTRO_RELAY_PATH, json={},
+                               headers={"Authorization": "Bearer not-real",
+                                        "Idempotency-Key": "zabbix:1"})
+        assert response.status_code == 403
+        assert response.json()["status"] == "TLS_REQUIRED"
