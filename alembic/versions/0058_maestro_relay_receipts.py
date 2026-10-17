@@ -56,5 +56,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    if bind.execute(sa.text("SELECT 1 FROM maestro_relay_receipts LIMIT 1")).first():
+        raise RuntimeError("MAESTRO_RELAY_DOWNGRADE_REQUIRES_DATA_EXPORT")
     op.drop_index("ix_maestro_relay_binding_time", table_name="maestro_relay_receipts")
     op.drop_table("maestro_relay_receipts")

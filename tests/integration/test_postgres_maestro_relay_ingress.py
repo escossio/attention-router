@@ -149,3 +149,31 @@ def test_http_route_default_disabled_and_optin_commits(relay_world, monkeypatch)
         no_token = client.post(MAESTRO_RELAY_PATH, json=data, headers={"Idempotency-Key": "zabbix:2"})
         assert no_token.status_code == 401
         assert receipts(Session) == 1
+
+
+def test_pg_populated_maestro_receipts_block_destructive_downgrade(relay_world, pg_url):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    from sqlalchemy import text
+
+    Session, token, *_ = relay_world
+    received = admit_maestro_relay(
+        Session, token, body(envelope()), idempotency_key="zabbix:1",
+    )
+    assert received.code == "ACCEPTED"
+    env = os.environ.copy()
+    env["DATABASE_URL"] = pg_url
+    repo = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "downgrade", "0057_bootstrap_selection"],
+        cwd=repo, env=env, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "MAESTRO_RELAY_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
+    with Session() as session:
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
+            "0058_maestro_relay_receipts"
+        )
+    assert receipts(Session) == 1
