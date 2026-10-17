@@ -48,3 +48,7 @@ O ingress já escuta HTTP interno. Não trocar o protocolo dessa porta sem anali
 **Rollback:** esta branch não toca runtime. Na implantação futura, manter a flag OFF, rollback da imagem com retenção de recibos e migração não destrutiva; não reverter 0058 do grupo. A presença contextual e os alertas Zabbix atuais não devem ser interrompidos.
 
 **Live continuity:** não alterada. **Historical acceleration:** backfill adiado; nenhum cursor live alterado ou eventos históricos importados.
+
+## Prova incremental específica (sem tocar no banco do AGT)
+
+A compatibilização inclui também `test_pg_upgrade_from_existing_group_0058_to_maestro_0059_keeps_group_state`, em `tests/integration/test_postgres_maestro_relay_ingress.py`. No PostgreSQL **descartável do CI**, grava um grupo inteiramente sintético com modo OBSERVE, rebaixa apenas a revisão candidata 0059 para 0058 (o teste só parte de banco sem recibos), comprova que o grupo permaneceu intacto, sobe novamente para o head 0059 e registra um recibo MAESTRO sintético. Qualquer erro impede o gate PostgreSQL. Este ensaio não significa que a DB real do estágio já foi migrada e não autoriza descartar histórico do grupo.
