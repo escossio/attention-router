@@ -65,7 +65,8 @@ class LiveLoopbackTLSValidation(unittest.TestCase):
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 timeout=12)
             server = HTTPServer(("127.0.0.1", 0), LocalReceiptHandler)
-            tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            tls = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            tls.minimum_version = ssl.TLSVersion.TLSv1_2
             tls.load_cert_chain(str(cert), str(key))
             server.socket = tls.wrap_socket(server.socket, server_side=True)
             server.seen = []
