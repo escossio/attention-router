@@ -7,7 +7,7 @@ services:
     command: [python, -m, attention_router.web.maestro_standalone_server]
     user: "10001:10001"
     read_only: true
-    tmpfs: [/tmp:mode=1777,noexec,nosuid]
+    tmpfs: ["/tmp:mode=1777,noexec,nosuid"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 64
@@ -43,7 +43,7 @@ services:
     healthcheck:
       test: [CMD, python, -m, attention_router.web.maestro_standalone_server, --health]
       interval: 20s
-      timeout: 5s
+      timeout: 15s
       retries: 3
       start_period: 20s
     logging:
