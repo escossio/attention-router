@@ -47,3 +47,12 @@ Não adicionar rede, VLAN, bridge, IP dedicado, IP estático, roteamento nem con
 - Ainda falta acoplar a **orquestração futura MAESTRO** aos recibos. Aceitar evento não equivale a despachar Investigador, priorizar ou resolver caso.
 
 **CI npm:** foi transportada sem modificação a correção certificada do PR #360 para o teste de SDK (compatibilidade npm 10/12); não modifica o comportamento do produto e mantém as asserções.
+
+
+## Evidência de certificação PostgreSQL V0 — 17/10/2026
+
+A branch no SHA `510a8154e4e1b743c5f9a4c546d77cb60c2ec1bd` concluiu o **reprofile oficial no worker CI03** em banco descartável, incluindo upgrade da revisão Alembic 0058. Resultado: **469 testes PostgreSQL PASS, 0 FAIL, 58 arquivos**; perfil versionado pelo scheduler sob chave `8b88939f3e96b66c4b43a3fbf0e99355c0e44d81b10b2d64faac164adf7b631b`. O teste novo de downgrade com recibo persistido foi incluído. Os checks públicos Python/Transport/Docker/segurança/CodeQL também passaram nesse SHA.
+
+O check externo `distributed-postgres` dessa rodada retornou `WAITING_FOR_DISCOVERY_CAPACITY` depois de um limite de espera, enquanto o CI03 estava ocupado pelo próprio reprofile. Isso **não** é falha funcional do receptor e **não** autoriza classificar o gate público como verde: precisa de nova execução com perfil disponível e capacidade de worker. O presente registro é evidência operacional para justificar a nova certificação, não um atalho ou autorização para merge.
+
+Nenhuma migração foi aplicada no PostgreSQL operacional do AGT; não houve habilitação da rota, credencial real nem tráfego Zabbix → MAESTRO.
