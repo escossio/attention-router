@@ -324,6 +324,72 @@ def test_loopback_https_relay_shaped_requests_commit_and_replay(relay_world, mon
             ).all()
             assert [r.signal_status for r in records] == ["PROBLEM", "RECOVERY"]
             assert records[1].problem_event_id == "problem:synthetic:123"
+
+        # V0 integrated proof: dispatch through the actual Relay HTTP/TLS client,
+        # not a synthetic urllib caller, using the same disposable PostgreSQL.
+        from tests.test_occurrence_relay_v0 import relay as actual_relay
+
+        relay_db = tmp_path / "actual-relay-outbox.sqlite3"
+        store = actual_relay.Store(str(relay_db))
+        signals = [
+            envelope(number=1)["signal"],
+            envelope(number=2, status="RECOVERY")["signal"],
+        ]
+        third = envelope(number=3)
+        third["signal"]["event_id"] = "problem:synthetic:125"
+        signals.append(third["signal"])
+        for expected_number, signal in enumerate(signals, 1):
+            accepted_signal, signal_digest = actual_relay.validate(body(signal))
+            local_number, created = store.admit(accepted_signal, signal_digest)
+            assert created and local_number == expected_number
+
+        relay_endpoint = f"https://127.0.0.1:{port}{MAESTRO_RELAY_PATH}"
+        def actual_client(cafile=""):
+            return actual_relay.App(
+                store, "unused-inbound-token", TENANT_A, "zabbix",
+                relay_endpoint, token, cafile,
+            )
+
+        # Missing trust must not send an authenticated bearer or drop outbox data.
+        assert actual_client().dispatch_one() is False
+        assert store.counts()["pending_delivery"] == 3
+        assert receipts(Session) == 2
+
+        client = actual_client(str(cert_file))
+        # Those two events were already committed by the independent caller:
+        # the real Relay must accept only structured 200 DUPLICATE receipts.
+        assert client.dispatch_one() is True
+        assert client.dispatch_one() is True
+        assert store.counts()["pending_delivery"] == 1
+        assert receipts(Session) == 2
+
+        # Force the loss of an ACK *after* the genuine backend has committed;
+        # the actual Relay must retain the pending event for the same-key retry.
+        actual_verify = actual_relay.valid_delivery_ack
+        def synthetic_ack_loss_after_commit(response, occurrence_number):
+            assert actual_verify(response, occurrence_number) is True
+            raise TimeoutError("synthetic ACK lost after durable receipt")
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(actual_relay, "valid_delivery_ack",
+                           synthetic_ack_loss_after_commit)
+            assert client.dispatch_one() is False
+        assert receipts(Session) == 3
+        assert store.counts()["pending_delivery"] == 1
+
+        # Reopen the SQLite outbox and retry with a newly initialized client.
+        store = actual_relay.Store(str(relay_db))
+        assert actual_client(str(cert_file)).dispatch_one() is True
+        assert receipts(Session) == 3  # replay did not insert a fourth row
+        assert store.counts()["pending_delivery"] == 0
+        with Session() as database:
+            final = database.scalars(
+                select(MaestroRelayReceiptRow).order_by(
+                    MaestroRelayReceiptRow.occurrence_number
+                )
+            ).all()
+            assert [item.occurrence_number for item in final] == [1, 2, 3]
+            assert final[2].event_id == "problem:synthetic:125"
     finally:
         server.should_exit = True
         task.join(timeout=6)
