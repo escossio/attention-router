@@ -16,7 +16,7 @@ def test_pending_intent_client_command_source_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0058_group_contextual_presence"]
+            ).scalars().all() == ["0059_maestro_relay_receipts"]
 
             schema = inspect(connection)
             columns = {

@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -3141,4 +3142,35 @@ class IntegrationInboxRow(Base):
             name="ck_integration_inbox_dispatch_state",
         ),
         CheckConstraint("length(raw_body) <= 65536", name="ck_integration_inbox_size"),
+    )
+
+class MaestroRelayReceiptRow(Base):
+    """Committed operational transport receipt; not a ticket or investigation."""
+    __tablename__ = "maestro_relay_receipts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    binding_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    credential_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_system: Mapped[str] = mapped_column(String(120), nullable=False)
+    instance_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    occurrence_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    event_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    signal_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    problem_event_id: Mapped[str | None] = mapped_column(String(500))
+    signal_json: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    admitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    body_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "binding_id"],
+                             ["integration_bindings.tenant_id", "integration_bindings.id"]),
+        ForeignKeyConstraint(["credential_id", "binding_id"],
+                             ["integration_credentials.id", "integration_credentials.binding_id"]),
+        UniqueConstraint("tenant_id", "source_system", "instance_id", "occurrence_number",
+                         name="uq_maestro_relay_scope_number"),
+        CheckConstraint("occurrence_number > 0", name="ck_maestro_relay_number_positive"),
+        CheckConstraint("signal_status in ('PROBLEM','RECOVERY','UPDATE')",
+                        name="ck_maestro_relay_status"),
+        Index("ix_maestro_relay_binding_time", "tenant_id", "binding_id", "admitted_at"),
     )
