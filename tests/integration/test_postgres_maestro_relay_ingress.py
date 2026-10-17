@@ -19,7 +19,7 @@ from attention_router.integrations.tenant_binding import (
 from attention_router.maestro.admission import RELAY_AUDIENCE, RELAY_WRITE_SCOPE, admit_maestro_relay
 from attention_router.web.ingress_app import create_ingress_app
 from attention_router.web.maestro_relay_ingress import (
-    MAESTRO_RELAY_PATH, get_maestro_relay_session_factory,
+    MAESTRO_RELAY_PATH, create_maestro_tls_app, get_maestro_relay_session_factory,
 )
 
 pytestmark = pytest.mark.postgres
@@ -129,9 +129,9 @@ def test_pg_tenant_serialization_avoids_duplicate_receipts(relay_world):
 
 def test_http_route_default_disabled_and_optin_commits(relay_world, monkeypatch):
     Session, token, *_ = relay_world
-    app = create_ingress_app()
+    app = create_maestro_tls_app()
     app.dependency_overrides[get_maestro_relay_session_factory] = lambda: Session
-    with TestClient(app) as client:
+    with TestClient(app, base_url="https://testserver") as client:
         data = envelope()
         headers = {"Authorization": f"Bearer {token}",
                    "Idempotency-Key": "zabbix:1"}
@@ -139,6 +139,11 @@ def test_http_route_default_disabled_and_optin_commits(relay_world, monkeypatch)
         assert disabled.status_code == 503
         assert receipts(Session) == 0
         monkeypatch.setattr(settings, "maestro_relay_ingress_enabled", True)
+        # The original HTTP ingress must remain completely unaware of MAESTRO.
+        with TestClient(create_ingress_app()) as legacy:
+            denied = legacy.post(MAESTRO_RELAY_PATH, json=data, headers=headers)
+            assert denied.status_code == 404
+        assert receipts(Session) == 0
         accepted = client.post(MAESTRO_RELAY_PATH, json=data, headers=headers)
         assert accepted.status_code == 202
         assert accepted.json()["status"] == "ACCEPTED"
@@ -238,7 +243,7 @@ def test_loopback_https_relay_shaped_requests_commit_and_replay(relay_world, mon
     untrusted_opener = build_opener(
         ProxyHandler({}), HTTPSHandler(context=ssl.create_default_context())
     )
-    app = create_ingress_app()
+    app = create_maestro_tls_app()
     app.dependency_overrides[get_maestro_relay_session_factory] = lambda: Session
     monkeypatch.setattr(settings, "maestro_relay_ingress_enabled", True)
 
