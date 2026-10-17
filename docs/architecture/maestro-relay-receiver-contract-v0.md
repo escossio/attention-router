@@ -1,36 +1,49 @@
-# MAESTRO — compatibilidade de contrato com Occurrence Relay V0
+# MAESTRO — receptor mínimo e persistência do Relay V0
 
-**Estado:** validador puro em branch isolada; sem HTTP, banco, migração, contêiner, integração, deploy ou merge.
+**Data:** 2026-10-17.
+**Estado:** CANDIDATO EM PR DRAFT. Não implantado. Sem merge, endpoint ativo, binding operacional ou migrations em banco real. PR #368, continuidade de contrato puro do SHA 5a39350.
 
-## Reuso encontrado
+## Descobertas e decisão de reuso
 
-O Attention Router já inclui web/integration_ingress.py, integrations/admission.py, integrations/tenant_binding.py, contracts/integration.py e IntegrationInboxRow persistido no PostgreSQL. Esta infraestrutura fornece admissão com binding, autenticação, recibo após commit e idempotência para o contrato inbound_event. Não é, porém, MAESTRO.
+O Attention Router já oferece PostgreSQL, migrations Alembic, credenciais de integração e bindings de tenant, além de ingresso HTTP em web/ingress_app.py. O sistema tem infrastructure/models.py, integration_admission e integration_inbox. A última armazena **somente** contract_type=inbound_event, impõe schema e uma semântica própria de integração; o Relay transmite occurrence-relay-v0-draft, com cabeçalho Idempotency-Key. Adaptar silenciosamente ao formato genérico mudaria semântica de timestamps e identidade; reutilização direta da tabela/rota seria errada.
 
-O relay envia contrato occurrence-relay-v0-draft e cabeçalho Idempotency-Key. A rota genérica recusa explicitamente esse cabeçalho e espera um JSON de formato diferente. Não reutilizar essa rota como receptor MAESTRO sem estabelecer uma adaptação segura e um contrato de persistência próprio ao papel.
+**Solução mínima:** reaproveitar o processo de ingress, o mesmo PostgreSQL, as tabelas de credenciais e tenants e a disciplina de locks, com **uma tabela adicional e estritamente específica de recibos de transporte do MAESTRO**. Isso NÃO cria contêiner, sistema de chamados, base PostgreSQL adicional, interface, prioridade, execução, chamado novo ou duplicação do histórico do detector. O armazenamento adicional existe para não alterar a tabela do ingresso genérico.
 
-## Entrega desta etapa
+## Artefatos propostos
 
-- Módulo attention_router/maestro/relay_contract.py faz validação tipada, sem efeitos colaterais, do envelope atual do Relay V0.
-- A identidade de tenant, origem e instância é fornecida exclusivamente por TrustedRelayBinding, que precisa resultar de autenticação externa. O conteúdo JSON não concede escopo.
-- Identidade de recibo futuro: tupla (tenant, source, instance_id, occurrence_number), evitando confundir números locais entre diferentes instalações do relay.
-- Confere versão, cabeçalho Idempotency-Key, tipagem, limites de payload, ausência de campos duplicados ou desconhecidos, timestamps com timezone, recuperação vinculada ao problema e digest canônico.
-- Nunca chama LLM, monitor, Investigador, executor ou motor de autorização; não ordena filas, não define prioridade, não transforma normalização em ação.
-- Não emite HTTP 2xx. O resultado do validador não é recibo durável.
+- attention_router/maestro/relay_contract.py: valida envelope após identificação de serviço.
+- attention_router/maestro/admission.py: valida token e binding sob transação PostgreSQL, usa ordem de bloqueio tenant → binding → credencial, checa escopo dedicado maestro:relay:write e audience maestro-relay-ingress; insere recibo e só devolve ACCEPTED após o commit. Replays idênticos resultam em DUPLICATE; conteúdo divergente dá CONFLICT.
+- attention_router/infrastructure/models.py: MaestroRelayReceiptRow, identidade única por (tenant, source_system, instance_id, occurrence_number), digest canônico e referência do sinal. A linha é recibo histórico, **não** ticket, fila ou disparo de investigação.
+- alembic/versions/0058_maestro_relay_receipts.py: nova tabela em PostgreSQL atual com índices, integridade referencial e constraints; migration somente versionada, não aplicada no AGT.
+- attention_router/web/maestro_relay_ingress.py: POST /api/v1/ingress/maestro/occurrences, no app de ingresso existente, com validação de headers HTTP, corpo limitado, autorização obrigatória e ausência de mensagens sensíveis nos erros.
+- attention_router/config.py: flag maestro_relay_ingress_enabled default FALSE; sem credencial real/binding provisionado o serviço continua NO-GO.
+- tests/test_maestro_relay_contract_v0.py e tests/test_maestro_relay_http_v0.py: testes leves offline de schema e rota default-off.
+- tests/integration/test_postgres_maestro_relay_ingress.py: testes de commit real no banco descartável PostgreSQL dos workers, casos de replay, conflito, revogação, cross-tenant e concorrência.
 
-## Pendência do contrato real de admissão
+### Contrato da admissão
 
-O receptor MAESTRO deve aceitar evento somente após identificar credencial de serviço autenticada e realizar commit atômico no PostgreSQL de (tenant, source, instance_id, occurrence_number, digest, metadados). Replay do mesmo ID e mesmo digest devolve o mesmo recibo; mesma identidade com digest diferente falha; persistência indisponível não pode devolver 2xx. Recuperação precisa ser evento novo com vínculo ao anterior, não fechamento automático.
+Credencial Bearer provisionada por mecanismo já existente, mas **escopo diferente** de integration:inbound_event:write. O token nunca vem do evento nem concede tenant automaticamente. O binding canônico deve ser CAPABILITY + ops.zabbix_relay + instance_id e audience maestro-relay-ingress. O MAESTRO valida tenant/source/ID enviados **contra** esse binding, sem confiar nos campos como autoridade.
 
-A próxima decisão técnica é escolher como aproveitar a infraestrutura já existente de admissão sem violar seu contrato ou introduzir outra fonte de verdade. Este módulo NÃO instala uma API e não supõe que MAESTRO esteja operacional.
+A chave local zabbix:N é permitida somente no âmbito de um binding homologado. A unicidade persistente usa (tenant, source_system, instance_id, N), impedindo colisão entre instalações independentes. O recibo após commit inclui receipt_id e occurrence_number; duplicata legítima recebe o mesmo receipt_id. Uma falha de PostgreSQL nunca confirma 2xx. Evento RECOVERY cria outro recibo vinculado a problem_event_id sem fechar incidente. Uma admissão não concede poderes de remediação.
 
-## Rede / autoridade / rollback
+**Estados HTTP candidatos:** 202 ACCEPTED, 200 DUPLICATE, 401 UNAUTHENTICATED, 403 FORBIDDEN, 409 CONFLICT, 422 INVALID_CONTRACT, 503 UNAVAILABLE. Erros de framing 400/413/415. Sem endpoint MAESTRO ativado/roteado externamente e sem autenticação de produção.
 
-Nenhum fluxo ou segmento de rede alterado nesta etapa. Futuro: Relay → receptor MAESTRO por HTTPS autenticado, e receptor → persistência já autorizada. A autoridade decorre de identidade de serviço e binding, nunca apenas de reachability. L2 dedicada: não. IP dedicado: não. IP estático: não. Rede adicional: não definida/necessária no incremento. Rollback: descartar branch, pois nada foi implantado.
+### Grafo e confiança
 
-Live continuity: eventos novos do Zabbix intocados, integração real desativada. Historical acceleration: importação histórica não realizada, por não haver contrato/cursor aprovado.
+| Origem | Destino | Iniciador | Transporte | Fase | Autoridade | Zona |
+| --- | --- | --- | --- | --- | --- | --- |
+| Relay V0 | Runtime ingress (MAESTRO route) | Relay | HTTPS validado | Futuro | credencial de serviço e audience/binding/escopo restritos | Relay → ingress interno |
+| Ingress existente | PostgreSQL existente | Ingress | conexão SQL existente | Quando ativado | role de DB já governado, migration homologada | Aplicação → DB privado |
 
-## Testes
+Não adicionar rede, VLAN, bridge, IP dedicado, IP estático, roteamento nem contêiner por efeito deste PR. L2 dedicado: não; L3 dedicado: não demonstrado; IP dedicado/estático: não. A implantação precisa validar alcance TLS entre o Relay e a API já existente sem criar trânsito inesperado. Rollback: desabilitar a flag (default), sem trocar a rede; migração nunca deve ser revertida em produção sem política de preservação de recibos.
 
-11 testes offline em tests/test_maestro_relay_contract_v0.py, sem rede, segredos operacionais nem PostgreSQL. Cobrem entradas válidas, problema/recuperação, tenant, binding de instância, chave de idempotência, replay canônico, chaves duplicadas, tipos, limites e timestamps. Testes não comprovam aceite durável no MAESTRO real.
+## Gates explícitos
 
-**Próximo gate:** certificação CI do SHA, revisão do encaixe na infraestrutura de admissão e prova PostgreSQL no worker antes de considerar um receptor executável. PR em draft; sem merge automático.
+- Testes offline no AGT: apenas suites focadas de baixa carga, sem DB real.
+- CI distribuído PostgreSQL deve testar no banco criado e destruído exclusivamente pelo fixture; não correr full suite/migrations no AGT.
+- Não publicar credenciais em repositório nem ativar envio do Relay antes de testes autenticados ponta a ponta, validação da identidade TLS, provisionamento da credencial e checklist de retenção/backup.
+- Tráfego existente Zabbix/Telegram e estágio Relay continuam intactos.
+- Live continuity: webhook real do Zabbix segue inalterado. Historical acceleration: nenhum backfill, cursors intocados; ativação não retroalimenta backlog histórico.
+- Ainda falta acoplar a **orquestração futura MAESTRO** aos recibos. Aceitar evento não equivale a despachar Investigador, priorizar ou resolver caso.
+
+**CI npm:** foi transportada sem modificação a correção certificada do PR #360 para o teste de SDK (compatibilidade npm 10/12); não modifica o comportamento do produto e mantém as asserções.
