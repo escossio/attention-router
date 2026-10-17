@@ -1,6 +1,6 @@
 /*
- * Zabbix 7.4 media type Script — CANDIDATE ONLY, NOT INSTALLED.
- * Provided params by Zabbix Media type: endpoint, secret, event_id,
+ * Zabbix 7.4 webhook script installed as a private media type for MAESTRO.
+ * Provided params by Zabbix Media type: endpoint, secret, event_source, event_id,
  * event_recovery_id, event_ts, recovery_ts, host_id, trigger_id,
  * event_name, severity.
  * No global source/tenant claims and no command execution.

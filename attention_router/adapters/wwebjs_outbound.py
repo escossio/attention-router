@@ -57,7 +57,7 @@ class WwebjsOutboundAdapter:
                 "interaction_id": outbox.interaction_id,
                 "outbox_id": outbox.id,
             }
-        return {
+        result = {
             "schema_version": "1",
             "idempotency_key": outbox.idempotency_key,
             "external_actor_id": payload["external_actor_id"],
@@ -67,6 +67,9 @@ class WwebjsOutboundAdapter:
             "interaction_id": outbox.interaction_id,
             "outbox_id": outbox.id,
         }
+        if outbox.action_type in {"wwebjs_group_contextual_text", "wwebjs_group_contextual_notice"}:
+            result["group_policy"] = payload["group_policy"]
+        return result
 
     def build_request(self, outbox) -> tuple[bytes, dict[str, str]]:
         if not self.secret:

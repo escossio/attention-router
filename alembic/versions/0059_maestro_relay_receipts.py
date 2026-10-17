@@ -1,14 +1,14 @@
 """MAESTRO relay transport receipt table, no ticket logic.
 
-Revision ID: 0058_maestro_relay_receipts
-Revises: 0057_bootstrap_selection
+Revision ID: 0059_maestro_relay_receipts
+Revises: 0058_group_contextual_presence
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0058_maestro_relay_receipts"
-down_revision = "0057_bootstrap_selection"
+revision = "0059_maestro_relay_receipts"
+down_revision = "0058_group_contextual_presence"
 branch_labels = None
 depends_on = None
 

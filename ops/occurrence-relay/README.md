@@ -16,11 +16,11 @@ Retorno 201 para novo evento com occurrence_number numérico; 200 para repetiç�
 
 Os campos tenant/source são derivados da configuração confiável do receptor, nunca de texto no evento. SQLite privado é usado somente como diário local/outbox; **não substitui o PostgreSQL** e não introduz MariaDB, Redis ou Elasticsearch.
 
-## Destino futuro
+## Destino MAESTRO no estágio operacional
 
-MAESTRO_URL e MAESTRO_TOKEN_FILE não são configurados no estágio. Só habilitar entrega quando confirmar URL e contrato de idempotência, autenticação e ACK durável do MAESTRO. A saída do relay é envelope de estudo (occurrence-relay-v0-draft), não API de produção. A aplicação não cria tickets automaticamente nem interpreta semântica.
+O overlay `compose.maestro.yaml` configura `MAESTRO_URL`, token de serviço e certificado confiável em arquivos privados. O estágio foi homologado com ACK 202, replay 200 e retry da outbox após indisponibilidade. A saída do Relay permanece o contrato `occurrence-relay-v0-draft`; o MAESTRO persiste recibos, sem criar tickets ou interpretar semântica.
 
-## Segurança do ACK e da saída HTTPS (candidato em revisão)
+## Segurança do ACK e da saída HTTPS
 
 O Relay somente marca a entrega como concluída ao receber do MAESTRO JSON tipado:
 `202 ACCEPTED` ou `200 DUPLICATE`, sempre com `receipt_id` não vazio e
@@ -30,17 +30,21 @@ recibo divergente **não** retira a ocorrência da outbox; redirect permanece bl
 `MAESTRO_CA_FILE` aceita arquivo PEM de CA privada homologada, montado somente-leitura
 **apenas quando** o destino `MAESTRO_URL` estiver autorizado. Na ausência dessa
 variável, usa raízes padrão do sistema. A verificação de certificado e hostname
-permanece obrigatória. Não confiar no certificado snakeoil do Apache existente,
-não desativar TLS verification e não habilitar `MAESTRO_URL` nesta fase.
+permanece obrigatória. Não confiar no certificado snakeoil do Apache existente
+nem desativar TLS verification.
 
-A conexão Apache→ingresso atualmente seria HTTP por rede roteada. Não transmitir
-token de serviço real nesse trecho sem criptografia de backend homologada e revisão
-da fronteira de confiança. Veja `docs/architecture/relay-maestro-tls-ack-gate-20261017.md`.
+O webhook Zabbix usa uma entrada Apache HTTPS privada na borda Docker,
+que encaminha somente `/v1/zabbix/events` ao Relay local. A CA está montada
+no servidor Zabbix; mídia e ação ficam na base Zabbix, com backup privado.
+Veja `docs/architecture/relay-maestro-tls-ack-gate-20261017.md`.
 
 ## Testes e estágio
 
-Rodar os testes Python dirigidos sem rede externa: `python3 -m unittest tests.test_occurrence_relay_v0 tests.test_occurrence_relay_maestro_ack_v0 -v`. A segunda suíte simula o receptor, sua indisponibilidade, o aceite seguido de perda do ACK, o reenvio idempotente e o restart da store. Ela **não é prova de que o MAESTRO real foi implementado**. Compilar imagem com origem SHA conhecida. Compose de stage publica entrada **só em 127.0.0.1**, sem conexão com Zabbix real ou MAESTRO. Segredo em arquivo 0400 de dono autorizado; bind persistente de dados, UID 10001. Não conectar à rede do Zabbix sem revisão da topologia.
+Rodar os testes Python dirigidos sem rede externa: `python3 -m unittest tests.test_occurrence_relay_v0 tests.test_occurrence_relay_maestro_ack_v0 -v`. A segunda suíte simula o receptor, sua indisponibilidade, o aceite seguido de perda do ACK, o reenvio idempotente e o restart da store. Ela **não é prova de que o MAESTRO real foi implementado**. Compilar imagem com origem SHA conhecida. Compose de stage publica entrada **só em 127.0.0.1**; a entrada HTTPS privada permite conexão do Zabbix sem anexar o Relay à rede Zabbix. Segredo em arquivo 0400 de dono autorizado; bind persistente de dados, UID 10001.
 
-**Live continuity:** futuro webhook deve entregar eventos novos com ACK somente após commit do diário; **historical acceleration:** importação histórica adiada, separada do stream live para preservar cursores/idempotência.
+**Live continuity:** a nova ação Zabbix entrega apenas eventos novos com ACK após commit do diário; **historical acceleration:** importação histórica adiada, separada do stream live para preservar cursores/idempotência.
 
-Rollback: remover só container do estágio, preservando dados privados até descarte autorizado. Não alterar VLANs, MikroTik, contêineres ou PostgreSQL operacional.
+Rollback operacional: desabilitar/remover a ação e mídia MAESTRO no Zabbix,
+retirar a entrada HTTPS privada e o overlay do destino Relay, preservando a
+outbox SQLite e os recibos PostgreSQL. Parar só o MAESTRO; remover a VLAN
+apenas depois de verificar dependências. Não executar downgrade destrutivo.

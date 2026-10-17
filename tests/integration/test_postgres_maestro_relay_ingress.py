@@ -172,14 +172,14 @@ def test_pg_populated_maestro_receipts_block_destructive_downgrade(relay_world, 
     env["DATABASE_URL"] = pg_url
     repo = Path(__file__).resolve().parents[2]
     result = subprocess.run(
-        [sys.executable, "-m", "alembic", "downgrade", "0057_bootstrap_selection"],
+        [sys.executable, "-m", "alembic", "downgrade", "0058_group_contextual_presence"],
         cwd=repo, env=env, capture_output=True, text=True, check=False,
     )
     assert result.returncode != 0
     assert "MAESTRO_RELAY_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
     with Session() as session:
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0058_maestro_relay_receipts"
+            "0059_maestro_relay_receipts"
         )
     assert receipts(Session) == 1
 
@@ -401,3 +401,75 @@ def test_loopback_https_relay_shaped_requests_commit_and_replay(relay_world, mon
         if task.is_alive():
             raise AssertionError("synthetic HTTPS server failed to stop")
         listener.close()
+
+
+def test_pg_upgrade_from_existing_group_0058_to_maestro_0059_keeps_group_state(
+    relay_world, pg_url,
+):
+    """Disposable DB: preserve preexisting group row through incremental upgrade."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    from uuid import uuid4
+    from sqlalchemy import text
+
+    Session, token, *_ = relay_world
+    now = datetime.now(timezone.utc)
+    group_id = "synthetic-preexisting-group@g.us"
+    with Session.begin() as session:
+        session.execute(
+            text(
+                "INSERT INTO group_contextual_presence "
+                "(id, tenant_id, group_id, mode, observe_after, updated_at) "
+                "VALUES (:id,:tenant,:group_id,:mode,:now,:now)"
+            ),
+            {
+                "id": str(uuid4()),
+                "tenant": TENANT_A,
+                "group_id": group_id,
+                "mode": "OBSERVE",
+                "now": now,
+            },
+        )
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = pg_url
+    repo = Path(__file__).resolve().parents[2]
+
+    def migration(*commands):
+        return subprocess.run(
+            [sys.executable, "-m", "alembic", *commands],
+            cwd=repo,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    downgrade = migration("downgrade", "0058_group_contextual_presence")
+    assert downgrade.returncode == 0, downgrade.stderr[-1200:]
+    with Session() as session:
+        assert session.scalar(
+            text("SELECT version_num FROM alembic_version")
+        ) == "0058_group_contextual_presence"
+        assert session.scalar(
+            text("SELECT mode FROM group_contextual_presence WHERE group_id=:id"),
+            {"id": group_id},
+        ) == "OBSERVE"
+
+    upgrade = migration("upgrade", "head")
+    assert upgrade.returncode == 0, upgrade.stderr[-1200:]
+    with Session() as session:
+        assert session.scalar(
+            text("SELECT version_num FROM alembic_version")
+        ) == "0059_maestro_relay_receipts"
+        assert session.scalar(
+            text("SELECT mode FROM group_contextual_presence WHERE group_id=:id"),
+            {"id": group_id},
+        ) == "OBSERVE"
+    response = admit_maestro_relay(
+        Session, token, body(envelope()), idempotency_key="zabbix:1",
+    )
+    assert response.code == "ACCEPTED"
+    assert receipts(Session) == 1

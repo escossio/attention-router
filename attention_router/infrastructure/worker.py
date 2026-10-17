@@ -8,6 +8,7 @@ from attention_router.application.decision_pipeline import process_agent_decisio
 from attention_router.application.autonomy import evaluate_and_route
 from attention_router.application.execution import enqueue_ready_intents, probe_transport_ready
 from attention_router.application.services import process_due_timers, process_outbox
+from attention_router.application.group_contextual_presence import process_group_contextual_cycle
 from attention_router.application.owner_reply_grace import (
     grace_allows_interaction,
     process_due_grace_windows,
@@ -479,6 +480,11 @@ def run_forever() -> None:
             )
             decision_count = process_agent_decisions(session, identity)
             session.commit()
+            try:
+                process_group_contextual_cycle(session)
+            except Exception:
+                session.rollback()
+                logger.exception("group contextual cycle failed worker_id=%s", identity)
             execution_count = enqueue_ready_intents(
                 session,
                 transport_ready=transport_ready,

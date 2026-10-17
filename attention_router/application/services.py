@@ -106,6 +106,7 @@ from attention_router.application.execution import (
     automatic_intent_denial_reason,
     execution_gate,
     probe_transport_status,
+    probe_transport_ready,
     requires_platform_execution_safety,
     validate_platform_outbox_safety,
 )
@@ -2595,7 +2596,33 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                     continue
             if fail:
                 raise RuntimeError("forced outbox failure")
-            if row.destination == "wwebjs" and row.action_type in {"wwebjs_outbound_text", "wwebjs_manual_reply_text"}:
+            if row.destination == "wwebjs" and row.action_type in {"wwebjs_group_contextual_text", "wwebjs_group_contextual_notice"}:
+                from attention_router.application.group_contextual_presence import (
+                    NOTICE_ACTION, authorize_outbox,
+                )
+                from attention_router.infrastructure.models import GroupContextualPresenceRow
+
+                reason = authorize_outbox(session, row, session_ready=probe_transport_ready())
+                if reason != "ALLOW":
+                    row.status = "BLOCKED"
+                    row.last_error = reason
+                    audit(session, row.interaction_id, "group_contextual.dispatch_denied",
+                          {"reason_code": reason, "outbox_id": row.id},
+                          row.correlation_id, row.causation_id, origin="group_contextual")
+                    session.commit()
+                    continue
+                external_attempted = True
+                result = wwebjs_outbound.dispatch_outbox(row)
+                provider_confirmed = result.status in {"sent", "already_sent"}
+                if row.action_type == NOTICE_ACTION and provider_confirmed:
+                    state = session.scalar(select(GroupContextualPresenceRow).where(
+                        GroupContextualPresenceRow.group_id == row.payload["external_actor_id"]
+                    ).with_for_update())
+                    state.notice_sent_at = now_utc()
+                audit(session, row.interaction_id, "group_contextual.transport_accepted",
+                      {"outbox_id": row.id, "provider_reference_present": bool((result.response or {}).get("message_reference"))},
+                      row.correlation_id, row.causation_id, origin="group_contextual")
+            elif row.destination == "wwebjs" and row.action_type in {"wwebjs_outbound_text", "wwebjs_manual_reply_text"}:
                 external_attempted = True
                 trace_carrier = ((row.payload or {}).get("observability") or {}).get("trace_context")
                 with start_span(
