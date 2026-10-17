@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     ingress_http_port: int = 18101
     integration_ingress_enabled: bool = False
     integration_ingress_audience: str = "andy-integration-ingress"
+    maestro_relay_ingress_enabled: bool = False
     integration_dispatch_enabled: bool = False
     integration_dispatch_batch_size: int = 20
     gmail_connect_enabled: bool = False
