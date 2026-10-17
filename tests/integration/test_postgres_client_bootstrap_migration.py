@@ -14,7 +14,7 @@ def test_client_device_bootstrap_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0058_maestro_relay_receipts"]
+            ).scalars().all() == ["0059_maestro_relay_receipts"]
 
             schema = inspect(connection)
             assert {

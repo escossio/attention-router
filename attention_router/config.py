@@ -140,6 +140,9 @@ class Settings(BaseSettings):
     andy_behavior_enabled: bool = False
     andy_behavior_canary_binding_id: str | None = None
     andy_agent_enabled: bool = False
+    group_contextual_presence_enabled: bool = False
+    group_contextual_presence_group_id: str | None = Field(default=None, repr=False)
+    group_contextual_presence_tenant_id: str | None = Field(default=None, repr=False)
     andy_agent_model: str = "gpt-5.6-sol"
     andy_agent_timeout_seconds: float = 20.0
     andy_agent_max_turns: int = 3

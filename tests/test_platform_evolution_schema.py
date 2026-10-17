@@ -195,7 +195,7 @@ def test_attention_salience_table_is_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0058_maestro_relay_receipts"]
+    assert scripts.get_heads() == ["0059_maestro_relay_receipts"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -246,8 +246,11 @@ def test_platform_evolution_migration_waves_form_one_chain():
     assert revisions["0057_bootstrap_selection"].down_revision == (
         "0056_attention_salience_v0"
     )
-    assert revisions["0058_maestro_relay_receipts"].down_revision == (
+    assert revisions["0058_group_contextual_presence"].down_revision == (
         "0057_bootstrap_selection"
+    )
+    assert revisions["0059_maestro_relay_receipts"].down_revision == (
+        "0058_group_contextual_presence"
     )
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"

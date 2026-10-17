@@ -16,7 +16,7 @@ def test_client_command_channel_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0058_maestro_relay_receipts"]
+            ).scalars().all() == ["0059_maestro_relay_receipts"]
 
             schema = inspect(connection)
             assert "client_command_messages" in set(schema.get_table_names())

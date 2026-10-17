@@ -563,6 +563,37 @@ class OutboxMessageRow(Base):
     __table_args__ = (UniqueConstraint("idempotency_key", name="uq_outbox_idempotency_key"),)
 
 
+class GroupContextualPresenceRow(Base):
+    __tablename__ = "group_contextual_presence"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), ForeignKey("tenants.id"), nullable=False)
+    group_id: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    mode: Mapped[str] = mapped_column(String(24), nullable=False, default="OFF")
+    observe_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cursor_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cursor_id: Mapped[str | None] = mapped_column(String(64))
+    notice_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notice_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        CheckConstraint("mode in ('OFF','OBSERVE','MENTION_ONLY','CONTEXTUAL')", name="ck_group_presence_mode"),
+        CheckConstraint("group_id like '%@g.us'", name="ck_group_presence_group_id"),
+    )
+
+
+class GroupContextualEventRow(Base):
+    __tablename__ = "group_contextual_events"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    presence_id: Mapped[str] = mapped_column(String(64), ForeignKey("group_contextual_presence.id"), nullable=False)
+    inbound_event_id: Mapped[str] = mapped_column(String(64), ForeignKey("inbound_events.id"), nullable=False, unique=True)
+    outcome: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    proposal_hash: Mapped[str | None] = mapped_column(String(128))
+    outbox_message_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("outbox_messages.id"))
+    decision_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PendingIntentRow(Base):
     __tablename__ = "pending_intents"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)

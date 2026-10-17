@@ -41,6 +41,11 @@ function normalizeInboundMessage(message, options = {}) {
     ? 'UNKNOWN_FROM_ME'
     : finalFromMeClassification;
   const isOwnerObservation = Boolean(message?.fromMe) && !ownerSelfChat && Boolean(fromMeClassification);
+  const groupId = String(message?.id?.remote?._serialized || message?.id?.remote || message?.from || '');
+  const isGroup = groupId.endsWith('@g.us');
+  const participantId = isGroup && !message?.fromMe
+    ? String(message?.author?._serialized || message?.author || '') || null
+    : null;
   return {
     schema_version: '1',
     tenant_id: tenantId,
@@ -52,13 +57,21 @@ function normalizeInboundMessage(message, options = {}) {
     external_actor_id: isOwnerObservation ? (conversation.peer_id || externalActorId) : externalActorId,
     channel,
     message_type: type,
-    content: isOwnerObservation ? '' : text,
+    content: isOwnerObservation && !isGroup ? '' : text,
     has_media: hasMedia,
     metadata: {
       provider: 'wwebjs',
       source_account: options.sourceAccount || 'default',
       message_type: type,
       from_me: Boolean(message?.fromMe),
+      ...(isGroup ? {
+        is_group: true,
+        thread_type: 'GROUP',
+        thread_key: groupId,
+        group_participant_id: participantId,
+        quoted_message_id: message?._data?.quotedStanzaID || null,
+        quoted_participant_id: message?._data?.quotedParticipant || null,
+      } : {}),
       owner_self_chat: ownerSelfChat,
       authenticated_owner_self_chat_target: authenticatedSelfChatTarget,
       authenticated_owner: ownerSelfChat ? authenticatedWid : null,

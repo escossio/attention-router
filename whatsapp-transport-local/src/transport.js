@@ -9,6 +9,7 @@ const {
   authenticatedSelfAliasSet,
   canonicalIdentity,
   isAuthenticatedOwnerSelfChatMessage,
+  extractMessageId,
   kindForId,
 } = require('./message-id');
 const { compareOwnerIdentity, resolveWhatsAppIdentity } = require('./identity');
@@ -1213,6 +1214,11 @@ async function startTransport(config, logger = console, deps = {}) {
       status.last_inbound_error_at = nowIso();
       logger.error?.('inbound_message_error', { error: String(error?.message || error) });
     });
+  });
+
+  onClient('message_ack', (message, ack) => {
+    if (!message?.fromMe) return;
+    outboundProvenance.markAck?.(extractMessageId(message), ack);
   });
 
   const initPromise = Promise.resolve().then(() => client.initialize()).then(async () => {

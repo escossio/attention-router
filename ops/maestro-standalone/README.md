@@ -56,9 +56,10 @@ permissions before cutover. Never disable hostname or chain verification.
 1. Record a private checkpoint: source SHA/image revision, current health/status,
    rendered Compose hash, Relay env/image, database revision, network/router
    state and private backup locations. Verify the existing PostgreSQL backup is
-   restorable before applying migration 0058. Check the exact revision name,
-   not its numeric prefix. A different 0058 head or existing table requires
-   Alembic history reconciliation; never stamp or apply blindly.
+   restorable before applying migration `0059_maestro_relay_receipts`. Check the
+   exact revision name, not its numeric prefix. The database must already be at
+   `0058_group_contextual_presence`; any other head or existing receipt table
+   requires reconciliation. Never stamp or apply blindly.
 2. Reserve the network/address authoritatively, back up RouterOS state, and
    provision only the new VLAN/network. Confirm Relay→MAESTRO and MAESTRO→DB
    routing without modifying legacy firewall, gateway or ingress.
@@ -86,6 +87,6 @@ Remove the Relay overlay first so new delivery stops while its outbox remains
 durable. Stop only `andy-maestro-standalone`; retain private certs, image and
 checkpoint. Remove the new Docker network/VLAN only after confirming no
 attachments/dependencies remain. Restore the previous Relay env/image if needed.
-Do not downgrade migration 0058 when receipts exist; retain DB data and resolve
+Do not downgrade migration 0059 when receipts exist; retain DB data and resolve
 the schema separately. No legacy container or PostgreSQL restart is part of
 rollback.
