@@ -8,13 +8,13 @@
 
 ## 1. Decisão de direção e fronteiras
 
-O sistema de detecção (Zabbix e demais detectores homologados) identifica anomalias. O intermediário **não monitora nem descobre falhas por conta própria**: reage a sinais autenticados, registra ocorrências, organiza contexto e produz recomendações de relevância/prioridade por análise colaborativa de modelos independentes. MAESTRO permanece uma responsabilidade separada de coordenação operacional, sem executar remediação ou investigar causalmente por conta própria; o Investigador V0 consulta evidências sob admissão e orçamento próprios.
+O sistema de detecção (Zabbix e demais detectores homologados) identifica anomalias. O intermediário **não monitora nem descobre falhas por conta própria**: reage a sinais autenticados, registra ocorrências e assume a **gestão da fila e da prioridade relativa de atendimento**, inclusive reavaliando casos abertos e trabalhos já iniciados à luz de novos incidentes. Usa análise colaborativa de modelos independentes para fundamentar prioridade e dependências. MAESTRO permanece responsável por orquestrar o trabalho que lhe chega **já organizado**, sem ter de recalcular prioridades nem gerir competição entre ocorrências; o Investigador V0 consulta evidências sob admissão e orçamento próprios.
 
 A referência a uma técnica de debate entre múltiplas IAs **não implica incorporar qualquer aplicação externa, interface gráfica ou marca ao Attention Router**. Reutilizar uma ideia não significa criar dependência de runtime, biblioteca ou repositório.
 
 Não criar um motor determinístico de árvore de decisões para deduzir causas, prioridade ou a necessidade de usar IA. O código convencional conserva responsabilidades de autenticação, integridade, normalização estrita, limites, fila, rastreabilidade, comparação estrutural de saídas e bloqueio de operações não autorizadas.
 
-**Conflito documental ainda aberto:** a proposta de MAESTRO V0 atualmente atribui a ele prioridade, classificação e fila. Esta revisão propõe que o intermediário calcule **recomendações justificadas**, mas não altera nem aprova quem possui a prioridade canônica, o ciclo do caso e as decisões de despacho. Resolver em ADR antes de implementar. Nenhuma transição automática de autoridade.
+**Diretriz explicitada pelo operador em 2026-10-16:** o **intermediário é o responsável conceitual pela fila, comparação, reordenação e prioridade operacional relativa dos chamados**; essa carga **não deve recair sobre o MAESTRO**. Ele entrega trabalho já ordenado, com motivação e versões auditáveis. A prioridade de atendimento não é autorização de remediação nem de alterar um trabalho já em execução. **Conflito documental pendente:** o rascunho MAESTRO V0 anterior atribui a ele fila e prioridade; alinhar formalmente os contratos/ADR antes de codificar ou alterar a autoridade canônica no runtime. A propriedade do ticket/estado de resolução segue em aberto. Este registro não modifica os documentos MAESTRO/ILO unilateralmente.
 
 ## 2. Etapa 1 — recepção contratual, ocorrência e recibo
 
@@ -60,17 +60,19 @@ A mesma pergunta operacional, bem especificada e sem gabarito, é enviada a múl
 
 O comparador deve **validar esquema, IDs, versão de snapshot e correspondência de resultados**, identificar convergência e divergência, encaminhar contestação e eventual arbitragem a modelos sob orçamento. Sua função não é reimplementar em condicionais o raciocínio de prioridade. A arbitragem sintetiza evidências e discordâncias, não transforma votação em prova causal. Respostas inválidas, desatualizadas ou indisponíveis ficam registradas; nenhuma maioria concede autoridade operacional.
 
-**Saída candidata:** PriorityAssessmentV0 com snapshot_id, propostas relativas e empates, relações somente hipotéticas, justificativas, divergências preservadas, confiança/limitações explicadas e evidence_refs. O destinatário é a fronteira de autoridade a definir com MAESTRO; não despachar nem executar nada diretamente. O significado de prioridade canônica, quórum, política de desempate e aceitação de sugestões permanece pendente.
+**Saída candidata:** PriorityAssessmentV0 com snapshot_id, prioridades relativas e empates, relações somente hipotéticas, justificativas, divergências preservadas, confiança/limitações explicadas e evidence_refs. O intermediário deve manter uma **fila de atendimento ordenada e reavaliável**, cuja titularidade conceitual é sua, e entregar demandas já organizadas ao MAESTRO. A operação precisa registrar como a avaliação por IA se tornou uma decisão de fila sob política aprovada; resultado de IA isolado não executa nenhuma mudança privilegiada. Quórum, política de aceitação, revisão humana e a representação do estado canônico ainda precisam de contrato/testes. O intermediário não executa remediações nem toma posse das tarefas executadas pelo MAESTRO.
 
 ## 4. Volumes, atualização e falhas
 
 Os eventos são recebidos e registrados independentemente de IA disponível. A análise pode trabalhar com lotes de mudanças e snapshot de ocorrências existentes, evitando uma consulta por alerta da mesma cascata. **Tamanho, janela temporal e latência-alvo ficam sem número até benchmark.** O reagrupamento não apaga eventos.
 
-Não assumir que todos os alertas relacionados possuem mesma causa. A interface de rede down pode explicar três falhas de contêiner, mas isso inicialmente é hipótese. O intermediário não encerra chamados nem suspende uma investigação em curso por sugestão de modelo.
+Não assumir que todos os alertas relacionados possuem mesma causa. A interface de rede down pode explicar três falhas de contêiner, mas isso inicialmente é hipótese. O intermediário **pode reordenar o atendimento pendente** quando surgir caso novo mais relevante, inclusive enquanto outro chamado já é atendido há 10–15 minutos. Porém **não encerra chamados nem cancela/suspende uma investigação em curso** por sugestão de modelo: deve registrar a perda de prioridade do caso em andamento e, se mudança de execução for necessária, recorrer ao contrato de coordenação e à autoridade pertinente, ou solicitar intervenção humana. Diferenciar reordenação de fila de preempção de trabalho ativo.
 
 Cada nova atualização invalida ou exige reconciliação explícita de avaliações feitas sobre snapshots anteriores; não promover resultado stale. Em indisponibilidade parcial ou total de modelos, preservar ocorrências e estado anterior auditável, sinalizar DEGRADED/INCONCLUSIVE e não inventar prioridade validada. Nenhum fallback para execução privilegiada ou despacho direto ao Investigador.
 
 Impor controles externos de concorrência por tenant, tempo, custo, tokens, retries, circuit breaker, evidências e tamanho; consumo desconhecido não é grátis. Não copiar automaticamente política de orçamento do Investigador V0, pois pertence a outra responsabilidade.
+
+**Exceções e intervenção humana (fase posterior):** quando houver situação atípica — exemplo ilustrativo: dez chamados disputando uma fila e prioridades/reordenações que não possam ser resolvidas com segurança — o intermediário deve poder solicitar decisão humana. Canal preferencial: notificação no aplicativo da Andy; canais complementares: Telegram e demais transportes **já homologados e disponíveis**. Notificação com resumo mínimo, IDs, urgência, alternativas e trilha de recebimento; sem expor dados sensíveis nem disparar mensagens repetidas. **Não afirmar que integração/entrega push ou Telegram já exista para esse papel.** Não implementar agora: estudar gatilhos, limiares reais, falha de entrega, deduplicação e ausência de resposta quando houver demanda comprovada. O valor 'dez' não é limite aprovado nem gatilho rígido de produção.
 
 ## 5. Ensaios sintéticos obrigatórios antes de qualquer código operacional
 
@@ -85,18 +87,21 @@ Impor controles externos de concorrência por tenant, tempo, custo, tokens, retr
 9. Mudança de estado durante debate: rejeitar ou reconciliar proposta baseada em snapshot obsoleto.
 10. Tentativa de prompt injection em log e evento malicioso, IDs de tenant cruzados e payload exagerado: bloquear vazamento e instrução embutida.
 11. Tempestade de alertas: testar backlog, idempotência, fairness e limites sem perda, antes de fixar duração de lote.
+12. Chamado já em atendimento há 15 minutos versus incidente crítico recém-chegado: o intermediário reavalia e reordena o **pendente**, registra a nova comparação e sinaliza necessidade de replanejar o ativo sem interrompê-lo automaticamente; o MAESTRO não recalcula a fila.
+13. Situação atípica com dez chamados concorrentes: registrar condição de possível intervenção humana, sem adotar o número como gatilho fixo ou afirmar que há transporte de notificações habilitado.
 
 Aceite documental: separar fatos verificados, hipóteses e decisões ainda abertas; nenhuma referência falsa a API, banco ou serviço implantado. Aceite técnico futuro: testes negativos/offline por SHA, CI distribuído, revisão de autoridade e autorização separada antes de qualquer chamada real ou deploy.
 
 ## 6. Pendências a resolver com o operador
 
-- Identidade canônica do ticket/caso e propriedade da prioridade: intermediário recomenda, MAESTRO decide, ITSM decide ou outra fronteira aprovada?
+- Identidade canônica do ticket/caso permanece aberta; **prioridade relativa da fila e sua reordenação pertencem conceitualmente ao intermediário**, não ao MAESTRO. Especificar a política formal de aceitação de análises por IA e reconciliar a autoridade operacional no ADR.
 - Adaptador real do Zabbix/ROC: transporte, autenticação, catálogo tipado, estado de recuperação e versão; levantamento somente-leitura.
 - Como associar a estrutura platform/findings e suas ocorrências a um ticket sem criar duplicidade de autoridade.
 - Escopo de contexto/dados permitido aos fornecedores de modelos, anonimização, evidência, custo e consentimento.
 - Quando produzir rodada colaborativa, limites de concorrência, versões, tolerância a atraso e política de fallback.
 - Como demonstrar que decisões por IA realmente superam baseline operacional simples em cenários cegos e diferentes, sem treinar prompt no gabarito.
-- Reconciliação formal do documento MAESTRO V0 e do estudo ILO, sem edição unilateral desses arquivos.
+- Reconciliação formal do documento MAESTRO V0 e do estudo ILO, retirando do MAESTRO a responsabilidade de recalcular prioridades/administrar competição de fila sem afetar sua coordenação; sem edição unilateral desses arquivos.
+- Intervenção humana como evolução posterior: gatilhos atípicos, notificação por aplicativo Andy/Telegram/canais homologados, idempotência, confirmação e fallback quando o operador não responder; não implementar agora.
 - Se esse papel requer entidade executável separada, reutiliza uma entidade existente ou é apenas módulo: decidir após grafo de autoridade e alcance, não por nome.
 
 ## 7. Fontes internas verificadas
