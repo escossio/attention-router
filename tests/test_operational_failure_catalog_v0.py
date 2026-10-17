@@ -1,6 +1,5 @@
 """Contrato leve do catálogo: prova local sem runtime/DB/Zabbix."""
 import json
-import re
 import unittest
 from pathlib import Path
 
