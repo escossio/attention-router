@@ -1,0 +1,80 @@
+{
+  "version": "0.1.0-draft",
+  "status": "PLANNING_ONLY_NOT_PROVISIONED",
+  "first_case": "AR-1001",
+  "native_trigger": "ANDY_WA_AUTO_REPLY_STALLED",
+  "existing_items": [
+    {
+      "key": "andy.reply.functional_stalled",
+      "meaning": "Flag de resposta funcional interrompida",
+      "status": "LIVE_ITEM"
+    },
+    {
+      "key": "andy.reply.probe_ok",
+      "meaning": "Saúde e frescor do coletor funcional",
+      "status": "LIVE_ITEM"
+    }
+  ],
+  "proposed_observations": [
+    {
+      "key": "andy.reply.eligible_inbound_count",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.processed_inbound_count",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.decisions_by_status",
+      "dimension": "application_flow",
+      "kind": "typed_bounded_aggregate",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.outbox_enqueued_count",
+      "dimension": "delivery",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.deliveries_confirmed_count",
+      "dimension": "delivery",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.expected_response_basis",
+      "dimension": "application_flow",
+      "kind": "typed_enum",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.probe_freshness_seconds",
+      "dimension": "collector_integrity",
+      "kind": "bounded_duration",
+      "available": "TO_VERIFY"
+    }
+  ],
+  "planned_event_tags": [
+    {
+      "tag": "fault_code",
+      "value": "AR-1001",
+      "scope": "NEW_EVENTS_AFTER_EXPLICIT_ROLLOUT"
+    },
+    {
+      "tag": "evidence_profile",
+      "value": "layered-v0-draft",
+      "scope": "NEW_EVENTS_AFTER_EXPLICIT_ROLLOUT"
+    }
+  ],
+  "non_goals": [
+    "No direct raw logs in Zabbix event tags",
+    "No active Relay V0 changes",
+    "No automatic tcpdump",
+    "No claim that absent telemetry is a healthy layer"
+  ]
+}

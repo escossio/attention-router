@@ -1,0 +1,187 @@
+{
+  "version": "0.1.0-draft",
+  "status": "PLANNING_ONLY",
+  "dimensions": [
+    {
+      "dimension": "physical",
+      "osi_ref": [
+        1
+      ],
+      "title": "Enlace e interfaces físicas",
+      "sources": [
+        "roc_network_osi",
+        "zabbix_native"
+      ],
+      "first_checks": [
+        "estado administrativo/operacional de interface quando coletado",
+        "integridade e frescor SNMP"
+      ],
+      "caution": "Link ativo não prova conectividade de aplicação."
+    },
+    {
+      "dimension": "data_link",
+      "osi_ref": [
+        2
+      ],
+      "title": "VLAN, bridge, vizinhança e topologia L2",
+      "sources": [
+        "roc_network_osi",
+        "zabbix_native"
+      ],
+      "first_checks": [
+        "parent de VLAN verificado",
+        "vizinho ARP completo/incompleto com coleta íntegra"
+      ],
+      "caution": "ARP ausente ou incompleto não prova sozinho a causa do incidente."
+    },
+    {
+      "dimension": "network",
+      "osi_ref": [
+        3
+      ],
+      "title": "Roteamento e alcançabilidade IP",
+      "sources": [
+        "roc_network_osi",
+        "zabbix_native"
+      ],
+      "first_checks": [
+        "alcançabilidade e perda ICMP",
+        "dependências de L1 e L2"
+      ],
+      "caution": "ICMP saudável não prova conexão TCP ou resposta da aplicação."
+    },
+    {
+      "dimension": "transport",
+      "osi_ref": [
+        4
+      ],
+      "title": "Sessão TCP e conectividade de transporte",
+      "sources": [
+        "zabbix_native",
+        "otel_tempo",
+        "manual_packet_evidence"
+      ],
+      "first_checks": [
+        "teste TCP autenticado quando existir item",
+        "retransmissão/RST/timeout quando houver evidência"
+      ],
+      "caution": "tcpdump é captura excepcional autorizada, não coleta contínua nem prova de causa sem correlação."
+    },
+    {
+      "dimension": "runtime",
+      "osi_ref": [
+        7
+      ],
+      "title": "Processos, contêineres e capacidade",
+      "sources": [
+        "docker_inventory",
+        "mgmt_compute",
+        "dozzle"
+      ],
+      "first_checks": [
+        "estado do processo e reinícios",
+        "saúde do container em relação ao healthcheck real"
+      ],
+      "caution": "Docker HEALTHY não prova disponibilidade funcional do fluxo."
+    },
+    {
+      "dimension": "application_http",
+      "osi_ref": [
+        7
+      ],
+      "title": "HTTP, ingresso e rotas",
+      "sources": [
+        "goaccess",
+        "zabbix_native",
+        "otel_tempo"
+      ],
+      "first_checks": [
+        "códigos HTTP e latências em janela apropriada",
+        "ingresso real e destino consultado"
+      ],
+      "caution": "HTTP 200 em healthcheck pode coexistir com falha de negócio."
+    },
+    {
+      "dimension": "tracing",
+      "osi_ref": [
+        7
+      ],
+      "title": "OpenTelemetry, spans e correlação",
+      "sources": [
+        "otel_tempo",
+        "grafana_flow"
+      ],
+      "first_checks": [
+        "traces ligados ao fluxo e cobertura do instrumento",
+        "frescor dos exportadores/collector"
+      ],
+      "caution": "Trace ausente não prova que a aplicação ou camada inferior falhou."
+    },
+    {
+      "dimension": "application_flow",
+      "osi_ref": [
+        7
+      ],
+      "title": "Entrada, decisão, contexto e execução",
+      "sources": [
+        "mgmt_agent_transport",
+        "mgmt_message_trace",
+        "zabbix_reply_probe"
+      ],
+      "first_checks": [
+        "elegibilidade e expectativa de resposta",
+        "entrada processada, decisão, política e intenção"
+      ],
+      "caution": "DRY_RUN/INSUFFICIENT_CONTEXT são estados, não causas suficientes sem expectativa."
+    },
+    {
+      "dimension": "persistence",
+      "osi_ref": [
+        7
+      ],
+      "title": "PostgreSQL, fila e estado durável",
+      "sources": [
+        "zabbix_native",
+        "otel_tempo",
+        "mgmt_message_trace"
+      ],
+      "first_checks": [
+        "conectividade/duração de operação DB quando medida",
+        "registro da fila e confirmação por recibo"
+      ],
+      "caution": "Tabelas vazias não são falha sem expectativa de escrita."
+    },
+    {
+      "dimension": "delivery",
+      "osi_ref": [
+        7
+      ],
+      "title": "Outbox, Relay, confirmação e canal externo",
+      "sources": [
+        "mgmt_message_trace",
+        "mgmt_agent_transport",
+        "zabbix_native"
+      ],
+      "first_checks": [
+        "outbox pendente/produzida",
+        "ACK confirmado vs envio tentado"
+      ],
+      "caution": "Mensagem entregue ao provedor não é prova de leitura pelo destinatário."
+    },
+    {
+      "dimension": "collector_integrity",
+      "osi_ref": [],
+      "title": "Qualidade e limites da observabilidade",
+      "sources": [
+        "zabbix_native",
+        "otel_tempo",
+        "roc_network_osi"
+      ],
+      "first_checks": [
+        "status do coletor e último dado válido",
+        "lacunas, retenção e timeout de consulta"
+      ],
+      "caution": "Coleta indisponível é UNKNOWN, jamais OK por ausência de alarme."
+    }
+  ]
+}

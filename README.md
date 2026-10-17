@@ -77,6 +77,12 @@ documents the controlled transition. Operational acceptance on AGT is
 **separate from public prerelease certification**; neither establishes universal
 provider support or production readiness.
 
+## MGMT — observabilidade ponta a ponta (contexto canônico)
+
+No projeto, **MGMT** significa o conjunto de ferramentas de gerência e observabilidade — Zabbix ROC/Network-OSI, Docker/Agent2, OpenTelemetry/Tempo/Grafana, Flow Map, GoAccess, Dozzle, Andy Ops Compute e Agent/Transport, além do rastreamento de mensagens e CI. Essa suíte está descrita no [mapa de arquitetura MGMT](docs/architecture/mgmt-observability-context-v0.md); cada fonte mantém seu escopo, atraso, cobertura e estado de coleta.
+
+As ocorrências serão progressivamente enriquecidas usando o [perfil de evidências por domínio/OSI](docs/architecture/zabbix-layered-evidence-v0.md) e o [catálogo AR-XXXX](docs/operations/operational-failure-catalog-v0.md). **Zabbix primeiro**: dados tipados e confiança/qualidade observacional, sem declarar causa nem tratamento. A evolução do wire Zabbix→Relay→MAESTRO permanece uma etapa futura, versionada. O estado vivo deve ser verificado e não pode ser inferido só pelo catálogo.
+
 ## Operational observability
 
 The AGT runtime now has an out-of-band lightweight observability layer:

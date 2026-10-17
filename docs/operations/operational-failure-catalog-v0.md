@@ -2,6 +2,12 @@
 
 **Data:** 2026-10-17. **Estado:** DRAFT, somente documentação e validação offline. Sem nova ação, media, trigger ou deploy Zabbix.
 
+## Complemento obrigatório — evidências do MGMT e ordem OSI
+
+Este catálogo identifica **a classe do sintoma**, não substitui seu conjunto de evidências. Ver o [mapa MGMT](../architecture/mgmt-observability-context-v0.md) e o [perfil Zabbix de evidências por camadas](../architecture/zabbix-layered-evidence-v0.md), com os registros versionados ops/observability/failure-catalog/layered-*, evidence-sources.v0.json e zabbix-plan.ar-1001.v0.json. Esses documentos já distinguem informações realmente observadas, ausência de observação, observabilidade degradada e verificações sem anomalia relacionada.
+
+**Não emitir novos campos no Relay V0**: a enumeração de domínios/qualidade de coleta é apenas uma proposta de contrato de origem Zabbix até existir versão de transporte compatível e certificada. Uma captura tcpdump/PCAP permanece sob demanda e não é pré-requisito universal para alarme.
+
 ## Por que existe
 
 Zabbix observa e classifica **sintomas**; Occurrence Relay registra e transporta sem perder/reordenar identidade; MAESTRO recebe e confirma. A causa e a solução não são escolhidas pelo Zabbix, pelo Relay ou pelo código da ocorrência. O catálogo torna o sintoma identificável, legível e verificável antes de qualquer investigação.
