@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 
 MODULE_PATH = Path(__file__).parents[1] / "ops" / "occurrence-relay" / "relay.py"
@@ -131,7 +132,7 @@ class HttpTests(StoreTests):
     def request(self, token=None, data=None):
         req = Request(self.url, data=json.dumps(data or event()).encode("utf-8"),
                       method="POST",
-                      headers={} if token is None else {"Authorization": "Bearer "+token})
+                      headers={"Content-Type": "application/json", **({} if token is None else {"Authorization": "Bearer "+token})})
         try:
             with urlopen(req, timeout=3) as r:
                 return r.status, json.load(r)
@@ -152,6 +153,57 @@ class HttpTests(StoreTests):
         self.assertEqual(self.request("x"*40)[0], 201)
         self.assertEqual(self.request("x"*40, event(severity=0))[0], 422)
         self.assertEqual(self.store.counts()["events"], 1)
+
+    def raw_post(self, custom_headers):
+        body = json.dumps(event()).encode("utf-8")
+        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        try:
+            connection.putrequest("POST", "/v1/zabbix/events")
+            connection.putheader("Authorization", "Bearer " + "x" * 40)
+            connection.putheader("Content-Type", "application/json")
+            for key, value in custom_headers:
+                connection.putheader(key, value)
+            connection.endheaders(body)
+            response = connection.getresponse()
+            status = response.status
+            response.read()
+            return status
+        finally:
+            connection.close()
+
+    def test_duplicate_length_cannot_choose_first(self):
+        body_length = len(json.dumps(event()).encode("utf-8"))
+        self.assertEqual(self.raw_post([
+            ("Content-Length", str(body_length)),
+            ("Content-Length", str(body_length - 1)),
+        ]), 400)
+        self.assertEqual(self.store.counts()["events"], 0)
+
+    def test_transfer_encoding_with_length_is_rejected(self):
+        body_length = len(json.dumps(event()).encode("utf-8"))
+        self.assertEqual(self.raw_post([
+            ("Transfer-Encoding", "chunked"),
+            ("Content-Length", str(body_length)),
+        ]), 400)
+        self.assertEqual(self.store.counts()["events"], 0)
+
+    def test_duplicate_auth_header_is_rejected(self):
+        body_length = len(json.dumps(event()).encode("utf-8"))
+        self.assertEqual(self.raw_post([
+            ("Authorization", "Bearer " + "x" * 40),
+            ("Content-Length", str(body_length)),
+        ]), 400)
+        self.assertEqual(self.store.counts()["events"], 0)
+
+    def test_disallowed_content_type_is_rejected(self):
+        payload = json.dumps(event()).encode()
+        request = Request(self.url, data=payload, method="POST",
+                          headers={"Authorization":"Bearer " + "x"*40,
+                                   "Content-Type":"text/plain"})
+        with self.assertRaises(HTTPError) as raised:
+            urlopen(request, timeout=3)
+        self.assertEqual(raised.exception.code, 400)
+        self.assertEqual(self.store.counts()["events"], 0)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ Componente mínimo: receber evento autenticado, persistir identificador sequenci
 
 ## Contrato de ensaio
 
-POST /v1/zabbix/events, Bearer token restrito vindo de arquivo protegido, JSON de até 16 KiB. Campos obrigatórios: schema_version=1; event_id; occurred_at com timezone; asset_ref; signal_code; status (PROBLEM, RECOVERY, UPDATE). Opcionais: problem_event_id, service_ref, interface_ref, summary, severity. RECOVERY exige problem_event_id.
+POST /v1/zabbix/events, Bearer token restrito vindo de arquivo protegido, JSON de até 16 KiB. A fronteira rejeita requisições com Content-Length duplicado, Transfer-Encoding, Content-Encoding, Content-Type fora de application/json e Authorization duplicado; ambiguidades retornam HTTP 400 e a conexão é encerrada. Sem credencial, retorna HTTP 401. Campos obrigatórios: schema_version=1; event_id; occurred_at com timezone; asset_ref; signal_code; status (PROBLEM, RECOVERY, UPDATE). Opcionais: problem_event_id, service_ref, interface_ref, summary, severity. RECOVERY exige problem_event_id.
 
 Exemplo exclusivamente sintético:
 

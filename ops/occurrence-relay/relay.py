@@ -208,6 +208,8 @@ def handler_factory(app: App):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(data)
 
@@ -224,7 +226,23 @@ def handler_factory(app: App):
             if self.path != "/v1/zabbix/events":
                 self._reply(404, {"error": "NOT_FOUND"})
                 return
-            provided = self.headers.get("Authorization", "")
+            # The stdlib HTTP server does not reject ambiguous framing by itself.
+            # Never trust the first of two lengths or a body marked chunked.
+            lengths = self.headers.get_all("Content-Length", [])
+            authorizations = self.headers.get_all("Authorization", [])
+            contents = self.headers.get_all("Content-Type", [])
+            if (
+                len(lengths) != 1
+                or len(authorizations) > 1
+                or len(contents) != 1
+                or contents[0].lower() not in ("application/json", "application/json; charset=utf-8")
+                or self.headers.get_all("Transfer-Encoding")
+                or self.headers.get_all("Content-Encoding")
+            ):
+                self.close_connection = True
+                self._reply(400, {"error": "INVALID_HTTP_ENVELOPE"})
+                return
+            provided = authorizations[0] if authorizations else ""
             if not hmac.compare_digest(provided, "Bearer " + app.inbound_token):
                 self._reply(401, {"error": "UNAUTHORIZED"})
                 return
