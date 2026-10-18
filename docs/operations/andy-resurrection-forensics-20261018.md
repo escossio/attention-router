@@ -372,6 +372,16 @@ fluxo distribuído existente; architecture guard está dentro de docker-build.
 O ruleset exige distributed-python além dos checks legados. Nenhum resultado de
 SHA anterior certifica HEAD novo. Não houve suite pesada no AGT.
 
+Uma falha independente no gate Transport foi reproduzida:272 testes Transport e
+64 de conformidade passaram; o teste do SDK TypeScript assumia array no JSON
+de npm pack e falhou no formato keyed-object. Foi reaproveitado, sem reconstruir,
+o commit `7d412ff40933dd239cb091dd34ef9de9ad37453f` da PR #360, ainda draft.
+O ajuste preserva as asserções de arquivos, valida um único pacote e testa os
+dois formatos. Altera apenas sdks/typescript/tests/installed-package.mjs, sem
+mudança no SDK publicado ou runtime. Os checks antigos dessa PR não certificam
+o novo SHA; o gate completo deve passar novamente. Essa falha não explica o
+incidente WhatsApp e permanece separada da causalidade acima.
+
 | # | Cenário exigido | Prova offline do candidato e limite |
 | --- | --- | --- |
 | 1 | Visitante novo, pergunta simples | Pipeline→autonomia→outbox→DONE no adapter fake, sem binding criado. |
