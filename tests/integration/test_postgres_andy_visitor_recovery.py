@@ -1,0 +1,37 @@
+"""Run the same recovery cases in the distributed PostgreSQL discovery path.
+
+The integration Session fixture owns a randomly named, migrated test database
+and protected per-test truncation. No test logic or runtime path is duplicated.
+The domain-preflight case stays in the database-independent unit module.
+"""
+
+import pytest
+
+from tests.test_andy_visitor_recovery import (
+    test_01_new_visitor_question_reaches_fake_delivery_without_binding as test_01_new_visitor_question_reaches_fake_delivery_without_binding,
+    test_02_active_binding_keeps_its_explicit_blueprint as test_02_active_binding_keeps_its_explicit_blueprint,
+    test_03_inactive_binding_is_visitor_without_inheriting_owner_metadata as test_03_inactive_binding_is_visitor_without_inheriting_owner_metadata,
+    test_04_pn_alias_does_not_promote_lid_to_pn_owner_binding as test_04_pn_alias_does_not_promote_lid_to_pn_owner_binding,
+    test_05_receipt_tenant_divergence_blocks_intent as test_05_receipt_tenant_divergence_blocks_intent,
+    test_06_blueprint_without_current_version_produces_no_intent as test_06_blueprint_without_current_version_produces_no_intent,
+    test_07_blueprint_of_other_tenant_produces_no_intent as test_07_blueprint_of_other_tenant_produces_no_intent,
+    test_09_simple_question_has_no_tool_requests_or_grants as test_09_simple_question_has_no_tool_requests_or_grants,
+    test_10_11_privileged_request_cannot_execute_owner_action as test_10_11_privileged_request_cannot_execute_owner_action,
+    test_12_policy_silence_overrides_visitor_conversation as test_12_policy_silence_overrides_visitor_conversation,
+    test_13_outbox_persistence_failure_rolls_back_without_losing_intent as test_13_outbox_persistence_failure_rolls_back_without_losing_intent,
+    test_14_transport_unavailable_after_outbox_does_not_claim_delivery as test_14_transport_unavailable_after_outbox_does_not_claim_delivery,
+    test_15_replay_does_not_duplicate_decision_intent_or_reply as test_15_replay_does_not_duplicate_decision_intent_or_reply,
+    test_16_tracer_failure_preserves_functional_reply as test_16_tracer_failure_preserves_functional_reply,
+    test_17_partial_conversation_identity_never_promotes_owner as test_17_partial_conversation_identity_never_promotes_owner,
+    test_18_group_default_is_excluded_and_does_not_authorize_external_effect as test_18_group_default_is_excluded_and_does_not_authorize_external_effect,
+    visitor as visitor,
+)
+
+
+pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture()
+def session(Session):
+    with Session() as db:
+        yield db

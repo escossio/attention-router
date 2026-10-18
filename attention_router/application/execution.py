@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from attention_router.config import settings
 from attention_router.domain.models import new_id
 from attention_router.infrastructure.models import (
+    AgentBlueprintRow,
+    AgentBlueprintVersionRow,
     AgentDecisionRow,
     AgentExecutionIntentRow,
     AgentResponseReviewRow,
@@ -25,6 +27,8 @@ from attention_router.infrastructure.models import (
     ExecutionLeaseRow,
     ReadinessResultRow,
     ScenarioRunRow,
+    PolicyRow,
+    PolicyVersionRow,
 )
 from attention_router.infrastructure.repository import audit, mask_identifier
 from attention_router.application.repetition import suppress_if_repeated
@@ -206,6 +210,39 @@ def execution_gate(
     return "ALLOWED", "READY", recipient
 
 
+def _refresh_visitor_intent_scope(
+    session: Session, decision: AgentDecisionRow, interaction: InteractionRow,
+) -> bool:
+    """Refresh only protected execution scopes, preserving pending caller writes."""
+    from attention_router.application.decision_pipeline import _guarded_visitor_default
+
+    if not decision.agent_blueprint_id or decision.agent_blueprint_version is None:
+        return False
+    blueprint = session.get(AgentBlueprintRow, decision.agent_blueprint_id)
+    recorded_version = session.scalar(select(AgentBlueprintVersionRow).where(
+        AgentBlueprintVersionRow.blueprint_id == decision.agent_blueprint_id,
+        AgentBlueprintVersionRow.version == decision.agent_blueprint_version,
+    ))
+    # Use the decision's immutable version: rollback may move current_version_id
+    # to an unmarked version while this Session still retains the old pointer.
+    if not _guarded_visitor_default(blueprint, recorded_version):
+        return False
+    session.flush()
+    session.refresh(interaction)
+    blueprint = session.get(AgentBlueprintRow, decision.agent_blueprint_id, populate_existing=True)
+    if blueprint is not None and blueprint.current_version_id:
+        session.get(AgentBlueprintVersionRow, blueprint.current_version_id, populate_existing=True)
+    policies = session.scalars(select(PolicyRow).where(
+        PolicyRow.tenant_id == interaction.tenant_id,
+    ).execution_options(populate_existing=True)).all()
+    pointers = [policy.current_version_id for policy in policies if policy.current_version_id]
+    if pointers:
+        session.scalars(select(PolicyVersionRow).where(
+            PolicyVersionRow.id.in_(pointers),
+        ).execution_options(populate_existing=True)).all()
+    return True
+
+
 def automatic_intent_denial_reason(
     session: Session, intent: AgentExecutionIntentRow, *, lock=False,
 ) -> str | None:
@@ -225,6 +262,9 @@ def automatic_intent_denial_reason(
     evaluation = session.get(AutonomyEvaluationRow, intent.autonomy_evaluation_id) if intent.autonomy_evaluation_id else None
     if event is None:
         return "DIRECT_EVENT_MISSING"
+    guarded = _refresh_visitor_intent_scope(session, decision, interaction)
+    if guarded and interaction.contact_id != decision.actor_id:
+        return "DIRECT_INTERACTION_MISMATCH"
     if (event.source == "wwebjs" or (event.payload or {}).get("channel") == "whatsapp") and not (intent.effective_response_snapshot or "").strip():
         return "AUTOMATIC_RESPONSE_EMPTY"
     if event.source == "wwebjs" or (evaluation and evaluation.conversation_contract_version):
@@ -246,7 +286,10 @@ def automatic_intent_denial_reason(
             policy = routing.policy_version
             if not policy or policy.id != decision.policy_version_id or policy.status != "ACTIVE":
                 return "CONVERSATION_POLICY_STALE"
-            blueprint, version = _blueprint(session, routing.binding, interaction.tenant_id, explicit_only=True)
+            blueprint, version = _blueprint(
+                session, routing.binding, interaction.tenant_id, explicit_only=True,
+                event=event, audience=routing.audience, policy_version=policy,
+            )
             if (not blueprint or not version or blueprint.id != decision.agent_blueprint_id
                 or version.version != decision.agent_blueprint_version):
                 return "CONVERSATION_BLUEPRINT_STALE"

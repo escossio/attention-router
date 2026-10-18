@@ -17,6 +17,8 @@ from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.media_store import MediaStore, MediaStoreError, media_ref
 from attention_router.infrastructure.audio_normalizer import normalize_voice_for_whatsapp
 from attention_router.infrastructure.models import (
+    AgentBlueprintRow,
+    AgentBlueprintVersionRow,
     AgentDecisionRow,
     AgentExecutionIntentRow,
     InboundEventRow,
@@ -35,7 +37,18 @@ def source_text_hash(text: str) -> str:
 def intent_is_voice_response(session, intent: AgentExecutionIntentRow) -> bool:
     decision = session.get(AgentDecisionRow, intent.agent_decision_id)
     event = session.get(InboundEventRow, decision.event_id) if decision else None
-    return is_voice_input_event(event)
+    if not is_voice_input_event(event):
+        return False
+    from attention_router.application.decision_pipeline import _guarded_visitor_default
+
+    blueprint = session.get(AgentBlueprintRow, decision.agent_blueprint_id) if decision.agent_blueprint_id else None
+    # The decision's immutable contract survives rollout flag loss and rollback
+    # of the blueprint's current pointer. Text-only visitors never request TTS.
+    version = session.scalar(select(AgentBlueprintVersionRow).where(
+        AgentBlueprintVersionRow.blueprint_id == decision.agent_blueprint_id,
+        AgentBlueprintVersionRow.version == decision.agent_blueprint_version,
+    )) if decision.agent_blueprint_id and decision.agent_blueprint_version is not None else None
+    return not _guarded_visitor_default(blueprint, version)
 
 
 def ensure_tts_derivation(session, intent: AgentExecutionIntentRow) -> TTSDerivationRow:

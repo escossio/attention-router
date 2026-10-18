@@ -95,6 +95,8 @@ function createOutboundProvenanceLedger(config, deps = {}) {
       started_at: now,
       status: 'SENDING',
       message_reference: null,
+      ack: null,
+      ack_at: null,
       observed_message_ids: [],
       updated_at: now,
     };
@@ -105,8 +107,34 @@ function createOutboundProvenanceLedger(config, deps = {}) {
     return write({ ...record, ...values, updated_at: clock().toISOString() });
   }
 
-  function markSent(record, messageReference) {
-    return update(record, { status: 'SENT', message_reference: messageReference || record.message_reference || null });
+  function markSent(record, messageReference, initialAck = null) {
+    const ack = Number.isInteger(initialAck) && initialAck >= 0 ? initialAck : record.ack;
+    return update(record, {
+      status: 'SENT', message_reference: messageReference || record.message_reference || null,
+      ack, ack_at: ack === null ? record.ack_at : clock().toISOString(),
+    });
+  }
+
+  function markAck(messageReference, ack) {
+    if (typeof messageReference !== 'string' || !messageReference || !Number.isInteger(ack) || ack < 0) return false;
+    const matches = all().filter((record) => record.status === 'SENT' && record.message_reference === messageReference);
+    if (matches.length !== 1) return false;
+    const record = matches[0];
+    if (record.ack !== null && record.ack !== undefined && ack <= record.ack) return true;
+    update(record, { ack, ack_at: clock().toISOString() });
+    return true;
+  }
+
+  function statusForKey(idempotencyKey) {
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey || idempotencyKey.length > 180) return null;
+    const file = recordPath(idempotencyKey);
+    if (!ensureAvailable() || !io.existsSync(file)) return null;
+    try {
+      const record = read(file);
+      return record.idempotency_key === idempotencyKey ? record : null;
+    } catch {
+      return null;
+    }
   }
 
   function markFailed(record, reason = 'SEND_FAILED') {
@@ -212,7 +240,9 @@ function createOutboundProvenanceLedger(config, deps = {}) {
     classify,
     classifyBounded,
     markFailed,
+    markAck,
     markSent,
+    statusForKey,
     records: all,
   };
 }

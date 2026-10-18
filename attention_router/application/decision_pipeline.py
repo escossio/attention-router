@@ -71,6 +71,7 @@ from attention_router.infrastructure.repository import (
     mask_identifier,
     resolve_actor_binding,
 )
+from attention_router.infrastructure.hashing import stable_hash
 from attention_router.observability.tracing import identifier_hash, safe_set_attribute, set_outcome, start_span
 
 
@@ -128,11 +129,85 @@ def _behavior_history(
     )
 
 
+def _guarded_visitor_default(
+    blueprint: AgentBlueprintRow | None,
+    version: AgentBlueprintVersionRow | None = None,
+) -> bool:
+    value = getattr(version, "spec", None)
+    spec = value if isinstance(value, dict) else {}
+    behavior = spec.get("behavior")
+    marked = isinstance(behavior, dict) and "visitor_default_contract" in behavior
+    return bool(
+        marked or (
+            getattr(settings, "agent_decision_default_visitor_only", False)
+            and blueprint is not None
+            and blueprint.id == settings.agent_decision_default_blueprint_id
+        )
+    )
+
+
+def _visitor_default_denial_reason(
+    blueprint: AgentBlueprintRow,
+    version: AgentBlueprintVersionRow,
+    *,
+    binding: ActorBindingRow | None,
+    event: InboundEventRow | None,
+    audience: str | None,
+    policy_version: PolicyVersionRow | None,
+) -> str | None:
+    """Constrain the opted-in default, including explicit references to its ID."""
+    if (
+        binding is not None or audience != "unknown"
+        or getattr(event, "tenant_id", None) != blueprint.tenant_id
+        or not direct_conversation_eligibility(event).eligible
+    ):
+        return "VISITOR_DEFAULT_SCOPE_DENIED"
+    spec = version.spec or {}
+    if not isinstance(spec, dict) or not isinstance(spec.get("actions"), dict):
+        return "VISITOR_DEFAULT_BLUEPRINT_INVALID"
+    actions = spec.get("actions") or {}
+    text_actions = {"respond", "request_information"}
+
+    def textual(values, *, exact: bool) -> bool:
+        return (
+            isinstance(values, list) and all(isinstance(value, str) for value in values)
+            and len(values) == len(set(values))
+            and (set(values) == text_actions if exact else set(values) <= text_actions)
+        )
+
+    if (
+        blueprint.status != "published" or spec.get("domain") != "general"
+        or version.is_immutable is not True
+        or version.checksum != stable_hash(spec)
+        or spec.get("behavior") != {"visitor_default_contract": "text-only-v1"}
+        or spec.get("audiences") != ["unknown"] or spec.get("channels") != ["whatsapp"]
+        or not textual(actions.get("allowed"), exact=True)
+        or actions.get("requires_approval") != []
+    ):
+        return "VISITOR_DEFAULT_BLUEPRINT_INVALID"
+    config = policy_version.config if policy_version is not None else None
+    conversation = config.get("conversational_execution") if isinstance(config, dict) else None
+    if (
+        policy_version is None or policy_version.status != "ACTIVE" or policy_version.is_immutable is not True
+        or policy_version.checksum != stable_hash(config)
+        or not isinstance(conversation, dict)
+        or conversation.get("execution_mode") not in {"AUTO_ALLOWED", "REQUIRES_APPROVAL", "OBSERVE"}
+        or not textual(conversation.get("allowed_actions"), exact=False)
+        or not textual(config.get("allowed_actions"), exact=True)
+        or config.get("allowed_capabilities") != [] or config.get("allowed_disclosures") != []
+    ):
+        return "VISITOR_DEFAULT_POLICY_DENIED"
+    return None
+
+
 def _blueprint(
     session: Session,
     binding: ActorBindingRow | None,
     tenant_id: str,
     *, explicit_only: bool = False,
+    event: InboundEventRow | None = None,
+    audience: str | None = None,
+    policy_version: PolicyVersionRow | None = None,
 ) -> tuple[AgentBlueprintRow | None, AgentBlueprintVersionRow | None]:
     blueprint_id = (binding.binding_metadata or {}).get("agent_blueprint_id") if binding else None
     blueprint_id = blueprint_id or settings.agent_decision_default_blueprint_id
@@ -150,6 +225,8 @@ def _blueprint(
         status_rank = {"published": 3, "ready_for_simulation": 2, "draft": 1}
         for candidate in candidates:
             version = session.get(AgentBlueprintVersionRow, candidate.current_version_id)
+            if _guarded_visitor_default(candidate, version):
+                continue
             if version is not None:
                 completeness = int((version.spec or {}).get("configuration_completeness", 0))
                 ranked.append((status_rank.get(candidate.status, 0), completeness, candidate.updated_at, candidate))
@@ -158,6 +235,10 @@ def _blueprint(
         return row, None
     version = session.get(AgentBlueprintVersionRow, row.current_version_id)
     if version is None or version.blueprint_id != row.id:
+        return row, None
+    if _guarded_visitor_default(row, version) and _visitor_default_denial_reason(
+        row, version, binding=binding, event=event, audience=audience, policy_version=policy_version,
+    ):
         return row, None
     return row, version
 
@@ -312,17 +393,25 @@ def _recent_agent_turns(
     tenant_id: str,
     contact_id: str,
     current_id: str,
+    *, visitor_only: bool = False,
 ) -> list[dict[str, str]]:
     current = session.get(InteractionRow, current_id)
     if current is None or current.tenant_id != tenant_id or current.contact_id != contact_id:
         return []
+    query = select(InteractionRow).where(
+        InteractionRow.tenant_id == tenant_id,
+        InteractionRow.contact_id == contact_id,
+        InteractionRow.created_at < current.created_at,
+    )
+    if visitor_only:
+        query = query.where(select(AuditEventRow.id).where(
+            AuditEventRow.tenant_id == tenant_id,
+            AuditEventRow.interaction_id == InteractionRow.id,
+            AuditEventRow.event_type == "visitor_default.context_built",
+            AuditEventRow.payload["contract"].as_string() == "text-only-v1",
+        ).exists())
     rows = session.scalars(
-        select(InteractionRow)
-        .where(
-            InteractionRow.tenant_id == tenant_id,
-            InteractionRow.contact_id == contact_id,
-            InteractionRow.created_at < current.created_at,
-        )
+        query
         .order_by(InteractionRow.created_at.desc(), InteractionRow.id.desc())
         .limit(6)
     ).all()
@@ -454,7 +543,24 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
     else:
         _audit(session, interaction.id, "actor.resolved", {"status": "UNKNOWN", "binding_present": False})
     direct = direct_conversation_eligibility(event)
-    blueprint, version = _blueprint(session, binding, interaction.tenant_id, explicit_only=direct.eligible)
+    blueprint, version = _blueprint(
+        session, binding, interaction.tenant_id, explicit_only=direct.eligible,
+        event=event, audience=audience, policy_version=policy_version,
+    )
+    candidate_version = version or (
+        session.get(AgentBlueprintVersionRow, blueprint.current_version_id)
+        if blueprint is not None and blueprint.current_version_id else None
+    )
+    visitor_guarded = _guarded_visitor_default(blueprint, candidate_version)
+    visitor_default = visitor_guarded and version is not None
+    if visitor_guarded and version is None:
+        if candidate_version is not None and candidate_version.blueprint_id == blueprint.id:
+            reason = _visitor_default_denial_reason(
+                blueprint, candidate_version, binding=binding, event=event,
+                audience=audience, policy_version=policy_version,
+            )
+            if reason:
+                _audit(session, interaction.id, "visitor_default.blocked", {"reason_code": reason})
     if direct.eligible and version is None:
         _audit(session, interaction.id, "conversation.blocked",
                {"reason_code": "CONVERSATION_BLUEPRINT_UNCONFIGURED"})
@@ -543,6 +649,8 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             disclosure_authority,
             platform_context.current_operational_state,
         )
+        if visitor_default:
+            private_state = []
         response_style_profile = ResponseStyleProfile()
         if binding is not None:
             try:
@@ -566,23 +674,28 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
             actor_id=identifier_hash(context.actor_id),
             binding_id=identifier_hash(context.actor_binding_id) if context.actor_binding_id else None,
             interaction_actor={"type": "ACTOR", "id": identifier_hash(context.actor_id)},
-            represented_subject=represented_subject.model_dump() if represented_subject else None,
+            represented_subject=(
+                represented_subject.model_dump() if represented_subject and not visitor_default else None
+            ),
             audience=audience,
             policy_summary=f"policy={policy_version.policy_id if policy_version else 'none'}; "
             f"conversation_contract={DIRECT_TEXT_CONVERSATION_CONTRACT_VERSION}; capabilities_require_separate_authority",
             allowed_disclosures=allowed_disclosures,
             allowed_facts=[],
             recent_turns=_recent_agent_turns(
-                session, interaction.tenant_id, interaction.contact_id, interaction.id
+                session, interaction.tenant_id, interaction.contact_id, interaction.id,
+                visitor_only=visitor_default,
             ),
-            available_action_capabilities=["leave_message", "request_callback", "notify_alex"],
+            available_action_capabilities=(
+                [] if visitor_default else ["leave_message", "request_callback", "notify_alex"]
+            ),
             current_message=effective_text,
             relationship=interaction.relationship_category,
             contact_return_channel_available=direct.return_channel_available,
             whatsapp_return_channel_available=direct.return_channel_available,
             already_known_information=(["actor_identity", "relationship"] if binding else [])
             + (["current_whatsapp_return_channel"] if direct.return_channel_available else []),
-            action_capabilities=[
+            action_capabilities=[] if visitor_default else [
                 ActionCapability(
                     action_type="leave_message",
                     known_channel="current_whatsapp_return_channel",
@@ -600,17 +713,19 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                     description="no direct notification capability is exposed to this run",
                 ),
             ],
-            available_capabilities=platform_context.available_capabilities,
+            available_capabilities=[] if visitor_default else platform_context.available_capabilities,
             current_operational_state=private_state,
-            relevant_facts=platform_context.relevant_facts,
-            relevant_decisions=platform_context.relevant_decisions,
-            effective_authority=platform_context.effective_authority,
-            effective_standing_directives=directive_context,
+            relevant_facts=[] if visitor_default else platform_context.relevant_facts,
+            relevant_decisions=[] if visitor_default else platform_context.relevant_decisions,
+            effective_authority=[] if visitor_default else platform_context.effective_authority,
+            effective_standing_directives=[] if visitor_default else directive_context,
             communication_intent={
                 "disclose_current_availability_when_relevant": disclose_presence,
             },
             response_style=response_style_profile.prompt_payload(),
         )
+        if visitor_default:
+            _audit(session, interaction.id, "visitor_default.context_built", {"contract": "text-only-v1"})
         with start_span("andy.agent.context_build") as span:
             safe_set_attribute(span, "attention.agent.context_turn_count", len(agent_context.recent_turns))
             safe_set_attribute(span, "attention.agent.known_required_information_count", len(agent_context.already_known_information))
