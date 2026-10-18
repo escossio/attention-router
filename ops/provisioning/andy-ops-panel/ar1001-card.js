@@ -38,6 +38,20 @@
     NOT_OBSERVED: "NÃO CORRELACIONADO",
     NOT_APPLICABLE: "NÃO APLICÁVEL",
   };
+  const contextLabels = {
+    "andy.summary.domains": "Domínios monitorados",
+    "andy.summary.reachable": "Domínios alcançáveis",
+    "andy.summary.complete": "Vizinhanças completas",
+    "andy.summary.incomplete": "Vizinhanças incompletas",
+    "andy.topology.consistent": "Consistência da topologia",
+    "andy.tempo.query_ok": "Consulta à API Tempo",
+    "andy.tempo.log_probe_ok": "Sonda de logs Tempo",
+  };
+  const contextAssessments = {
+    NETWORK_OSI_AGGREGATE: "NETWORK / OSI — panorama geral",
+    TEMPO_QUERY_INTERFACE: "Tempo — API de consulta",
+    TEMPO_LOG_INSPECTION: "Tempo — inspeção dos logs",
+  };
   const interesting = [
     "andy.reply.direct_6h", "andy.reply.direct_processed_6h",
     "andy.reply.decisions_dry_run_6h", "andy.reply.outbox_new_6h",
@@ -88,6 +102,46 @@
       main.append(box);
     });
     root.append(main);
+
+    // Context is intentionally separate from incident facets. A healthy
+    // general OSI snapshot is not evidence that an Andy message path is OK.
+    const context = payload.general_context || {};
+    const ctxHeading = el("div", "ficha-ar1001-section-title");
+    ctxHeading.append(
+      el("h3", "", "Contexto geral · NETWORK/OSI e Tempo"),
+      el("p", "", "Outras medições existentes no Zabbix. Não estão correlacionadas à interação AR-1001 e não determinam a causa.")
+    );
+    root.append(ctxHeading);
+    const ctxRoot = el("section", "ficha-ar1001-context");
+    const ctxStates = el("div", "ficha-ar1001-context-states");
+    const assessments = Array.isArray(context.assessments) ? context.assessments : [];
+    assessments.forEach(item => {
+      if (!Object.prototype.hasOwnProperty.call(contextAssessments, item.source)) return;
+      const line = el("div", "ficha-ar1001-context-row");
+      line.append(el("span", "", contextAssessments[item.source]),
+                  el("strong", "ficha-ar1001-chip " + badgeClass(item.state),
+                     statuses[item.state] || "INDETERMINADO"));
+      ctxStates.append(line);
+    });
+    if (!ctxStates.children.length) {
+      ctxStates.append(el("p", "ficha-ar1001-disclaimer", "Dados gerais não disponíveis."));
+    }
+    ctxRoot.append(ctxStates);
+    const ctxMetrics = el("div", "ficha-ar1001-context-metrics");
+    const sensors = context.sensors || {};
+    Object.keys(contextLabels).forEach(key => {
+      const v = sensors[key];
+      const line = el("div", "ficha-ar1001-context-value");
+      line.append(el("span", "", contextLabels[key]),
+                  el("strong", "", measure(v)),
+                  el("small", "", v && v.fresh ? "Amostra geral · " + isoTime(v.sampled_at)
+                    : "Sem amostra recente"));
+      ctxMetrics.append(line);
+    });
+    ctxRoot.append(ctxMetrics);
+    ctxRoot.append(el("p", "ficha-ar1001-disclaimer",
+      "Contexto não vinculado ao incidente. Oito domínios alcançáveis não significam fluxo WhatsApp funcional; API Tempo disponível não comprova trace correspondente."));
+    root.append(ctxRoot);
 
     const intro = el("div", "ficha-ar1001-section-title");
     intro.append(el("h3", "", "Roteiro de troubleshooting · evidências por domínio"),

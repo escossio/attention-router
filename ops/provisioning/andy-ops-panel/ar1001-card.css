@@ -26,3 +26,15 @@
 .ficha-ar1001-measure small{color:var(--muted)}
 .ficha-ar1001-disclaimer{padding:.8rem;color:var(--muted);font-size:.78rem;line-height:1.5}
 @media(max-width:850px){.ficha-ar1001-counters{grid-template-columns:repeat(2,minmax(0,1fr))}.ficha-ar1001-domain{grid-template-columns:1fr;gap:.3rem}.ficha-ar1001-domain .ficha-ar1001-chip{justify-self:start}.ficha-ar1001-head{flex-direction:column;align-items:flex-start}.ficha-ar1001-chips{align-items:flex-start}.ficha-ar1001-measure{grid-template-columns:minmax(0,1fr) 3rem}.ficha-ar1001-measure small{grid-column:1/-1}}
+
+/* Panorama geral: expressamente separado da correlação causal do incidente. */
+.ficha-ar1001-context{border:1px solid var(--line);background:var(--panel);border-radius:.65rem;overflow:hidden}
+.ficha-ar1001-context-states{padding:.65rem .85rem;border-bottom:1px solid var(--line)}
+.ficha-ar1001-context-row{display:flex;justify-content:space-between;align-items:center;gap:.9rem;padding:.4rem 0;font-size:.78rem}
+.ficha-ar1001-context-row .ficha-ar1001-chip{flex-shrink:0}
+.ficha-ar1001-context-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
+.ficha-ar1001-context-value{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.35rem .8rem;align-items:center;padding:.6rem .85rem;border-bottom:1px solid var(--line);font-size:.77rem}
+.ficha-ar1001-context-value:nth-child(odd){border-right:1px solid var(--line)}
+.ficha-ar1001-context-value strong{font-variant-numeric:tabular-nums}
+.ficha-ar1001-context-value small{grid-column:1/-1;color:var(--muted);font-size:.66rem}
+@media(max-width:650px){.ficha-ar1001-context-metrics{grid-template-columns:1fr}.ficha-ar1001-context-value:nth-child(odd){border-right:none}.ficha-ar1001-context-row{align-items:flex-start;flex-direction:column;gap:.4rem}}
