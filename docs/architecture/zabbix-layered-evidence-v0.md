@@ -48,6 +48,8 @@ Detector já presente no ROC Zabbix: `ANDY_WA_AUTO_REPLY_STALLED`. Coletor auxil
 
 O planejamento Zabbix para esta falha está em `ops/observability/failure-catalog/zabbix-plan.ar-1001.v0.json`. Seus itens adicionais são **candidatos**, não itens instalados, e precisam de descoberta da fonte mais barata e de contrato comprovado por campo.
 
+**Regra de correlação:** um trace vinculado à entrada de uma interação não comprova que a operação de auditoria da falha compartilhe o mesmo ID. O gate de associação, seus níveis e as lacunas observadas estão documentados em [AR-1001 — níveis de correlação](../operations/ar-1001-trace-correlation-evidence-v0.md). Nunca promover correlação por horário a causalidade ou considerar uma busca vazia no Tempo como prova de saúde.
+
 ## No Zabbix primeiro; Relay depois
 
 1. Mapear a cada código as fontes e atributos já medidos; registrar custo/frescor/retenção por fonte.
