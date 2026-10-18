@@ -37,7 +37,8 @@ def _public(level: str, reason: str, *, span_names: tuple[str, ...] = ()) -> dic
         "scope": "ONE_INTERACTION_WITH_FAILURE_AUDIT_NOT_ZABBIX_PROBLEM_CAUSE",
         "verified_source": "DURABLE_AUDIT_AND_TEMPO_SPAN_ATTRIBUTES",
         "span_names": list(span_names[:8]),
-        "same_failure_operation_proven": level == "SAME_AUDIT_CORRELATION",
+        "audit_correlation_matched": level == "SAME_AUDIT_CORRELATION",
+        "failure_stage_proven": False,
         "causal_origin_proven": False,
         "zabbix_event_member_proven": False,
     }

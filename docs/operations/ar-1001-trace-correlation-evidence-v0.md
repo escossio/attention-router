@@ -28,7 +28,7 @@ O panorama geral NETWORK/OSI (domínios/vizinhanças) também não define o perc
 | `SAME_INTERACTION_INPUT` | Mesmo tenant e interação na base, `roc.correlation_id` idêntico ao da entrada em span efetivamente recuperado, dentro da janela | **Não** liga o span ao registro de auditoria que detectou falha |
 | `SAME_AUDIT_CORRELATION` | Mesmo tenant/interação + atributo `roc.correlation_id` do span igual ao evento da auditoria de falha e tempo compatível | Ainda **não** prova causa raiz, Zabbix event ID ou autorização para resolver |
 
-O classificador puro está em `ops/observability/failure_catalog/ar1001_correlation_evidence.py` e tem testes sintéticos em `tests/test_ar1001_correlation_evidence.py`. A saída **nunca** contém UUID, ID de interação/tenant, `trace_id`, IP privado, payload, corpo de mensagem ou URL interna. `causal_origin_proven=false` e `zabbix_event_member_proven=false` são invariantes V0.
+O classificador puro está em `ops/observability/failure_catalog/ar1001_correlation_evidence.py` e tem testes sintéticos em `tests/test_ar1001_correlation_evidence.py`. A saída **nunca** contém UUID, ID de interação/tenant, `trace_id`, IP privado, payload, corpo de mensagem ou URL interna. `causal_origin_proven=false` e `zabbix_event_member_proven=false` são invariantes V0. O campo audit_correlation_matched=true certifica igualdade do UUID de auditoria no span, mas failure_stage_proven=false ainda reconhece que a etapa causadora não foi identificada.
 
 Os nomes de span são de uma allowlist curta. Um hit da busca `/api/search` não serve sozinho: a regra exige buscar o trace por ID e verificar no conteúdo do span o atributo idêntico ao recebido da fonte autorizada. Não aceitar um trace aleatório cujo timestamp apenas coincida.
 

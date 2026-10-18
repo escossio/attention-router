@@ -35,7 +35,7 @@ class CorrelationEvidenceTests(unittest.TestCase):
     def test_same_interaction_input_not_same_failed_operation(self):
         r = witness()
         self.assertEqual(r["level"], "SAME_INTERACTION_INPUT")
-        self.assertFalse(r["same_failure_operation_proven"])
+        self.assertFalse(r["audit_correlation_matched"])
         self.assertFalse(r["zabbix_event_member_proven"])
         self.assertFalse(r["causal_origin_proven"])
         self.assertEqual(r["span_names"], ["attention.message"])
@@ -44,7 +44,8 @@ class CorrelationEvidenceTests(unittest.TestCase):
         r = witness(fetched_span_correlation_id=AUDIT, span_at=ROOT + timedelta(minutes=4),
                     fetched_span_name="roc.DECISION")
         self.assertEqual(r["level"], "SAME_AUDIT_CORRELATION")
-        self.assertTrue(r["same_failure_operation_proven"])
+        self.assertTrue(r["audit_correlation_matched"])
+        self.assertFalse(r["failure_stage_proven"])
         self.assertFalse(r["causal_origin_proven"])
         self.assertFalse(r["zabbix_event_member_proven"])
 
