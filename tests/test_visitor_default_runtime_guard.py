@@ -14,6 +14,8 @@ from attention_router.application.agents.output import AndyAgentOutput
 from attention_router.application.agents.service import AndyAgentResult
 from attention_router.application.owner_reply_grace import process_due_grace_windows
 from attention_router.application.platform.capability_pack import provision_internal_providers
+from attention_router.application.voice_transcription import process_voice_transcriptions
+from attention_router.application.voice_tts import ensure_tts_derivation, intent_is_voice_response, process_tts_derivations
 from attention_router.config import Settings, settings
 from attention_router.core.capabilities import CapabilityRequest
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
@@ -22,13 +24,13 @@ from attention_router.infrastructure import human_identity_models  # noqa: F401
 from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.db import Base
 from attention_router.infrastructure.models import (
-    AgentBlueprintRow, AgentBlueprintVersionRow, AgentExecutionIntentRow, AuditEventRow,
+    AgentBlueprintRow, AgentBlueprintVersionRow, AgentDecisionRow, AgentExecutionIntentRow, AuditEventRow,
     CapabilityDefinitionRow, CapabilityGrantRow, ConversationResponseGraceWindowRow,
-    OutboxMessageRow, PolicyRow, PolicyVersionRow,
+    InboundEventRow, OutboxMessageRow, PolicyRow, PolicyVersionRow, TTSDerivationRow,
 )
 from attention_router.infrastructure.repository import ensure_policy_version, seed_policies, upsert_actor_binding
 from tests.test_direct_conversation import PEER, direct_event, setup_direct
-from tests.test_agent_conversation_history import _interaction, _intent, _outbox
+from tests.test_agent_conversation_history import _interaction, _outbox
 
 
 def setup_guarded_visitor(session, monkeypatch):
@@ -93,6 +95,21 @@ def assert_no_visitor_intent(session, decision, captured):
     assert not session.scalar(select(OutboxMessageRow))
 
 
+def insert_invalid_policy_version(session, policy, config, *, mutable=False, bad_checksum=False):
+    """Insert deliberately invalid evidence without changing immutable history."""
+    current = session.get(PolicyVersionRow, policy.current_version_id)
+    config = {**deepcopy(config), "tone": config["tone"] + " synthetic-" + new_id()}
+    version = PolicyVersionRow(
+        id=new_id(), policy_id=policy.identifier, version=current.version + 1, config=config,
+        checksum="0" * 64 if bad_checksum else stable_hash(config),
+        created_at=now_utc(), created_by="synthetic guard fixture", is_immutable=not mutable,
+    )
+    session.add(version)
+    session.flush()
+    policy.current_version_id = version.id
+    return version
+
+
 def test_opt_in_guard_permits_unbound_question_and_text_outbox(session, guarded_visitor):
     captured, blueprint, _ = guarded_visitor
     decision = visitor_decision(session)
@@ -100,6 +117,69 @@ def test_opt_in_guard_permits_unbound_question_and_text_outbox(session, guarded_
     assert autonomy.evaluate_and_route(session, decision).automatic_execution_allowed
     assert execution.enqueue_ready_intents(session, transport_ready=True) == 1
     assert session.scalar(select(OutboxMessageRow)).payload["external_actor_id"] == PEER
+
+
+def visitor_voice_decision(session, monkeypatch, tmp_path):
+    from tests.test_whatsapp_voice_flow import attach_media, release_grace, voice_event
+
+    event = voice_event()
+    received = services.receive_normalized_inbound_event(session, event)
+    attach_media(session, monkeypatch, tmp_path, {
+        **received, "external_event_id": event.external_event_id,
+    })
+    assert process_voice_transcriptions(session, "synthetic-visitor-stt", client=SimpleNamespace(
+        transcribe=lambda *_: {
+            "transcript": "Explique fibra óptica em uma frase.", "provider": "synthetic",
+            "model": "synthetic", "request_id": "synthetic-visitor-transcription",
+        },
+    )) == 1
+    release_grace(session)
+    return pipeline.process_agent_decision(session, received["inbound_event_id"])
+
+
+def test_guard_transcribed_ptt_enqueues_text_without_tts(session, guarded_visitor, monkeypatch, tmp_path):
+    captured, blueprint, _ = guarded_visitor
+    decision = visitor_voice_decision(session, monkeypatch, tmp_path)
+    assert decision.agent_blueprint_id == blueprint.id
+    assert captured[0].current_message == "Explique fibra óptica em uma frase."
+    assert autonomy.evaluate_and_route(session, decision).automatic_execution_allowed
+    intent = session.scalar(select(AgentExecutionIntentRow))
+    assert not intent_is_voice_response(session, intent)
+    assert execution.enqueue_ready_intents(session, transport_ready=True) == 1
+    outbox = session.scalar(select(OutboxMessageRow))
+    assert outbox.execution_intent_id == intent.id and intent.status == "QUEUED"
+    assert outbox.action_type == "agent_execution_text" and outbox.payload["message_type"] == "text"
+    assert outbox.payload["external_actor_id"] == PEER
+    assert outbox.payload["text"] == intent.effective_response_snapshot
+    assert not session.scalar(select(TTSDerivationRow))
+
+
+def test_guard_rejects_synthetic_tts_after_flag_loss_and_pointer_change(
+    session, guarded_visitor, monkeypatch, tmp_path,
+):
+    _, blueprint, recorded_version = guarded_visitor
+    decision = visitor_voice_decision(session, monkeypatch, tmp_path)
+    assert autonomy.evaluate_and_route(session, decision).automatic_execution_allowed
+    intent = session.scalar(select(AgentExecutionIntentRow))
+    monkeypatch.setattr(settings, "agent_decision_default_visitor_only", False)
+    monkeypatch.setattr(settings, "agent_decision_default_blueprint_id", None)
+    spec = {**deepcopy(recorded_version.spec), "behavior": {}}
+    unmarked = AgentBlueprintVersionRow(
+        id=new_id(), blueprint_id=blueprint.id, version=recorded_version.version + 1,
+        spec=spec, checksum=stable_hash(spec), created_at=now_utc(), created_by="synthetic",
+        change_reason="synthetic pointer change", is_immutable=True,
+    )
+    session.add(unmarked)
+    session.flush()
+    blueprint.current_version_id = unmarked.id
+    assert not intent_is_voice_response(session, intent)
+    derivation = ensure_tts_derivation(session, intent)
+    assert process_tts_derivations(session, "synthetic-visitor-tts", client=SimpleNamespace(
+        synthesize=lambda *a, **k: pytest.fail("text-only visitor called TTS provider"),
+    )) == 1
+    assert derivation.status == "FAILED" and derivation.attempt_count == 0
+    assert intent.status == "BLOCKED" and intent.blocked_reason == "TTS_DERIVATION_FAILED"
+    assert not session.scalar(select(OutboxMessageRow))
 
 
 @pytest.mark.parametrize("category,explicit", [("owner", False), ("unknown", False), ("unknown", True)])
@@ -189,13 +269,14 @@ def test_guard_rejects_policy_authority_beyond_text(session, guarded_visitor, mu
         del config["conversational_execution"]
     elif mutation == "wider-conversation":
         config["conversational_execution"]["allowed_actions"].append("grant.create")
-    version = ensure_policy_version(session, policy, config, "synthetic widened policy")
+    if mutation in {"mutable", "checksum"}:
+        insert_invalid_policy_version(
+            session, policy, config, mutable=mutation == "mutable", bad_checksum=mutation == "checksum",
+        )
+    else:
+        version = ensure_policy_version(session, policy, config, "synthetic widened policy")
     if mutation == "retired":
         version.status = "RETIRED"
-    elif mutation == "mutable":
-        version.is_immutable = False
-    elif mutation == "checksum":
-        version.checksum = "0" * 64
     decision = visitor_decision(session)
     assert_no_visitor_intent(session, decision, captured)
     audit = session.scalar(select(AuditEventRow).where(AuditEventRow.event_type == "visitor_default.blocked"))
@@ -285,7 +366,31 @@ def test_guard_excludes_legacy_owner_history_after_binding_revocation(session, g
     captured, _, _ = guarded_visitor
     prior = _interaction(session, text="SYNTHETIC_OLD_OWNER_PRIVATE_INPUT", offset=-120, contact_id=PEER)
     prior.relationship_category = "owner"
-    prior_intent = _intent(session, prior, effective="SYNTHETIC_OLD_OWNER_PRIVATE_RESPONSE")
+    receipt = InboundEventRow(
+        id=new_id(), tenant_id=prior.tenant_id, source="wwebjs", external_event_id=new_id(),
+        event_type="message", payload={}, payload_hash=stable_hash({}), received_at=prior.created_at,
+        processed_at=prior.created_at, interaction_id=prior.id, status="PROCESSED",
+        correlation_id=prior.correlation_id,
+    )
+    session.add(receipt)
+    session.flush()
+    decision = AgentDecisionRow(
+        id=new_id(), event_id=receipt.id, interaction_id=prior.id, actor_id=PEER, audience="owner",
+        decision_pipeline_version="synthetic-private-history", decision_type="RESPOND",
+        recommended_action="respond", escalation_required=False, missing_information=[],
+        execution_allowed=True, external_delivery_allowed=True, reasoning_summary="synthetic legacy history",
+        status="SUCCESS", created_at=prior.created_at,
+    )
+    session.add(decision)
+    session.flush()
+    prior_intent = AgentExecutionIntentRow(
+        id=new_id(), agent_decision_id=decision.id, authorization_source="POLICY_AUTONOMY",
+        intent_type="WHATSAPP_RESPONSE", effective_response_snapshot="SYNTHETIC_OLD_OWNER_PRIVATE_RESPONSE",
+        status="SENT", execution_allowed=True, external_delivery_allowed=True, release_status="RELEASED",
+        idempotency_key=new_id(), created_at=prior.created_at, executed_at=prior.created_at,
+    )
+    session.add(prior_intent)
+    session.flush()
     _outbox(session, prior, prior_intent)
     upsert_actor_binding(session, "wwebjs", PEER, PEER, "owner", metadata={"owner": True}, is_active=False)
     visitor_decision(session)
@@ -369,11 +474,15 @@ def test_guard_is_revalidated_before_enqueue(session, guarded_visitor, drift):
     else:
         policy = session.get(PolicyRow, "desconhecido")
         policy_version = session.get(PolicyVersionRow, policy.current_version_id)
-        policy_version.config = {**policy_version.config, "allowed_capabilities": ["grant.create"]}
+        ensure_policy_version(session, policy, {
+            **policy_version.config, "allowed_capabilities": ["grant.create"],
+        }, "synthetic late policy widening")
     session.flush()
     assert execution.enqueue_ready_intents(session, transport_ready=True) == 0
     assert not session.scalar(select(OutboxMessageRow))
-    assert session.scalar(select(AgentExecutionIntentRow)).blocked_reason == "CONVERSATION_BLUEPRINT_STALE"
+    assert session.scalar(select(AgentExecutionIntentRow)).blocked_reason == (
+        "CONVERSATION_POLICY_STALE" if drift == "policy" else "CONVERSATION_BLUEPRINT_STALE"
+    )
 
 
 def test_guard_preserves_stricter_silence_policy(session, guarded_visitor):
@@ -430,7 +539,9 @@ def test_independent_session_cannot_dispatch_cached_visitor_authority(independen
                 if drift == "policy-status":
                     target.status = "RETIRED"
                 else:
-                    target.checksum = "0" * 64
+                    insert_invalid_policy_version(
+                        second, second.get(PolicyRow, policy.identifier), target.config, bad_checksum=True,
+                    )
             second.commit()
         # These old objects are deliberately cached in an expire_on_commit=False session.
         assert blueprint.status == "published" and blueprint.current_version_id == version.id

@@ -55,6 +55,10 @@ inventário de ferramentas e autoridade da plataforma. Propostas hostis de
 capacidade continuam passando pela negação independente de policy/owner/grant.
 Nenhuma ferramenta, Gmail, comando administrativo ou representação de owner é
 concedida. Outros blueprints explícitos sem o marcador mantêm seu contrato.
+O contrato também fixa a **saída em texto**: uma entrada de voz transcrita não
+autoriza TTS nem outbox de áudio para esse candidato. O teste cobre o enqueue
+textual e a recusa da derivação TTS, inclusive após perda da flag; os demais
+blueprints conservam o comportamento de voz existente.
 Binding ativo sem blueprint próprio não recebe o novo default: essa limitação
 é intencional para evitar herança de autoridade nesta recuperação.
 
@@ -68,6 +72,7 @@ grupos independente e os respectivos controles permanecem como no baseline.
 | `attention_router/config.py` | Flag opt-in e rejeição de default ausente quando a flag está ativa. |
 | `attention_router/application/decision_pipeline.py` | Guard de seleção/contexto e histórico público comprovado. |
 | `attention_router/application/execution.py` | Revalidação do guard e atualização das leituras de autoridade antes do envio. |
+| `attention_router/application/voice_tts.py` | Saída textual do contrato visitante, preservando voz dos demais blueprints. |
 | `attention_router/infrastructure/repository.py` | Tenant correto na auditoria da nova versão de policy. |
 | `config/examples/andy_visitor_recovery.proposed.json` | Spec/policy/contrato v2 exatos para revisão. |
 | `scripts/forensics/andy_visitor_recovery_admin.py` | CLI administrativa com snapshot, CAS, rollback e reconciliação. |
@@ -144,6 +149,12 @@ operação em READ ONLY, e produz novo recibo. Estado misto, edição concorrent
 ou ausência dessa prova permanecem NO-GO/UNKNOWN: não repetir o mutador nem
 compensar automaticamente. O ensaio injeta falha de gravação após commit.
 
+A CLI `prepare` real também foi executada no host em REPEATABLE READ/READ ONLY,
+com timeout, usando a conexão efetiva do Worker somente pelo ambiente privado.
+Esse acesso independente foi comprovado antes da janela: parar o Worker não
+retira o caminho administrativo. O plano definitivo e seu checksum ficam no
+checkpoint privado; prepare não criou blueprint, versão ou policy.
+
 ## Proveniência da imagem e composição completa
 
 O Worker vivo é 4d06e4d, com código de grupos/0058 da PR #333 ainda não merged.
@@ -177,6 +188,23 @@ Rollback fixa a imagem viva por image ID local; RepoDigests vazio não prova um
 digest de registry. A imagem candidata deve ter SHA OCI/ID e artefato de build
 associados à certificação definitiva antes do GO.
 
+O Docker 29/containerd dos workers identifica a imagem pelo manifesto OCI;
+o Docker 26/classic do AGT usa o digest do config. São identificadores distintos
+da mesma cadeia de conteúdo. O artefato exportado pelo gate deve ser carregado
+e inspecionado em laboratório Docker classic, com smoke da mesma imagem, antes
+de fixar o ID de implantação. A homologação usa Docker oficial 26.1.4 descartável;
+o AGT usa Debian 26.1.5+dfsg1. Essa prova de formato não afirma igualdade binária
+dos daemons. Após autorização, carregar e conferir o ID/config/hash **antes** de
+parar o Worker continua sendo condição da janela. Nenhuma imagem foi carregada
+no AGT durante a homologação.
+
+O primeiro perfil PostgreSQL desta fase, no SHA intermediário `3db277f`, teve
+534 PASS e seis falhas de fixture: cinco tentavam editar semântica imutável e
+uma omitia o evento exigido por FK. As fixtures agora usam novas versões/ponteiros
+ou comprovam a rejeição pelo trigger dentro de savepoint. Nenhum trigger foi
+desabilitado e nenhum caso foi pulado. Esse resultado permanece registrado como
+falha; somente a nova execução completa no HEAD definitivo pode fechar o gate.
+
 ## Procedimento na fronteira de produção
 
 1. Obter autorização final explícita para criar/publicar o novo candidato,
@@ -187,13 +215,16 @@ associados à certificação definitiva antes do GO.
    não autorização para corrigir outros serviços.
 3. Renderizar a pilha completa com overlay estreito e comparar com o manifesto.
    Confirmar artefato certificado e rollback disponíveis antes da parada.
+   Renovar contagens de intents automáticos, outbox e leases; item ambíguo não
+   autoriza replay, e trabalho em execução exige avaliar a drenagem antes da parada.
    Na janela aprovada, parar **somente Worker** pela composição integral,
    antes de publicar o candidato. O Worker antigo não conhece o marcador e
    poderia selecionar o candidato publicado por ranking non-direct durante
    uma atualização sem essa barreira.
 4. Executar o caminho administrativo aprovado por fases, conservar recibos
    privados e iniciar/recriar somente Worker com imagem e composição aprovadas,
-   `--no-deps --no-build`, sem migração. Conferir settings/proveniência carregados.
+   `--force-recreate --no-deps --no-build --pull never`, sem migração.
+   Conferir settings/proveniência carregados.
    Não alterar bindings, tenants, identidades, owner controls, grants, Gmail,
    cursores, Relay, MAESTRO ou observabilidade. Ingress/Transport permanecem
    ativos; duração da janela e freshness são verificadas sem replay histórico.

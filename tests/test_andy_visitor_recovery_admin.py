@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from attention_router.config import settings
 from attention_router.domain.models import new_id, now_utc
@@ -203,6 +203,20 @@ def test_rollback_refuses_an_original_policy_that_became_mutable(session, admin_
     draft = observed(session, admin_case, tmp_path)
     active = activated(session, draft, tmp_path)
     original = session.get(PolicyVersionRow, active["before_policy"]["current_version_id"])
+    if session.bind.dialect.name == "postgresql":
+        # PostgreSQL prevents this corruption before the administrative guard.
+        # Keep the trigger active and prove the rejected write does not break rollback.
+        with pytest.raises(DBAPIError, match="versioned authority semantics are immutable"):
+            with session.begin_nested():
+                original.is_immutable = False
+                session.flush()
+        session.refresh(original)
+        assert original.is_immutable is True
+        restored = admin.rollback(session, active, approval_path=approved(tmp_path, active, "ROLLBACK"))
+        session.commit()
+        assert restored["phase"] == "ROLLED_BACK"
+        assert admin._policy_state(session.get(PolicyRow, active["policy_id"])) == active["before_policy"]
+        return
     original.is_immutable = False
     session.commit()
     with pytest.raises(ValueError, match="RECOVERY_ORIGINAL_POLICY_CHANGED"):
