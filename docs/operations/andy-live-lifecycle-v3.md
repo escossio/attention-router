@@ -64,6 +64,11 @@ compatibility require an isolated stack; no synthetic result proves production
 health or WhatsApp delivery. The exact commit and CI checks must be recorded
 before any operational promotion.
 
+When certifying a PR, reserve the distributed PostgreSQL worker for the
+GitHub check. Do not start an independent distributed PostgreSQL run for the
+same SHA until that check has finished; competing discovery can exhaust the
+check's capacity window even if the independent suite passes.
+
 Live continuity remains on the existing admitted-event path. Historical
 acceleration is deliberately unchanged: no cursor reset, historical import or
 semantic-memory requirement is introduced. No container or network is added
