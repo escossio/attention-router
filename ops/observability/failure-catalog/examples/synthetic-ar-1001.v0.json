@@ -1,0 +1,75 @@
+{
+  "schema_version": "0.1.0-draft",
+  "fault_code": "AR-1001",
+  "source_event_ref": "synthetic:event:001",
+  "observed_at": "2026-10-17T12:15:00Z",
+  "window": {
+    "from": "2026-10-17T12:00:00Z",
+    "to": "2026-10-17T12:15:00Z"
+  },
+  "facets": [
+    {
+      "dimension": "physical",
+      "state": "NOT_OBSERVED",
+      "basis": "NONE",
+      "source_ids": [],
+      "evidence_refs": [],
+      "coverage": "NONE",
+      "reason_code": "NOT_QUERIED"
+    },
+    {
+      "dimension": "runtime",
+      "state": "OBSERVED_HEALTHY",
+      "basis": "DIRECT_MEASUREMENT",
+      "source_ids": [
+        "docker_inventory"
+      ],
+      "evidence_refs": [
+        "synthetic:container-health:01"
+      ],
+      "coverage": "GENERAL_HEALTH",
+      "reason_code": "HEALTHCHECK_PASSED",
+      "measured_at": "2026-10-17T12:14:00Z",
+      "sample_age_seconds": 60
+    },
+    {
+      "dimension": "tracing",
+      "state": "NOT_OBSERVED",
+      "basis": "NONE",
+      "source_ids": [],
+      "evidence_refs": [],
+      "coverage": "NONE",
+      "reason_code": "NO_MATCHING_TRACE_COLLECTED"
+    },
+    {
+      "dimension": "application_flow",
+      "state": "OBSERVED_FAILURE",
+      "basis": "DERIVED_WITH_CONTRACT",
+      "source_ids": [
+        "zabbix_reply_probe"
+      ],
+      "evidence_refs": [
+        "synthetic:reply-probe:01"
+      ],
+      "coverage": "OBSERVED_PATH",
+      "reason_code": "REPLY_EXPECTED_BUT_ABSENT",
+      "measured_at": "2026-10-17T12:15:00Z",
+      "sample_age_seconds": 0
+    },
+    {
+      "dimension": "collector_integrity",
+      "state": "OBSERVED_HEALTHY",
+      "basis": "DIRECT_MEASUREMENT",
+      "source_ids": [
+        "zabbix_native"
+      ],
+      "evidence_refs": [
+        "synthetic:collector:01"
+      ],
+      "coverage": "GENERAL_HEALTH",
+      "reason_code": "PROBE_FRESH",
+      "measured_at": "2026-10-17T12:14:59Z",
+      "sample_age_seconds": 1
+    }
+  ]
+}

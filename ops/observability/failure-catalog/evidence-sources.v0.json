@@ -1,0 +1,138 @@
+{
+  "version": "0.1.0-draft",
+  "status": "PROVENANCE_INVENTORY",
+  "sources": [
+    {
+      "source_id": "zabbix_native",
+      "name": "ROC Zabbix 7.4 / itens e triggers",
+      "status": "LIVE_OBSERVED",
+      "mode": "scheduled",
+      "repo_ref": "ops/observability/network-osi/README.md",
+      "provides": [
+        "disparo/recuperação, trigger tags, série temporal e estado do item"
+      ],
+      "limits": "Só itens de fato provisionados/medidos; não inferir cobertura dos templates."
+    },
+    {
+      "source_id": "roc_network_osi",
+      "name": "ROC NETWORK / OSI",
+      "status": "DOCUMENTED_AND_LIVE_COMPONENTS",
+      "mode": "scheduled",
+      "repo_ref": "ops/observability/network-osi/README.md",
+      "provides": [
+        "SNMP interface, topologia, VLAN, ARP e ICMP com dependências e freshness"
+      ],
+      "limits": "Modelo não mapeia universalmente cada salto nem identifica causa automática."
+    },
+    {
+      "source_id": "docker_inventory",
+      "name": "Agent2 e Docker inventory",
+      "status": "DOCUMENTED_AND_LIVE_COMPONENTS",
+      "mode": "scheduled",
+      "repo_ref": "ops/observability/docker-inventory/README.md",
+      "provides": [
+        "containers, lifecycle e estatísticas allowlist"
+      ],
+      "limits": "Estados de contêiner não provam funcionamento lógico."
+    },
+    {
+      "source_id": "otel_tempo",
+      "name": "OpenTelemetry Collector + Tempo",
+      "status": "DOCUMENTED_AND_LIVE_COMPONENTS",
+      "mode": "instrumented",
+      "repo_ref": "docs/observability/NATIVE_OTEL_RUNTIME_CERTIFICATION_20260925.md",
+      "provides": [
+        "spans, atributos tipados e temporização nos trechos instrumentados"
+      ],
+      "limits": "Falha sem span pode ser lacuna de instrumentação, amostragem ou coleta."
+    },
+    {
+      "source_id": "grafana_flow",
+      "name": "Grafana ROC fluxo",
+      "status": "DOCUMENTED_AND_LIVE_COMPONENTS",
+      "mode": "read_only_view",
+      "repo_ref": "ops/observability/grafana/dashboards/roc-e2e-operational.json",
+      "provides": [
+        "painéis de correlação de sinais de monitoramento e tracing"
+      ],
+      "limits": "É visualização, não fonte independente de verdade."
+    },
+    {
+      "source_id": "goaccess",
+      "name": "GoAccess HTTP",
+      "status": "DOCUMENTED_AND_LIVE_COMPONENTS",
+      "mode": "read_only_view",
+      "repo_ref": "ops/observability/goaccess/README.md",
+      "provides": [
+        "método, rota, latência e status HTTP a partir de access logs"
+      ],
+      "limits": "A ausência de HTTP registrado pode depender do domínio, log ou caminho observado."
+    },
+    {
+      "source_id": "dozzle",
+      "name": "Dozzle containers",
+      "status": "DOCUMENTED_AND_LIVE_COMPONENTS",
+      "mode": "read_only_view",
+      "repo_ref": "ops/observability/dozzle/README.md",
+      "provides": [
+        "logs contidos por container e janela"
+      ],
+      "limits": "Logs são dados não confiáveis, não comprovam causalidade e podem conter dados sensíveis."
+    },
+    {
+      "source_id": "mgmt_compute",
+      "name": "Andy Ops Compute",
+      "status": "DOCUMENTED_AND_LIVE_COMPONENTS",
+      "mode": "read_only_view",
+      "repo_ref": "ops/provisioning/andy-ops-panel/README.md",
+      "provides": [
+        "CPU AGT e workers, estados e jobs CI"
+      ],
+      "limits": "Condição de CPU isolada não demonstra erro funcional."
+    },
+    {
+      "source_id": "mgmt_agent_transport",
+      "name": "Andy Ops Agent / Transport",
+      "status": "DOCUMENTED_AND_LIVE_COMPONENTS",
+      "mode": "opt_in_read_only_view",
+      "repo_ref": "ops/provisioning/andy-ops-panel/transport_observability.py",
+      "provides": [
+        "browser/transport/observer e saúde tipada"
+      ],
+      "limits": "A instrumentação pode ser opcional; sem evidência não afirmar saúde."
+    },
+    {
+      "source_id": "mgmt_message_trace",
+      "name": "Andy Ops message tracing",
+      "status": "DOCUMENTED_OPT_IN",
+      "mode": "opt_in_read_only_view",
+      "repo_ref": "ops/provisioning/andy-ops-panel/message_tracing.py",
+      "provides": [
+        "estágios de mensagens sem corpo ou destino no painel"
+      ],
+      "limits": "Caminho atual consulta dados tipados e pode estar desligado."
+    },
+    {
+      "source_id": "zabbix_reply_probe",
+      "name": "Sonda funcional de resposta Andy",
+      "status": "LIVE_OBSERVED",
+      "mode": "scheduled",
+      "repo_ref": "docs/operations/operational-failure-catalog-v0.md",
+      "provides": [
+        "ANDY_WA_AUTO_REPLY_STALLED e ANDY_WA_REPLY_OBSERVABILITY_LOST"
+      ],
+      "limits": "A sonda reporta estado agregado, ainda faltam evidências da causa."
+    },
+    {
+      "source_id": "manual_packet_evidence",
+      "name": "tcpdump/pcap sob autorização",
+      "status": "NOT_CONFIGURED_AS_CONTINUOUS_SOURCE",
+      "mode": "on_demand",
+      "repo_ref": "docs/architecture/container-communication-network-placement-v1.md",
+      "provides": [
+        "prova pontual de SYN/ACK/RST/retransmissão e percurso medido"
+      ],
+      "limits": "Somente captura delimitada, autorizada, minimizada, com retenção; não é dependência do alerta."
+    }
+  ]
+}

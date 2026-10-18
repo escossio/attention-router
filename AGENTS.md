@@ -6,6 +6,14 @@ Use synthetic fixtures. Never place credentials, real conversations or environme
 Run the documented offline tests for affected components. Provider and transport calls require explicit authorization.
 Future design documents are not claims of implemented functionality.
 
+## MGMT — contexto operacional e evidências (leitura obrigatória)
+
+- **MGMT** ou **aba/plataforma MGMT** no vocabulário do operador designa a suíte integrada de observabilidade/gerência da Andy, **não um único painel ou motor**. Para compreender as fontes, camadas OSI, OTel, Zabbix, Tempo, GoAccess, Dozzle, Network/OSI, Docker inventory, Compute, Agent/Transport, fluxo de mensagens e CI, leia [docs/architecture/mgmt-observability-context-v0.md](docs/architecture/mgmt-observability-context-v0.md) antes de propor novos coletores ou diagnosticar uma ocorrência.
+- Para contratos de erro e alarmes, leia [docs/architecture/zabbix-layered-evidence-v0.md](docs/architecture/zabbix-layered-evidence-v0.md) e [docs/operations/operational-failure-catalog-v0.md](docs/operations/operational-failure-catalog-v0.md), além dos registros JSON em ops/observability/failure-catalog/.
+- Diferencie OBSERVED_HEALTHY, OBSERVED_FAILURE, NO_RELATED_ANOMALY, UNKNOWN, NOT_OBSERVED e NOT_APPLICABLE. A ausência de spans OTel ou pacotes capturados não demonstra integridade; um healthcheck verde não prova funcionamento de aplicação.
+- Primeiro evolua **Zabbix: observações + código + evidência**. Somente depois de medições comprovadas e contrato versionado altere o Relay e MAESTRO por PR separada. Não incorporar logs completos, PCAP ou dados sensíveis a eventos.
+- Este documento vincula o contexto no repositório para futuras sessões Codex; **não** afirma que todos os sensores estão ativos ou que um chat novo carregou automaticamente os documentos.
+
 ## GitHub-first development control loop
 - Follow [docs/operations/github-first-development-control-loop.md](docs/operations/github-first-development-control-loop.md) for agentic investigation and remote-runtime work.
 - GitHub defines the expected contract and versioned implementation; runtime/AGT is evidence of the currently observed behavior.

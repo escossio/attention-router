@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AR Layered Evidence Profile V0 (candidate only)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fault_code",
+    "source_event_ref",
+    "observed_at",
+    "window",
+    "facets"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0-draft"
+    },
+    "fault_code": {
+      "type": "string",
+      "pattern": "^AR-[1-6][0-9]{3}$"
+    },
+    "source_event_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "facets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dimension",
+          "state",
+          "basis",
+          "source_ids",
+          "evidence_refs",
+          "coverage",
+          "reason_code"
+        ],
+        "properties": {
+          "dimension": {
+            "enum": [
+              "physical",
+              "data_link",
+              "network",
+              "transport",
+              "runtime",
+              "application_http",
+              "tracing",
+              "application_flow",
+              "persistence",
+              "delivery",
+              "collector_integrity"
+            ]
+          },
+          "state": {
+            "enum": [
+              "OBSERVED_HEALTHY",
+              "OBSERVED_FAILURE",
+              "NO_RELATED_ANOMALY",
+              "UNKNOWN",
+              "NOT_OBSERVED",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "basis": {
+            "enum": [
+              "DIRECT_MEASUREMENT",
+              "DERIVED_WITH_CONTRACT",
+              "CORRELATED_MEASUREMENTS",
+              "NONE"
+            ]
+          },
+          "source_ids": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 6,
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9:._/-]+$"
+            }
+          },
+          "coverage": {
+            "enum": [
+              "OBSERVED_PATH",
+              "GENERAL_HEALTH",
+              "PARTIAL",
+              "NONE"
+            ]
+          },
+          "reason_code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Z][A-Z0-9_]+$"
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sample_age_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2592000
+          }
+        }
+      }
+    }
+  }
+}

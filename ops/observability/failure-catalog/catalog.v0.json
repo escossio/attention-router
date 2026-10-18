@@ -1,0 +1,131 @@
+{
+  "catalog_version": "0.1.0-draft",
+  "namespace": "AR",
+  "policy": "Identifica sintomas observáveis, não causas nem ações corretivas.",
+  "entries": [
+    {
+      "code": "AR-1001",
+      "family": "application",
+      "title": "Andy não entrega resposta automática esperada",
+      "state": "LIVE_TRIGGER",
+      "source_codes": [
+        "ANDY_WA_AUTO_REPLY_STALLED"
+      ],
+      "condition": "A sonda funcional indica mensagens diretas elegíveis sem resposta esperada dentro da janela observada.",
+      "minimum_evidence": [
+        "event_time",
+        "observation_time",
+        "window_seconds",
+        "probe_freshness_seconds",
+        "reply_expected_basis",
+        "eligible_inbound_count",
+        "processed_inbound_count",
+        "decisions_by_status",
+        "outbox_enqueued_count",
+        "confirmed_delivery_count"
+      ],
+      "false_positive_guard": "Não tratar silêncio intencional, política de não responder, janela de espera em aberto ou ausência de mensagens elegíveis como falha confirmada."
+    },
+    {
+      "code": "AR-1002",
+      "family": "application",
+      "title": "Decisão não gera entrega apesar de resposta esperada",
+      "state": "PROPOSED",
+      "source_codes": [
+        "INSUFFICIENT_CONTEXT",
+        "DRY_RUN"
+      ],
+      "condition": "Após entrada elegível e processamento, há decisão sem entrega; somente é anomalia se o contrato exigia resposta.",
+      "minimum_evidence": [
+        "event_time",
+        "window_seconds",
+        "eligible_inbound_count",
+        "decisions_by_status",
+        "response_expected",
+        "reason_code",
+        "outbox_enqueued_count"
+      ],
+      "false_positive_guard": "INSUFFICIENT_CONTEXT e DRY_RUN isolados não provam erro: exigem contexto de elegibilidade e política."
+    },
+    {
+      "code": "AR-2001",
+      "family": "runtime",
+      "title": "Channel Sync sem avanço com erros repetidos",
+      "state": "PROPOSED",
+      "source_codes": [
+        "GMAIL_PRODUCT_REFRESH_FAILED",
+        "GMAIL_PRODUCT_PROVIDER_UNAVAILABLE"
+      ],
+      "condition": "Instalação elegível continua falhando em ciclos sucessivos e não avança o cursor; é distinto de ausência legítima de novas mensagens.",
+      "minimum_evidence": [
+        "event_time",
+        "window_seconds",
+        "enabled_installations_count",
+        "processed_count",
+        "failed_count",
+        "error_classes",
+        "cursor_progress",
+        "process_uptime_seconds"
+      ],
+      "false_positive_guard": "Não concluir indisponibilidade apenas porque processed=0; não copiar cursor, token OAuth ou dados de instalação."
+    },
+    {
+      "code": "AR-3001",
+      "family": "delivery",
+      "title": "Relay com entrega pendente além da janela aceita",
+      "state": "PROPOSED",
+      "source_codes": [
+        "OCCURRENCE_RELAY_DID_NOT_ACCEPT"
+      ],
+      "condition": "Outbox durável possui ocorrência pendente além de limite operacional a definir após medição, sem concluir perda de dados.",
+      "minimum_evidence": [
+        "event_time",
+        "window_seconds",
+        "pending_count",
+        "oldest_pending_age_seconds",
+        "last_attempt_age_seconds",
+        "destination_health",
+        "ack_status"
+      ],
+      "false_positive_guard": "Retentativa normal não é perda; jamais gerar outro evento original ou trocar idempotency key para forçar entrega."
+    },
+    {
+      "code": "AR-5001",
+      "family": "network",
+      "title": "Endpoint de rede não alcançável",
+      "state": "IN_REPO_TEMPLATE",
+      "source_codes": [
+        "L3_ENDPOINT_UNREACHABLE"
+      ],
+      "condition": "Trigger de alcançabilidade do inventário OSI, respeitando as dependências de L1/L2 e o estado da coleta.",
+      "minimum_evidence": [
+        "event_time",
+        "window_seconds",
+        "endpoint_ref",
+        "icmp_observation",
+        "collector_freshness_seconds",
+        "parent_link_state",
+        "vlan_state"
+      ],
+      "false_positive_guard": "Telemetry UNKNOWN ou parent DOWN não devem ser apresentados como causa L3 independente."
+    },
+    {
+      "code": "AR-6001",
+      "family": "observability",
+      "title": "Sonda de resposta automática sem dados confiáveis",
+      "state": "LIVE_TRIGGER",
+      "source_codes": [
+        "ANDY_WA_REPLY_OBSERVABILITY_LOST"
+      ],
+      "condition": "Sonda de resposta indisponível ou sem dados recentes; informa perda de evidência, não falha do serviço em si.",
+      "minimum_evidence": [
+        "event_time",
+        "observation_time",
+        "probe_ok",
+        "last_probe_age_seconds",
+        "collector_state"
+      ],
+      "false_positive_guard": "Não classificar serviço como recuperado ou falho quando a própria fonte de observação está UNKNOWN."
+    }
+  ]
+}

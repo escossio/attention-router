@@ -1,5 +1,12 @@
 # Project status
 
+## AR-1001 — coleta enriquecida operacional no Zabbix (2026-10-18 UTC)
+
+- PR #375: código de ativação no SHA `50c8faa1a90031f1587d0f646872445d3eedc9ff` passou os quatro checks distribuídos antes do rollout. A sonda host-private original foi copiada e verificada; o builder versionado incorporou a SQL única e o parser no **mesmo** `reply_health.py`, preservando `next_state`, `probe_ok`, estado e `zabbix_sender`. Timer, unidade e estado do incidente não foram substituídos.
+- Sete itens AR-1001 trapper uint habilitados pela API oficial ROC 7.4.14. Os oito itens antigos permanecem habilitados. Três ciclos consecutivos às 02:34:02, 02:36:02 e 02:38:02 UTC enviaram 15/15 valores cada, `failed: 0`, `probe_ok=1`. Os sete novos contadores corresponderam ao PostgreSQL em cada amostra. O histórico oficial confirmou 45 registros, com 15 itens em três timestamps distintos; evidência privada modo `0600` sob `/midia/agt01-storage/backups/ar1001-zabbix-api-20261018/`.
+- Os dois triggers originais permaneceram sem drift e a mesma ocorrência funcional seguiu aberta, sem recovery ou duplicação; `event.get` confirmou zero eventos novos nesses triggers desde o checkpoint. Uma comparação inicial divergente foi explicada por evento PostgreSQL ocorrido 16 s **depois** do envio Zabbix; a nova sequência de três amostras foi validada sem diferença temporal. Nenhuma mensagem, identificador pessoal ou segredo foi exportado: somente agregados uint.
+- Backup Zabbix completo, quatro cópias host-private anteriores e checkpoint de rollback seguem privados e verificados. Nenhum registro, cursor, schema, migração, Relay, MAESTRO, Telegram, contêiner ou rede foi alterado. O manifesto de provisionamento permanece congelado para preservar o hash exigido pelo operador de rollback. Contrato Relay continua fora deste incremento.
+
 ## MAESTRO standalone — operational checkpoint, 2026-10-17
 
 - Code lineage: branch `feat/maestro-standalone-vlan-operational-20261017` merged the operational Relay history, preserving `0058_group_contextual_presence` then `0059_maestro_relay_receipts`. Distributed Docker, Python, Transport and PostgreSQL checks all passed on code SHA `932af6e3c9876fcf30f471f5d6e1df8f35feff90`. The image `attention-router:maestro-932af6e3c987` has that OCI revision. The later documentation/Compose SHA requires its own certification; do not attribute the old checks to it.

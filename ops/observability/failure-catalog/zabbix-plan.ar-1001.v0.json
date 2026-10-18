@@ -1,0 +1,151 @@
+{
+  "version": "0.1.0-draft",
+  "status": "PLANNING_ONLY_NOT_PROVISIONED",
+  "first_case": "AR-1001",
+  "native_trigger": "ANDY_WA_AUTO_REPLY_STALLED",
+  "existing_items": [
+    {
+      "key": "andy.reply.functional_stalled",
+      "meaning": "Flag de resposta funcional interrompida",
+      "status": "LIVE_ITEM"
+    },
+    {
+      "key": "andy.reply.probe_ok",
+      "meaning": "Saúde e frescor do coletor funcional",
+      "status": "LIVE_ITEM"
+    }
+  ],
+  "proposed_observations": [
+    {
+      "key": "andy.reply.eligible_inbound_count",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.processed_inbound_count",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.decisions_by_status",
+      "dimension": "application_flow",
+      "kind": "typed_bounded_aggregate",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.outbox_enqueued_count",
+      "dimension": "delivery",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.deliveries_confirmed_count",
+      "dimension": "delivery",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.expected_response_basis",
+      "dimension": "application_flow",
+      "kind": "typed_enum",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.probe_freshness_seconds",
+      "dimension": "collector_integrity",
+      "kind": "bounded_duration",
+      "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.direct_processed_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Direct inbound event rows processed (not unique interactions)",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.decision_total_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Decisions on direct interactions in the 6-hour window",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.decisions_dry_run_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Subset INSUFFICIENT_CONTEXT plus DRY_RUN",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.outbox_new_6h",
+      "dimension": "delivery",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Outbox rows created on direct interactions",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.grace_released_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Grace windows released for direct interactions",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.grace_canceled_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Grace windows canceled for direct interactions",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.direct_event_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Raw direct inbound rows, may exceed distinct interactions",
+      "source": "SQL_INTEGRATED_CANDIDATE_NOT_PROVISIONED"
+    }
+  ],
+  "planned_event_tags": [
+    {
+      "tag": "fault_code",
+      "value": "AR-1001",
+      "scope": "NEW_EVENTS_AFTER_EXPLICIT_ROLLOUT"
+    },
+    {
+      "tag": "evidence_profile",
+      "value": "layered-v0-draft",
+      "scope": "NEW_EVENTS_AFTER_EXPLICIT_ROLLOUT"
+    }
+  ],
+  "non_goals": [
+    "No direct raw logs in Zabbix event tags",
+    "No active Relay V0 changes",
+    "No automatic tcpdump",
+    "No claim that absent telemetry is a healthy layer"
+  ],
+  "versioned_sql": "ops/observability/failure-catalog/queries/ar-1001-readonly-progress.v0.sql",
+  "versioned_sql_state": "CANDIDATE_NOT_EXECUTED_FROM_FILE_NOT_INSTALLED",
+  "known_collector": "AGT host-private reply_health.py / andy-reply-health.timer; read-only PostgreSQL -> Zabbix sender",
+  "measured_semantics": {
+    "andy.reply.direct_6h": "distinct direct interaction_id in 6h, not necessarily raw messages",
+    "andy.reply.no_safe_6h": "distinct interactions with behavior.unavailable",
+    "andy.reply.blueprint_6h": "distinct interactions with conversation.blocked; not a proven blueprint root cause",
+    "andy.reply.functional_stalled": "sticky incident until later qualifying DONE auto-reply; not a new event each poll"
+  },
+  "integrated_single_cycle_sql": "ops/observability/failure-catalog/queries/ar-1001-integrated-readonly.v0.sql",
+  "integrated_single_cycle_plan": "PREFERRED_AFTER_DISPOSABLE_PG_PROOF; NOT_INSTALLED",
+  "seven_item_manifest": "ops/observability/failure-catalog/zabbix-items.ar-1001.v0.json",
+  "disposable_pg_proof": "docs/operations/ar-1001-disposable-pg-proof-20261017.md",
+  "disposable_pg_status": "PASS_TWO_SQL_CANDIDATES_ON_CI03_SYNTHETIC",
+  "live_readonly_sql_status": "BLOCKED_NOT_PROVEN"
+}

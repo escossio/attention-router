@@ -1,0 +1,65 @@
+{
+  "manifest_version": "0.1.0-draft",
+  "target": "Existing ROC Zabbix engine logical host; resolve ID at rollout (do not store private IDs)",
+  "status": "CANDIDATE_NOT_PROVISIONED",
+  "mode": "EXTEND_EXISTING_REPLY_HEALTH_TIMER_ONLY",
+  "input_sql": "ops/observability/failure-catalog/queries/ar-1001-integrated-readonly.v0.sql",
+  "projection_module": "ops/observability/failure_catalog/ar1001_metric_projection.py",
+  "item_policy": {
+    "type": "ZABBIX_TRAPPER",
+    "zabbix_item_type": 2,
+    "value_type": "NUMERIC_UNSIGNED",
+    "zabbix_value_type": 3,
+    "history": "7d",
+    "trends": "30d",
+    "update_interval": "INHERIT_EXISTING_REPLY_HEALTH_TIMER",
+    "new_trigger": false
+  },
+  "items": [
+    {
+      "key": "andy.reply.direct_event_6h",
+      "label": "Andy reply: direct inbound events in 6h",
+      "semantic": "Rows of direct inbound events, including multiple events for same interaction"
+    },
+    {
+      "key": "andy.reply.direct_processed_6h",
+      "label": "Andy reply: direct inbound events processed in 6h",
+      "semantic": "Rows with status PROCESSED and nonnull processed_at"
+    },
+    {
+      "key": "andy.reply.decision_total_6h",
+      "label": "Andy reply: decision rows on direct interactions in 6h",
+      "semantic": "Decisions emitted in window for distinct directly observed interactions"
+    },
+    {
+      "key": "andy.reply.decisions_dry_run_6h",
+      "label": "Andy reply: decisions insufficient context dry-run in 6h",
+      "semantic": "Subset of decision rows with INSUFFICIENT_CONTEXT plus DRY_RUN"
+    },
+    {
+      "key": "andy.reply.outbox_new_6h",
+      "label": "Andy reply: outbox created on direct interactions in 6h",
+      "semantic": "All new outbox rows on direct interactions, NOT confirmed deliveries"
+    },
+    {
+      "key": "andy.reply.grace_released_6h",
+      "label": "Andy reply: grace windows released in 6h",
+      "semantic": "Response grace window rows anchored to direct interaction, state RELEASED"
+    },
+    {
+      "key": "andy.reply.grace_canceled_6h",
+      "label": "Andy reply: grace windows canceled in 6h",
+      "semantic": "Response grace window rows anchored to direct interaction, state CANCELED"
+    }
+  ],
+  "operator_gates": [
+    "Verify legacy 7 fields semantically identical on golden synthetic fixtures",
+    "Measured time/IO of single SELECT on live schema within granted read-only window",
+    "Backup current Zabbix engine host items and original private script+timer",
+    "Provision only 7 unsigned trapper items through official Zabbix API after approval",
+    "Extend existing reply_health.py with integrated SQL and projection; no second timer",
+    "Revalidate probe_ok, old counters, original trigger state, no false recovery",
+    "Observe 3 fresh samples and prove item values using Zabbix API/history",
+    "No new Telegram or MAESTRO event forced; recovery requires actual qualifying DONE"
+  ]
+}
