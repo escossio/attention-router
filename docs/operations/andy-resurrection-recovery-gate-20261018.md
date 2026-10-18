@@ -1,6 +1,10 @@
 # Andy — candidato e gate de recuperação do atendimento geral
 
-**18/10/2026. Estado: procedimento para revisão, sem autorização operacional.**
+**18/10/2026. Registro da proposta inicial v1, anterior à homologação.**
+O procedimento definitivo v2, os controles adicionais e os gates de promoção
+estão em [homologação pré-produtiva](andy-resurrection-prepromotion-20261018.md).
+Os checksums e o alcance amplo descritos abaixo são históricos; não aplicar
+esta versão nem usar a imagem viva sem os controles do candidato v2.
 Relaciona-se ao [relatório causal](andy-resurrection-forensics-20261018.md).
 Não é um script de aplicação, um novo serviço ou uma promoção de blueprint.
 

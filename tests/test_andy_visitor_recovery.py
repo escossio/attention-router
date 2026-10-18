@@ -2,7 +2,7 @@
 
 The proposed activation is applied only to disposable test fixtures. These
 tests do not publish a blueprint, authorize tools, send messages or certify a
-provider. Domain validation belongs to the proposal preflight, not the selector.
+provider. The proposed opt-in runtime guard also checks domain and authority.
 """
 
 from copy import deepcopy
@@ -32,6 +32,7 @@ from attention_router.infrastructure.models import (
     ConversationResponseGraceWindowRow, InboundEventRow, OutboxMessageRow,
     PolicyRow, PolicyVersionRow, TenantRow,
 )
+from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.repository import ensure_policy_version, upsert_actor_binding
 from attention_router.observability import tracing
 from scripts.forensics.andy_visitor_recovery_preflight import preflight_manifest, simulation_spec
@@ -47,9 +48,11 @@ def visitor(session, monkeypatch):
     manifest = json.loads(PROPOSAL_PATH.read_text())
     preflight_manifest(manifest, tenant_approved=True, version_valid=True)
     captured = setup_direct(session, monkeypatch)
+    monkeypatch.setattr(settings, "agent_decision_default_visitor_only", True)
     blueprint = session.get(AgentBlueprintRow, settings.agent_decision_default_blueprint_id)
     version = session.get(AgentBlueprintVersionRow, blueprint.current_version_id)
     version.spec = simulation_spec(manifest)
+    version.checksum = stable_hash(version.spec)
     policy = session.get(PolicyRow, "desconhecido")
     config = deepcopy(session.get(PolicyVersionRow, policy.current_version_id).config)
     config.update({
@@ -112,6 +115,7 @@ def test_02_active_binding_keeps_its_explicit_blueprint(session, visitor):
     version = AgentBlueprintVersionRow(id=new_id(), blueprint_id=explicit.id, version=1,
         spec=deepcopy(source.spec), checksum=new_id(), created_at=now_utc(), created_by="test",
         change_reason="synthetic", is_immutable=True)
+    version.spec["behavior"] = {}  # This existing binding owns a separate, unmarked contract.
     session.add(version)
     explicit.current_version_id = version.id
     binding = upsert_actor_binding(session, "wwebjs", PEER, "known-visitor", "unknown",
@@ -305,12 +309,12 @@ def test_17_partial_conversation_identity_never_promotes_owner(session, visitor)
     assert not session.scalar(select(OutboxMessageRow)) and recorder.calls == []
 
 
-def test_18_group_default_changes_selection_but_does_not_authorize_external_effect(session, visitor):
+def test_18_group_default_is_excluded_and_does_not_authorize_external_effect(session, visitor):
     captured, blueprint, _ = visitor
     inbound = direct_event(peer="5500000000030@g.us")
     inbound.metadata["is_group"] = True
     decision, _ = decide(session, inbound)
-    assert decision.agent_blueprint_id == blueprint.id  # The default has a non-direct blast radius.
+    assert decision.agent_blueprint_id != blueprint.id
     assert not captured
     evaluation = autonomy.evaluate_and_route(session, decision)
     assert not evaluation.automatic_execution_allowed

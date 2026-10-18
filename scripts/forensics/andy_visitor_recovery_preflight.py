@@ -18,7 +18,7 @@ from attention_router.domain.agent_builder import AgentBlueprintSpec
 from attention_router.infrastructure.hashing import stable_hash
 
 
-SCHEMA_VERSION = "andy-visitor-recovery-proposal-v1"
+SCHEMA_VERSION = "andy-visitor-recovery-proposal-v2"
 TEXT_ACTIONS = {"respond", "request_information"}
 FORBIDDEN_ACTIONS = {
     "tool_execution", "administrative_commands", "gmail_access",
@@ -28,12 +28,19 @@ AUTHORITY_FIELDS = {
     "owner_authenticated", "tools_enabled", "admin_enabled", "gmail_enabled",
     "private_data_disclosure_enabled",
 }
+RUNTIME_REQUIREMENTS = {
+    "AGENT_DECISION_DEFAULT_VISITOR_ONLY": True,
+    "default_blueprint_matches_approved_candidate": True,
+    "requires_certified_worker_image": True,
+    "private_platform_context_excluded": True,
+    "same_contact_recent_turns_preserved": True,
+}
 SELECTION_IMPACT = {
     "process_default_with_tenant_check": True,
     "explicit_binding_blueprint_precedence_preserved": True,
-    "bindings_without_blueprint_may_select_default": True,
-    "owner_without_explicit_blueprint_may_select_default": True,
-    "non_direct_and_groups_may_select_default": True,
+    "bindings_without_blueprint_may_select_default": False,
+    "owner_without_explicit_blueprint_may_select_default": False,
+    "non_direct_and_groups_may_select_default": False,
     "non_direct_and_groups_automatic_effects_authorized": False,
     "unknown_policy_overlay_requires_separate_approval": True,
     "unknown_policy_change_may_affect_other_unknown_flows": True,
@@ -43,7 +50,7 @@ SELECTION_IMPACT = {
 MANIFEST_FIELDS = {
     "schema_version", "review_only", "name", "tenant_scope", "creation_status",
     "creation_spec", "proposed_activation", "policy_proposal",
-    "authority_boundary", "selection_impact", "notes",
+    "authority_boundary", "runtime_requirements", "selection_impact", "notes",
 }
 
 
@@ -108,7 +115,8 @@ def _validated_parts(manifest: dict) -> tuple[dict, dict, dict]:
         "VISITOR_RECOVERY_ACTIONS_INVALID",
     )
     _require(
-        creation["known_information"] == {} and creation["behavior"] == {}
+        creation["known_information"] == {}
+        and creation["behavior"] == {"visitor_default_contract": "text-only-v1"}
         and all(creation[key] == [] for key in (
             "knowledge_requirements", "missing_information", "assumptions",
             "escalation", "blocking_questions",
@@ -159,6 +167,14 @@ def _validated_parts(manifest: dict) -> tuple[dict, dict, dict]:
         manifest["authority_boundary"], AUTHORITY_FIELDS, "VISITOR_RECOVERY_AUTHORITY_INVALID",
     )
     _require(all(value is False for value in authority.values()), "VISITOR_RECOVERY_AUTHORITY_INVALID")
+    runtime = _fields(
+        manifest["runtime_requirements"], set(RUNTIME_REQUIREMENTS),
+        "VISITOR_RECOVERY_RUNTIME_REQUIREMENTS_INVALID",
+    )
+    _require(
+        all(runtime[key] is value for key, value in RUNTIME_REQUIREMENTS.items()),
+        "VISITOR_RECOVERY_RUNTIME_GUARD_REQUIRED",
+    )
     impact = _fields(
         manifest["selection_impact"], set(SELECTION_IMPACT), "VISITOR_RECOVERY_BLAST_RADIUS_INVALID",
     )
@@ -212,6 +228,7 @@ def preflight_manifest(manifest: dict, *, tenant_approved: bool, version_valid: 
         "execution_mode_overrides_level": True,
         "autonomy_increase_requires_approval": True,
         "selector_domain_or_publication_guard_installed": False,
+        "runtime_requirements": deepcopy(RUNTIME_REQUIREMENTS),
         "selection_impact": deepcopy(SELECTION_IMPACT),
         "plan": [
             "Review this exact manifest, spec and policy checksums.",

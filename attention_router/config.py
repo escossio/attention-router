@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     agent_decision_pipeline_enabled: bool = True
     agent_decision_pipeline_version: str = "v1"
     agent_decision_default_blueprint_id: str | None = None
+    agent_decision_default_visitor_only: bool = False
     andy_behavior_enabled: bool = False
     andy_behavior_canary_binding_id: str | None = None
     andy_agent_enabled: bool = False
@@ -281,6 +282,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        if self.agent_decision_default_visitor_only and not (
+            self.agent_decision_default_blueprint_id and self.agent_decision_default_blueprint_id.strip()
+        ):
+            raise ValueError("VISITOR_DEFAULT_BLUEPRINT_REQUIRED")
         allowed = {"test", "development", "production", "private"}
         if self.app_env not in allowed:
             raise ValueError(f"APP_ENV must be one of {sorted(allowed)}")

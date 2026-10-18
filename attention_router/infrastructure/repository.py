@@ -144,6 +144,7 @@ def ensure_policy_version(
         {"policy_id": row.identifier, "version": version, "checksum": checksum},
         policy_version_id=policy_version.id,
         origin=origin,
+        tenant_id=row.tenant_id,
     )
     return policy_version
 

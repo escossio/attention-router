@@ -36,6 +36,8 @@ def test_preflight_binds_review_checksums_without_mutating_or_approving():
     assert report["operational_approval_granted"] is False
     assert report["production_recovery_proven"] is False
     assert report["selector_domain_or_publication_guard_installed"] is False
+    assert report["runtime_requirements"]["AGENT_DECISION_DEFAULT_VISITOR_ONLY"] is True
+    assert report["selection_impact"]["non_direct_and_groups_may_select_default"] is False
 
 
 @pytest.mark.parametrize(
@@ -53,12 +55,18 @@ def test_preflight_binds_review_checksums_without_mutating_or_approving():
         (("proposed_activation", "autonomy", "execution_mode"), "REQUIRES_APPROVAL", True, True, "AUTONOMY_CHANGE_NOT_EXPLICIT"),
         (("selection_impact", "acknowledged_for_review"), False, True, True, "BLAST_RADIUS_NOT_ACKNOWLEDGED"),
         (("policy_proposal", "allowed_actions"), ["respond", "request_information", "grant.create"], True, True, "POLICY_AUTHORITY_INVALID"),
+        (("runtime_requirements", "AGENT_DECISION_DEFAULT_VISITOR_ONLY"), False, True, True, "RUNTIME_GUARD_REQUIRED"),
+        (("runtime_requirements", "private_platform_context_excluded"), False, True, True, "RUNTIME_GUARD_REQUIRED"),
+        (("selection_impact", "owner_without_explicit_blueprint_may_select_default"), True, True, True, "BLAST_RADIUS_NOT_ACKNOWLEDGED"),
+        (("creation_spec", "behavior"), {}, True, True, "PRIVATE_OR_IMPLICIT_CONTEXT_INVALID"),
     ],
     ids=[
         "wrong-domain", "unpublished", "owner-promotion", "tools",
         "private-capability", "private-disclosure", "tenant-not-approved",
         "invalid-version", "target-observe", "target-requires-approval",
         "unacknowledged-blast-radius", "legacy-policy-action-inheritance",
+        "runtime-guard-disabled", "private-context-included", "owner-default-inheritance",
+        "persistent-contract-missing",
     ],
 )
 def test_preflight_rejects_mutated_or_unproven_package(

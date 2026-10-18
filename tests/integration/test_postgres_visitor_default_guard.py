@@ -1,0 +1,36 @@
+"""Run the same visitor-default guard cases in distributed PostgreSQL discovery."""
+
+import pytest
+
+from tests.test_visitor_default_runtime_guard import (
+    guarded_visitor as guarded_visitor,
+    test_guard_default_scope_cannot_be_widened as test_guard_default_scope_cannot_be_widened,
+    test_guard_denies_existing_privileged_grant_to_unbound_actor as test_guard_denies_existing_privileged_grant_to_unbound_actor,
+    test_guard_is_revalidated_before_enqueue as test_guard_is_revalidated_before_enqueue,
+    test_guard_keeps_other_explicit_blueprint_and_legacy_flag_off as test_guard_keeps_other_explicit_blueprint_and_legacy_flag_off,
+    test_guard_never_inherits_active_binding_authority as test_guard_never_inherits_active_binding_authority,
+    test_guard_preserves_stricter_silence_policy as test_guard_preserves_stricter_silence_policy,
+    test_guard_preserves_proven_visitor_history_with_fake_delivery as test_guard_preserves_proven_visitor_history_with_fake_delivery,
+    test_guard_excludes_legacy_owner_history_after_binding_revocation as test_guard_excludes_legacy_owner_history_after_binding_revocation,
+    test_guard_rejects_incompatible_blueprint_at_runtime as test_guard_rejects_incompatible_blueprint_at_runtime,
+    test_guard_rejects_policy_authority_beyond_text as test_guard_rejects_policy_authority_beyond_text,
+    test_guard_sanitizes_poisoned_owner_context_and_preserves_same_chat_history as test_guard_sanitizes_poisoned_owner_context_and_preserves_same_chat_history,
+    test_invalid_explicit_reference_cannot_rank_guarded_default as test_invalid_explicit_reference_cannot_rank_guarded_default,
+    test_independent_session_cannot_dispatch_cached_visitor_authority as test_independent_session_cannot_dispatch_cached_visitor_authority,
+    test_marker_preserves_guard_when_rollout_flag_disappears as test_marker_preserves_guard_when_rollout_flag_disappears,
+    test_opt_in_guard_permits_unbound_question_and_text_outbox as test_opt_in_guard_permits_unbound_question_and_text_outbox,
+)
+
+
+pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture()
+def session(Session):
+    with Session() as db:
+        yield db
+
+
+@pytest.fixture()
+def independent_sessions(Session):
+    return Session

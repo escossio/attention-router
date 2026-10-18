@@ -1,5 +1,5 @@
 {
-  "schema_version": "andy-visitor-recovery-proposal-v1",
+  "schema_version": "andy-visitor-recovery-proposal-v2",
   "review_only": true,
   "name": "Andy — atendimento geral a visitantes",
   "tenant_scope": "EXACT_APPROVED_WHATSAPP_TENANT",
@@ -65,7 +65,7 @@
     ],
     "configuration_completeness": 100,
     "blocking_questions": [],
-    "behavior": {}
+    "behavior": {"visitor_default_contract": "text-only-v1"}
   },
   "proposed_activation": {
     "status": "published",
@@ -90,12 +90,19 @@
     "gmail_enabled": false,
     "private_data_disclosure_enabled": false
   },
+  "runtime_requirements": {
+    "AGENT_DECISION_DEFAULT_VISITOR_ONLY": true,
+    "default_blueprint_matches_approved_candidate": true,
+    "requires_certified_worker_image": true,
+    "private_platform_context_excluded": true,
+    "same_contact_recent_turns_preserved": true
+  },
   "selection_impact": {
     "process_default_with_tenant_check": true,
     "explicit_binding_blueprint_precedence_preserved": true,
-    "bindings_without_blueprint_may_select_default": true,
-    "owner_without_explicit_blueprint_may_select_default": true,
-    "non_direct_and_groups_may_select_default": true,
+    "bindings_without_blueprint_may_select_default": false,
+    "owner_without_explicit_blueprint_may_select_default": false,
+    "non_direct_and_groups_may_select_default": false,
     "non_direct_and_groups_automatic_effects_authorized": false,
     "unknown_policy_overlay_requires_separate_approval": true,
     "unknown_policy_change_may_affect_other_unknown_flows": true,
@@ -105,8 +112,10 @@
   "notes": [
     "Proposta integral para revisão e testes sintéticos; não aplica alterações.",
     "execution_mode=AUTO_ALLOWED vence level=observe no avaliador atual: a ativação proposta aumenta autonomia.",
-    "O selector atual não valida domínio ou publicação; este preflight verifica somente este pacote proposto.",
-    "O default também participa de seleção não direta, grupos e bindings sem ID explícito; nenhum efeito automático desses caminhos é autorizado por este pacote.",
+    "A imagem candidata deve conter o guard opt-in: o Worker atual ainda não o implementa.",
+    "Com o guard ativo, o candidato só atende mensagens diretas externas elegíveis de audiência unknown sem binding ativo; referência explícita ao mesmo candidato não contorna essa restrição.",
+    "O guard valida domínio general, publicação, versão e autoridade textual da policy; exclui o candidato do ranking não direto e retira contexto privado e inventário de capacidades.",
+    "O marcador persistido visitor_default_contract=text-only-v1 mantém o contrato restrito mesmo se a flag for perdida ou o ID for referenciado por um binding.",
     "A policy unknown proposta restringe allowed_actions também no nível raiz; divergência da policy efetiva é delta operacional separado e pode afetar outros fluxos unknown.",
     "Nenhuma importação histórica, replay, alteração de cursor ou escrita operacional está incluída."
   ]

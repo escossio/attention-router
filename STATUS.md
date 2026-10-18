@@ -1,5 +1,14 @@
 # Project status
 
+## Andy — homologação pré-promoção #380 (18/10/2026 UTC)
+
+- Operador aprovou homologação completa e artefatos de promoção; publicação, autonomia, policy, default e recriação produtivos continuam proibidos até aprovação final. Nenhuma mutação produtiva nesta etapa.
+- Pacote v2 exige guard opt-in do default: visitante externo direto, unknown, sem binding ativo; candidato general/publicado, policy somente textual, sem capacidades/disclosures e sem contexto privado da plataforma. Implementação e regressões em preparação; não tratar imagem viva como se já tivesse o guard.
+- Caminho administrativo local revisado com snapshot/CAS/aprovação e rollback será ensaiado em PostgreSQL descartável pelos workers. Snapshot atualizado confirmou cinco overlays Compose + um env preservados; nenhum compose up/build local.
+- Candidato de imagem deve preservar o baseline vivo 4d06e4d (fluxo de grupos/0058 ainda fora da main), além das mudanças desta recuperação. Gerar apenas a imagem da antiga #380/main removeria funcionalidade operacional; integração e certificação exatas são gates prévios.
+- Certificação anterior 478f644 permanece apenas evidência histórica. SHA final desta fase requer todos os checks novos, incluindo PostgreSQL e composição/rollback; GO/NO-GO ainda em preparação.
+- Validação efetiva READ ONLY confirmou tenant ativo e igualdade Transport/entrada/policy, versão/checksum da policy íntegros e capacidades/disclosures vazios. DB vivo está em0059 MAESTRO: nenhuma migração faz parte deste rollout. Manifesto v2 inclui marcador persistido text-only-v1; targeted local do harness/matriz/preflight41 PASS em5,06s. Revisão administrativa fecha recuperação de recibo após commit antes da certificação distribuída.
+
 ## Andy sem resposta — investigação forense #376 (18/10/2026 UTC)
 
 - Branch isolada sobre `main` `078dd742`; produção preservada. PRs #375/#377/#378/#379 continuam OPEN/DRAFT, sem merge. Worker vivo é `4d06e4d`, API é `d5a36d5`; versões foram verificadas separadamente.

@@ -1,7 +1,10 @@
 """Compare the actual versioned selection prefix with synthetic, offline fixtures.
 
 This deliberately does not import application settings or open a database. Only
-three source functions and the direct-eligibility value class/regex are loaded.
+three source functions, their optional visitor-guard helpers and the direct-
+eligibility value class/regex are loaded. Cases exercise the legacy unmarked
+contract with the visitor opt-in disabled; dedicated integration tests certify
+the new guarded package.
 Session.get, readiness and settings are fixture boundaries, so the result proves
 selection/enabling behavior, never complete authority or delivery.
 """
@@ -22,6 +25,7 @@ from types import SimpleNamespace
 PIPELINE_PATH = "attention_router/application/decision_pipeline.py"
 DIRECT_PATH = "attention_router/application/direct_conversation.py"
 FUNCTIONS = ("_blueprint", "_agent_enabled_for", "direct_conversation_eligibility")
+OPTIONAL_HELPERS = {"_guarded_visitor_default", "_visitor_default_denial_reason"}
 LIMITS = (
     "Synthetic Session.get, settings and READY readiness; no real persistence/provider.",
     "No actor-binding lookup, alias authentication, policy, autonomy or tools certified.",
@@ -46,6 +50,8 @@ def _selected_nodes(source: str, names: set[str]) -> list[ast.stmt]:
 def compare_sources(pipeline_source: str, direct_source: str) -> dict:
     """Execute exact source definitions under an intentionally narrow fixture boundary."""
     nodes = _selected_nodes(pipeline_source, {"_blueprint", "_agent_enabled_for"})
+    nodes += [node for node in ast.parse(pipeline_source).body
+              if isinstance(node, ast.FunctionDef) and node.name in OPTIONAL_HELPERS]
     nodes += _selected_nodes(
         direct_source, {"DirectConversationEligibility", "_PEER", "direct_conversation_eligibility"}
     )
@@ -63,7 +69,7 @@ def compare_sources(pipeline_source: str, direct_source: str) -> dict:
     exec(compile(ast.fix_missing_locations(module), "<versioned selection prefix>", "exec"), namespace)
     fingerprints = {
         node.name: hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
-        for node in nodes if isinstance(node, ast.FunctionDef)
+        for node in nodes if isinstance(node, ast.FunctionDef) and node.name in FUNCTIONS
     }
     cases = []
     configurations = (
@@ -87,7 +93,7 @@ def compare_sources(pipeline_source: str, direct_source: str) -> dict:
             id="valid", tenant_id="tenant-a", current_version_id="v1",
             status="draft", domain="synthetic-other-domain",
         )
-        version = SimpleNamespace(id="v1", blueprint_id="valid")
+        version = SimpleNamespace(id="v1", blueprint_id="valid", spec={})
         rows = {
             "valid": blueprint, "v1": version,
             "foreign": SimpleNamespace(id="foreign", tenant_id="tenant-b", current_version_id="v2"),
