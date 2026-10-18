@@ -2,6 +2,7 @@
 
 ## AR-1001 — Zabbix preparado, coleta nova ainda inativa (2026-10-18 UTC)
 
+- Ativação controlada em preparação: pré-checagem confirmou backup e script original idênticos, 7 novos itens desabilitados, 8 legados e 2 triggers sem drift, mesma ocorrência aberta. Um builder versionado gerou candidato privado autocontido da sonda com SQL e parser existentes; `next_state`, `send`, estado e `probe_ok` foram preservados. Regressão sintética e teste privado do candidato passaram; rollout aguarda certificação do SHA de código.
 - PR #375 retomada em `935cdf449d5a93685326b6592daf76916845e10e`, worktree limpa no início e quatro checks distribuídos verdes. A API ROC 7.4.14 aceitou o mesmo cliente oficial na retomada; a causa exata da rejeição anterior de `host.get` não é recuperável do erro sanitizado.
 - Backup privado completo e verificado dos 8 itens e 2 triggers Zabbix, além das quatro cópias host-private prévias preservadas sem sobrescrita. SQL integrado homologado somente-leitura no PostgreSQL operacional: 7 colunas legadas iguais em três pares, 7 agregados confirmados independentemente, tempo total máximo observado 135,5 ms contra timeout de 3 s.
 - Sete itens AR-1001 criados como `trapper uint` **desabilitados**. Oito itens antigos seguem habilitados/recentes, `probe_ok=1`, dois triggers sem drift e uma única ocorrência funcional aberta. Sonda, timer, estado, Telegram, Relay e MAESTRO não foram alterados.
