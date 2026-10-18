@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 from ops.observability.failure_catalog.zabbix_items_admin import (
-    HOST_LABEL, OLD_KEYS, _config, candidate_items, inspect, main, snapshot,
+    HOST_LABEL, OLD_KEYS, _config, candidate_items, inspect, main,
+    planned_status_updates, snapshot,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +22,7 @@ def mock_inventory(*, existing_keys=()):
             "name": key, "type": "2", "status": "0"}
            for i, key in enumerate(OLD_KEYS)]
     new = [{"itemid": str(200+i), "key_": k, "hostid": "demo-host",
-            "name": k, "type": "2", "status": "1"}
+            "name": k, "type": "2", "value_type": "3", "status": "1"}
            for i, k in enumerate(existing_keys)]
     return {"host": {"hostid": "demo-host", "host": "synthetic", "name": HOST_LABEL},
             "legacy_items": sorted(old, key=lambda x: x["key_"]),
@@ -51,6 +52,11 @@ class FakeAPI:
             return self.inventory["triggers"]
         if method == "item.create":
             return {"itemids": [str(i) for i in range(len(params))]}
+        if method == "item.update":
+            by_id = {item["itemid"]: item for item in self.inventory["candidate_items"]}
+            for update in params:
+                by_id[update["itemid"]]["status"] = str(update["status"])
+            return {"itemids": [update["itemid"] for update in params]}
         raise AssertionError("unexpected API " + method)
 
 
@@ -147,6 +153,51 @@ class Ar1001ZabbixOperatorTests(unittest.TestCase):
             path.write_text(json.dumps(data))
             with self.assertRaises(ValueError):
                 _config(path)
+
+    def test_enable_and_disable_touch_only_checkpointed_new_items(self):
+        manifest = _config(MANIFEST)
+        keys = [item["key"] for item in manifest["items"]]
+        with tempfile.TemporaryDirectory() as dirpath:
+            base = Path(dirpath)
+            credentials = base / "credentials.json"
+            credentials.write_text(json.dumps({"username": "synthetic", "password": "mock-only"}))
+            settings = base / "settings.json"
+            settings.write_text(json.dumps({
+                "api_url": "https://synthetic.example.test/api_jsonrpc.php",
+                "admin_credentials_file": str(credentials),
+            }))
+            api = FakeAPI()
+            def factory(_):
+                return api
+            args = ["--manifest", str(MANIFEST), "--operator-settings", str(settings),
+                    "--backup-dir", str(base / "backup")]
+            self.assertEqual(main(args + ["--mode", "snapshot"], api_factory=factory), 0)
+            api.inventory["candidate_items"] = mock_inventory(existing_keys=keys)["candidate_items"]
+            checkpoint = base / "backup/ar1001-created-disabled.private.json"
+            checkpoint.write_text(json.dumps({
+                "candidate_itemids": [item["itemid"]
+                                      for item in api.inventory["candidate_items"]],
+            }))
+            probe = base / "reply_health.py"
+            probe.write_text("synthetic probe")
+            digest = hashlib.sha256(probe.read_bytes()).hexdigest()
+            self.assertEqual(main(args + ["--mode", "enable", "--installed-probe",
+                                          str(probe), "--expected-probe-sha256", digest],
+                                  api_factory=factory), 0)
+            self.assertTrue(all(item["status"] == "0" for item in api.inventory["candidate_items"]))
+            self.assertEqual(main(args + ["--mode", "disable"], api_factory=factory), 0)
+            self.assertTrue(all(item["status"] == "1" for item in api.inventory["candidate_items"]))
+            with self.assertRaisesRegex(RuntimeError, "HASH_MISMATCH"):
+                main(args + ["--mode", "enable", "--installed-probe", str(probe),
+                             "--expected-probe-sha256", "0" * 64], api_factory=factory)
+            self.assertEqual(len([call for call in api.calls if call[0] == "item.update"]), 2)
+
+    def test_status_update_rejects_uncheckpointed_item(self):
+        manifest = _config(MANIFEST)
+        inv = mock_inventory(existing_keys=[item["key"] for item in manifest["items"]])
+        with self.assertRaisesRegex(RuntimeError, "CHECKPOINT_MISMATCH"):
+            planned_status_updates(inv, manifest, {"candidate_itemids": ["wrong"]},
+                                   enable=True)
 
 
 if __name__ == "__main__":

@@ -18,15 +18,15 @@ Não houve mutação em nenhum item, trigger, template, media, ação ou banco o
 
 ## Novo operador offline e caminho de recuperação
 
-`ops/observability/failure_catalog/zabbix_items_admin.py` encapsula acesso à API oficial por métodos permitidos, com três modos:
+`ops/observability/failure_catalog/zabbix_items_admin.py` encapsula acesso à API oficial por métodos permitidos, inicialmente com três modos:
 
 1. **plan (padrão):** verifica manifesto e imprime apenas intenção offline; não usa a rede.
 2. **snapshot:** exige parâmetros privados explícitos; autentica, identifica host exato, compara oito itens antigos e duas triggers, grava cópia com `0600` e checksum fora do Git. Interrompe sem backup se a API falhar.
 3. **create-disabled:** exige snapshot anterior, manifesto idêntico e ausência de drift da configuração original. Só então cria **sete itens trapper unsigned DESABILITADOS**; não emite dados, não inicia timer, não ativa triggers e não altera o Relay.
 
-Não existe modo de ativação dos itens nesse operador; a ativação exigirá implantação separada do coletor original, comprovação de consulta real com autorização, e verificação de 3 ciclos. Se algum item novo já existir, o operador recusa criação parcial ao invés de sobrescrever. A lista permitida após autenticação inclui `host.get`, `item.get`, `trigger.get`, `problem.get` (somente leitura) e `item.create`; login e consulta da versão também são permitidos, sem API genérica para mutações amplas. Falhas retornam códigos sanitizados, sem `error.data`, tokens ou corpo da resposta.
+O incremento de ativação acrescenta `enable` e `disable`: ambos exigem os sete IDs do checkpoint privado e conferem tipo e chaves; `enable` também exige hash do script instalado e ausência de drift dos itens/triggers originais. `disable` aceita drift dinâmico desses originais para permitir rollback. Só os sete IDs novos são enviados a `item.update`, com confirmação posterior da API. Se algum item novo já existir, `create-disabled` recusa criação parcial. A lista permitida após autenticação inclui `host.get`, `item.get`, `trigger.get`, `problem.get` (somente leitura), `item.create` e `item.update`; login e consulta da versão também são permitidos. Falhas retornam códigos sanitizados, sem `error.data`, tokens ou corpo da resposta.
 
-O teste `tests/test_operational_ar1001_zabbix_admin.py` utiliza exclusivamente API simulada: recusa host/trigger divergentes, impede duplicação, confirma modo plan offline, verifica snapshot `0700/0600`, exige backup antes de item.create e confere status desabilitado. **Nenhuma chamada dessa bateria acessa a API real.**
+O teste `tests/test_operational_ar1001_zabbix_admin.py` utiliza exclusivamente API simulada: recusa host/trigger divergentes, impede duplicação, confirma modo plan offline, verifica snapshot `0700/0600`, exige backup antes de item.create, confere criação desabilitada e limita enable/disable aos IDs do checkpoint. **Nenhuma chamada dessa bateria acessa a API real.**
 
 ## Critérios para liberar ativação
 

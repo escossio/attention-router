@@ -60,7 +60,7 @@ class ZabbixAPI:
     def call(self, method: str, params: dict | list) -> object:
         if method not in {
             "user.login", "apiinfo.version", "host.get", "item.get",
-            "trigger.get", "problem.get", "item.create",
+            "trigger.get", "problem.get", "item.create", "item.update",
         }:
             raise ValueError("AR1001_API_METHOD_DENIED")
         headers = {"Content-Type": "application/json-rpc"}
@@ -188,12 +188,34 @@ def candidate_items(inventory: dict, manifest: dict) -> list[dict]:
     return items
 
 
+def planned_status_updates(inventory: dict, manifest: dict, checkpoint: dict,
+                           *, enable: bool) -> list[dict]:
+    items = inventory["candidate_items"]
+    expected_keys = {entry["key"] for entry in manifest["items"]}
+    checkpoint_ids = set(checkpoint.get("candidate_itemids", []))
+    if (len(items) != 7 or {item["key_"] for item in items} != expected_keys or
+            {item["itemid"] for item in items} != checkpoint_ids or
+            len(checkpoint_ids) != 7):
+        raise RuntimeError("AR1001_CANDIDATE_CHECKPOINT_MISMATCH")
+    if any(int(item["type"]) != 2 or int(item["value_type"]) != 3
+           for item in items):
+        raise RuntimeError("AR1001_CANDIDATE_TYPE_DRIFT")
+    if enable and any(int(item["status"]) != 1 for item in items):
+        raise RuntimeError("AR1001_CANDIDATE_NOT_ALL_DISABLED")
+    target = 0 if enable else 1
+    return [{"itemid": item["itemid"], "status": target}
+            for item in sorted(items, key=lambda item: item["key_"])]
+
+
 def main(argv=None, *, api_factory=ZabbixAPI) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--operator-settings", type=Path)
     parser.add_argument("--backup-dir", type=Path)
-    parser.add_argument("--mode", choices=("plan", "snapshot", "create-disabled"),
+    parser.add_argument("--installed-probe", type=Path)
+    parser.add_argument("--expected-probe-sha256")
+    parser.add_argument("--mode", choices=("plan", "snapshot", "create-disabled",
+                                           "enable", "disable"),
                         default="plan")
     args = parser.parse_args(argv)
     manifest = _config(args.manifest)
@@ -222,10 +244,34 @@ def main(argv=None, *, api_factory=ZabbixAPI) -> int:
     expected_digest = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
     if proof.get("manifest_sha256") != expected_digest:
         raise RuntimeError("AR1001_MANIFEST_CHANGED_SINCE_BACKUP")
-    if proof.get("inventory", {}).get("legacy_items") != inventory["legacy_items"]:
+    if args.mode != "disable" and proof.get("inventory", {}).get("legacy_items") != inventory["legacy_items"]:
         raise RuntimeError("AR1001_LEGACY_DRIFT_SINCE_BACKUP")
-    if proof.get("inventory", {}).get("triggers") != inventory["triggers"]:
+    if args.mode != "disable" and proof.get("inventory", {}).get("triggers") != inventory["triggers"]:
         raise RuntimeError("AR1001_TRIGGER_DRIFT_SINCE_BACKUP")
+    if args.mode in ("enable", "disable"):
+        checkpoint_file = args.backup_dir / "ar1001-created-disabled.private.json"
+        if not checkpoint_file.is_file():
+            raise RuntimeError("AR1001_CREATED_CHECKPOINT_REQUIRED")
+        checkpoint = json.loads(checkpoint_file.read_text(encoding="utf-8"))
+        if args.mode == "enable":
+            if not args.installed_probe or not args.expected_probe_sha256:
+                raise RuntimeError("AR1001_INSTALLED_PROBE_PROOF_REQUIRED")
+            if hashlib.sha256(args.installed_probe.read_bytes()).hexdigest() != args.expected_probe_sha256:
+                raise RuntimeError("AR1001_INSTALLED_PROBE_HASH_MISMATCH")
+        updates = planned_status_updates(inventory, manifest, checkpoint,
+                                         enable=args.mode == "enable")
+        updated = api.call("item.update", updates)
+        if (not isinstance(updated, dict) or
+                set(updated.get("itemids", [])) != {item["itemid"] for item in updates}):
+            raise RuntimeError("AR1001_STATUS_UPDATE_PARTIAL_RESULT")
+        after = inspect(api, manifest)
+        if ({item["itemid"] for item in after["candidate_items"]} !=
+                {item["itemid"] for item in updates} or
+                any(int(item["status"]) != updates[0]["status"]
+                    for item in after["candidate_items"])):
+            raise RuntimeError("AR1001_STATUS_UPDATE_NOT_CONFIRMED")
+        print("AR1001_ITEM_STATUS_CONFIRMED", args.mode, "count", len(updates))
+        return 0
     new_items = candidate_items(inventory, manifest)
     created = api.call("item.create", new_items)
     if (not isinstance(created, dict) or
