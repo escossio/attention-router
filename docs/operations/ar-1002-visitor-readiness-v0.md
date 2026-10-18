@@ -25,3 +25,9 @@ Antes de integrar ao Zabbix, identificar no runtime a fonte autorizada para cada
 Reutilizar o ciclo existente de `andy-reply-health.timer`, mas manter falha de coleta separada de violação comprovada. Adicionar itens/triggers e código ao catálogo só depois de testes de frescor, concorrência de deploy, rollback e ausência de regressão do AR-1001.
 
 Nenhuma mensagem sintética externa, execução de agente, mudança de blueprint, escrita no PostgreSQL, restart, replay ou publicação operacional faz parte deste V0.
+
+## Adaptador de evidência (fase 2, não instalado)
+
+`attention_router/observability/visitor_readiness_adapter.py` recebe uma sessão já aberta pelo chamador, modelos ORM explícitos, ID de default, tenant esperado e atestações tipadas de runtime/policy. Usa apenas `Session.get`; não cria conexão, não escreve, não envia métricas. O chamador **deve** abrir transação PostgreSQL read-only com snapshot consistente, verificar identidade da imagem/guard e construir as atestações de policy com o mesmo contrato efetivo do Worker.
+
+**Limite:** `policy_text_only`, `guard_installed` e `worker_healthy` são evidências fornecidas pelo chamador; não são comprovadas por este módulo. Nunca alimentar todas com `True` por conveniência. `READY` em testes sintéticos não certifica a implantação. Não instalar timer/triggers nesta fase.
