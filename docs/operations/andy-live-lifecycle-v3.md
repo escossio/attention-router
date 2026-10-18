@@ -31,7 +31,13 @@ post-start gate.
 The target manifest is root-only, separately pinned by
 `ATTENTION_LIVE_WORKER_MANIFEST_SHA256`. A transition also requires a pinned
 previous manifest and `ATTENTION_LIVE_WORKER_MANIFEST_SHA256_PREVIOUS`. The
-previous schema may be V2 (OFF baseline) or V3. Both manifests must agree on
+previous schema may be V2 (OFF baseline) or V3. A V2 manifest may also be
+the current target for an OFF boot or directed OFF rollback. In that case the
+V3 controller validates the V2 schema's ten critical environment pins, exact
+six-file render, image ID/revision and runtime parity, and rejects any ON
+claim, enabled First Contact flag or nonempty First Contact scope. A V3 ON
+target still requires all thirteen critical pins and independent tenant/account
+boot scope; renaming a V2 manifest to V3 is invalid. Both manifests must agree on
 project, workdir, Worker/DB containers and service. The old six Compose files
 must remain immutable at their original paths while the old container declares
 them; place target files at separate versioned paths. Editing overlays in place
@@ -53,6 +59,16 @@ presentation, ACK, ambiguous-effect, outbox and ledger records; never replay or
 backfill to make rollback appear successful. The controller does not perform an
 automatic second external effect after an ambiguous result. Installation of a
 root-owned package, boot default and unit is a separate approved operation.
+
+The direct-exec unit can keep its existing `ExecStart` path if a separately
+certified executable launcher is installed there. The launcher starts with
+`/usr/bin/python3 -I`, validates root ownership/modes and SHA-256 pins for the
+V3 module and composition helper, then calls the V3 `main()` in the same
+process. Missing package settings, import errors and hash drift fail closed;
+there is no fallback to the legacy controller. The six boot Compose paths must
+match the pinned manifest in order. See
+[`andy-live-lifecycle-v3-boot-package.md`](andy-live-lifecycle-v3-boot-package.md)
+for the sanitized packaging and future installation contract.
 
 ## Validation boundary
 

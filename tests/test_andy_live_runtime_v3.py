@@ -76,6 +76,64 @@ def test_complete_six_input_preflight(scenario):
     assert image["Id"] == manifest["image_id"]
 
 
+def test_pinned_v2_target_is_off_without_first_contact_fields(scenario, monkeypatch):
+    manifest, _, rendered, _, _ = scenario
+    manifest["schema_version"] = "andy-live-worker-lifecycle-v2"
+    manifest.pop("first_contact_mode")
+    env = rendered["services"]["worker"]["environment"]
+    for key in ("FIRST_CONTACT_ENABLED", "FIRST_CONTACT_TENANT_ID", "FIRST_CONTACT_SOURCE_ACCOUNT"):
+        env.pop(key)
+        manifest["critical_environment_sha256"].pop(key)
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    assert lifecycle.preflight()[0]["schema_version"] == "andy-live-worker-lifecycle-v2"
+    env["FIRST_CONTACT_ENABLED"] = "true"
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    with pytest.raises(lifecycle.InvariantError, match="LEGACY_FIRST_CONTACT_FIELDS_INVALID"):
+        lifecycle.preflight()
+
+
+def test_v2_target_rejects_on_claim_and_scope(scenario, monkeypatch):
+    manifest, _, rendered, _, _ = scenario
+    manifest["schema_version"] = "andy-live-worker-lifecycle-v2"
+    for key in ("FIRST_CONTACT_ENABLED", "FIRST_CONTACT_TENANT_ID", "FIRST_CONTACT_SOURCE_ACCOUNT"):
+        manifest["critical_environment_sha256"].pop(key)
+    manifest["first_contact_mode"] = "on"
+    repin(scenario, monkeypatch)
+    with pytest.raises(lifecycle.InvariantError, match="LEGACY_FIRST_CONTACT_FIELDS_INVALID"):
+        lifecycle.preflight()
+    manifest.pop("first_contact_mode")
+    rendered["services"]["worker"]["environment"]["FIRST_CONTACT_TENANT_ID"] = "synthetic-tenant"
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    with pytest.raises(lifecycle.InvariantError, match="LEGACY_FIRST_CONTACT_FIELDS_INVALID"):
+        lifecycle.preflight()
+
+
+def test_v2_off_rollback_target_accepts_v3_on_source(scenario, monkeypatch):
+    manifest, _, rendered, _, _ = scenario
+    manifest["schema_version"] = "andy-live-worker-lifecycle-v2"
+    manifest.pop("first_contact_mode")
+    env = rendered["services"]["worker"]["environment"]
+    for key in ("FIRST_CONTACT_ENABLED", "FIRST_CONTACT_TENANT_ID", "FIRST_CONTACT_SOURCE_ACCOUNT"):
+        env.pop(key)
+        manifest["critical_environment_sha256"].pop(key)
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    target = lifecycle.preflight()
+    source_manifest = dict(target[0], schema_version="andy-live-worker-lifecycle-v3", first_contact_mode="on")
+    source = (source_manifest, {"services": {"worker": "on"}}, {"Id": source_manifest["image_id"]}, ["source"])
+    calls = []
+    monkeypatch.setattr(lifecycle, "verify", lambda item, *_args, **_kwargs: calls.append(("verify", item["schema_version"])))
+    monkeypatch.setattr(lifecycle, "preflight", lambda *, previous=False: source if previous else target)
+    monkeypatch.setattr(lifecycle, "invoke", lambda args, **_kwargs: calls.append(("invoke", args)) or "")
+    monkeypatch.setattr(lifecycle, "wait_healthy", lambda *_args: calls.append(("healthy", None)))
+    lifecycle.reconcile(*target, previous=source)
+    assert calls[0] == ("verify", "andy-live-worker-lifecycle-v3")
+    assert calls[-1] == ("verify", "andy-live-worker-lifecycle-v2")
+
+
 def test_on_mode_requires_scoped_tenant_and_account(scenario, monkeypatch):
     manifest, _, rendered, _, _ = scenario
     env = rendered["services"]["worker"]["environment"]
