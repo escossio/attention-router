@@ -10,6 +10,9 @@ Este catálogo identifica **a classe do sintoma**, não substitui seu conjunto d
 
 ## Por que existe
 
+A primeira auditoria da sonda real está documentada em [AR-1001 — origem da coleta](ar-1001-source-audit-20261017.md), com SQL somente leitura candidato, significados precisos dos oito itens já existentes e evidências de uma janela de seis horas. A query nova **não está em produção**.
+
+
 Zabbix observa e classifica **sintomas**; Occurrence Relay registra e transporta sem perder/reordenar identidade; MAESTRO recebe e confirma. A causa e a solução não são escolhidas pelo Zabbix, pelo Relay ou pelo código da ocorrência. O catálogo torna o sintoma identificável, legível e verificável antes de qualquer investigação.
 
 Há códigos existentes que devemos **reutilizar**, não apagar: ANDY_WA_AUTO_REPLY_STALLED, ANDY_WA_REPLY_OBSERVABILITY_LOST, GMAIL_PRODUCT_REFRESH_FAILED, L1_PARENT_DOWN, L2_DOMAIN_DOWN, L3_NEIGHBOR_INCOMPLETE e L3_ENDPOINT_UNREACHABLE. A codificação AR-XXXX é uma **chave de catálogo proposta**, associada a essas identificações de origem, não um novo status HTTP.

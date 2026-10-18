@@ -57,6 +57,54 @@
       "dimension": "collector_integrity",
       "kind": "bounded_duration",
       "available": "TO_VERIFY"
+    },
+    {
+      "key": "andy.reply.direct_processed_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Direct inbound event rows processed (not unique interactions)",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.decision_total_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Decisions on direct interactions in the 6-hour window",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.decisions_dry_run_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Subset INSUFFICIENT_CONTEXT plus DRY_RUN",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.outbox_new_6h",
+      "dimension": "delivery",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Outbox rows created on direct interactions",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.grace_released_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Grace windows released for direct interactions",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
+    },
+    {
+      "key": "andy.reply.grace_canceled_6h",
+      "dimension": "application_flow",
+      "kind": "bounded_count",
+      "available": "TO_VERIFY",
+      "meaning": "Grace windows canceled for direct interactions",
+      "source": "SQL_CANDIDATE_NOT_PROVISIONED"
     }
   ],
   "planned_event_tags": [
@@ -76,5 +124,14 @@
     "No active Relay V0 changes",
     "No automatic tcpdump",
     "No claim that absent telemetry is a healthy layer"
-  ]
+  ],
+  "versioned_sql": "ops/observability/failure-catalog/queries/ar-1001-readonly-progress.v0.sql",
+  "versioned_sql_state": "CANDIDATE_NOT_EXECUTED_FROM_FILE_NOT_INSTALLED",
+  "known_collector": "AGT host-private reply_health.py / andy-reply-health.timer; read-only PostgreSQL -> Zabbix sender",
+  "measured_semantics": {
+    "andy.reply.direct_6h": "distinct direct interaction_id in 6h, not necessarily raw messages",
+    "andy.reply.no_safe_6h": "distinct interactions with behavior.unavailable",
+    "andy.reply.blueprint_6h": "distinct interactions with conversation.blocked; not a proven blueprint root cause",
+    "andy.reply.functional_stalled": "sticky incident until later qualifying DONE auto-reply; not a new event each poll"
+  }
 }

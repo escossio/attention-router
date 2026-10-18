@@ -39,6 +39,9 @@ O painel de alarme deve mostrar a primeira anomalia observada e uma sequência d
 
 ## Exemplo AR-1001 — Andy sem resposta
 
+Para consulta de origem e semântica dos dados, ler também [AR-1001 — auditoria real da sonda](../operations/ar-1001-source-audit-20261017.md). Não tratar \`direct_6h\` como total de mensagens, nem \`blueprint_6h\` como diagnóstico causal de blueprint.
+
+
 Detector já presente no ROC Zabbix: `ANDY_WA_AUTO_REPLY_STALLED`. Coletor auxiliar: `ANDY_WA_REPLY_OBSERVABILITY_LOST`. Os itens nativos já existentes incluem `andy.reply.functional_stalled` e `andy.reply.probe_ok`. O histórico recente do Zabbix registra PROBLEM duradouro e a sonda disponível; isso não identifica isoladamente qual estágio deixou de responder.
 
 **Primeiro recorte de enriquecimento:** janela e elegibilidade de mensagens; contagem recebida e processada; decisões por tipo/status; expectativa autorizada de resposta; outbox produzida/confirmada; frescor da observação; cobertura e referências OTel quando correlacionáveis. Não basta saber que Docker e API estão HEALTHY.
