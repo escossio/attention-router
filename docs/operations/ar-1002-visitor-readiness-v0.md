@@ -31,3 +31,13 @@ Nenhuma mensagem sintética externa, execução de agente, mudança de blueprint
 `attention_router/observability/visitor_readiness_adapter.py` recebe uma sessão já aberta pelo chamador, modelos ORM explícitos, ID de default, tenant esperado e atestações tipadas de runtime/policy. Usa apenas `Session.get`; não cria conexão, não escreve, não envia métricas. O chamador **deve** abrir transação PostgreSQL read-only com snapshot consistente, verificar identidade da imagem/guard e construir as atestações de policy com o mesmo contrato efetivo do Worker.
 
 **Limite:** `policy_text_only`, `guard_installed` e `worker_healthy` são evidências fornecidas pelo chamador; não são comprovadas por este módulo. Nunca alimentar todas com `True` por conveniência. `READY` em testes sintéticos não certifica a implantação. Não instalar timer/triggers nesta fase.
+
+
+### Gate de seleção da policy (fase 2)
+
+O adaptador exige agora `policy_selection_verified=True` para aceitar qualquer
+atestado positivo de policy. A fonte externa deve demonstrar que a versão
+efetiva corresponde à seleção do resolver real para audiência `unknown`,
+tenant e interação direta elegível, sob o mesmo snapshot read-only.
+`None` resulta em evidência incompleta; `False` impede READY.
+Não inferir essa prova da existência de uma policy ACTIVE.

@@ -24,6 +24,7 @@ class AdapterTests(unittest.TestCase):
         args = dict(session=self.session, default_blueprint_id="synthetic-bp",
                     tenant_id="synthetic-tenant", runtime=self.runtime,
                     policy=self.policy, collector_ok=True, snapshot_consistent=True,
+                    policy_selection_verified=True,
                     blueprint_model=type("Blueprint", (), {}), version_model=type("Version", (), {}))
         args.update(kwargs)
         return collect(**args)
@@ -32,6 +33,12 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(self.run_collect()["state"], "READY")
         self.session.commit.assert_not_called()
         self.session.flush.assert_not_called()
+
+    def test_policy_not_proven_selected_cannot_be_ready(self):
+        self.assertEqual(self.run_collect(policy_selection_verified=None)["state"], "DEGRADED")
+
+    def test_wrong_policy_selection_is_broken(self):
+        self.assertEqual(self.run_collect(policy_selection_verified=False)["state"], "BROKEN")
 
     def test_missing_policy_evidence_not_ready(self):
         self.assertEqual(self.run_collect(policy={})["state"], "DEGRADED")
