@@ -33,6 +33,7 @@ dessa perda histórica; sozinho não teria demonstrado sua causa.
 | 24/set 16:40:14.699664 | 24/set 13:40:14 | **Confirmado:** substituto criado com Compose temporário único, default ausente e `AGENT_EXECUTION_ENABLED=false`; permaneceu `Created`. |
 | 25/set, recuperação do consumidor | 25/set | **Confirmado pelo registro AFO-004; instante completo não determinado:** Worker volta a processar, sem paridade semântica do baseline. |
 | 25/set 11:39:19.049023 | 25/set 08:39:19 | **Confirmado:** primeira auditoria retida `CONVERSATION_BLUEPRINT_UNCONFIGURED`; não é necessariamente a primeira falha ocorrida. |
+| 26/set 02:10:56.055256 e 03:21:42.922876 | 25/set 23:10:56 e 26/set 00:21:42 | **Confirmado:** duas respostas DONE com binding explícito, ainda sem recuperação do caminho sem binding. |
 | 03/out 04:05:48; 04:18:17; 04:41:49 | 03/out 01:05; 01:18; 01:41 | **Confirmado:** três DONE por Agent SDK, com binding/blueprint/policy. |
 | 04/out 01:12:38; 02:33:51; 21:58:36 | 03/out 22:12; 23:33; 04/out 18:58 | **Confirmado:** três DONE pelo mesmo caminho. O primeiro é o último RESPOND com outbox DONE retido. |
 | 05/out 15:01:15 | 05/out 12:01:15 | **Confirmado:** merge Android #67, mecanismo de troca de tenant; seletor nomeado de UI veio na #76 às16:26:25Z. Merge não prova instalação. |
@@ -130,6 +131,16 @@ A desativação da execução era um segundo bloqueio histórico. Hoje os gates
 `andy_agent_enabled`, `agent_execution_enabled`, `autonomous_execution_enabled`,
 `external_delivery_enabled` e o pipeline estão true; legacy fallback está false.
 Essa recuperação parcial explica por que um binding continuou respondendo.
+
+Readiness local observada18/out09:52:16Z: READY/ANDY_AGENT_READY, sem provider
+invocado. Ela verifica dependência/configuração/credencial presente, não quota,
+disponibilidade do modelo remoto ou geração de resposta real.
+
+O banco também preserva dois DONE vinculados em26/set e10 intents com
+blocked_reason=AGENT_EXECUTION_DISABLED, com criação até03/out03:58:54Z.
+Isso mostra recuperações/bloqueios parciais, não uma restauração monotônica de
+todos os serviços. Criação do intent não data a avaliação do gate. O default
+geral permanece a divergência independente comprovada no ensaio18/out.
 
 Comparação semântica em cinco revisões: `6611eac1`, `b3a0c302`, `a17e2b84`,
 `d5a36d5`, `4d06e4d`. As ASTs de `_blueprint`, `_agent_enabled_for` e
@@ -356,7 +367,7 @@ ponto de entrada sem duplicar cenários. PASS do SHA81 não certifica os17 casos
 Resultados dos checks distribuídos e SHA final ficam na
 [PR #380](https://github.com/escossio/attention-router/pull/380) e no
 comentário de certificação da issue376. PostgreSQL completo usa CI03; os17
-casos do wrapper serão incluídos nesse gate. Python/Docker/Transport usam
+casos do wrapper integram a descoberta desse gate. Python/Docker/Transport usam
 fluxo distribuído existente; architecture guard está dentro de docker-build.
 O ruleset exige distributed-python além dos checks legados. Nenhum resultado de
 SHA anterior certifica HEAD novo. Não houve suite pesada no AGT.
