@@ -41,3 +41,17 @@ efetiva corresponde à seleção do resolver real para audiência `unknown`,
 tenant e interação direta elegível, sob o mesmo snapshot read-only.
 `None` resulta em evidência incompleta; `False` impede READY.
 Não inferir essa prova da existência de uma policy ACTIVE.
+
+### Testemunha sintética da seleção da policy
+
+O módulo `visitor_policy_witness.py` valida a identidade de uma testemunha
+sintética `unknown`, sem binding, e compara a saída de um resolver injetado
+com o identificador de policy esperado. Ele não consulta banco nem expõe
+identificadores. **Uma testemunha não representa todos os contextos possíveis**;
+antes de READY operacional será necessária matriz representativa de
+categoria/contexto e evidência de que o resolver é o mesmo do Worker, sob
+snapshot consistente e com versão efetiva verificada.
+
+A testemunha isolada não fornece por si `policy_selection_verified=True`
+ao adaptador. Esse vínculo entre resolvedor, snapshot e policy efetiva continua
+pendente no coletor real. Não instalar Zabbix nem timer nesta fase.
