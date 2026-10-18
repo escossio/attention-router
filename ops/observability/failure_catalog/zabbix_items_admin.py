@@ -60,7 +60,7 @@ class ZabbixAPI:
     def call(self, method: str, params: dict | list) -> object:
         if method not in {
             "user.login", "apiinfo.version", "host.get", "item.get",
-            "trigger.get", "item.create",
+            "trigger.get", "problem.get", "item.create",
         }:
             raise ValueError("AR1001_API_METHOD_DENIED")
         headers = {"Content-Type": "application/json-rpc"}

@@ -1,5 +1,12 @@
 # Project status
 
+## AR-1001 — Zabbix preparado, coleta nova ainda inativa (2026-10-18 UTC)
+
+- PR #375 retomada em `935cdf449d5a93685326b6592daf76916845e10e`, worktree limpa no início e quatro checks distribuídos verdes. A API ROC 7.4.14 aceitou o mesmo cliente oficial na retomada; a causa exata da rejeição anterior de `host.get` não é recuperável do erro sanitizado.
+- Backup privado completo e verificado dos 8 itens e 2 triggers Zabbix, além das quatro cópias host-private prévias preservadas sem sobrescrita. SQL integrado homologado somente-leitura no PostgreSQL operacional: 7 colunas legadas iguais em três pares, 7 agregados confirmados independentemente, tempo total máximo observado 135,5 ms contra timeout de 3 s.
+- Sete itens AR-1001 criados como `trapper uint` **desabilitados**. Oito itens antigos seguem habilitados/recentes, `probe_ok=1`, dois triggers sem drift e uma única ocorrência funcional aberta. Sonda, timer, estado, Telegram, Relay e MAESTRO não foram alterados.
+- Falta integrar o parser à sonda existente, habilitar os novos itens, verificar três ciclos operacionais e aplicar o rollback descrito em `docs/operations/ar-1001-zabbix-operator-gate-20261018.md` se houver divergência. Não declarar implantação completa nesta fase.
+
 ## MAESTRO standalone — operational checkpoint, 2026-10-17
 
 - Code lineage: branch `feat/maestro-standalone-vlan-operational-20261017` merged the operational Relay history, preserving `0058_group_contextual_presence` then `0059_maestro_relay_receipts`. Distributed Docker, Python, Transport and PostgreSQL checks all passed on code SHA `932af6e3c9876fcf30f471f5d6e1df8f35feff90`. The image `attention-router:maestro-932af6e3c987` has that OCI revision. The later documentation/Compose SHA requires its own certification; do not attribute the old checks to it.
