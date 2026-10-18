@@ -492,6 +492,14 @@ def run_forever() -> None:
             session.commit()
             tts_count = process_tts_derivations(session, identity)
             outbox_count = process_outbox(session, identity)
+            if settings.first_contact_enabled:
+                from attention_router.application.first_contact_runtime import reconcile_presentations
+
+                try:
+                    reconcile_presentations(session)
+                except Exception:
+                    session.rollback()
+                    logger.exception("first contact receipt reconciliation failed")
             timer_count = process_due_timers(session, identity)
             scheduled_event_count = process_scheduled_events_if_available(session)
             media_cleanup_count = cleanup_expired_media(session)

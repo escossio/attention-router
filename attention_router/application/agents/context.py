@@ -42,6 +42,7 @@ class AllowedAgentContext:
     response_style: dict[str, object] = field(default_factory=dict)
     response_locale: str = ""
     response_locale_source: str = ""
+    first_contact: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         if self.response_locale:
@@ -52,5 +53,7 @@ class AllowedAgentContext:
 
     def prompt_payload(self) -> dict:
         payload = {k: v for k, v in asdict(self).items() if k not in {"actor_id", "binding_id"}}
+        if self.first_contact is None:
+            payload.pop("first_contact")
         payload["action_capabilities"] = [asdict(item) for item in self.action_capabilities]
         return payload

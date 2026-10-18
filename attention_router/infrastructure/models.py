@@ -3142,3 +3142,7 @@ class IntegrationInboxRow(Base):
         ),
         CheckConstraint("length(raw_body) <= 65536", name="ck_integration_inbox_size"),
     )
+
+
+# Register operational presentation rows alongside the existing application metadata.
+from attention_router.infrastructure import first_contact_models as first_contact_models  # noqa: E402,F401

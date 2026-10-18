@@ -52,7 +52,11 @@ def run_andy(context: AllowedAgentContext) -> AndyAgentResult:
         from agents import Runner
 
         result = Runner.run_sync(
-            build_andy_agent(),
+            (
+                build_andy_agent(public_identity=True)
+                if context.first_contact is not None
+                else build_andy_agent()
+            ),
             input=[{"role": "user", "content": str(context.prompt_payload())}],
             max_turns=settings.andy_agent_max_turns,
         )

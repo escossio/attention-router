@@ -81,6 +81,8 @@ function normalizeInboundMessage(message, options = {}) {
       conversation_reason: conversation.reason,
       peer_identifiers: conversation.peer_identifiers,
       peer_id_kind: kindForId(conversation.peer_id),
+      ...(!message?.fromMe && !isGroup && conversation.first_contact_identity
+        ? { first_contact_identity: conversation.first_contact_identity } : {}),
       from_me_classification: fromMeClassification,
       final_from_me_classification: normalizedFinalFromMeClassification,
       outbound_provenance: message?.__outboundProvenance || null,

@@ -1111,7 +1111,9 @@ async function startTransport(config, logger = console, deps = {}) {
       return;
     }
     const messageAuthority = authorityState.snapshot(client);
-    resolveConversationIdentity(message, client).then((conversationIdentity) => {
+    resolveConversationIdentity(message, client, {
+      firstContactEnabled: config.firstContactEnabled === true,
+    }).then((conversationIdentity) => {
       message.__conversationIdentity = conversationIdentity;
       return inboundBridge.handleMessage(message, {
         clientInfo: client?.info || {},

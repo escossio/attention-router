@@ -67,6 +67,9 @@ class WwebjsOutboundAdapter:
             "interaction_id": outbox.interaction_id,
             "outbox_id": outbox.id,
         }
+        if payload.get("first_contact"):
+            result["first_contact"] = payload["first_contact"]
+            result["execution_intent_id"] = payload["execution_intent_id"]
         if outbox.action_type in {"wwebjs_group_contextual_text", "wwebjs_group_contextual_notice"}:
             result["group_policy"] = payload["group_policy"]
         return result
