@@ -107,7 +107,8 @@ class Ar1001ZabbixOperatorTests(unittest.TestCase):
                 "admin_credentials_file": str(credentials),
             }))
             fake = FakeAPI()
-            factory = lambda _: fake
+            def factory(_):
+                return fake
             with self.assertRaisesRegex(RuntimeError, "PRIOR_BACKUP_REQUIRED"):
                 main(["--manifest", str(MANIFEST), "--mode", "create-disabled",
                       "--operator-settings", str(settings),
@@ -125,7 +126,8 @@ class Ar1001ZabbixOperatorTests(unittest.TestCase):
                 "admin_credentials_file": str(credentials),
             }))
             api = FakeAPI()
-            factory = lambda _: api
+            def factory(_):
+                return api
             args = ["--manifest", str(MANIFEST), "--operator-settings", str(settings),
                     "--backup-dir", str(base / "backup")]
             self.assertEqual(main(args + ["--mode", "snapshot"], api_factory=factory), 0)
