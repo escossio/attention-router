@@ -1,6 +1,6 @@
 # AR-1001 — proposta de enriquecimento no coletor existente
 
-**Data:** 17/10/2026. **Fase:** homologação offline no CI03 concluída; rollout Zabbix ainda **não realizado**. Na próxima passada de implantação, não reconstruir o sistema.
+**Data da proposta:** 17/10/2026. **Fase deste registro inicial:** homologação offline no CI03; resultado da ativação de 18/10/2026 registrado ao final.
 
 ## Decisão após prova PostgreSQL descartável
 
@@ -34,3 +34,7 @@ A função pura `ops/observability/failure_catalog/ar1001_metric_projection.py` 
 ## Testes, limites e referências
 
 `python3 -m unittest tests.test_operational_ar1001_projection tests.test_operational_ar1001_readonly_probe_v0` testa o mapeamento, contagens incoerentes e guardas de SQL sem conectar no banco. `validation/ar1001_disposable_pg.py` exige Docker PG no worker designado e executa schema/fixture exclusivamente sintético; **não** faz parte dos testes Python genéricos de CI. A investigação da sonda existente e da sua semântica está em [ar-1001-source-audit-20261017.md](ar-1001-source-audit-20261017.md).
+
+## Resultado de ativação — 18/10/2026 UTC
+
+A integração usou o builder versionado `ops/observability/failure_catalog/ar1001_reply_health_build.py` para gerar uma única sonda host-private autocontida a partir do script original, SQL e projeção aprovados. Regressões sintéticas e privadas passaram. A API oficial habilitou somente os sete itens do checkpoint privado. Três ciclos consecutivos da unidade original, em 02:34:02/02:36:02/02:38:02 UTC, confirmaram 15/15 ACK por ciclo, 7 novos agregados compatíveis com PostgreSQL, 8 antigos preservados, `probe_ok=1`, dois triggers sem drift e o incidente antigo ainda aberto e único. Os 45 registros constam do histórico Zabbix; evidência detalhada e rollback estão em [ar-1001-zabbix-operator-gate-20261018.md](ar-1001-zabbix-operator-gate-20261018.md). Nenhum Relay ou MAESTRO foi alterado.
