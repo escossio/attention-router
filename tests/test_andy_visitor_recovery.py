@@ -1,6 +1,6 @@
 """Offline recovery proposal: real pipeline/authority/outbox, fake Agent and transport.
 
-The proposed activation is applied only to disposable SQLite fixtures. These
+The proposed activation is applied only to disposable test fixtures. These
 tests do not publish a blueprint, authorize tools, send messages or certify a
 provider. Domain validation belongs to the proposal preflight, not the selector.
 """
@@ -8,7 +8,6 @@ provider. Domain validation belongs to the proposal preflight, not the selector.
 from copy import deepcopy
 from datetime import timedelta
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -36,31 +35,11 @@ from attention_router.infrastructure.models import (
 from attention_router.infrastructure.repository import ensure_policy_version, upsert_actor_binding
 from attention_router.observability import tracing
 from scripts.forensics.andy_visitor_recovery_preflight import preflight_manifest, simulation_spec
-from tests.conftest import session as sqlite_session  # noqa: F401
-from tests.integration.conftest import Session, pg_url  # noqa: F401
 from tests.test_direct_conversation import PEER, direct_event, setup_direct
 from tests.test_owner_control import _LocalTransportRecorder
 
 
 PROPOSAL_PATH = Path(__file__).resolve().parents[1] / "config/examples/andy_visitor_recovery.proposed.json"
-
-
-@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
-def session(request):
-    """Reuse repository fixtures; the PostgreSQL parameter runs only on CI workers.
-
-    tests.conftest already validates PUBLIC_POSTGRES_TEST_URL as a disposable
-    ar_test database. The existing integration fixture migrates an isolated
-    random database and truncates it between tests, including explicit commits.
-    """
-    if request.param == "sqlite":
-        yield request.getfixturevalue("sqlite_session")
-    else:
-        if not os.environ.get("PUBLIC_POSTGRES_TEST_URL"):
-            pytest.fail("PostgreSQL recovery cases require the distributed disposable test harness")
-        factory = request.getfixturevalue("Session")
-        with factory() as db:
-            yield db
 
 
 @pytest.fixture()

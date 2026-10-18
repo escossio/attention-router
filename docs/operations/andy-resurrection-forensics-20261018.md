@@ -323,13 +323,14 @@ python scripts/forensics/andy_reply_counterfactual.py \
 ```
 
 `tests/test_andy_visitor_recovery.py` executa os17 cenários e um caso adicional
-de grupo:18 casos SQLite. Dezessete casos com persistência são parametrizados
-para PostgreSQL, usando a fixture vigente de banco aleatório migrado e limpo
-entre testes; o preflight de domínio é puro. Esses17 casos executam no worker,
+de grupo:18 casos SQLite. O wrapper
+`tests/integration/test_postgres_andy_visitor_recovery.py` reutiliza os17 casos
+com persistência na fixture vigente de banco aleatório migrado e limpo entre
+testes; o preflight de domínio é puro. Esses17 casos executam no worker,
 nunca no AGT. Quinze testes do preflight incluem mutantes de domínio, publicação,
 autoridade, tenant, versão, ações e reconhecimento do alcance.
 
-Execução consolidada curta: **41 PASS,17 PostgreSQL deselected,5,79s**. Inclui
+Execução consolidada curta: **41 PASS em5,86s**. Inclui
 4 testes do contrafactual,18 do candidato,15 do preflight e4 contratos integrados
 existentes. Agent e Transport são fake; pipeline, policy, autonomia, intent e
 outbox são reais em fixtures. Ruff e diff-check passaram. O SQL agregado foi
@@ -347,9 +348,15 @@ versão são **CALLER_ASSERTIONS_ONLY**: não autenticam um operador nem demonst
 existência de linhas produtivas. Checksum do pacote proposto:
 `c22cdaef3702407f2236614db9652a440e93a8c725f2e758b9fe3cbccb5443df`.
 
-Resultados dos checks distribuídos e SHA final ficam na PR deste documento e no
-comentário de certificação da issue376. PostgreSQL completo usa CI03; as17
-parametrizações novas serão incluídas nesse gate. Python/Docker/Transport usam
+O primeiro SHA publicado81f4231 tinha variantes PG fora da descoberta instalada,
+que aceita apenas tests/integration/test_postgres*.py. A inspeção do manifesto do
+worker identificou a lacuna antes da certificação. O wrapper acima corrige o
+ponto de entrada sem duplicar cenários. PASS do SHA81 não certifica os17 casos.
+
+Resultados dos checks distribuídos e SHA final ficam na
+[PR #380](https://github.com/escossio/attention-router/pull/380) e no
+comentário de certificação da issue376. PostgreSQL completo usa CI03; os17
+casos do wrapper serão incluídos nesse gate. Python/Docker/Transport usam
 fluxo distribuído existente; architecture guard está dentro de docker-build.
 O ruleset exige distributed-python além dos checks legados. Nenhum resultado de
 SHA anterior certifica HEAD novo. Não houve suite pesada no AGT.

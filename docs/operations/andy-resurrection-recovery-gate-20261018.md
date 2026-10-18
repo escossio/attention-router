@@ -79,8 +79,9 @@ ad hoc para experimentar em produção.
   ativação `dd34694b3a7aaa187aba830115320f557cb4d009158f6b277d8d8507785f11b1`;
   policy `444775fee3bced1e7c4a4c48defb655ea81b7abe6f01022ecbcb2f7dfa296c44`.
 - 18 cenários SQLite do candidato e15 testes do preflight passaram; rodada
-  consolidada com harness/contratos existentes:41 PASS em5,79s. Os17 cenários
-  com DB também estão parametrizados para PostgreSQL distribuído. Resultado do
+  consolidada com harness/contratos existentes:41 PASS em5,86s. Os17 cenários
+  com DB também são reutilizados pelo wrapper PostgreSQL em tests/integration/.
+  Resultado do
   SHA final nos checks da PR, sem tratar PASS SQLite como PASS PostgreSQL.
 - Snapshot privado em leitura do Worker alvo, inspect e6 arquivos de composição/
   env, com hashes/permissões, preparado no checkpoint. Não é autorização para
