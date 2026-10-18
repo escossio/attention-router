@@ -600,6 +600,22 @@ def enqueue_ready_intents(
                 continue
         else:
             session.add(outbox)
+        from attention_router.application.first_contact_runtime import attach_presentation
+        from attention_router.application.first_contact import FirstContactConflict
+
+        session.flush()
+        if decision.response_introduction_included is True:
+            try:
+                with session.begin_nested():
+                    attach_presentation(session, decision, intent, outbox)
+            except FirstContactConflict:
+                outbox.status = "BLOCKED"
+                outbox.last_error = "FIRST_CONTACT_EFFECT_LINK_DENIED"
+                intent.status = "BLOCKED"
+                intent.blocked_reason = outbox.last_error
+                audit(session, interaction.id, "first_contact.effect_link_denied",
+                      {"outbox_id": outbox.id, "intent_id": intent.id}, origin="first_contact")
+                continue
         intent.status = "QUEUED"
         intent.blocked_reason = None
         audit(session, interaction.id, "execution.outbox_enqueued", {"intent_id": intent.id, "outbox_id": outbox.id})

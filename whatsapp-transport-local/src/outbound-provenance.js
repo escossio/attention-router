@@ -3,6 +3,7 @@ const path = require('node:path');
 
 const { stableHash } = require('./hmac');
 const { identityFromAliases, normalizeAliases } = require('./conversation');
+const { validFirstContact, scopeForRecord } = require('./first-contact');
 const { extractMessageId } = require('./message-id');
 
 const AUTOMATED_FINGERPRINT_STATUSES = new Set(['SENDING', 'SENT']);
@@ -61,7 +62,7 @@ function createOutboundProvenanceLedger(config, deps = {}) {
     ]);
     const messageType = payload.message_type === 'ptt' ? 'ptt' : 'text';
     const textHash = messageType === 'text' ? stableHash(String(payload.text)) : null;
-    const fingerprint = stableHash(JSON.stringify({
+    const fingerprintInput = {
       idempotency_key: payload.idempotency_key,
       conversation_key: identity.conversation_key,
       peer_identifiers: aliases,
@@ -70,7 +71,17 @@ function createOutboundProvenanceLedger(config, deps = {}) {
       artifact_sha256: payload.content_sha256 || null,
       mime_type: payload.mime_type || null,
       size_bytes: payload.size_bytes || null,
-    }));
+    };
+    if (Object.hasOwn(payload, 'first_contact')) {
+      if (!validFirstContact(payload.first_contact) || messageType !== 'text') {
+        throw new Error('FIRST_CONTACT_PROVENANCE_INVALID');
+      }
+      fingerprintInput.first_contact = Object.fromEntries(Object.keys(payload.first_contact)
+        .sort().map((key) => [key, payload.first_contact[key]]));
+      fingerprintInput.execution_intent_id = payload.execution_intent_id;
+      fingerprintInput.outbox_id = payload.outbox_id;
+    }
+    const fingerprint = stableHash(JSON.stringify(fingerprintInput));
     const file = recordPath(payload.idempotency_key);
     if (io.existsSync(file)) {
       const existing = read(file);
@@ -99,7 +110,11 @@ function createOutboundProvenanceLedger(config, deps = {}) {
       ack_at: null,
       observed_message_ids: [],
       updated_at: now,
+      ...(Object.hasOwn(payload, 'first_contact') ? { first_contact: payload.first_contact } : {}),
     };
+    if (Object.hasOwn(payload, 'first_contact') && !scopeForRecord(record)) {
+      throw new Error('FIRST_CONTACT_PROVENANCE_INVALID');
+    }
     return { record: write(record), replay: false };
   }
 
@@ -125,10 +140,11 @@ function createOutboundProvenanceLedger(config, deps = {}) {
     return true;
   }
 
-  function statusForKey(idempotencyKey) {
+  function statusForKey(idempotencyKey, options = {}) {
     if (typeof idempotencyKey !== 'string' || !idempotencyKey || idempotencyKey.length > 180) return null;
+    if (options.readOnly === true && (!directory || !io.existsSync(directory))) return null;
     const file = recordPath(idempotencyKey);
-    if (!ensureAvailable() || !io.existsSync(file)) return null;
+    if ((options.readOnly !== true && !ensureAvailable()) || !io.existsSync(file)) return null;
     try {
       const record = read(file);
       return record.idempotency_key === idempotencyKey ? record : null;

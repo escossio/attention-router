@@ -1,4 +1,5 @@
 import json
+import hashlib
 from attention_router.application.direct_conversation import direct_conversation_eligibility, DIRECT_TEXT_CONVERSATION_CONTRACT_VERSION
 from attention_router.application.voice_transcription import (
     effective_inbound_text,
@@ -32,6 +33,10 @@ from attention_router.domain.decision import DecisionResult, DecisionType
 from attention_router.application.agents import AndyAgentError, run_andy
 from attention_router.application.agents.readiness import get_andy_readiness
 from attention_router.application.agents.context import ActionCapability, AllowedAgentContext
+from attention_router.application.agents.first_contact import (
+    PRESENTATION_VERSION, agent_presentation, render_public_identity_response,
+)
+from attention_router.application.first_contact_identity import presentation_scope
 from attention_router.application.lab_conversation import claim_inbound
 from attention_router.application.platform.capability_pack import execute_owner_capability
 from attention_router.application.platform.context import build_context_snapshot, resolve_represented_subject
@@ -614,6 +619,38 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         binding, audience, policy_version, owner_authenticated,
         event=event, blueprint_configured=version is not None,
     )
+    first_contact_token = None
+    first_contact_control = None
+    if (
+        agent_path_enabled and settings.first_contact_enabled
+        and visitor_default and binding is None and direct.eligible
+        and interaction.tenant_id == settings.first_contact_tenant_id
+        and direct.source_account == settings.first_contact_source_account
+        and policy_version is not None
+        and policy_version.policy_id == interaction.policy_id
+    ):
+        from attention_router.application.first_contact import FirstContactConflict, reserve
+
+        scope = presentation_scope(event, visitor_default=visitor_default, binding=binding)
+        mode = "UNAVAILABLE"
+        if scope is not None:
+            # The optional lifecycle owns a durable short reservation. Release
+            # its locks before the model call; no owner dispatch lock exists here.
+            session.commit()
+            try:
+                reservation = reserve(session, scope, event.id, PRESENTATION_VERSION)
+                session.commit()
+                if reservation.status == "REPLAY":
+                    # A duplicate in-flight event cannot race the winning proposal.
+                    return None
+                first_contact_token = reservation.token
+                mode = "INTRODUCE" if first_contact_token is not None else "CONTINUE"
+            except FirstContactConflict as exc:
+                session.rollback()
+                _audit(session, interaction.id, "first_contact.reservation_denied",
+                       {"reason_code": str(exc)})
+        first_contact_control = agent_presentation(mode)
+        _audit(session, interaction.id, "first_contact.context_built", {"mode": mode})
     if agent_path_enabled:
         represented_subject = resolve_represented_subject(session, interaction.tenant_id)
         platform_context = build_context_snapshot(
@@ -723,6 +760,7 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                 "disclose_current_availability_when_relevant": disclose_presence,
             },
             response_style=response_style_profile.prompt_payload(),
+            first_contact=first_contact_control,
         )
         if visitor_default:
             _audit(session, interaction.id, "visitor_default.context_built", {"contract": "text-only-v1"})
@@ -776,10 +814,23 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                 ),
             },
         )
+        if first_contact_control is not None:
+            session.commit()  # Optional composition has no DB transaction across the Agent.
         try:
             with start_span("andy.agent.run") as span:
                 agent_result = run_andy(agent_context)
                 agent_output = agent_result.output
+                if first_contact_control is not None and (
+                    agent_output.conversation_state != "hold" and agent_output.response_text.strip()
+                ):
+                    agent_output = agent_output.model_copy(update={
+                        "response_text": render_public_identity_response(
+                            agent_output.response_text,
+                            mode=str(first_contact_control["mode"]),
+                            current_message=effective_text,
+                            locale=agent_context.response_locale,
+                        ),
+                    })
                 safe_set_attribute(span, "attention.agent.model", settings.andy_agent_model)
                 safe_set_attribute(span, "attention.agent.intent", agent_output.intent)
                 safe_set_attribute(span, "attention.agent.objective", agent_output.objective)
@@ -960,7 +1011,11 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         response_message_family=candidate.message_family if candidate else None,
         response_variant_id=candidate.variant_id if candidate else None,
         response_spoken_text=candidate.spoken_text if candidate else None,
-        response_introduction_included=candidate.introduction_included if candidate else None,
+        response_introduction_included=(
+            bool(first_contact_token and proposed_response)
+            if first_contact_control is not None
+            else candidate.introduction_included if candidate else None
+        ),
         escalation_required=result.escalation_required,
         escalation_reason=result.escalation_reason,
         confidence=result.confidence,
@@ -1010,6 +1065,21 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         },
     )
     _audit(session, interaction.id, "decision.persisted", {"decision_id": row.id})
+    if first_contact_token is not None:
+        from attention_router.application.first_contact import record_generated, fail_before_effect
+
+        if proposed_response:
+            record_generated(
+                session, first_contact_token, row.id,
+                hashlib.sha256(proposed_response.encode()).hexdigest(),
+            )
+            _audit(session, interaction.id, "first_contact.generated", {
+                "decision_id": row.id,
+                "attempt_id": first_contact_token.attempt_id,
+                "presentation_version": PRESENTATION_VERSION,
+            })
+        else:
+            fail_before_effect(session, first_contact_token, "AGENT_NO_RESPONSE")
     if capability_resolutions:
         _audit(
             session,

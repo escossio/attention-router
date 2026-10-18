@@ -82,7 +82,20 @@ function normalizeBrowserDebugUrl(env) {
 function createConfig(env = process.env) {
   const browserURL = normalizeBrowserDebugUrl(env);
   const inboundSpoolDir = env.LOCAL_INBOUND_SPOOL_DIR || '';
+  const firstContactEnabled = parseBoolean(env.FIRST_CONTACT_ENABLED, false);
+  const firstContactTenantId = (env.FIRST_CONTACT_TENANT_ID || '').trim() || null;
+  const firstContactSourceAccount = (env.FIRST_CONTACT_SOURCE_ACCOUNT || '').trim() || null;
+  if (firstContactEnabled && (!firstContactTenantId || !firstContactSourceAccount
+      || firstContactTenantId !== ((env.LOCAL_TENANT_ID || '').trim() || null)
+      || firstContactSourceAccount !== (env.LOCAL_SOURCE_ACCOUNT || 'default')
+      || (env.LOCAL_INBOUND_SOURCE || 'wwebjs') !== 'wwebjs'
+      || (env.LOCAL_INBOUND_CHANNEL || 'whatsapp') !== 'whatsapp')) {
+    throw new Error('FIRST_CONTACT_SCOPE_CONFIGURATION_INVALID');
+  }
   return {
+    firstContactEnabled,
+    firstContactTenantId,
+    firstContactSourceAccount,
     httpHost: env.LOCAL_TRANSPORT_HTTP_HOST || '127.0.0.1',
     httpPort: parseInteger(env.LOCAL_TRANSPORT_HTTP_PORT, 18103),
     browserDebugUrl: browserURL,

@@ -2,7 +2,8 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { isReady, snapshot } = require('./status');
 const { fetchHistoryMessages, listHistoryChats, verifyHistoryHmac } = require('./history');
-const { identityFromAliases } = require('./conversation');
+const { identityFromAliases, resolveConversationIdentity } = require('./conversation');
+const firstContact = require('./first-contact');
 const { createOutboundProvenanceLedger } = require('./outbound-provenance');
 const { createNoopTransportTracing } = require('./observability');
 const fs = require('node:fs');
@@ -47,12 +48,13 @@ function sanitizeOutboundErrorMessage(error) {
   return message.slice(0, 300);
 }
 
-function respondJson(res, code, body) {
+function respondJson(res, code, body, extraHeaders = {}) {
   const payload = Buffer.from(JSON.stringify(body));
   res.writeHead(code, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': String(payload.length),
     'cache-control': 'no-store',
+    ...extraHeaders,
   });
   res.end(payload);
 }
@@ -66,6 +68,64 @@ function createServer(config, status, client = null, deps = {}) {
   const observability = deps.observability || createNoopTransportTracing();
   return http.createServer((req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || `${config.httpHost}:${config.httpPort}`}`);
+    if (url.pathname === firstContact.PROOF_PATH) {
+      if (config.firstContactEnabled !== true) {
+        respondJson(res, 404, { status: 'not_found' });
+        return;
+      }
+      if (req.method !== 'POST' || url.search) {
+        respondJson(res, 405, { status: 'first_contact_proof_method_denied' });
+        return;
+      }
+      const chunks = [];
+      let size = 0;
+      req.on('data', (chunk) => { size += chunk.length; if (size <= 4096) chunks.push(chunk); });
+      req.on('end', () => {
+        if (size > 4096) {
+          respondJson(res, 413, { status: 'first_contact_proof_body_too_large' });
+          return;
+        }
+        const raw = Buffer.concat(chunks);
+        if (!firstContact.validRequest(req, raw, config.outboundHmacSecret, now)) {
+          respondJson(res, 401, { status: 'first_contact_proof_auth_denied' });
+          return;
+        }
+        let scope;
+        try { scope = JSON.parse(raw.toString('utf8')); } catch {
+          respondJson(res, 400, { status: 'first_contact_proof_payload_invalid' });
+          return;
+        }
+        if (!firstContact.validScope(scope) || !firstContact.matchesConfiguredScope(scope, config)) {
+          respondJson(res, 403, { status: 'first_contact_proof_scope_denied' });
+          return;
+        }
+        let record;
+        try { record = outboundProvenance.statusForKey?.(scope.idempotency_key, { readOnly: true }); } catch {
+          respondJson(res, 503, { status: 'first_contact_proof_unavailable' });
+          return;
+        }
+        const recorded = record ? firstContact.scopeForRecord(record) : null;
+        if (record && (!recorded || Object.keys(scope).some((key) => scope[key] !== recorded[key]))) {
+          respondJson(res, 409, { status: 'first_contact_proof_scope_mismatch' });
+          return;
+        }
+        const timestamp = String(Math.floor(now() / 1000));
+        const nonce = req.headers['x-attention-nonce'];
+        const proof = {
+          ...scope, nonce, issued_at: Number(timestamp),
+          status: record?.status || 'UNKNOWN',
+          message_reference: record?.message_reference || null,
+          ack: Number.isInteger(record?.ack) ? record.ack : null,
+          ack_at: record?.ack_at || null,
+        };
+        const proofRaw = Buffer.from(JSON.stringify(proof));
+        const proofSignature = firstContact.signature(config.outboundHmacSecret, 'response', timestamp, nonce, proofRaw);
+        respondJson(res, 200, proof, {
+          'X-Attention-Proof-Timestamp': timestamp, 'X-Attention-Proof-Signature': proofSignature,
+        });
+      });
+      return;
+    }
     if (req.method === 'POST' && url.pathname === config.outboundPath) {
       if (!config.externalDeliveryEnabled || !config.outboundHmacSecret) {
         respondJson(res, 503, { status: 'external_delivery_disabled' });
@@ -97,7 +157,12 @@ function createServer(config, status, client = null, deps = {}) {
           respondJson(res, 400, { status: 'invalid_json' });
           return;
         }
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          respondJson(res, 400, { status: 'invalid_json_payload' });
+          return;
+        }
         const key = payload.idempotency_key;
+        const hasFirstContact = Object.hasOwn(payload, 'first_contact');
         const destination = payload.external_actor_id || payload.destination;
         const destinationConflict = Boolean(
           payload.external_actor_id && payload.destination
@@ -120,11 +185,34 @@ function createServer(config, status, client = null, deps = {}) {
           respondJson(res, 409, { status: 'transport_not_ready_or_invalid_payload' });
           return;
         }
+        let verifiedIdentity = null;
+        if (hasFirstContact) {
+          if (!firstContact.validFirstContact(payload.first_contact)
+              || !firstContact.matchesConfiguredScope(payload.first_contact, config)
+              || voice || payload.message_type !== 'text' || !payload.text.trim()
+              || !firstContact.bounded(payload.execution_intent_id) || !firstContact.bounded(payload.outbox_id)
+              || key !== `execution:${payload.execution_intent_id}`
+              || payload.first_contact.execution_intent_id !== payload.execution_intent_id
+              || payload.first_contact.outbox_id !== payload.outbox_id
+              || payload.first_contact.idempotency_key !== key
+              || payload.first_contact.text_hash !== crypto.createHash('sha256').update(payload.text).digest('hex')) {
+            respondJson(res, 403, { status: 'first_contact_send_scope_denied' });
+            return;
+          }
+          verifiedIdentity = await resolveConversationIdentity({ fromMe: true, to: destination }, client,
+            { firstContactEnabled: true });
+          const canonical = verifiedIdentity.first_contact_identity;
+          if (!canonical || crypto.createHash('sha256').update(canonical.canonical_peer_id).digest('hex')
+              !== payload.first_contact.canonical_peer_hash) {
+            respondJson(res, 403, { status: 'first_contact_send_identity_unverified' });
+            return;
+          }
+        }
         if (!outboundProvenance.available) {
           respondJson(res, 503, { status: 'outbound_provenance_unavailable' });
           return;
         }
-        if (deliveries.has(key)) {
+        if (!hasFirstContact && deliveries.has(key)) {
           respondJson(res, 200, { status: 'already_sent', message_reference: deliveries.get(key), idempotency_key: key });
           return;
         }
@@ -133,7 +221,7 @@ function createServer(config, status, client = null, deps = {}) {
           const begun = outboundProvenance.begin({
             ...payload,
             destination,
-            conversation_identity: identityFromAliases([
+            conversation_identity: verifiedIdentity || identityFromAliases([
               destination,
               ...(payload.peer_identifiers || []),
             ]),
@@ -141,6 +229,10 @@ function createServer(config, status, client = null, deps = {}) {
           provenance = begun.record;
           if (begun.replay && provenance.status === 'SENT') {
             respondJson(res, 200, { status: 'already_sent', message_reference: provenance.message_reference, idempotency_key: key });
+            return;
+          }
+          if (hasFirstContact && begun.replay) {
+            respondJson(res, 409, { status: 'first_contact_send_outcome_unknown' });
             return;
           }
         } catch (error) {
@@ -162,7 +254,8 @@ function createServer(config, status, client = null, deps = {}) {
                   { sendAudioAsVoice: true },
                 )
                 : await client.sendMessage(destination, payload.text);
-              reference = message?.id?._serialized || message?.id?.id || `accepted-${now()}`;
+              reference = message?.id?._serialized || message?.id?.id || (hasFirstContact ? null : `accepted-${now()}`);
+              if (hasFirstContact && !reference) throw new Error('FIRST_CONTACT_MESSAGE_REFERENCE_UNKNOWN');
               outboundProvenance.markSent(provenance, reference, message?.ack);
               deliveries.set(key, reference);
               sendSpan.setResult('DELIVERED');

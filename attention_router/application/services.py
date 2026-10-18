@@ -2343,6 +2343,9 @@ def claim_outbox(session: Session, worker: str, limit: int = 10) -> list[OutboxM
             row.status = "CANCELED"
             row.completed_at = now_utc()
             row.last_error = "CANCELED_BY_HUMAN_REPLY"
+            from attention_router.application.first_contact_runtime import observe_presentation_outbox
+
+            observe_presentation_outbox(session, row, known_before_effect=True)
             _mark_voice_outbox_artifact_terminal(session, row)
             intent = session.get(AgentExecutionIntentRow, row.execution_intent_id) if row.execution_intent_id else None
             if intent and intent.status != "SENT":
@@ -2353,6 +2356,20 @@ def claim_outbox(session: Session, worker: str, limit: int = 10) -> list[OutboxM
         row.claimed_at = now_utc()
         row.claimed_by = worker
         row.attempt_count = (row.attempt_count or 0) + 1
+        from attention_router.application.first_contact_runtime import observe_presentation_outbox
+        from attention_router.application.first_contact import FirstContactConflict
+
+        try:
+            observe_presentation_outbox(session, row, claimed=True)
+        except FirstContactConflict:
+            row.status = "BLOCKED"
+            row.last_error = "FIRST_CONTACT_OUTBOX_INTEGRITY_DENIED"
+            if intent:
+                intent.status = "BLOCKED"
+                intent.blocked_reason = row.last_error
+            audit(session, row.interaction_id, "first_contact.claim_integrity_denied",
+                  {"outbox_id": row.id}, origin="first_contact")
+            continue
         audit(session, row.interaction_id, "outbox_claimed", {"outbox_id": row.id, "worker": worker}, row.correlation_id, row.causation_id)
         rows.append(row)
     session.flush()
@@ -2391,6 +2408,9 @@ def _mark_external_ambiguous(
     reason: str,
 ) -> None:
     row.status = "AMBIGUOUS"
+    from attention_router.application.first_contact_runtime import observe_presentation_outbox
+
+    observe_presentation_outbox(session, row)
     row.last_error = reason
     _mark_voice_outbox_artifact_terminal(session, row, ambiguous=True)
     intent = (
@@ -2446,6 +2466,9 @@ def _mark_external_reconciliation_required(
     reason: str,
 ) -> None:
     row.status = "RECONCILIATION_REQUIRED"
+    from attention_router.application.first_contact_runtime import observe_presentation_outbox
+
+    observe_presentation_outbox(session, row)
     row.last_error = reason
     _mark_voice_outbox_artifact_terminal(session, row, ambiguous=True)
     intent = (
@@ -2482,6 +2505,9 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
             if intent is None:
                 row.status = "BLOCKED"
                 row.last_error = "AGENT_EXECUTION_INTENT_MISSING"
+                from attention_router.application.first_contact_runtime import observe_presentation_outbox
+
+                observe_presentation_outbox(session, row, known_before_effect=True)
                 _mark_voice_outbox_artifact_terminal(session, row)
                 audit(
                     session,
@@ -2517,6 +2543,9 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                     if blocked is not None:
                         blocked.status = "BLOCKED"
                         blocked.last_error = exc.reason_code
+                        from attention_router.application.first_contact_runtime import observe_presentation_outbox
+
+                        observe_presentation_outbox(session, blocked, known_before_effect=True)
                         _mark_voice_outbox_artifact_terminal(session, blocked)
                         blocked_intent = session.get(
                             AgentExecutionIntentRow,
@@ -2587,6 +2616,9 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                 if gate != "ALLOWED":
                     row.status = "BLOCKED"
                     row.last_error = reason
+                    from attention_router.application.first_contact_runtime import observe_presentation_outbox
+
+                    observe_presentation_outbox(session, row, known_before_effect=True)
                     _mark_voice_outbox_artifact_terminal(session, row)
                     intent.status = "BLOCKED"
                     intent.blocked_reason = reason
@@ -2652,6 +2684,21 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                     row.causation_id,
                 )
             elif row.action_type in {"agent_execution_text", "agent_execution_voice"} and row.destination == "local_transport":
+                from attention_router.application.first_contact_runtime import validate_presentation_outbox
+
+                decision = session.get(AgentDecisionRow, intent.agent_decision_id) if intent else None
+                try:
+                    validate_presentation_outbox(session, decision, row)
+                except ValueError:
+                    row.status = "BLOCKED"
+                    row.last_error = "FIRST_CONTACT_OUTBOX_INTEGRITY_DENIED"
+                    if intent:
+                        intent.status = "BLOCKED"
+                        intent.blocked_reason = row.last_error
+                    audit(session, row.interaction_id, "first_contact.dispatch_denied",
+                          {"outbox_id": row.id, "reason": row.last_error})
+                    session.commit()
+                    continue
                 if row.action_type == "agent_execution_voice" and intent:
                     from attention_router.application.voice_tts import validate_voice_outbox
                     validate_voice_outbox(session, row, intent)
@@ -2796,6 +2843,9 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
             else:
                 actions.dispatch(row.destination, row.interaction_id)
             row.status = "DONE"
+            from attention_router.application.first_contact_runtime import observe_presentation_outbox
+
+            observe_presentation_outbox(session, row)
             row.completed_at = now_utc()
             interaction = session.get(InteractionRow, row.interaction_id)
             intent = session.get(AgentExecutionIntentRow, row.execution_intent_id) if row.execution_intent_id else None
@@ -2826,6 +2876,9 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
         except WwebjsOutboundConfigError as exc:
             row.status = "FAILED"
             row.last_error = "TRANSPORT_CONFIGURATION_DENIED"
+            from attention_router.application.first_contact_runtime import observe_presentation_outbox
+
+            observe_presentation_outbox(session, row, known_before_effect=True)
             _mark_voice_outbox_artifact_terminal(session, row)
             audit(session, row.interaction_id, "outbox_failed", {"outbox_id": row.id, "error_class": type(exc).__name__}, row.correlation_id, row.causation_id)
             if row.execution_intent_id:

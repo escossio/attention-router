@@ -16,7 +16,7 @@ def test_client_approval_decision_evidence_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0058_group_contextual_presence"]
+            ).scalars().all() == ["0060_first_contact_v1"]
 
             schema = inspect(connection)
             tables = set(schema.get_table_names())
