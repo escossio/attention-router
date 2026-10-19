@@ -81,6 +81,17 @@ def test_builder_refuses_overwrite(staged):
         package.build(root)
 
 
+def test_builder_normalizes_intermediate_modes_with_group_writable_umask(tmp_path):
+    old_umask = os.umask(0o002)
+    try:
+        root = tmp_path / "group-umask-package"
+        package.build(root)
+    finally:
+        os.umask(old_umask)
+    for relative in ("scripts", "scripts/operations", "scripts/forensics"):
+        assert (root / relative).stat().st_mode & 0o777 == 0o755
+
+
 def test_public_boot_example_has_six_ordered_inputs():
     example = (package.SOURCE_ROOT / "ops/andy-live-runtime-v3/boot.env.example").read_text()
     rows = [line for line in example.splitlines() if line.startswith("ATTENTION_LIVE_WORKER_COMPOSE_FILES=")]

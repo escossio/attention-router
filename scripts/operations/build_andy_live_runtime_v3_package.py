@@ -26,6 +26,10 @@ def build(destination: Path) -> dict:
     for relative in (*SOURCES, *INIT_FILES):
         target = destination / relative
         target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        # pathlib creates intermediate parents with 0777 minus umask. A 0002
+        # umask would leave scripts/ group-writable, which the launcher rejects.
+        (destination / "scripts").chmod(0o755)
+        target.parent.chmod(0o755)
         source = SOURCE_ROOT / relative
         if relative in INIT_FILES:
             target.write_bytes(b"")
