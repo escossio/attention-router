@@ -137,7 +137,7 @@ def check_text_repetition(session: Session, interaction: InteractionRow) -> Repe
             prior = state_signature(previous.contact_id, previous.inbound_text)
             outbound = session.scalar(select(OutboxMessageRow).where(
                 OutboxMessageRow.interaction_id == previous.id, OutboxMessageRow.status == "DONE",
-                OutboxMessageRow.payload["text"].as_string().is_not(None),
+                OutboxMessageRow.action_type != "agent_execution_voice",
             ).order_by(OutboxMessageRow.completed_at.desc()).limit(1))
             if outbound and prior.state_value == current.state_value and _useful_response(current.objective, (outbound.payload or {}).get("text")):
                 return RepetitionDecision(
