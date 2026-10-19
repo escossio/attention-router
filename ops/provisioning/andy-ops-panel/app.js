@@ -8,6 +8,8 @@ const state = {
 };
 
 const observabilitySources = {
+  "flow-e2e": {key: "flow_e2e_url", frame: "#flow-e2e-frame", status: "#flow-e2e-state", open: "#flow-e2e-open"},
+  "live-message": {key: "live_message_url", frame: "#live-message-frame", status: "#live-message-state", open: "#live-message-open"},
   network: {
     key: "network_osi_url",
     frame: "#network-frame",
@@ -552,14 +554,24 @@ function configureObservability(config) {
 
     link.href = url;
     link.hidden = false;
+    if (name === "goaccess") {
+      const domainLink = $("#goaccess-domain-open");
+      try {
+        domainLink.href = new URL("dominios/index.html", url).href;
+        domainLink.hidden = false;
+      } catch (_error) {
+        domainLink.hidden = true;
+      }
+    }
     status.textContent = "PRONTO";
     status.className = "source-state ready";
 
     const frame = $(source.frame);
     if (!frame.dataset.loadBound) {
       frame.addEventListener("load", () => {
-        status.textContent = "AO VIVO";
-        status.className = "source-state live";
+        // A successful iframe load event does not prove its application authenticated.
+        status.textContent = "CARREGADO · VERIFICAR LOGIN";
+        status.className = "source-state ready";
       });
       frame.dataset.loadBound = "1";
     }

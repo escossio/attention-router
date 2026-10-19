@@ -26,6 +26,8 @@
     <button class="tab" data-tab="transport" type="button">AGENT / TRANSPORT</button>
     <button class="tab" data-tab="goaccess" type="button">HTTP / GOACCESS</button>
     <button class="tab" data-tab="dozzle" type="button">CONTAINERS / DOZZLE</button>
+    <button class="tab" data-tab="flow-e2e" type="button">FLOW / E2E</button>
+    <button class="tab" data-tab="live-message" type="button">LIVE MESSAGE</button>
     <button class="tab" data-tab="network" type="button">NETWORK / OSI</button>
   </nav>
 
@@ -210,6 +212,7 @@
         <div class="observability-actions">
           <span id="goaccess-state" class="source-state">AGUARDANDO</span>
           <a id="goaccess-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+          <a id="goaccess-domain-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>DOMÍNIOS / CONTEÚDO</a>
         </div>
       </section>
       <div class="observability-frame-shell">
@@ -232,6 +235,30 @@
       <div class="observability-frame-shell">
         <iframe id="dozzle-frame" title="Dozzle Docker logs" loading="lazy" referrerpolicy="no-referrer"></iframe>
       </div>
+    </section>
+
+    <section id="flow-e2e-view" class="view observability-view">
+      <section class="observability-hero"><div>
+        <span class="section-label">OPEN TELEMETRY · TEMPO</span>
+        <h2>ROC-E2E / Operational Flow</h2>
+        <p>Traces de Worker, Transport e decisões; dashboard do Grafana ROC.</p>
+      </div><div class="observability-actions">
+        <span id="flow-e2e-state" class="source-state">AGUARDANDO</span>
+        <a id="flow-e2e-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+      </div></section>
+      <div class="observability-frame-shell"><iframe id="flow-e2e-frame" title="ROC E2E Operational Flow" loading="lazy" referrerpolicy="no-referrer"></iframe></div>
+    </section>
+
+    <section id="live-message-view" class="view observability-view">
+      <section class="observability-hero"><div>
+        <span class="section-label">MENSAGENS · CAMINHO COMPLETO</span>
+        <h2>Andy · Live Message Path</h2>
+        <p>Visualização de cada etapa observável, com resultado e lacunas do fluxo.</p>
+      </div><div class="observability-actions">
+        <span id="live-message-state" class="source-state">AGUARDANDO</span>
+        <a id="live-message-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+      </div></section>
+      <div class="observability-frame-shell"><iframe id="live-message-frame" title="Andy Live Message Path" loading="lazy" referrerpolicy="no-referrer"></iframe></div>
     </section>
 
     <section id="network-view" class="view observability-view">
