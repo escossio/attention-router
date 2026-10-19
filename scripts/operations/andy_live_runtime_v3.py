@@ -93,7 +93,9 @@ def load_manifest(*, previous: bool = False) -> dict:
             result[key] = value
         return result
     value = json.loads(raw, object_pairs_hook=unique)
-    valid_schemas = ("andy-live-worker-lifecycle-v2", "andy-live-worker-lifecycle-v3") if previous else ("andy-live-worker-lifecycle-v3",)
+    # A V2 manifest is a pinned OFF composition for the pre-First-Contact
+    # Worker. It may also be the current target at boot or an OFF rollback.
+    valid_schemas = ("andy-live-worker-lifecycle-v2", "andy-live-worker-lifecycle-v3")
     require(type(value) is dict and value.get("schema_version") in valid_schemas, "MANIFEST_SCHEMA_INVALID")
     return value
 
@@ -132,7 +134,7 @@ def preflight(*, previous: bool = False) -> tuple[dict, dict, dict, list[str]]:
     require(set(rendered.get("services", {})) == {manifest["service"]}, "COMPOSE_SERVICE_SCOPE_INVALID")
     service = rendered["services"][manifest["service"]]
     env = service.get("environment") or {}
-    legacy = previous and manifest["schema_version"] == "andy-live-worker-lifecycle-v2"
+    legacy = manifest["schema_version"] == "andy-live-worker-lifecycle-v2"
     critical = LEGACY_CRITICAL if legacy else CRITICAL
     require(type(env) is dict and set(manifest.get("critical_environment_sha256", {})) == set(critical), "CRITICAL_ENV_SCHEMA_INVALID")
     for key in critical:
@@ -142,6 +144,12 @@ def preflight(*, previous: bool = False) -> tuple[dict, dict, dict, list[str]]:
     require(all(env[key] == "true" for key in ("GROUP_CONTEXTUAL_PRESENCE_ENABLED", "CLIENT_SESSION_ENABLED", "AGENT_EXECUTION_ENABLED", "ANDY_AGENT_ENABLED")), "REQUIRED_CAPABILITY_DISABLED")
     require(env["GROUP_CONTEXTUAL_PRESENCE_GROUP_ID"].strip() != "" and env["GROUP_CONTEXTUAL_PRESENCE_TENANT_ID"].strip() != "", "GROUP_SCOPE_MISSING")
     require(env["ATTENTION_ROUTER_BUILD_SHA"] == env["RUNTIME_HEAD"] == manifest["source_sha"], "SOURCE_PROVENANCE_DRIFT")
+    if legacy:
+        require("first_contact_mode" not in manifest and
+                env.get("FIRST_CONTACT_ENABLED") in (None, "", "false") and
+                all(env.get(key) in (None, "") for key in
+                    ("FIRST_CONTACT_TENANT_ID", "FIRST_CONTACT_SOURCE_ACCOUNT")),
+                "LEGACY_FIRST_CONTACT_FIELDS_INVALID")
     mode = "off" if legacy else manifest.get("first_contact_mode")
     require(mode in ("off", "on"), "FIRST_CONTACT_MODE_INVALID")
     require(env.get("FIRST_CONTACT_ENABLED", "false") == ("true" if mode == "on" else "false"), "FIRST_CONTACT_MODE_DRIFT")
