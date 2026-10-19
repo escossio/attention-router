@@ -6,7 +6,7 @@ import tempfile
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from attention_router.adapters.tts import SwitcherTTSClient, TTSClientError
 from attention_router.application.conversation_language import resolve_interaction_locale_by_id
@@ -27,6 +27,7 @@ from attention_router.infrastructure.models import (
     OutboxMessageRow,
     TTSDerivationRow,
 )
+from attention_router.infrastructure.first_contact_models import FirstContactAttemptRow, FirstContactPresentationRow
 from attention_router.infrastructure.repository import audit
 
 
@@ -73,7 +74,97 @@ def ensure_tts_derivation(session, intent: AgentExecutionIntentRow) -> TTSDeriva
     return row
 
 
+def supplemental_parent(session, intent: AgentExecutionIntentRow) -> OutboxMessageRow | None:
+    """Return only the marked, delivered text effect for this intent."""
+    parent = session.scalar(select(OutboxMessageRow).where(
+        OutboxMessageRow.idempotency_key == f"execution:{intent.id}",
+        OutboxMessageRow.execution_intent_id == intent.id,
+        OutboxMessageRow.action_type == "agent_execution_text",
+        OutboxMessageRow.destination == "local_transport",
+        OutboxMessageRow.status == "DONE",
+    ))
+    if parent is None:
+        return None
+    payload = parent.payload or {}
+    digest = source_text_hash(intent.effective_response_snapshot)
+    if (payload.get("supplemental_audio_text_hash") != digest
+            or payload.get("text") != intent.effective_response_snapshot
+            or payload.get("execution_intent_id") != intent.id):
+        return None
+    decision = session.get(AgentDecisionRow, intent.agent_decision_id)
+    interaction = session.get(InteractionRow, decision.interaction_id) if decision else None
+    if (decision is None or interaction is None or parent.interaction_id != interaction.id
+            or parent.causation_id != decision.id):
+        return None
+    if decision.response_introduction_included is True:
+        if not settings.first_contact_enabled:
+            return None
+        attempt = session.scalar(select(FirstContactAttemptRow).join(
+            FirstContactPresentationRow,
+            FirstContactPresentationRow.id == FirstContactAttemptRow.presentation_id,
+        ).where(
+            FirstContactAttemptRow.outbox_id == parent.id,
+            FirstContactAttemptRow.execution_intent_id == intent.id,
+            FirstContactAttemptRow.state == "CONFIRMED",
+            FirstContactAttemptRow.ack >= 2,
+            FirstContactPresentationRow.state == "CONFIRMED",
+            FirstContactPresentationRow.tenant_id == interaction.tenant_id,
+        ))
+        if attempt is None:
+            return None
+    return parent
+
+
+def supplemental_marked(session, intent: AgentExecutionIntentRow) -> bool:
+    parent = session.scalar(select(OutboxMessageRow).where(
+        OutboxMessageRow.idempotency_key == f"execution:{intent.id}",
+        OutboxMessageRow.execution_intent_id == intent.id,
+    ))
+    return bool(parent and (parent.payload or {}).get("supplemental_audio_text_hash"))
+
+
+def enqueue_supplemental_derivations(session, *, limit: int = 10) -> int:
+    if not (settings.tts_enabled and settings.tts_auto_send and settings.tts_supplemental_enabled):
+        return 0
+    confirmed_intro = select(FirstContactAttemptRow.id).join(
+        FirstContactPresentationRow,
+        FirstContactPresentationRow.id == FirstContactAttemptRow.presentation_id,
+    ).where(
+        FirstContactAttemptRow.outbox_id == OutboxMessageRow.id,
+        FirstContactAttemptRow.state == "CONFIRMED",
+        FirstContactAttemptRow.ack >= 2,
+        FirstContactPresentationRow.state == "CONFIRMED",
+    ).exists()
+    query = select(OutboxMessageRow).join(
+        AgentExecutionIntentRow,
+        AgentExecutionIntentRow.id == OutboxMessageRow.execution_intent_id,
+    ).join(
+        AgentDecisionRow,
+        AgentDecisionRow.id == AgentExecutionIntentRow.agent_decision_id,
+    ).where(
+        OutboxMessageRow.action_type == "agent_execution_text",
+        OutboxMessageRow.status == "DONE",
+        OutboxMessageRow.execution_intent_id.is_not(None),
+        OutboxMessageRow.payload["supplemental_audio_text_hash"].as_string().is_not(None),
+        or_(AgentDecisionRow.response_introduction_included.is_not(True), confirmed_intro),
+        ~select(TTSDerivationRow.id).where(
+            TTSDerivationRow.execution_intent_id == OutboxMessageRow.execution_intent_id,
+        ).exists(),
+    ).order_by(OutboxMessageRow.completed_at).limit(limit)
+    if session.bind and session.bind.dialect.name == "postgresql":
+        query = query.with_for_update(of=OutboxMessageRow, skip_locked=True)
+    count = 0
+    for parent in session.scalars(query).all():
+        intent = session.get(AgentExecutionIntentRow, parent.execution_intent_id)
+        if intent and supplemental_parent(session, intent) is not None:
+            ensure_tts_derivation(session, intent)
+            count += 1
+    session.commit()
+    return count
+
+
 def process_tts_derivations(session, worker: str, limit: int = 10, client=None) -> int:
+    enqueue_supplemental_derivations(session, limit=limit)
     stamp = now_utc()
     stale_query = select(TTSDerivationRow).where(
         TTSDerivationRow.status == "PROCESSING",
@@ -121,8 +212,14 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
         temp_path: Path | None = None
         provider_attempted = False
         try:
-            if intent is None or decision is None or interaction is None or not intent_is_voice_response(session, intent):
+            parent = supplemental_parent(session, intent) if intent else None
+            supplemental = supplemental_marked(session, intent) if intent else False
+            if intent is None or decision is None or interaction is None or not (supplemental or intent_is_voice_response(session, intent)):
                 raise TTSClientError("tts_intent_invalid")
+            if supplemental and (parent is None or not (
+                settings.tts_enabled and settings.tts_auto_send and settings.tts_supplemental_enabled
+            )):
+                raise TTSClientError("tts_supplemental_parent_invalid")
             if source_text_hash(intent.effective_response_snapshot) != row.source_text_hash:
                 raise TTSClientError("tts_source_text_mismatch")
             fd, raw_path = tempfile.mkstemp(prefix="andy-tts-", suffix=".mp3")
@@ -171,9 +268,16 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
             row.provider = result.provider or "xai"
             row.request_reference = result.request_id
             row.error_code = None
+            key = f"execution:{intent.id}:audio" if supplemental else f"execution:{intent.id}"
             outbox = session.scalar(select(OutboxMessageRow).where(
-                OutboxMessageRow.execution_intent_id == intent.id
+                OutboxMessageRow.idempotency_key == key
             ))
+            if outbox is not None and (
+                outbox.action_type != "agent_execution_voice"
+                or outbox.execution_intent_id != intent.id
+                or outbox.interaction_id != interaction.id
+            ):
+                raise TTSClientError("tts_outbox_key_conflict")
             if outbox is None:
                 from attention_router.application.execution import resolve_recipient
                 recipient = resolve_recipient(session, intent)
@@ -188,27 +292,30 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
                         "size_bytes": size,
                         "execution_intent_id": intent.id,
                         "message_type": "ptt",
+                        **({"source_text_hash": row.source_text_hash,
+                            "parent_outbox_id": parent.id} if supplemental else {}),
                     },
                     status="PENDING", created_at=now_utc(), available_at=now_utc(),
-                    attempt_count=0, idempotency_key=f"execution:{intent.id}",
+                    attempt_count=0, idempotency_key=key,
                     correlation_id=interaction.correlation_id, causation_id=decision.id,
                     execution_intent_id=intent.id,
                 )
                 session.add(outbox)
-            intent.status = "QUEUED"
-            intent.blocked_reason = None
+            if not supplemental:
+                intent.status = "QUEUED"
+                intent.blocked_reason = None
             audit(session, interaction.id, "tts.derivation_ready", {
                 "tts_derivation_id": row.id, "artifact_id": artifact.id,
             }, origin="voice_tts")
         except (TTSClientError, MediaStoreError, OSError, ValueError) as exc:
             if provider_attempted and row.attempt_count <= 1:
                 row.status = "PENDING"
-                row.error_code = str(exc)[:120]
+                row.error_code = "TTS_DERIVATION_RETRY" if supplemental else str(exc)[:120]
             else:
                 row.status = "FAILED"
                 row.error_code = "TTS_DERIVATION_FAILED"
                 row.completed_at = now_utc()
-                if intent:
+                if intent and not supplemental:
                     intent.status = "BLOCKED"
                     intent.blocked_reason = "TTS_DERIVATION_FAILED"
                 if interaction:
@@ -240,6 +347,24 @@ def validate_voice_outbox(session, outbox: OutboxMessageRow, intent: AgentExecut
     if derivation.source_text_hash != source_text_hash(intent.effective_response_snapshot):
         raise ValueError("VOICE_SOURCE_TEXT_MISMATCH")
     payload = outbox.payload or {}
+    if outbox.idempotency_key.endswith(":audio"):
+        from attention_router.application.execution import execution_gate
+
+        parent = supplemental_parent(session, intent)
+        gate, _, recipient = execution_gate(session, intent, transport_ready=True)
+        decision = session.get(AgentDecisionRow, intent.agent_decision_id)
+        interaction = session.get(InteractionRow, decision.interaction_id) if decision else None
+        if (not (settings.tts_enabled and settings.tts_auto_send and settings.tts_supplemental_enabled)
+                or gate != "ALLOWED" or recipient is None
+                or parent is None or outbox.idempotency_key != f"execution:{intent.id}:audio"
+                or payload.get("parent_outbox_id") != parent.id
+                or payload.get("source_text_hash") != derivation.source_text_hash
+                or payload.get("external_actor_id") != recipient.reference
+                or payload.get("external_actor_id") != (parent.payload or {}).get("external_actor_id")
+                or interaction is None or artifact.tenant_id != interaction.tenant_id
+                or outbox.interaction_id != parent.interaction_id
+                or outbox.causation_id != parent.causation_id):
+            raise ValueError("VOICE_SUPPLEMENTAL_PARENT_MISMATCH")
     if (
         payload.get("execution_intent_id") != intent.id
         or payload.get("content_sha256") != artifact.content_sha256

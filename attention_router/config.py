@@ -120,6 +120,7 @@ class Settings(BaseSettings):
     tts_enabled: bool = False
     tts_profile: str = "andy"
     tts_auto_send: bool = False
+    tts_supplemental_enabled: bool = False
     tts_internal_url: str = "http://tts-api-switcher:8090/internal/tts"
     tts_internal_token: str | None = None
     tts_timeout_seconds: float = 20.0

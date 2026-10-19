@@ -18,7 +18,7 @@ from attention_router.application.voice_media import (
     record_media_notification,
 )
 from attention_router.application.voice_transcription import process_voice_transcriptions
-from attention_router.application.voice_tts import process_tts_derivations, validate_voice_outbox
+from attention_router.application.voice_tts import process_tts_derivations, source_text_hash, validate_voice_outbox
 from attention_router.config import settings
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.media_store import MediaStore, MediaStoreError
@@ -625,6 +625,79 @@ def test_tts_auto_send_does_not_turn_text_input_into_voice(
     outbox = session.scalar(select(OutboxMessageRow))
     assert outbox.action_type == "agent_execution_text"
     assert session.scalar(select(TTSDerivationRow)) is None
+
+
+def test_supplemental_voice_uses_delivered_text_snapshot_once(session, monkeypatch, tmp_path):
+    setup_direct(session, monkeypatch)
+    monkeypatch.setattr(settings, "tts_enabled", True)
+    monkeypatch.setattr(settings, "tts_auto_send", True)
+    monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
+    monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path))
+    services.receive_normalized_inbound_event(session, direct_event())
+    release_grace(session)
+    process_agent_decisions(session, "worker")
+    decision = session.scalar(select(AgentDecisionRow))
+    autonomy.evaluate_and_route(session, decision)
+    assert execution.enqueue_ready_intents(session, transport_ready=True) == 1
+    intent = session.scalar(select(AgentExecutionIntentRow))
+    primary = session.scalar(select(OutboxMessageRow))
+    fake = FakeTTS()
+    assert process_tts_derivations(session, "tts", client=fake) == 0
+    primary.status = "DONE"
+    primary.completed_at = now_utc()
+    intent.status = "SENT"
+    session.commit()
+    assert process_tts_derivations(session, "tts", client=fake) == 1
+    voice = session.scalar(select(OutboxMessageRow).where(
+        OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
+    ))
+    assert voice is not None and voice.payload["parent_outbox_id"] == primary.id
+    assert voice.payload["source_text_hash"] == source_text_hash(primary.payload["text"])
+    validate_voice_outbox(session, voice, intent)
+    assert process_tts_derivations(session, "tts", client=fake) == 0
+    assert fake.calls == 1 and intent.status == "SENT"
+    primary.status = "AMBIGUOUS"
+    session.flush()
+    try:
+        validate_voice_outbox(session, voice, intent)
+    except ValueError as exc:
+        assert str(exc) == "VOICE_SUPPLEMENTAL_PARENT_MISMATCH"
+    else:
+        raise AssertionError("ambiguous parent accepted")
+    primary.status = "DONE"
+    session.flush()
+    services._mark_external_ambiguous(session, voice, "EXTERNAL_REQUEST_OUTCOME_AMBIGUOUS")
+    assert voice.status == "AMBIGUOUS" and intent.status == "SENT"
+
+
+def test_supplemental_failure_preserves_delivered_text(session, monkeypatch):
+    setup_direct(session, monkeypatch)
+    monkeypatch.setattr(settings, "tts_enabled", True)
+    monkeypatch.setattr(settings, "tts_auto_send", True)
+    monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
+    services.receive_normalized_inbound_event(session, direct_event())
+    release_grace(session)
+    process_agent_decisions(session, "worker")
+    autonomy.evaluate_and_route(session, session.scalar(select(AgentDecisionRow)))
+    execution.enqueue_ready_intents(session, transport_ready=True)
+    intent = session.scalar(select(AgentExecutionIntentRow))
+    primary = session.scalar(select(OutboxMessageRow))
+    primary.status = "DONE"
+    primary.completed_at = now_utc()
+    intent.status = "SENT"
+    session.commit()
+
+    class FailedTTS:
+        def synthesize(self, *_args, **_kwargs):
+            raise TTSClientError("synthetic_timeout")
+
+    assert process_tts_derivations(session, "tts", client=FailedTTS()) == 1
+    assert process_tts_derivations(session, "tts", client=FailedTTS()) == 1
+    assert session.scalar(select(TTSDerivationRow)).status == "FAILED"
+    assert intent.status == "SENT" and primary.status == "DONE"
+    assert session.scalar(select(OutboxMessageRow).where(
+        OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
+    )) is None
 
 
 def test_shared_digest_keeps_bytes_until_final_live_reference_expires(

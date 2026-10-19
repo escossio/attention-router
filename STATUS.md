@@ -1,5 +1,10 @@
 # Project status
 
+## PASSADA 19 — implementação local em validação (19/10/2026 UTC)
+
+- Worktree isolada `feat/andy-first-contact-dual-tts-pass19`: áudio complementar opt-in ligado apenas a novos efeitos de texto, com chave `execution:<id>:audio`, derivação do snapshot aprovado e dependência do texto `DONE`; INTRODUCE também exige confirmação autenticada ACK >= 2 do texto. Voz inbound legada preservada; repetição textual consulta o efeito de texto. Nenhum envio, provider live, deploy, push ou banco produtivo.
+- Intents sintéticas de plataforma excluídas porque seu orçamento de efeito atual é único. `compileall` e `git diff --check` passaram; pytest/ruff disponíveis via venv existente; 123 testes direcionados e Ruff PASS em 19/10/2026, portanto os testes sintéticos novos ainda não foram executados. Gate PostgreSQL fica para CI distribuído do orquestrador após publicação autorizada.
+
 ## Andy — homologação pré-promoção #380 (18/10/2026 UTC)
 
 - Operador aprovou homologação completa e artefatos de promoção; publicação, autonomia, policy, default e recriação produtivos continuam proibidos até aprovação final. Nenhuma mutação produtiva nesta etapa.

@@ -136,9 +136,10 @@ def check_text_repetition(session: Session, interaction: InteractionRow) -> Repe
         if _has_prior_outbound(session, previous.id):
             prior = state_signature(previous.contact_id, previous.inbound_text)
             outbound = session.scalar(select(OutboxMessageRow).where(
-                OutboxMessageRow.interaction_id == previous.id, OutboxMessageRow.status == "DONE"
+                OutboxMessageRow.interaction_id == previous.id, OutboxMessageRow.status == "DONE",
+                OutboxMessageRow.payload["text"].as_string().is_not(None),
             ).order_by(OutboxMessageRow.completed_at.desc()).limit(1))
-            if prior.state_value == current.state_value and _useful_response(current.objective, (outbound.payload or {}).get("text")):
+            if outbound and prior.state_value == current.state_value and _useful_response(current.objective, (outbound.payload or {}).get("text")):
                 return RepetitionDecision(
                     True, "SEMANTIC_REPEAT_OBJECTIVE_ALREADY_SATISFIED", current.state_value,
                     response_objective=current.objective, objective_already_satisfied=True,

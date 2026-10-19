@@ -2348,7 +2348,7 @@ def claim_outbox(session: Session, worker: str, limit: int = 10) -> list[OutboxM
             observe_presentation_outbox(session, row, known_before_effect=True)
             _mark_voice_outbox_artifact_terminal(session, row)
             intent = session.get(AgentExecutionIntentRow, row.execution_intent_id) if row.execution_intent_id else None
-            if intent and intent.status != "SENT":
+            if intent and intent.status != "SENT" and not row.idempotency_key.endswith(":audio"):
                 intent.status = "CANCELLED"
                 intent.blocked_reason = "CANCELED_BY_HUMAN_REPLY"
             continue
@@ -2364,7 +2364,7 @@ def claim_outbox(session: Session, worker: str, limit: int = 10) -> list[OutboxM
         except FirstContactConflict:
             row.status = "BLOCKED"
             row.last_error = "FIRST_CONTACT_OUTBOX_INTEGRITY_DENIED"
-            if intent:
+            if intent and not row.idempotency_key.endswith(":audio"):
                 intent.status = "BLOCKED"
                 intent.blocked_reason = row.last_error
             audit(session, row.interaction_id, "first_contact.claim_integrity_denied",
@@ -2418,7 +2418,7 @@ def _mark_external_ambiguous(
         if row.execution_intent_id
         else None
     )
-    if intent:
+    if intent and not row.idempotency_key.endswith(":audio"):
         intent.status = "BLOCKED"
         intent.blocked_reason = reason
     interaction = session.get(InteractionRow, row.interaction_id)
@@ -2476,7 +2476,7 @@ def _mark_external_reconciliation_required(
         if row.execution_intent_id
         else None
     )
-    if intent:
+    if intent and not row.idempotency_key.endswith(":audio"):
         intent.status = "BLOCKED"
         intent.blocked_reason = reason
     audit(
@@ -2551,7 +2551,7 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                             AgentExecutionIntentRow,
                             blocked.execution_intent_id,
                         )
-                        if blocked_intent:
+                        if blocked_intent and not blocked.idempotency_key.endswith(":audio"):
                             blocked_intent.status = "BLOCKED"
                             blocked_intent.blocked_reason = exc.reason_code
                         audit(
@@ -2620,8 +2620,9 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
 
                     observe_presentation_outbox(session, row, known_before_effect=True)
                     _mark_voice_outbox_artifact_terminal(session, row)
-                    intent.status = "BLOCKED"
-                    intent.blocked_reason = reason
+                    if not row.idempotency_key.endswith(":audio"):
+                        intent.status = "BLOCKED"
+                        intent.blocked_reason = reason
                     audit(session, row.interaction_id, "execution.blocked",
                           {"outbox_id": row.id, "reason": reason})
                     session.commit()
@@ -2692,7 +2693,7 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                 except ValueError:
                     row.status = "BLOCKED"
                     row.last_error = "FIRST_CONTACT_OUTBOX_INTEGRITY_DENIED"
-                    if intent:
+                    if intent and not row.idempotency_key.endswith(":audio"):
                         intent.status = "BLOCKED"
                         intent.blocked_reason = row.last_error
                     audit(session, row.interaction_id, "first_contact.dispatch_denied",
@@ -2883,7 +2884,7 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
             audit(session, row.interaction_id, "outbox_failed", {"outbox_id": row.id, "error_class": type(exc).__name__}, row.correlation_id, row.causation_id)
             if row.execution_intent_id:
                 intent = session.get(AgentExecutionIntentRow, row.execution_intent_id)
-                if intent:
+                if intent and not row.idempotency_key.endswith(":audio"):
                     intent.status = "FAILED"
                     audit(session, row.interaction_id, "execution.dispatch_failed", {"intent_id": intent.id, "error_class": type(exc).__name__})
             session.commit()
