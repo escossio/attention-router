@@ -37,6 +37,9 @@ function validScope(value) {
 function matchesConfiguredScope(value, config) {
   return config.firstContactEnabled === true
     && bounded(config.firstContactTenantId) && bounded(config.firstContactSourceAccount)
+    && typeof config.firstContactCanaryPeerSha256 === 'string'
+    && /^[0-9a-f]{64}$/.test(config.firstContactCanaryPeerSha256)
+    && value.canonical_peer_hash === config.firstContactCanaryPeerSha256
     && value.tenant_id === config.firstContactTenantId && value.tenant_id === config.tenantId
     && value.source_account === config.firstContactSourceAccount
     && value.source_account === config.sourceAccount;

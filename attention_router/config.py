@@ -1,4 +1,5 @@
 import math
+import re
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -143,6 +144,7 @@ class Settings(BaseSettings):
     first_contact_enabled: bool = False
     first_contact_tenant_id: str | None = Field(default=None, repr=False)
     first_contact_source_account: str | None = Field(default=None, repr=False)
+    first_contact_canary_peer_sha256: str | None = Field(default=None, repr=False)
     group_contextual_presence_enabled: bool = False
     group_contextual_presence_group_id: str | None = Field(default=None, repr=False)
     group_contextual_presence_tenant_id: str | None = Field(default=None, repr=False)
@@ -293,6 +295,11 @@ class Settings(BaseSettings):
             and self.first_contact_source_account and self.first_contact_source_account.strip()
         ):
             raise ValueError("FIRST_CONTACT_TENANT_AND_ACCOUNT_REQUIRED")
+        if self.first_contact_enabled and not (
+            self.first_contact_canary_peer_sha256
+            and re.fullmatch(r"[0-9a-f]{64}", self.first_contact_canary_peer_sha256)
+        ):
+            raise ValueError("FIRST_CONTACT_CANARY_PEER_SHA256_REQUIRED")
         if self.agent_decision_default_visitor_only and not (
             self.agent_decision_default_blueprint_id and self.agent_decision_default_blueprint_id.strip()
         ):

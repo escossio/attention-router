@@ -10,9 +10,13 @@ gates, ExecutionIntent, transactional outbox and Transport provenance ledger own
 the response path. First Contact adds bookkeeping and public identity composition,
 not a sender, personality engine, memory system, tool grant or owner identity.
 
-The default is OFF. FIRST_CONTACT_ENABLED requires explicit tenant and source
-account on the Worker. The Transport also requires these values to match its
-existing inbound tenant/account/source/channel. Eligibility is limited to organic
+The default is OFF. FIRST_CONTACT_ENABLED requires explicit tenant, source
+account and FIRST_CONTACT_CANARY_PEER_SHA256 on both Worker and Transport.
+The latter is the lowercase SHA-256 digest of the existing verified canonical
+provider LID, provisioned privately; it is not a phone number, display name,
+new identity or authority grant. Transport requires tenant/account to match its
+existing inbound tenant/account/source/channel and rejects send/proof scopes for
+another canonical peer. Eligibility is limited to that one canary among organic
 direct WhatsApp visitors without a binding admitted by the existing general
 text-only-v1 guard. Bound actors, owner commands and groups retain their contracts.
 No policy/autonomy changes make a presentation deliverable.
@@ -35,8 +39,11 @@ verified canonical provider LID. The digest is a pseudonymous operational key,
 not an authentication credential or an authorization shortcut. Presentation
 version is an attribute, so changing wording cannot silently reintroduce Andy.
 Existing bindings on proven aliases deny inaugural presentation; they confer no
-new binding/owner authority. Missing proof denies only the inaugural lifecycle:
-normal eligible text conversation continues, with public identity.
+new binding/owner authority. Missing proof or a different canary digest denies
+the inaugural lifecycle before an Agent directive is built: normal eligible
+text conversation continues under its existing contract. A previous ordinary
+reply does not count as a First Contact presentation; only the durable V1 state
+and correlated delivery evidence do.
 
 ## Persistent lifecycle
 

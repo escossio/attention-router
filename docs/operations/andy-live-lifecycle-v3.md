@@ -25,6 +25,12 @@ and source-account scope matching separate boot pins
 `ATTENTION_LIVE_FIRST_CONTACT_SOURCE_ACCOUNT`; OFF requires false. The image OCI revision must match
 the pinned source SHA. A service with no healthy Docker healthcheck fails the
 post-start gate.
+For individual canary ON, the rendered Worker must also carry a lowercase
+`FIRST_CONTACT_CANARY_PEER_SHA256` matching the private boot pin
+`ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256`. The complete rendered Compose
+hash pins that value. Existing V2/V3 OFF manifests remain readable unchanged;
+an ON transition without the peer pin fails before mutation. The installed V3
+must be updated separately in an approved window before relying on this check.
 
 ## Transition, reboot and reversal
 

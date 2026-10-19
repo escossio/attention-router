@@ -632,8 +632,8 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         from attention_router.application.first_contact import FirstContactConflict, reserve
 
         scope = presentation_scope(event, visitor_default=visitor_default, binding=binding)
-        mode = "UNAVAILABLE"
         if scope is not None:
+            mode = "UNAVAILABLE"
             # The optional lifecycle owns a durable short reservation. Release
             # its locks before the model call; no owner dispatch lock exists here.
             session.commit()
@@ -649,8 +649,8 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
                 session.rollback()
                 _audit(session, interaction.id, "first_contact.reservation_denied",
                        {"reason_code": str(exc)})
-        first_contact_control = agent_presentation(mode)
-        _audit(session, interaction.id, "first_contact.context_built", {"mode": mode})
+            first_contact_control = agent_presentation(mode)
+            _audit(session, interaction.id, "first_contact.context_built", {"mode": mode})
     if agent_path_enabled:
         represented_subject = resolve_represented_subject(session, interaction.tenant_id)
         platform_context = build_context_snapshot(
