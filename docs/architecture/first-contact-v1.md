@@ -10,16 +10,22 @@ gates, ExecutionIntent, transactional outbox and Transport provenance ledger own
 the response path. First Contact adds bookkeeping and public identity composition,
 not a sender, personality engine, memory system, tool grant or owner identity.
 
-The default is OFF. FIRST_CONTACT_ENABLED requires explicit tenant, source
-account and FIRST_CONTACT_CANARY_PEER_SHA256 on both Worker and Transport.
-The latter is the lowercase SHA-256 digest of the existing verified canonical
-provider LID, provisioned privately; it is not a phone number, display name,
-new identity or authority grant. Transport requires tenant/account to match its
-existing inbound tenant/account/source/channel and rejects send/proof scopes for
-another canonical peer. Eligibility is limited to that one canary among organic
-direct WhatsApp visitors without a binding admitted by the existing general
-text-only-v1 guard. Bound actors, owner commands and groups retain their contracts.
-No policy/autonomy changes make a presentation deliverable.
+The default is OFF. When enabled, Worker and Transport must agree on the explicit
+`FIRST_CONTACT_ELIGIBILITY_MODE` (`INDIVIDUAL` or `OPEN_INBOUND`), tenant and
+source account. `INDIVIDUAL` requires the privately provisioned lowercase
+SHA-256 of one verified canonical provider LID. `OPEN_INBOUND` omits that peer
+pin and admits any authenticated, canonical, organic direct WhatsApp visitor
+that passes the existing general `text-only-v1` visitor guard. Both modes require
+the same tenant/account scope, `provider-lid-v1` identity proof and persistent
+per-peer state. Open eligibility is limited to inbound messages; it is not a
+sender, binding, owner, policy, autonomy or tool grant. Bound actors, owner
+commands and groups retain their contracts. No policy/autonomy changes make a
+presentation deliverable.
+
+Explicit Lifecycle V3 manifests pin both images and the common mode/scope.
+During a directed transition the preflight accepts only a live Transport that
+matches the pinned source or target pair; read-only `--check` requires exact
+target parity.
 
 Live continuity consumes new admitted events. Historical acceleration is
 intentionally deferred: short history, generation markers, archived conversation
@@ -39,11 +45,13 @@ verified canonical provider LID. The digest is a pseudonymous operational key,
 not an authentication credential or an authorization shortcut. Presentation
 version is an attribute, so changing wording cannot silently reintroduce Andy.
 Existing bindings on proven aliases deny inaugural presentation; they confer no
-new binding/owner authority. Missing proof or a different canary digest denies
-the inaugural lifecycle before an Agent directive is built: normal eligible
-text conversation continues under its existing contract. A previous ordinary
-reply does not count as a First Contact presentation; only the durable V1 state
-and correlated delivery evidence do.
+new binding/owner authority. Missing identity proof denies the inaugural
+lifecycle in both modes. A different canary digest denies it in `INDIVIDUAL`;
+`OPEN_INBOUND` relies on authenticated canonical identity plus the tenant/account
+scope. In either case, normal eligible text conversation continues under its
+existing contract when First Contact is ineligible. A previous ordinary reply
+does not count as a First Contact presentation; only the durable V1 state and
+correlated delivery evidence do.
 
 ## Persistent lifecycle
 

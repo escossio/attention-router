@@ -41,6 +41,17 @@ def enabled(session, monkeypatch):
     return captured
 
 
+def enabled_open_inbound(session, monkeypatch):
+    captured, _, _ = setup_guarded_visitor(session, monkeypatch)
+    monkeypatch.setattr(settings, "first_contact_enabled", True)
+    monkeypatch.setattr(settings, "first_contact_eligibility_mode", "OPEN_INBOUND")
+    monkeypatch.setattr(settings, "first_contact_tenant_id", DEFAULT_TENANT_ID)
+    monkeypatch.setattr(settings, "first_contact_source_account", "default")
+    monkeypatch.setattr(settings, "first_contact_canary_peer_sha256", None)
+    session.commit()
+    return captured
+
+
 def event(*, peer=PEER, proof=True, **changes):
     item = direct_event(peer=peer, **changes)
     if proof:
@@ -53,6 +64,19 @@ def event(*, peer=PEER, proof=True, **changes):
                 "provenance": "DIRECTIONAL_LID" if peer == PEER else "PROVIDER_LID_PN_MAPPING",
             },
         })
+    return item
+
+
+def open_event(peer, **changes):
+    item = event(peer=peer, proof=False, **changes)
+    item.metadata.update({
+        "conversation_key": "wwebjs:" + peer,
+        "peer_identifiers": [peer],
+        "first_contact_identity": {
+            "contract_version": "provider-lid-v1", "state": "VERIFIED",
+            "canonical_peer_id": peer, "provenance": "DIRECTIONAL_LID",
+        },
+    })
     return item
 
 
@@ -130,6 +154,69 @@ def test_explicit_identity_after_confirmation_is_not_a_new_inauguration(session,
     assert "Olá!" not in question.proposed_response
     assert question.response_introduction_included is False
     assert session.scalar(select(FirstContactPresentationRow)).state == "CONFIRMED"
+
+
+def test_open_inbound_introduces_each_proven_direct_visitor_once(session, monkeypatch):
+    captured = enabled_open_inbound(session, monkeypatch)
+    first_peer = "1234567890@lid"
+    second_peer = "2234567890@lid"
+    first = visitor_decision(session, open_event(first_peer))
+    assert first.response_introduction_included is True
+    assert captured[-1].first_contact["mode"] == "INTRODUCE"
+    other = visitor_decision(session, open_event(second_peer))
+    assert other.response_introduction_included is True
+    assert captured[-1].first_contact["mode"] == "INTRODUCE"
+    repeat = visitor_decision(session, open_event(first_peer))
+    assert repeat.response_introduction_included is False
+    assert captured[-1].first_contact["mode"] == "CONTINUE"
+    assert session.scalar(select(func.count()).select_from(FirstContactPresentationRow)) == 2
+
+
+def test_open_inbound_confirmed_state_survives_for_next_interaction(session, monkeypatch):
+    captured = enabled_open_inbound(session, monkeypatch)
+    incoming = open_event("5234567890@lid")
+    first = visitor_decision(session, incoming)
+    outbox = enqueue(session, first)
+    send(session, monkeypatch, outbox)
+    assert confirm(session, outbox, ack=2)
+    follow_up = visitor_decision(session, open_event("5234567890@lid", content="Outra pergunta"))
+    assert captured[-1].first_contact["mode"] == "CONTINUE"
+    assert follow_up.response_introduction_included is False
+    assert session.scalar(select(FirstContactPresentationRow)).state == "CONFIRMED"
+
+
+@pytest.mark.parametrize("change", ["missing_identity", "other_tenant", "other_account", "group", "binding", "owner"])
+def test_open_inbound_still_requires_proven_unbound_direct_scope(session, monkeypatch, change):
+    captured = enabled_open_inbound(session, monkeypatch)
+    peer = "3234567890@lid"
+    incoming = open_event(peer)
+    if change == "missing_identity":
+        incoming.metadata.pop("first_contact_identity")
+    elif change == "other_tenant":
+        monkeypatch.setattr(settings, "first_contact_tenant_id", "synthetic-other-tenant")
+    elif change == "other_account":
+        incoming.metadata["source_account"] = "synthetic-other-account"
+    elif change == "group":
+        incoming.metadata["is_group"] = True
+    elif change in {"binding", "owner"}:
+        role = "owner" if change == "owner" else "bound_contact"
+        upsert_actor_binding(session, "wwebjs", peer, f"synthetic-{role}", role,
+                             metadata={"owner": change == "owner", "audience": role})
+        session.commit()
+    visitor_decision(session, incoming)
+    assert not session.scalar(select(FirstContactPresentationRow))
+    assert all(context.first_contact is None for context in captured)
+
+
+def test_open_inbound_off_has_no_presentation_side_effect(session, monkeypatch):
+    captured, _, _ = setup_guarded_visitor(session, monkeypatch)
+    monkeypatch.setattr(settings, "first_contact_enabled", False)
+    monkeypatch.setattr(settings, "first_contact_eligibility_mode", "OPEN_INBOUND")
+    monkeypatch.setattr(settings, "first_contact_tenant_id", DEFAULT_TENANT_ID)
+    monkeypatch.setattr(settings, "first_contact_source_account", "default")
+    visitor_decision(session, open_event("4234567890@lid"))
+    assert not session.scalar(select(FirstContactPresentationRow))
+    assert all(context.first_contact is None for context in captured)
 
 
 def test_agent_failure_before_effect_permits_only_new_event(session, monkeypatch):
@@ -328,6 +415,27 @@ def test_enable_requires_canonical_canary_hash():
                  first_contact_enabled=True, first_contact_tenant_id="tenant-test",
                  first_contact_source_account="account-test",
                  first_contact_canary_peer_sha256="not-a-canonical-hash")
+
+
+def test_eligibility_mode_rejects_unknown_and_contradictory_configuration():
+    with pytest.raises(ValueError, match="FIRST_CONTACT_ELIGIBILITY_MODE_INVALID"):
+        Settings(_env_file=None, app_env="test", admin_auth_enabled=False,
+                 first_contact_eligibility_mode="OPEN_ANYTHING")
+    with pytest.raises(ValueError, match="FIRST_CONTACT_OPEN_MODE_PEER_CONFLICT"):
+        Settings(_env_file=None, app_env="test", admin_auth_enabled=False,
+                 first_contact_eligibility_mode="OPEN_INBOUND",
+                 first_contact_canary_peer_sha256="a" * 64)
+
+
+def test_open_mode_requires_tenant_and_account_but_not_a_peer_digest():
+    candidate = Settings(_env_file=None, app_env="test", admin_auth_enabled=False,
+                         first_contact_enabled=True, first_contact_eligibility_mode="OPEN_INBOUND",
+                         first_contact_tenant_id="tenant-test", first_contact_source_account="account-test")
+    assert candidate.first_contact_canary_peer_sha256 is None
+    with pytest.raises(ValueError, match="FIRST_CONTACT_TENANT_AND_ACCOUNT_REQUIRED"):
+        Settings(_env_file=None, app_env="test", admin_auth_enabled=False,
+                 first_contact_enabled=True, first_contact_eligibility_mode="OPEN_INBOUND",
+                 first_contact_tenant_id="tenant-test")
 
 
 def test_other_verified_peer_keeps_ordinary_visitor_path(session, monkeypatch):

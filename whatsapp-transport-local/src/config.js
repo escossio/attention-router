@@ -83,19 +83,28 @@ function createConfig(env = process.env) {
   const browserURL = normalizeBrowserDebugUrl(env);
   const inboundSpoolDir = env.LOCAL_INBOUND_SPOOL_DIR || '';
   const firstContactEnabled = parseBoolean(env.FIRST_CONTACT_ENABLED, false);
+  if (env.FIRST_CONTACT_ENABLED != null && env.FIRST_CONTACT_ENABLED !== ''
+      && !['1', 'true', 'yes', 'on', '0', 'false', 'no', 'off'].includes(String(env.FIRST_CONTACT_ENABLED).trim().toLowerCase())) {
+    throw new Error('FIRST_CONTACT_ENABLED_INVALID');
+  }
+  const firstContactEligibilityMode = env.FIRST_CONTACT_ELIGIBILITY_MODE || 'INDIVIDUAL';
   const firstContactTenantId = (env.FIRST_CONTACT_TENANT_ID || '').trim() || null;
   const firstContactSourceAccount = (env.FIRST_CONTACT_SOURCE_ACCOUNT || '').trim() || null;
   const firstContactCanaryPeerSha256 = env.FIRST_CONTACT_CANARY_PEER_SHA256 || null;
-  if (firstContactEnabled && (!firstContactTenantId || !firstContactSourceAccount
-      || !/^[0-9a-f]{64}$/.test(firstContactCanaryPeerSha256 || '')
+  if (!['INDIVIDUAL', 'OPEN_INBOUND'].includes(firstContactEligibilityMode)
+      || (firstContactCanaryPeerSha256 && !/^[0-9a-f]{64}$/.test(firstContactCanaryPeerSha256))
+      || (firstContactEligibilityMode === 'OPEN_INBOUND' && firstContactCanaryPeerSha256)
+      || (firstContactEnabled && (!firstContactTenantId || !firstContactSourceAccount
       || firstContactTenantId !== ((env.LOCAL_TENANT_ID || '').trim() || null)
       || firstContactSourceAccount !== (env.LOCAL_SOURCE_ACCOUNT || 'default')
       || (env.LOCAL_INBOUND_SOURCE || 'wwebjs') !== 'wwebjs'
-      || (env.LOCAL_INBOUND_CHANNEL || 'whatsapp') !== 'whatsapp')) {
+      || (env.LOCAL_INBOUND_CHANNEL || 'whatsapp') !== 'whatsapp'
+      || (firstContactEligibilityMode === 'INDIVIDUAL' && !/^[0-9a-f]{64}$/.test(firstContactCanaryPeerSha256 || ''))))) {
     throw new Error('FIRST_CONTACT_SCOPE_CONFIGURATION_INVALID');
   }
   return {
     firstContactEnabled,
+    firstContactEligibilityMode,
     firstContactTenantId,
     firstContactSourceAccount,
     firstContactCanaryPeerSha256,

@@ -68,6 +68,50 @@ def repin(scenario, monkeypatch):
     monkeypatch.setenv("ATTENTION_LIVE_WORKER_MANIFEST_SHA256", lifecycle.digest(path.read_bytes()))
 
 
+def configure_first_contact_pair(scenario, monkeypatch, mode):
+    manifest, _, rendered, _, _ = scenario
+    env = rendered["services"]["worker"]["environment"]
+    manifest.update({"first_contact_mode": "on", "first_contact_eligibility_mode": mode,
+                     "first_contact_transport": {"container": "synthetic-transport",
+                         "image_id": "sha256:" + "d" * 64, "source_sha": "a" * 40}})
+    env.update({"FIRST_CONTACT_ENABLED": "true", "FIRST_CONTACT_TENANT_ID": "synthetic-tenant",
+                "FIRST_CONTACT_SOURCE_ACCOUNT": "synthetic-account",
+                "FIRST_CONTACT_ELIGIBILITY_MODE": mode})
+    manifest["critical_environment_sha256"]["FIRST_CONTACT_ENABLED"] = lifecycle.digest(b"true")
+    manifest["critical_environment_sha256"]["FIRST_CONTACT_TENANT_ID"] = lifecycle.digest(b"synthetic-tenant")
+    manifest["critical_environment_sha256"]["FIRST_CONTACT_SOURCE_ACCOUNT"] = lifecycle.digest(b"synthetic-account")
+    transport_env = {
+        "FIRST_CONTACT_ENABLED": "true", "FIRST_CONTACT_ELIGIBILITY_MODE": mode,
+        "FIRST_CONTACT_TENANT_ID": "synthetic-tenant", "FIRST_CONTACT_SOURCE_ACCOUNT": "synthetic-account",
+        "LOCAL_TENANT_ID": "synthetic-tenant", "LOCAL_SOURCE_ACCOUNT": "synthetic-account",
+        "LOCAL_INBOUND_SOURCE": "wwebjs", "LOCAL_INBOUND_CHANNEL": "whatsapp",
+    }
+    if mode == "INDIVIDUAL":
+        env["FIRST_CONTACT_CANARY_PEER_SHA256"] = "c" * 64
+        transport_env["FIRST_CONTACT_CANARY_PEER_SHA256"] = "c" * 64
+        monkeypatch.setenv("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256", "c" * 64)
+    else:
+        env.pop("FIRST_CONTACT_CANARY_PEER_SHA256", None)
+        monkeypatch.delenv("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256", raising=False)
+    for key, value in (("ATTENTION_LIVE_FIRST_CONTACT_TENANT_ID", "synthetic-tenant"),
+                       ("ATTENTION_LIVE_FIRST_CONTACT_SOURCE_ACCOUNT", "synthetic-account")):
+        monkeypatch.setenv(key, value)
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    worker_image = {"Id": manifest["image_id"], "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}}
+    transport_image = {"Id": "sha256:" + "d" * 64,
+                       "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}}
+    transport = {"Image": "sha256:" + "d" * 64,
+                 "Config": {"Env": [f"{key}={value}" for key, value in transport_env.items()]},
+                 "State": {"Status": "running", "Health": {"Status": "healthy"}}}
+    monkeypatch.setattr(lifecycle, "inspect", lambda kind, name: (
+        worker_image if kind == "image" and name == manifest["image_id"] else
+        transport_image if kind == "image" and name == "sha256:" + "d" * 64 else
+        transport if kind == "container" and name == "synthetic-transport" else
+        pytest.fail(f"unexpected synthetic inspect: {kind}")))
+    return transport_env
+
+
 def test_complete_six_input_preflight(scenario):
     manifest, rendered, image, command = lifecycle.preflight()
     assert len(manifest["compose_files"]) == 6
@@ -126,7 +170,7 @@ def test_v2_off_rollback_target_accepts_v3_on_source(scenario, monkeypatch):
     source = (source_manifest, {"services": {"worker": "on"}}, {"Id": source_manifest["image_id"]}, ["source"])
     calls = []
     monkeypatch.setattr(lifecycle, "verify", lambda item, *_args, **_kwargs: calls.append(("verify", item["schema_version"])))
-    monkeypatch.setattr(lifecycle, "preflight", lambda *, previous=False: source if previous else target)
+    monkeypatch.setattr(lifecycle, "preflight", lambda *, previous=False, **_kwargs: source if previous else target)
     monkeypatch.setattr(lifecycle, "invoke", lambda args, **_kwargs: calls.append(("invoke", args)) or "")
     monkeypatch.setattr(lifecycle, "wait_healthy", lambda *_args: calls.append(("healthy", None)))
     lifecycle.reconcile(*target, previous=source)
@@ -138,7 +182,9 @@ def test_on_mode_requires_scoped_tenant_and_account(scenario, monkeypatch):
     manifest, _, rendered, _, _ = scenario
     env = rendered["services"]["worker"]["environment"]
     manifest["first_contact_mode"] = "on"
+    manifest["first_contact_eligibility_mode"] = "INDIVIDUAL"
     env["FIRST_CONTACT_ENABLED"] = "true"
+    env["FIRST_CONTACT_ELIGIBILITY_MODE"] = "INDIVIDUAL"
     manifest["critical_environment_sha256"]["FIRST_CONTACT_ENABLED"] = lifecycle.digest(b"true")
     manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
     repin(scenario, monkeypatch)
@@ -162,7 +208,155 @@ def test_on_mode_requires_scoped_tenant_and_account(scenario, monkeypatch):
     with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_CANARY_BOOT_DRIFT"):
         lifecycle.preflight()
     monkeypatch.setenv("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256", "c" * 64)
-    assert lifecycle.preflight()[0]["first_contact_mode"] == "on"
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_TRANSPORT_PIN_MISSING"):
+        lifecycle.preflight()
+
+
+def test_open_inbound_on_requires_explicit_worker_transport_parity(scenario, monkeypatch):
+    manifest, _, _, _, _ = scenario
+    configure_first_contact_pair(scenario, monkeypatch, "OPEN_INBOUND")
+    assert lifecycle.preflight()[0]["first_contact_eligibility_mode"] == "OPEN_INBOUND"
+    transport = manifest["first_contact_transport"]
+    transport_env = {"FIRST_CONTACT_ENABLED": "true", "FIRST_CONTACT_ELIGIBILITY_MODE": "INDIVIDUAL",
+                     "FIRST_CONTACT_TENANT_ID": "synthetic-tenant", "FIRST_CONTACT_SOURCE_ACCOUNT": "synthetic-account",
+                     "LOCAL_TENANT_ID": "synthetic-tenant", "LOCAL_SOURCE_ACCOUNT": "synthetic-account",
+                     "LOCAL_INBOUND_SOURCE": "wwebjs", "LOCAL_INBOUND_CHANNEL": "whatsapp"}
+    transport_inspect = {"Image": transport["image_id"], "Config": {"Env": [f"{k}={v}" for k, v in transport_env.items()]},
+                         "State": {"Status": "running", "Health": {"Status": "healthy"}}}
+    monkeypatch.setattr(lifecycle, "inspect", lambda kind, name: (
+        {"Id": transport["image_id"], "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}}
+        if kind == "image" and name == transport["image_id"] else transport_inspect))
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_TRANSPORT_ELIGIBILITY_DRIFT"):
+        lifecycle.preflight()
+
+
+def test_open_inbound_rejects_unknown_or_individual_peer_pin(scenario, monkeypatch):
+    manifest, _, rendered, _, _ = scenario
+    configure_first_contact_pair(scenario, monkeypatch, "OPEN_INBOUND")
+    env = rendered["services"]["worker"]["environment"]
+    env["FIRST_CONTACT_ELIGIBILITY_MODE"] = "OPEN_ANYTHING"
+    manifest["first_contact_eligibility_mode"] = "OPEN_ANYTHING"
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_ELIGIBILITY_MODE_INVALID"):
+        lifecycle.preflight()
+    env["FIRST_CONTACT_ELIGIBILITY_MODE"] = "OPEN_INBOUND"
+    manifest["first_contact_eligibility_mode"] = "OPEN_INBOUND"
+    env["FIRST_CONTACT_CANARY_PEER_SHA256"] = "c" * 64
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_OPEN_PEER_CONFLICT"):
+        lifecycle.preflight()
+
+
+def test_individual_on_keeps_hash_pinned_across_worker_transport(scenario, monkeypatch):
+    configure_first_contact_pair(scenario, monkeypatch, "INDIVIDUAL")
+    assert lifecycle.preflight()[0]["first_contact_eligibility_mode"] == "INDIVIDUAL"
+    manifest, _, _, _, _ = scenario
+    pair = manifest["first_contact_transport"]
+    transport_env = {"FIRST_CONTACT_ENABLED": "true", "FIRST_CONTACT_ELIGIBILITY_MODE": "INDIVIDUAL",
+                     "FIRST_CONTACT_TENANT_ID": "synthetic-tenant", "FIRST_CONTACT_SOURCE_ACCOUNT": "synthetic-account",
+                     "FIRST_CONTACT_CANARY_PEER_SHA256": "e" * 64, "LOCAL_TENANT_ID": "synthetic-tenant",
+                     "LOCAL_SOURCE_ACCOUNT": "synthetic-account"}
+    transport_inspect = {"Image": pair["image_id"], "Config": {"Env": [f"{k}={v}" for k, v in transport_env.items()]},
+                         "State": {"Status": "running", "Health": {"Status": "healthy"}}}
+    monkeypatch.setattr(lifecycle, "inspect", lambda kind, name: (
+        {"Id": pair["image_id"], "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}}
+        if kind == "image" and name == pair["image_id"] else transport_inspect))
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_PAIR_PEER_DRIFT"):
+        lifecycle.preflight()
+
+
+def test_off_open_inbound_mode_is_explicit_and_effect_free(scenario, monkeypatch):
+    manifest, _, rendered, _, _ = scenario
+    env = rendered["services"]["worker"]["environment"]
+    env.update({"FIRST_CONTACT_ENABLED": "false", "FIRST_CONTACT_TENANT_ID": "",
+                "FIRST_CONTACT_SOURCE_ACCOUNT": "", "FIRST_CONTACT_ELIGIBILITY_MODE": "OPEN_INBOUND"})
+    manifest.update({"first_contact_mode": "off", "first_contact_eligibility_mode": "OPEN_INBOUND",
+                     "first_contact_transport": {"container": "synthetic-transport",
+                         "image_id": "sha256:" + "d" * 64, "source_sha": "a" * 40}})
+    for key in ("FIRST_CONTACT_ENABLED", "FIRST_CONTACT_TENANT_ID", "FIRST_CONTACT_SOURCE_ACCOUNT"):
+        manifest["critical_environment_sha256"][key] = lifecycle.digest(env[key].encode())
+    transport_env = {"FIRST_CONTACT_ENABLED": "false", "FIRST_CONTACT_ELIGIBILITY_MODE": "OPEN_INBOUND",
+                     "FIRST_CONTACT_TENANT_ID": "", "FIRST_CONTACT_SOURCE_ACCOUNT": ""}
+    transport = {"Image": "sha256:" + "d" * 64,
+                 "Config": {"Env": [f"{key}={value}" for key, value in transport_env.items()]},
+                 "State": {"Status": "running", "Health": {"Status": "healthy"}}}
+    worker_image = {"Id": manifest["image_id"], "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}}
+    transport_image = {"Id": "sha256:" + "d" * 64,
+                       "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}}
+    monkeypatch.setattr(lifecycle, "inspect", lambda kind, name: (
+        worker_image if kind == "image" and name == manifest["image_id"] else
+        transport_image if kind == "image" and name == "sha256:" + "d" * 64 else transport))
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    assert lifecycle.preflight()[0]["first_contact_eligibility_mode"] == "OPEN_INBOUND"
+    env["FIRST_CONTACT_ELIGIBILITY_MODE"] = "INDIVIDUAL"
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_ELIGIBILITY_MODE_DRIFT"):
+        lifecycle.preflight()
+
+
+def test_transition_preflight_accepts_pinned_source_transport_for_off_rollback(scenario, monkeypatch):
+    from copy import deepcopy
+
+    manifest, manifest_path, rendered, _, _ = scenario
+    target_env = rendered["services"]["worker"]["environment"]
+    target_env.update({"FIRST_CONTACT_ENABLED": "false", "FIRST_CONTACT_TENANT_ID": "",
+                       "FIRST_CONTACT_SOURCE_ACCOUNT": "", "FIRST_CONTACT_ELIGIBILITY_MODE": "OPEN_INBOUND"})
+    manifest.update({"first_contact_mode": "off", "first_contact_eligibility_mode": "OPEN_INBOUND",
+                     "first_contact_transport": {"container": "synthetic-transport",
+                         "image_id": "sha256:" + "d" * 64, "source_sha": "a" * 40}})
+    for key in ("FIRST_CONTACT_ENABLED", "FIRST_CONTACT_TENANT_ID", "FIRST_CONTACT_SOURCE_ACCOUNT"):
+        manifest["critical_environment_sha256"][key] = lifecycle.digest(target_env[key].encode())
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+
+    source_rendered = deepcopy(rendered)
+    source_env = source_rendered["services"]["worker"]["environment"]
+    source_env.update({"FIRST_CONTACT_ENABLED": "true", "FIRST_CONTACT_TENANT_ID": "synthetic-tenant",
+                       "FIRST_CONTACT_SOURCE_ACCOUNT": "synthetic-account"})
+    source_manifest = deepcopy(manifest)
+    source_manifest.update({"first_contact_mode": "on", "render_sha256": lifecycle.digest(
+        lifecycle.canonical(source_rendered))})
+    source_manifest["critical_environment_sha256"]["FIRST_CONTACT_ENABLED"] = lifecycle.digest(b"true")
+    source_manifest["critical_environment_sha256"]["FIRST_CONTACT_TENANT_ID"] = lifecycle.digest(b"synthetic-tenant")
+    source_manifest["critical_environment_sha256"]["FIRST_CONTACT_SOURCE_ACCOUNT"] = lifecycle.digest(b"synthetic-account")
+    previous_path = manifest_path.with_name("previous-on.json")
+    previous_path.write_text(json.dumps(source_manifest))
+    previous_path.chmod(0o600)
+    monkeypatch.setenv("ATTENTION_LIVE_WORKER_MANIFEST_PREVIOUS", str(previous_path))
+    monkeypatch.setenv("ATTENTION_LIVE_WORKER_MANIFEST_SHA256_PREVIOUS",
+                       lifecycle.digest(previous_path.read_bytes()))
+    monkeypatch.setenv("ATTENTION_LIVE_FIRST_CONTACT_TENANT_ID", "synthetic-tenant")
+    monkeypatch.setenv("ATTENTION_LIVE_FIRST_CONTACT_SOURCE_ACCOUNT", "synthetic-account")
+
+    transport_env = {"FIRST_CONTACT_ENABLED": "true", "FIRST_CONTACT_ELIGIBILITY_MODE": "OPEN_INBOUND",
+                     "FIRST_CONTACT_TENANT_ID": "synthetic-tenant", "FIRST_CONTACT_SOURCE_ACCOUNT": "synthetic-account",
+                     "LOCAL_TENANT_ID": "synthetic-tenant", "LOCAL_SOURCE_ACCOUNT": "synthetic-account",
+                     "LOCAL_INBOUND_SOURCE": "wwebjs", "LOCAL_INBOUND_CHANNEL": "whatsapp"}
+    transport = {"Image": "sha256:" + "d" * 64,
+                 "Config": {"Env": [f"{key}={value}" for key, value in transport_env.items()]},
+                 "State": {"Status": "running", "Health": {"Status": "healthy"}}}
+    worker_image = {"Id": manifest["image_id"], "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}}
+    transport_image = {"Id": "sha256:" + "d" * 64,
+                       "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}}
+    monkeypatch.setattr(lifecycle, "inspect", lambda kind, name: (
+        worker_image if kind == "image" and name == manifest["image_id"] else
+        transport_image if kind == "image" and name == "sha256:" + "d" * 64 else transport))
+    render_calls = {"count": 0}
+
+    def render_transition(*_args, **_kwargs):
+        value = rendered if render_calls["count"] == 0 else source_rendered
+        render_calls["count"] += 1
+        return json.dumps(value)
+
+    monkeypatch.setattr(lifecycle, "invoke", render_transition)
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_TRANSPORT_MODE_DRIFT"):
+        lifecycle.preflight()
+    render_calls["count"] = 0
+    assert lifecycle.preflight(allow_previous_transport=True)[0]["first_contact_mode"] == "off"
 
 
 def test_on_mode_cannot_be_enabled_by_render_alone(scenario, monkeypatch):
@@ -361,7 +555,7 @@ def test_rollback_direction_verifies_on_source_before_off_target(scenario, monke
     source = (source_manifest, {"services": {"worker": "on"}}, {"Id": source_manifest["image_id"]}, ["source"])
     calls = []
     monkeypatch.setattr(lifecycle, "verify", lambda manifest, *_args, **_kwargs: calls.append(("verify", manifest["first_contact_mode"])))
-    monkeypatch.setattr(lifecycle, "preflight", lambda *, previous=False: source if previous else target)
+    monkeypatch.setattr(lifecycle, "preflight", lambda *, previous=False, **_kwargs: source if previous else target)
     monkeypatch.setattr(lifecycle, "invoke", lambda args, **_kwargs: calls.append(("invoke", args)) or "")
     monkeypatch.setattr(lifecycle, "wait_healthy", lambda name, seconds: calls.append(("healthy", name)))
     lifecycle.reconcile(*target, previous=source)

@@ -11,7 +11,7 @@ const { createConfig } = require('../src/config');
 const { createStatus } = require('../src/status');
 const { createOutboundProvenanceLedger } = require('../src/outbound-provenance');
 const { createServer } = require('../src/server');
-const { PROOF_PATH, signature } = require('../src/first-contact');
+const { PROOF_PATH, signature, matchesConfiguredScope } = require('../src/first-contact');
 
 const secret = 'synthetic-first-contact-proof-secret';
 const lid = '1234567890@lid';
@@ -60,10 +60,12 @@ function request(port, body, { proof = false, headers = {}, timestamp, target } 
   });
 }
 
-async function fixture(t, { ready = true, client = null, enabled = true } = {}) {
+async function fixture(t, { ready = true, client = null, enabled = true, mode = 'INDIVIDUAL' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attention-first-contact-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const cfg = config({ LOCAL_OUTBOUND_PROVENANCE_DIR: dir, FIRST_CONTACT_ENABLED: String(enabled) });
+  const cfg = config({ LOCAL_OUTBOUND_PROVENANCE_DIR: dir, FIRST_CONTACT_ENABLED: String(enabled),
+    FIRST_CONTACT_ELIGIBILITY_MODE: mode,
+    ...(mode === 'OPEN_INBOUND' ? { FIRST_CONTACT_CANARY_PEER_SHA256: '' } : {}) });
   const status = createStatus(cfg, ready ? { service_state: 'ready', browser_debug_reachable: true,
     wwebjs_connected: true, ready: true, client_state: 'CONNECTED' } : {});
   const ledger = createOutboundProvenanceLedger(cfg);
@@ -119,6 +121,20 @@ test('new configuration defaults OFF and refuses incomplete or different namespa
   assert.throws(() => config({ FIRST_CONTACT_CANARY_PEER_SHA256: 'A'.repeat(64) }), /CONFIGURATION_INVALID/);
   assert.throws(() => config({ LOCAL_INBOUND_SOURCE: 'other' }), /CONFIGURATION_INVALID/);
   assert.throws(() => config({ LOCAL_INBOUND_CHANNEL: 'other' }), /CONFIGURATION_INVALID/);
+  assert.throws(() => config({ FIRST_CONTACT_ELIGIBILITY_MODE: 'OPEN_ANYTHING' }), /CONFIGURATION_INVALID/);
+  assert.throws(() => config({ FIRST_CONTACT_ELIGIBILITY_MODE: 'OPEN_INBOUND' }), /CONFIGURATION_INVALID/);
+  assert.throws(() => config({ FIRST_CONTACT_ENABLED: 'not-a-boolean' }), /FIRST_CONTACT_ENABLED_INVALID/);
+  const open = config({ FIRST_CONTACT_ELIGIBILITY_MODE: 'OPEN_INBOUND', FIRST_CONTACT_CANARY_PEER_SHA256: '' });
+  assert.equal(open.firstContactEligibilityMode, 'OPEN_INBOUND');
+  assert.equal(open.firstContactEnabled, true);
+  const openOff = createConfig({ FIRST_CONTACT_ENABLED: 'false', FIRST_CONTACT_ELIGIBILITY_MODE: 'OPEN_INBOUND' });
+  assert.equal(openOff.firstContactEnabled, false);
+  assert.equal(openOff.firstContactEligibilityMode, 'OPEN_INBOUND');
+  assert.equal(matchesConfiguredScope({ ...scope, canonical_peer_hash: sha('another-direct-peer@lid') }, open), true);
+  assert.equal(matchesConfiguredScope({ ...scope, tenant_id: 'other' }, open), false);
+  assert.equal(matchesConfiguredScope({ ...scope, source_account: 'other' }, open), false);
+  assert.throws(() => config({ FIRST_CONTACT_ELIGIBILITY_MODE: 'OPEN_INBOUND',
+    FIRST_CONTACT_CANARY_PEER_SHA256: scope.canonical_peer_hash }), /CONFIGURATION_INVALID/);
 });
 
 test('ledger binds full FC scope and monotonic ACK while legacy fingerprint stays compatible', async (t) => {
@@ -197,6 +213,31 @@ test('FC send compares canonical provider peer, full scope, durable replay and A
   assert.equal(sends, 1);
   ledger.markAck('synthetic-reference', 2);
   assert.equal((await request(port, scope, { proof: true })).body.ack, 2);
+});
+
+test('OPEN_INBOUND delivery accepts a second authenticated direct peer without a peer pin', async (t) => {
+  let sends = 0;
+  const otherPeer = '2234567890@lid';
+  const openScope = { ...scope, canonical_peer_hash: sha(otherPeer), attempt_id: 'open-attempt',
+    execution_intent_id: 'open-intent', outbox_id: 'open-outbox',
+    idempotency_key: 'execution:open-intent' };
+  const openPayload = { external_actor_id: otherPeer, message_type: 'text',
+    text: 'Synthetic public introduction.', execution_intent_id: 'open-intent',
+    outbox_id: 'open-outbox', idempotency_key: 'execution:open-intent', first_contact: openScope };
+  const { port, ledger } = await fixture(t, { mode: 'OPEN_INBOUND', client: { async sendMessage() {
+    sends += 1; return { id: { _serialized: 'synthetic-open-reference' }, ack: 1 };
+  } } });
+  const result = await request(port, openPayload);
+  assert.equal(result.code, 200);
+  assert.equal(result.body.status, 'sent');
+  assert.equal(sends, 1);
+  assert.equal((await request(port, openScope, { proof: true })).body.ack, 1);
+  ledger.markAck('synthetic-open-reference', 2);
+  assert.equal((await request(port, openScope, { proof: true })).body.ack, 2);
+  const group = await request(port, { ...openPayload, external_actor_id: '123@g.us',
+    first_contact: { ...openScope, canonical_peer_hash: sha('123@g.us') } });
+  assert.equal(group.code, 403);
+  assert.equal(sends, 1);
 });
 
 test('read-only proof of UNKNOWN never creates a missing provenance directory', async (t) => {

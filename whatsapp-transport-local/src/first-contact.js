@@ -35,11 +35,17 @@ function validScope(value) {
 }
 
 function matchesConfiguredScope(value, config) {
+  const mode = config.firstContactEligibilityMode || 'INDIVIDUAL';
+  const peerAllowed = mode === 'OPEN_INBOUND'
+    ? !config.firstContactCanaryPeerSha256
+    : mode === 'INDIVIDUAL'
+      && typeof config.firstContactCanaryPeerSha256 === 'string'
+      && /^[0-9a-f]{64}$/.test(config.firstContactCanaryPeerSha256)
+      && value.canonical_peer_hash === config.firstContactCanaryPeerSha256;
   return config.firstContactEnabled === true
+    && ['INDIVIDUAL', 'OPEN_INBOUND'].includes(mode)
     && bounded(config.firstContactTenantId) && bounded(config.firstContactSourceAccount)
-    && typeof config.firstContactCanaryPeerSha256 === 'string'
-    && /^[0-9a-f]{64}$/.test(config.firstContactCanaryPeerSha256)
-    && value.canonical_peer_hash === config.firstContactCanaryPeerSha256
+    && peerAllowed
     && value.tenant_id === config.firstContactTenantId && value.tenant_id === config.tenantId
     && value.source_account === config.firstContactSourceAccount
     && value.source_account === config.sourceAccount;
