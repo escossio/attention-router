@@ -142,6 +142,7 @@ class Settings(BaseSettings):
     andy_behavior_canary_binding_id: str | None = None
     andy_agent_enabled: bool = False
     first_contact_enabled: bool = False
+    first_contact_eligibility_mode: str = "INDIVIDUAL"
     first_contact_tenant_id: str | None = Field(default=None, repr=False)
     first_contact_source_account: str | None = Field(default=None, repr=False)
     first_contact_canary_peer_sha256: str | None = Field(default=None, repr=False)
@@ -290,16 +291,22 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        if self.first_contact_eligibility_mode not in {"INDIVIDUAL", "OPEN_INBOUND"}:
+            raise ValueError("FIRST_CONTACT_ELIGIBILITY_MODE_INVALID")
+        peer_hash = self.first_contact_canary_peer_sha256
+        if self.first_contact_eligibility_mode == "OPEN_INBOUND" and peer_hash:
+            raise ValueError("FIRST_CONTACT_OPEN_MODE_PEER_CONFLICT")
         if self.first_contact_enabled and not (
             self.first_contact_tenant_id and self.first_contact_tenant_id.strip()
             and self.first_contact_source_account and self.first_contact_source_account.strip()
         ):
             raise ValueError("FIRST_CONTACT_TENANT_AND_ACCOUNT_REQUIRED")
-        if self.first_contact_enabled and not (
-            self.first_contact_canary_peer_sha256
-            and re.fullmatch(r"[0-9a-f]{64}", self.first_contact_canary_peer_sha256)
+        if self.first_contact_enabled and self.first_contact_eligibility_mode == "INDIVIDUAL" and not (
+            peer_hash and re.fullmatch(r"[0-9a-f]{64}", peer_hash)
         ):
             raise ValueError("FIRST_CONTACT_CANARY_PEER_SHA256_REQUIRED")
+        if peer_hash and not re.fullmatch(r"[0-9a-f]{64}", peer_hash):
+            raise ValueError("FIRST_CONTACT_CANARY_PEER_SHA256_INVALID")
         if self.agent_decision_default_visitor_only and not (
             self.agent_decision_default_blueprint_id and self.agent_decision_default_blueprint_id.strip()
         ):

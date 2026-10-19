@@ -37,6 +37,7 @@ CRITICAL = (
 )
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 SOURCE_SHA = re.compile(r"[0-9a-f]{40}\Z")
+FIRST_CONTACT_MODES = ("INDIVIDUAL", "OPEN_INBOUND")
 LEGACY_CRITICAL = CRITICAL[:-3]
 
 
@@ -79,6 +80,72 @@ def inspect(kind: str, name: str) -> dict:
     return rows[0]
 
 
+def inspect_environment(container: dict) -> dict[str, str]:
+    rows = container.get("Config", {}).get("Env") or []
+    require(type(rows) is list and all(type(row) is str and "=" in row for row in rows),
+            "TRANSPORT_ENV_INVALID")
+    environment = {}
+    for row in rows:
+        key, value = row.split("=", 1)
+        require(key not in environment, "TRANSPORT_ENV_DUPLICATE_KEY")
+        environment[key] = value
+    return environment
+
+
+def first_contact_transport_pin(manifest: dict) -> dict:
+    pair = manifest.get("first_contact_transport")
+    require(type(pair) is dict and set(pair) == {"container", "image_id", "source_sha"},
+            "FIRST_CONTACT_TRANSPORT_PIN_MISSING")
+    require(type(pair["container"]) is str and pair["container"].strip()
+            and type(pair["image_id"]) is str
+            and bool(re.fullmatch(r"sha256:[0-9a-f]{64}", pair["image_id"]))
+            and type(pair["source_sha"]) is str
+            and bool(SOURCE_SHA.fullmatch(pair["source_sha"])), "FIRST_CONTACT_TRANSPORT_PIN_INVALID")
+    require(pair["source_sha"] == manifest["source_sha"], "FIRST_CONTACT_PAIR_SOURCE_DRIFT")
+    return pair
+
+
+def verify_first_contact_transport(manifest: dict, worker_env: dict, mode: str, *, enabled: bool) -> None:
+    pair = first_contact_transport_pin(manifest)
+    container = inspect("container", pair["container"])
+    require(container.get("Image") == pair["image_id"], "FIRST_CONTACT_TRANSPORT_IMAGE_DRIFT")
+    image = inspect("image", pair["image_id"])
+    require(image.get("Id") == pair["image_id"]
+            and image.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") == pair["source_sha"],
+            "FIRST_CONTACT_TRANSPORT_REVISION_DRIFT")
+    require(container.get("State", {}).get("Status") == "running"
+            and container.get("State", {}).get("Health", {}).get("Status") == "healthy",
+            "FIRST_CONTACT_TRANSPORT_UNHEALTHY")
+    transport_env = inspect_environment(container)
+    expected_enabled = "true" if enabled else "false"
+    require(transport_env.get("FIRST_CONTACT_ENABLED", "false") == expected_enabled,
+            "FIRST_CONTACT_TRANSPORT_MODE_DRIFT")
+    require(transport_env.get("FIRST_CONTACT_ELIGIBILITY_MODE", "INDIVIDUAL") == mode,
+            "FIRST_CONTACT_TRANSPORT_ELIGIBILITY_DRIFT")
+    for key in ("FIRST_CONTACT_TENANT_ID", "FIRST_CONTACT_SOURCE_ACCOUNT"):
+        require(transport_env.get(key, "") == worker_env.get(key, ""), "FIRST_CONTACT_PAIR_SCOPE_DRIFT")
+    if enabled:
+        require(transport_env.get("FIRST_CONTACT_TENANT_ID", "").strip()
+                and transport_env.get("FIRST_CONTACT_SOURCE_ACCOUNT", "").strip(),
+                "FIRST_CONTACT_TRANSPORT_SCOPE_MISSING")
+        require(transport_env.get("LOCAL_TENANT_ID") == transport_env["FIRST_CONTACT_TENANT_ID"]
+                and transport_env.get("LOCAL_SOURCE_ACCOUNT", "default") == transport_env["FIRST_CONTACT_SOURCE_ACCOUNT"]
+                and transport_env.get("LOCAL_INBOUND_SOURCE", "wwebjs") == "wwebjs"
+                and transport_env.get("LOCAL_INBOUND_CHANNEL", "whatsapp") == "whatsapp",
+                "FIRST_CONTACT_TRANSPORT_NAMESPACE_DRIFT")
+    transport_peer = transport_env.get("FIRST_CONTACT_CANARY_PEER_SHA256", "")
+    worker_peer = worker_env.get("FIRST_CONTACT_CANARY_PEER_SHA256", "")
+    if mode == "INDIVIDUAL":
+        require((not transport_peer or bool(SHA256.fullmatch(transport_peer)))
+                and transport_peer == worker_peer, "FIRST_CONTACT_PAIR_PEER_DRIFT")
+        if enabled:
+            require(bool(SHA256.fullmatch(worker_peer)), "FIRST_CONTACT_CANARY_MISSING")
+    else:
+        require(not worker_peer and not transport_peer
+                and not os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256", ""),
+                "FIRST_CONTACT_OPEN_PEER_CONFLICT")
+
+
 def load_manifest(*, previous: bool = False) -> dict:
     suffix = "_PREVIOUS" if previous else ""
     path = os.environ.get("ATTENTION_LIVE_WORKER_MANIFEST" + suffix, "")
@@ -118,7 +185,7 @@ def compose_command(manifest: dict, *, previous: bool = False) -> list[str]:
     return command
 
 
-def preflight(*, previous: bool = False) -> tuple[dict, dict, dict, list[str]]:
+def preflight(*, previous: bool = False, allow_previous_transport: bool = False) -> tuple[dict, dict, dict, list[str]]:
     manifest = load_manifest(previous=previous)
     for field, env_name in (("project", "ATTENTION_LIVE_PROJECT"), ("workdir", "ATTENTION_LIVE_WORKDIR"),
                             ("worker_container", "ATTENTION_LIVE_WORKER_CONTAINER"), ("db_container", "ATTENTION_LIVE_DB_CONTAINER"),
@@ -153,15 +220,56 @@ def preflight(*, previous: bool = False) -> tuple[dict, dict, dict, list[str]]:
     mode = "off" if legacy else manifest.get("first_contact_mode")
     require(mode in ("off", "on"), "FIRST_CONTACT_MODE_INVALID")
     require(env.get("FIRST_CONTACT_ENABLED", "false") == ("true" if mode == "on" else "false"), "FIRST_CONTACT_MODE_DRIFT")
+    eligibility = env.get("FIRST_CONTACT_ELIGIBILITY_MODE")
+    pinned_eligibility = manifest.get("first_contact_eligibility_mode")
+    if eligibility is None and pinned_eligibility is None and mode == "off":
+        eligibility = pinned_eligibility = "INDIVIDUAL"  # Existing OFF manifests remain readable.
+    require(eligibility in FIRST_CONTACT_MODES and pinned_eligibility in FIRST_CONTACT_MODES,
+            "FIRST_CONTACT_ELIGIBILITY_MODE_INVALID")
+    require(eligibility == pinned_eligibility, "FIRST_CONTACT_ELIGIBILITY_MODE_DRIFT")
+    worker_peer = env.get("FIRST_CONTACT_CANARY_PEER_SHA256", "")
+    require(not worker_peer or bool(SHA256.fullmatch(worker_peer)), "FIRST_CONTACT_CANARY_INVALID")
+    if eligibility == "OPEN_INBOUND":
+        require(not worker_peer, "FIRST_CONTACT_OPEN_PEER_CONFLICT")
     if mode == "on":
         require(bool(env["FIRST_CONTACT_TENANT_ID"].strip()) and bool(env["FIRST_CONTACT_SOURCE_ACCOUNT"].strip()), "FIRST_CONTACT_SCOPE_MISSING")
         require(env["FIRST_CONTACT_TENANT_ID"] == os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_TENANT_ID") and
                 env["FIRST_CONTACT_SOURCE_ACCOUNT"] == os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_SOURCE_ACCOUNT"),
                 "FIRST_CONTACT_BOOT_SCOPE_DRIFT")
-        canary = env.get("FIRST_CONTACT_CANARY_PEER_SHA256", "")
-        require(type(canary) is str and bool(SHA256.fullmatch(canary)), "FIRST_CONTACT_CANARY_MISSING")
-        require(canary == os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256"),
-                "FIRST_CONTACT_CANARY_BOOT_DRIFT")
+        if eligibility == "INDIVIDUAL":
+            require(bool(worker_peer), "FIRST_CONTACT_CANARY_MISSING")
+            require(worker_peer == os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256"),
+                    "FIRST_CONTACT_CANARY_BOOT_DRIFT")
+        else:
+            require(not os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256", ""),
+                    "FIRST_CONTACT_OPEN_PEER_BOOT_CONFLICT")
+    if not legacy and (mode == "on" or pinned_eligibility != "INDIVIDUAL"
+                       or "FIRST_CONTACT_ELIGIBILITY_MODE" in env):
+        first_contact_transport_pin(manifest)
+        if not previous:
+            try:
+                verify_first_contact_transport(manifest, env, eligibility, enabled=mode == "on")
+            except InvariantError as target_error:
+                if not allow_previous_transport:
+                    raise
+                source = preflight(previous=True)
+                source_manifest, source_rendered, *_ = source
+                source_mode = source_manifest.get("first_contact_mode")
+                if source_manifest["schema_version"] == "andy-live-worker-lifecycle-v2":
+                    source_mode = "off"
+                if source_mode not in ("off", "on"):
+                    raise target_error
+                source_env = source_rendered["services"][source_manifest["service"]].get("environment") or {}
+                source_eligibility = source_manifest.get("first_contact_eligibility_mode")
+                if source_eligibility is None and source_mode == "off":
+                    source_eligibility = "INDIVIDUAL"
+                if source_eligibility not in FIRST_CONTACT_MODES:
+                    raise target_error
+                try:
+                    verify_first_contact_transport(source_manifest, source_env, source_eligibility,
+                                                   enabled=source_mode == "on")
+                except InvariantError:
+                    raise target_error
     image = inspect("image", service["image"])
     require(image.get("Id") == manifest["image_id"], "IMAGE_DRIFT")
     require(service["image"] == manifest["image_id"], "IMAGE_REFERENCE_UNPINNED")
@@ -211,7 +319,9 @@ def reconcile(manifest: dict, rendered: dict, image: dict, command: list[str], *
     invoke(["docker", "update", "--restart", "unless-stopped", manifest["db_container"]])
     invoke(["docker", "start", manifest["db_container"]])
     wait_healthy(manifest["db_container"], seconds)
-    fresh_manifest, fresh_rendered, fresh_image, fresh_command = preflight()
+    fresh_manifest, fresh_rendered, fresh_image, fresh_command = preflight(
+        allow_previous_transport=previous is not None,
+    )
     require(fresh_manifest == manifest and fresh_rendered == rendered and fresh_image == image and
             fresh_command == command, "TARGET_CHANGED_BEFORE_UP")
     if previous is not None:
@@ -228,7 +338,8 @@ def main() -> int:
     parser.add_argument("--transition-check", action="store_true", help="read-only source and target validation")
     args = parser.parse_args()
     try:
-        manifest, rendered, image, command = preflight()
+        allow_previous_transport = not args.check and bool(os.environ.get("ATTENTION_LIVE_WORKER_MANIFEST_PREVIOUS"))
+        manifest, rendered, image, command = preflight(allow_previous_transport=allow_previous_transport)
         previous = preflight(previous=True) if args.transition_check or os.environ.get("ATTENTION_LIVE_WORKER_MANIFEST_PREVIOUS") else None
         if args.check:
             verify(manifest, rendered, image)

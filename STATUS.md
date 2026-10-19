@@ -474,3 +474,9 @@ the assets and `docs/demo.md`.
 - Worker requires a private SHA-256 of one verified canonical provider LID before building the First Contact Agent directive or reserving an introduction. Transport send/proof and Lifecycle V3 ON preflight require the same individual pin; OFF and ordinary visitor routing remain compatible.
 - The prior ordinary reply to the owner's consented test number does not establish a First Contact V1 presentation; only durable presentation state and correlated delivery proof do. No historical data is erased or backfilled.
 - Focused synthetic Agent and Lifecycle tests: 61 PASS; focused Transport tests: 8 PASS. Distributed PostgreSQL and GitHub checks are pending on the eventual commit SHA. No production configuration, container, database, session or message was changed.
+
+## Andy First Contact V1 — OPEN_INBOUND candidate (2026-10-19)
+
+- A main verificada da PR #386 é `1580c7a56f58302eb667193a87b91e6e6772b75f`; alteração preparada em worktree isolada `feat/andy-first-contact-open-inbound-pass14`.
+- Adiciona modalidade explícita OPEN_INBOUND mantendo o default OFF, identidade canônica autenticada, escopo tenant/conta, visitor guard, exclusão de bindings/owner/grupos e prova HMAC/ACK. O Lifecycle V3 exige paridade Worker/Transport e pins para manifestos explícitos.
+- Validação targeted sintética local: 181 Python e 9 Transport PASS; Ruff, sintaxe e diff-check PASS. Certificação oficial ainda pendente; produção não foi alterada e First Contact permanece OFF.

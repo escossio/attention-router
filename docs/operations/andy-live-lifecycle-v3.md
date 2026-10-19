@@ -19,18 +19,29 @@ The six ordered roles are `base`, `otel`, `otel_e2e`, `execution`, `groups` and
 canonical rendered Compose JSON hash, an immutable `sha256:` image reference
 and matching image ID, source revision, critical environment value hashes,
 project, workdir, service and container identities. `first_contact_mode` must
-be `off` or `on`. ON requires `FIRST_CONTACT_ENABLED=true` and explicit tenant
-and source-account scope matching separate boot pins
+be `off` or `on`. New explicit eligibility manifests pin
+`first_contact_eligibility_mode` as `INDIVIDUAL` or `OPEN_INBOUND`, matching
+`FIRST_CONTACT_ELIGIBILITY_MODE` in the Worker and Transport. ON requires
+`FIRST_CONTACT_ENABLED=true` and explicit tenant and source-account scope matching separate boot pins
 `ATTENTION_LIVE_FIRST_CONTACT_TENANT_ID` and
 `ATTENTION_LIVE_FIRST_CONTACT_SOURCE_ACCOUNT`; OFF requires false. The image OCI revision must match
 the pinned source SHA. A service with no healthy Docker healthcheck fails the
 post-start gate.
-For individual canary ON, the rendered Worker must also carry a lowercase
+For `INDIVIDUAL` ON, the rendered Worker must also carry a lowercase
 `FIRST_CONTACT_CANARY_PEER_SHA256` matching the private boot pin
 `ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256`. The complete rendered Compose
-hash pins that value. Existing V2/V3 OFF manifests remain readable unchanged;
-an ON transition without the peer pin fails before mutation. The installed V3
-must be updated separately in an approved window before relying on this check.
+hash pins that value. `OPEN_INBOUND` ON requires that peer pin to be absent in
+both services. Its root-only V3 manifest also pins the Transport container,
+immutable image ID and source revision; preflight verifies its live image,
+health, eligibility mode, tenant/account and inbound namespace before allowing
+the Worker transition. During a pinned transition, preflight accepts the live
+Transport only if it matches the complete target pair or the complete pinned
+source pair; `--check` always requires exact target parity. This permits a
+directed Worker-first OFF rollback while the authenticated Transport is still
+at the pinned ON source, without accepting an unrelated intermediate state.
+Existing V2/V3 OFF manifests without a mode remain
+readable as `INDIVIDUAL` for rollback compatibility. Explicit ON manifests
+without complete Worker/Transport parity pins fail before mutation.
 
 ## Transition, reboot and reversal
 
