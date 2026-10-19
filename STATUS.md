@@ -477,6 +477,6 @@ the assets and `docs/demo.md`.
 
 ## Andy First Contact V1 — OPEN_INBOUND candidate (2026-10-19)
 
-- A main verificada da PR #386 é `1580c7a56f58302eb667193a87b91e6e6772b75f`; alteração preparada em worktree isolada `feat/andy-first-contact-open-inbound-pass14`.
-- Adiciona modalidade explícita OPEN_INBOUND mantendo o default OFF, identidade canônica autenticada, escopo tenant/conta, visitor guard, exclusão de bindings/owner/grupos e prova HMAC/ACK. O Lifecycle V3 exige paridade Worker/Transport e pins para manifestos explícitos.
-- Validação targeted sintética local: 181 Python e 9 Transport PASS; Ruff, sintaxe e diff-check PASS. Certificação oficial ainda pendente; produção não foi alterada e First Contact permanece OFF.
+- Branch `feat/andy-first-contact-open-inbound-pass14` e PR #387 contra main `1580c7a56f58302eb667193a87b91e6e6772b75f`; implementation commit `b93017a5317107ae4a592abe4db3ceea56c18684`.
+- Adds explicit `INDIVIDUAL` and `OPEN_INBOUND` modes, retaining the OFF default, authenticated canonical identity, tenant/account scope, visitor guard, owner/group/binding exclusions and HMAC/ACK proof. Lifecycle V3 enforces Worker/Transport mode and pinned image parity.
+- Targeted synthetic checks: 181 Python and 9 Transport PASS; Ruff, compile/syntax and diff-check PASS. All 11 official checks passed on the exact implementation SHA, including distributed PostgreSQL, Python, Transport, Docker, CodeQL and secret-scan. PR remains open; no merge or production change was performed. First Contact remains OFF.
