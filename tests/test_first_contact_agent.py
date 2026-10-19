@@ -185,6 +185,46 @@ def test_open_inbound_confirmed_state_survives_for_next_interaction(session, mon
     assert session.scalar(select(FirstContactPresentationRow)).state == "CONFIRMED"
 
 
+@pytest.mark.parametrize("eligibility_mode", ["OPEN_INBOUND", "INDIVIDUAL"])
+def test_generic_second_inbound_recovers_undispatched_introduction(
+    session, monkeypatch, eligibility_mode,
+):
+    captured = (enabled_open_inbound(session, monkeypatch) if eligibility_mode == "OPEN_INBOUND"
+                else enabled(session, monkeypatch))
+    if eligibility_mode == "INDIVIDUAL":
+        monkeypatch.setattr(settings, "first_contact_eligibility_mode", "INDIVIDUAL")
+    monkeypatch.setattr(autonomy, "automation_denial_reason", lambda *_args, **_kwargs: "OWNER_AUTOMATION_PAUSED")
+    first = visitor_decision(session, event())
+    first_evaluation = autonomy.evaluate_and_route(session, first)
+    session.commit()
+    assert first.response_introduction_included is True
+    assert first.proposed_response.startswith("[Andy • IA] Olá! Sou a Andy")
+    assert first.status == "DRY_RUN" and not first_evaluation.automatic_execution_allowed
+    assert not session.scalar(select(OutboxMessageRow))
+    presentation = session.scalar(select(FirstContactPresentationRow))
+    original_attempt_id = presentation.current_attempt_id
+    assert presentation.state == "RESERVED"
+
+    monkeypatch.setattr(autonomy, "automation_denial_reason", lambda *_args, **_kwargs: None)
+    second = visitor_decision(session, event(content="Explique fibra de forma simples."))
+    assert captured[-1].first_contact["mode"] == "INTRODUCE"
+    assert second.response_introduction_included is True
+    assert second.proposed_response.startswith("[Andy • IA] Olá! Sou a Andy, uma assistente virtual")
+    assert session.get(FirstContactAttemptRow, original_attempt_id).state == "FAILED"
+    assert presentation.generation == 2
+    outbox = enqueue(session, second)
+    send(session, monkeypatch, outbox)
+    assert not confirm(session, outbox, ack=1)
+    assert presentation.state == "SENT" and presentation.confirmed_at is None
+    assert confirm(session, outbox, ack=2)
+    third = visitor_decision(session, event(content="Mais uma dúvida."))
+    assert captured[-1].first_contact["mode"] == "CONTINUE"
+    assert third.response_introduction_included is False
+    assert third.proposed_response.startswith("[Andy • IA]")
+    assert "Olá! Sou a Andy" not in third.proposed_response
+    assert session.scalar(select(func.count()).select_from(FirstContactAttemptRow)) == 2
+
+
 @pytest.mark.parametrize("change", ["missing_identity", "other_tenant", "other_account", "group", "binding", "owner"])
 def test_open_inbound_still_requires_proven_unbound_direct_scope(session, monkeypatch, change):
     captured = enabled_open_inbound(session, monkeypatch)

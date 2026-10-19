@@ -17,7 +17,7 @@ from attention_router.infrastructure.first_contact_models import (
     FirstContactAttemptRow, FirstContactPresentationRow,
 )
 from tests.test_first_contact import (
-    event, queued, scope, signed_proof,
+    denied_generated, event, queued, scope, signed_proof,
     test_accounts_and_tenants_have_separate_presentation_state as test_accounts_and_tenants_have_separate_presentation_state,
     test_ack_monotonicity_preserves_confirming_evidence as test_ack_monotonicity_preserves_confirming_evidence,
     test_authenticated_ack_confirms_once_and_survives_new_input as test_authenticated_ack_confirms_once_and_survives_new_input,
@@ -25,6 +25,7 @@ from tests.test_first_contact import (
     test_authenticated_transport_acceptance_is_not_device_confirmation as test_authenticated_transport_acceptance_is_not_device_confirmation,
     test_bound_effect_rejects_changed_snapshot_or_correlation as test_bound_effect_rejects_changed_snapshot_or_correlation,
     test_claim_is_explicit_and_done_does_not_confirm_delivery as test_claim_is_explicit_and_done_does_not_confirm_delivery,
+    test_committed_no_dispatch_denial_recovers_on_newer_event as test_committed_no_dispatch_denial_recovers_on_newer_event,
     test_confirmation_constraint_rejects_null_required_evidence as test_confirmation_constraint_rejects_null_required_evidence,
     test_database_rejects_confirmation_without_ack_or_effect as test_database_rejects_confirmation_without_ack_or_effect,
     test_generated_and_queued_are_not_confirmed_and_bind_is_idempotent as test_generated_and_queued_are_not_confirmed_and_bind_is_idempotent,
@@ -34,6 +35,8 @@ from tests.test_first_contact import (
     test_ineligible_or_cross_scope_event_cannot_reserve as test_ineligible_or_cross_scope_event_cannot_reserve,
     test_linked_effect_revalidates_original_scope_and_decision_authority as test_linked_effect_revalidates_original_scope_and_decision_authority,
     test_late_confirmation_keeps_original_identity_after_new_binding as test_late_confirmation_keeps_original_identity_after_new_binding,
+    test_no_dispatch_recovery_is_strictly_newer_and_identity_scoped as test_no_dispatch_recovery_is_strictly_newer_and_identity_scoped,
+    test_no_dispatch_recovery_requires_complete_negative_evidence as test_no_dispatch_recovery_requires_complete_negative_evidence,
     test_proven_failure_before_effect_allows_only_next_new_entry as test_proven_failure_before_effect_allows_only_next_new_entry,
     test_reference_cannot_change_after_authenticated_sent_receipt as test_reference_cannot_change_after_authenticated_sent_receipt,
     test_reserve_requires_new_event_and_never_releases_by_age as test_reserve_requires_new_event_and_never_releases_by_age,
@@ -91,6 +94,30 @@ def test_simultaneous_new_entries_have_exactly_one_presentation_owner(Session, s
     assert sum(result.token is not None for result in results) == 1
     assert session.scalar(select(func.count()).select_from(FirstContactPresentationRow)) == 1
     assert session.scalar(select(func.count()).select_from(FirstContactAttemptRow)) == 1
+
+
+def test_simultaneous_recovery_has_one_new_generation(Session, session):
+    first, _, _, _ = denied_generated(session)
+    receipts = [event(session, offset=10 + index) for index in range(2)]
+    ids = [receipt.id for receipt in receipts]
+    target = scope(first)
+    session.commit()
+    barrier = Barrier(2)
+
+    def claim(event_id):
+        with Session() as db:
+            db.execute(text("SET LOCAL statement_timeout='2000ms'"))
+            barrier.wait(timeout=5)
+            result = fc.reserve(db, target, event_id)
+            db.commit()
+            return result
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(claim, ids))
+    assert sorted(result.status for result in results) == ["BUSY", "RESERVED"]
+    assert session.scalar(select(func.count()).select_from(FirstContactPresentationRow)) == 1
+    assert session.scalar(select(func.count()).select_from(FirstContactAttemptRow)) == 2
+    assert session.scalar(select(FirstContactPresentationRow)).generation == 2
 
 
 def test_committed_ambiguous_reservation_survives_restart_and_accepts_late_proof(Session, session):
