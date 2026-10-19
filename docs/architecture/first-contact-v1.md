@@ -73,9 +73,15 @@ Composite foreign keys prevent cross-scope current-attempt pointers.
 Generation is a timestamp within RESERVED, not delivery. Same-event replay never
 receives a second generation token. Uniqueness plus a short PostgreSQL advisory
 transaction lock serializes first reservations; subsequent state writes use row
-locks and CAS. Reservations do not expire. An orphan requires explicit evidenced
-reconciliation, not automatic replay. New presentation locks are released before
-Agent and HTTP calls; the existing last-mile owner authority lock is preserved.
+locks and CAS. Reservations do not expire. A newer eligible inbound can replace
+the current RESERVED attempt only when a committed AUTO_ALLOWED evaluation denies
+automatic execution and there is no intent, review, outbox linkage or send/proof
+marker. The old attempt remains FAILED with its decision and text digest; the
+new generation composes the introduction again. DRY_RUN and generated text alone
+are not evidence of delivery or a completed denial. Orphan and uncertain-effect
+attempts require explicit evidenced reconciliation, never automatic replay. New
+presentation locks are released before Agent and HTTP calls; the existing
+last-mile owner authority lock is preserved.
 
 Corrupt outbox linkage/metadata is quarantined before Transport. A bookkeeping
 integrity failure cannot confirm the presentation or crash the existing worker.

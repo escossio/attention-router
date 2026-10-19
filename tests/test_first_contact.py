@@ -86,6 +86,25 @@ def decision(session, receipt, text=INTRO):
     return row
 
 
+def denied_generated(session):
+    receipt = event(session)
+    token = fc.reserve(session, scope(receipt), receipt.id).token
+    row = decision(session, receipt)
+    assert fc.record_generated(session, token, row.id, fc.text_hash(INTRO))
+    evaluation = AutonomyEvaluationRow(
+        id=new_id(), agent_decision_id=row.id, event_id=receipt.id,
+        interaction_id=receipt.interaction_id, blueprint_mode="AUTO_ALLOWED",
+        policy_mode="AUTO_ALLOWED", effective_mode="AUTO_ALLOWED",
+        decision_type="RESPOND", recommended_action="respond", action_allowed=True,
+        actor_scope_valid=True, audience_scope_valid=True, freshness_valid=True,
+        from_me=False, automatic_execution_allowed=False,
+        reason_code="OWNER_AUTOMATION_PAUSED", created_at=now_utc(),
+    )
+    session.add(evaluation)
+    session.commit()
+    return receipt, token, row, evaluation
+
+
 def effect(session, row, *, authorization_source="POLICY_AUTONOMY"):
     evaluation = AutonomyEvaluationRow(
         id=new_id(), agent_decision_id=row.id, event_id=row.event_id, interaction_id=row.interaction_id,
@@ -202,6 +221,74 @@ def test_generation_failure_releases_only_new_entry_and_preserves_attempt(sessio
     assert session.scalar(select(func.count()).select_from(FirstContactAttemptRow)) == 2
     with pytest.raises(fc.FirstContactConflict, match="STALE_ATTEMPT"):
         fc.fail_before_effect(session, token, "AGENT_FAILURE")
+
+
+def test_committed_no_dispatch_denial_recovers_on_newer_event(session):
+    first, token, _, _ = denied_generated(session)
+    assert fc.reserve(session, scope(first), first.id).status == "REPLAY"
+    newer = event(session, offset=10)
+    second = fc.reserve(session, scope(newer), newer.id)
+    assert second.status == "RESERVED" and second.token.generation == 2
+    session.commit()
+    prior = session.get(FirstContactAttemptRow, token.attempt_id)
+    assert prior.state == "FAILED" and prior.failure_reason == "AUTONOMY_NO_DISPATCH"
+    assert prior.decision_id and prior.text_hash and prior.generated_at
+    assert prior.execution_intent_id is None and prior.outbox_id is None
+    assert session.scalar(select(func.count()).select_from(FirstContactAttemptRow)) == 2
+    assert fc.reserve(session, scope(newer), newer.id).status == "REPLAY"
+
+
+@pytest.mark.parametrize("unsafe", [
+    "pending_evaluation", "allowed", "review", "intent", "outbox", "other_mode", "effect_marker",
+])
+def test_no_dispatch_recovery_requires_complete_negative_evidence(session, unsafe):
+    first, token, row, evaluation = denied_generated(session)
+    if unsafe == "pending_evaluation":
+        session.delete(evaluation)
+    elif unsafe == "allowed":
+        evaluation.automatic_execution_allowed = True
+    elif unsafe == "review":
+        session.add(AgentResponseReviewRow(
+            id=new_id(), agent_decision_id=row.id, status="PENDING",
+            proposed_response_snapshot=INTRO, effective_response=INTRO,
+            reviewer_type="operator", version=1, created_at=now_utc(), updated_at=now_utc(),
+        ))
+    elif unsafe == "intent":
+        session.add(AgentExecutionIntentRow(
+            id=new_id(), agent_decision_id=row.id, authorization_source="POLICY_AUTONOMY",
+            intent_type="WHATSAPP_RESPONSE", effective_response_snapshot=INTRO,
+            status="READY", execution_allowed=True, external_delivery_allowed=True,
+            release_status="RELEASED", idempotency_key="synthetic:" + new_id(),
+            created_at=now_utc(),
+        ))
+    elif unsafe == "outbox":
+        session.add(OutboxMessageRow(
+            id=new_id(), interaction_id=row.interaction_id, causation_id=row.id,
+            action_type="agent_execution_text", destination="local_transport",
+            payload={"message_type": "text", "text": INTRO},
+            status="PENDING", created_at=now_utc(), available_at=now_utc(),
+            attempt_count=0, idempotency_key="synthetic:" + new_id(),
+        ))
+    elif unsafe == "other_mode":
+        evaluation.effective_mode = "REQUIRES_APPROVAL"
+    else:
+        session.get(FirstContactAttemptRow, token.attempt_id).sending_at = now_utc()
+    session.commit()
+    newer = event(session, offset=10)
+    assert fc.reserve(session, scope(newer), newer.id).status == "BUSY"
+    assert session.get(FirstContactAttemptRow, token.attempt_id).state == "RESERVED"
+    assert session.scalar(select(func.count()).select_from(FirstContactAttemptRow)) == 1
+
+
+def test_no_dispatch_recovery_is_strictly_newer_and_identity_scoped(session):
+    first, token, _, _ = denied_generated(session)
+    older = event(session, offset=-10)
+    assert fc.reserve(session, scope(older), older.id).status == "REPLAY"
+    assert session.get(FirstContactAttemptRow, token.attempt_id).state == "RESERVED"
+    other = event(session, peer="5500000000999@lid", offset=10)
+    other_scope = replace(scope(other), canonical_peer_hash=fc.text_hash("5500000000999@lid"))
+    assert fc.reserve(session, other_scope, other.id).token.generation == 1
+    assert session.get(FirstContactAttemptRow, token.attempt_id).state == "RESERVED"
 
 
 @pytest.mark.parametrize("kind", ["group", "owner", "binding", "account", "tenant", "identity", "no_proof"])

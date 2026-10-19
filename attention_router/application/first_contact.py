@@ -1,8 +1,9 @@
 """Durable first presentation bookkeeping; never authorizes or sends an effect.
 
 The caller owns short transactions and MUST commit before model/provider/HTTP
-work. Reservations do not expire. A lost reservation needs explicit, evidenced
-administrative reconciliation; normal conversation can continue without intro.
+work. Reservations do not expire. A generated reservation with a committed
+no-dispatch evaluation can be recovered by a newer eligible event; an orphan
+without that evidence needs explicit administrative reconciliation.
 """
 
 from dataclasses import dataclass, field
@@ -21,7 +22,8 @@ from attention_router.infrastructure.first_contact_models import (
     FirstContactAttemptRow, FirstContactPresentationRow,
 )
 from attention_router.infrastructure.models import (
-    ActorBindingRow, AgentDecisionRow, AgentExecutionIntentRow, AgentResponseReviewRow, InboundEventRow,
+    ActorBindingRow, AgentDecisionRow, AgentExecutionIntentRow, AgentResponseReviewRow,
+    AutonomyEvaluationRow, InboundEventRow,
     InteractionRow, OutboxMessageRow,
 )
 from attention_router.infrastructure.repository import audit
@@ -136,12 +138,42 @@ def _audit(session: Session, row: FirstContactPresentationRow,
           origin="first_contact", tenant_id=row.tenant_id)
 
 
+def _undispatched_denial(session: Session, attempt: FirstContactAttemptRow) -> bool:
+    """A completed authority denial with no possible linked external effect."""
+    if (attempt.state != "RESERVED" or not attempt.decision_id
+            or not attempt.text_hash or not attempt.generated_at):
+        return False
+    if any(getattr(attempt, field) is not None for field in (
+        "execution_intent_id", "outbox_id", "idempotency_key", "queued_at", "sending_at",
+        "sent_at", "message_reference", "ack", "ack_at", "proof_sha256", "confirmed_at",
+    )):
+        return False
+    evaluation = session.scalar(select(AutonomyEvaluationRow).where(
+        AutonomyEvaluationRow.agent_decision_id == attempt.decision_id,
+    ))
+    if (evaluation is None or evaluation.effective_mode != "AUTO_ALLOWED"
+            or evaluation.automatic_execution_allowed):
+        return False
+    if session.scalar(select(AgentExecutionIntentRow.id).where(
+        AgentExecutionIntentRow.agent_decision_id == attempt.decision_id,
+    ).limit(1)) is not None:
+        return False
+    if session.scalar(select(OutboxMessageRow.id).where(
+        OutboxMessageRow.causation_id == attempt.decision_id,
+    ).limit(1)) is not None:
+        return False
+    return session.scalar(select(AgentResponseReviewRow.id).where(
+        AgentResponseReviewRow.agent_decision_id == attempt.decision_id,
+    ).limit(1)) is None
+
+
 def reserve(session: Session, scope: FirstContactScope, event_id: str,
             presentation_version: str = PRESENTATION_VERSION) -> ReservationResult:
     """Only RESERVED with a new token permits the caller to generate an intro.
 
     REPLAY has no token: even the same event cannot launch two model runs.
-    FAILED permits only a newer, previously unseen event. There is no TTL steal.
+    FAILED permits only a newer, previously unseen event. A committed denial
+    with no intent or review may first become FAILED. There is no TTL steal.
     """
     _require(presentation_version == PRESENTATION_VERSION, "FIRST_CONTACT_VERSION_UNSUPPORTED")
     session.flush()
@@ -159,15 +191,21 @@ def reserve(session: Session, scope: FirstContactScope, event_id: str,
     if row is not None:
         if row.state == "CONFIRMED":
             return ReservationResult("CONFIRMED")
-        if row.state != "FAILED":
+        if row.state not in {"FAILED", "RESERVED"}:
             return ReservationResult("BUSY")
         previous = session.get(FirstContactAttemptRow, row.current_attempt_id)
         previous_event = session.get(InboundEventRow, previous.event_id) if previous else None
-        _require(previous is not None and previous.state == "FAILED" and previous_event is not None,
+        _require(previous is not None and previous_event is not None,
                  "FIRST_CONTACT_STATE_INCONSISTENT")
         newer = _utc(event.received_at) > _utc(previous_event.received_at)
         if not newer:
             return ReservationResult("REPLAY")
+        if row.state == "RESERVED":
+            if not _undispatched_denial(session, previous):
+                return ReservationResult("BUSY")
+            fail_before_effect(session, _token(row, previous), "AUTONOMY_NO_DISPATCH")
+        else:
+            _require(previous.state == "FAILED", "FIRST_CONTACT_STATE_INCONSISTENT")
     stamp = now_utc()
     if row is None:
         row = FirstContactPresentationRow(
