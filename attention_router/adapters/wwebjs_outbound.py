@@ -43,7 +43,7 @@ class WwebjsOutboundAdapter:
     def build_payload(self, outbox) -> dict[str, Any]:
         payload = outbox.payload
         if outbox.action_type == "agent_execution_voice":
-            return {
+            result = {
                 "schema_version": "1",
                 "idempotency_key": outbox.idempotency_key,
                 "external_actor_id": payload["external_actor_id"],
@@ -57,6 +57,10 @@ class WwebjsOutboundAdapter:
                 "interaction_id": outbox.interaction_id,
                 "outbox_id": outbox.id,
             }
+            if payload.get("source_text_hash"):
+                result["source_text_hash"] = payload["source_text_hash"]
+                result["parent_outbox_id"] = payload["parent_outbox_id"]
+            return result
         result = {
             "schema_version": "1",
             "idempotency_key": outbox.idempotency_key,

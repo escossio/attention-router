@@ -38,6 +38,8 @@ def attach_presentation(session, decision, intent, outbox) -> None:
 
 
 def validate_presentation_outbox(session, decision, outbox) -> None:
+    if outbox.action_type == "agent_execution_voice" and outbox.idempotency_key.endswith(":audio"):
+        return  # The parent text effect alone carries presentation proof.
     metadata = (outbox.payload or {}).get("first_contact")
     if metadata is None and not decision_has_presentation(session, decision):
         return

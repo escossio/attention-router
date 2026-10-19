@@ -501,7 +501,9 @@ def enqueue_ready_intents(
                 intent.status = "BLOCKED"
                 intent.blocked_reason = "LAB_DELIVERY_PERMIT_WRONG_INTENT"
                 continue
-        existing = session.scalar(select(OutboxMessageRow).where(OutboxMessageRow.execution_intent_id == intent.id))
+        existing = session.scalar(select(OutboxMessageRow).where(
+            OutboxMessageRow.idempotency_key == f"execution:{intent.id}"
+        ))
         if existing:
             if requires_platform_execution_safety(session, intent):
                 try:
@@ -554,6 +556,14 @@ def enqueue_ready_intents(
         ) as outbox_span:
             outbox_carrier: dict[str, str] = {}
             inject_trace_context(outbox_carrier)
+            from attention_router.application.voice_tts import source_text_hash
+            supplemental = (
+                settings.tts_enabled and settings.tts_auto_send
+                and settings.tts_supplemental_enabled
+                and not requires_platform_execution_safety(session, intent)
+                and (decision.response_introduction_included is not True or settings.first_contact_enabled)
+                and response == intent.effective_response_snapshot
+            )
             outbox = OutboxMessageRow(
                 id=new_id(),
                 interaction_id=interaction.id,
@@ -564,6 +574,7 @@ def enqueue_ready_intents(
                     "message_type": "text",
                     "text": response,
                     "execution_intent_id": intent.id,
+                    **({"supplemental_audio_text_hash": source_text_hash(response)} if supplemental else {}),
                     "observability": {"trace_context": outbox_carrier},
                 },
                 status="PENDING",

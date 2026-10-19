@@ -1,5 +1,10 @@
 # Project status
 
+## PASSADA 19 — implementação local em validação (19/10/2026 UTC)
+
+- Worktree isolada `feat/andy-first-contact-dual-tts-pass19`: áudio complementar opt-in ligado apenas a novos efeitos de texto, com chave `execution:<id>:audio`, derivação do snapshot aprovado e dependência do texto `DONE`; INTRODUCE também exige confirmação autenticada ACK >= 2 do texto. Voz inbound legada preservada; repetição textual consulta o efeito de texto. Nenhum envio, provider live, deploy, push ou banco produtivo.
+- Intents sintéticas de plataforma excluídas porque seu orçamento de efeito atual é único. `compileall` e `git diff --check` passaram; pytest/ruff disponíveis via venv existente; 123 testes direcionados e Ruff PASS em 19/10/2026, portanto os testes sintéticos novos ainda não foram executados. Gate PostgreSQL fica para CI distribuído do orquestrador após publicação autorizada.
+
 ## Andy — homologação pré-promoção #380 (18/10/2026 UTC)
 
 - Operador aprovou homologação completa e artefatos de promoção; publicação, autonomia, policy, default e recriação produtivos continuam proibidos até aprovação final. Nenhuma mutação produtiva nesta etapa.
@@ -487,3 +492,7 @@ the assets and `docs/demo.md`.
 - Read-only correlation of two organic inbound events showed a generated introductory response held in RESERVED after `OWNER_AUTOMATION_PAUSED`, without intent, outbox, review or ACK. The following generic inbound received a normal labeled response because the pending reservation returned BUSY. No delivery of the inaugural text was proven.
 - Recovery is limited to a newer eligible event after a committed AUTO_ALLOWED evaluation denies automatic execution and no review, intent or effect marker exists. The prior attempt remains FAILED with its decision/text evidence; row/advisory locks, generation and CAS still serialize ownership. In-flight, approval, queued and ambiguous outcomes remain protected.
 - Local synthetic First Contact state/Agent/delivery suite: 161 PASS; targeted new cases: 11 PASS; Ruff, compile and diff-check PASS. PostgreSQL variants and concurrency are delegated to the official distributed gate for the final published SHA. Public certification and PR are pending; no live replay, backfill, restart, migration or send was performed.
+
+## Passada 19 — regressão de repetição corrigida no SHA de revisão (19/10/2026 UTC)
+
+- Gate `distributed-python` do SHA inicial apontou falha real em `tests/test_repetition.py` (legado sem campo texto). Corrigido filtro para ignorar somente `agent_execution_voice`; novo teste de texto+áudio e 133 testes direcionados PASS. Nova certificação oficial necessária no SHA atualizado. Não houve alteração produtiva.

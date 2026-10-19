@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from sqlalchemy import func, select
-from attention_router.domain.models import now_utc
+from attention_router.domain.models import new_id, now_utc
 
 from attention_router.application import services
 from attention_router.application import repetition
@@ -153,3 +153,25 @@ def test_one_hundred_repeats_do_not_create_unbounded_outbound(session, monkeypat
         if index == 0:
             mark_delivered(session)
     assert session.scalar(select(func.count()).select_from(OutboxMessageRow)) == 1
+
+
+def test_delivered_audio_supplement_does_not_hide_text_for_repetition(session, monkeypatch):
+    monkeypatch.setattr(settings, "agent_decision_pipeline_enabled", False)
+    receive(session, "identity-text-voice", "Qual é o seu nome?")
+    mark_delivered(session, "Meu nome é Andy, uma assistente virtual.")
+    parent = session.scalar(select(OutboxMessageRow))
+    stamp = now_utc()
+    voice = OutboxMessageRow(
+        id=new_id(), interaction_id=parent.interaction_id,
+        action_type="agent_execution_voice", destination="local_transport",
+        payload={"message_type": "ptt"}, status="DONE", created_at=stamp,
+        available_at=stamp, completed_at=stamp, attempt_count=1,
+        idempotency_key="synthetic-text-voice-supplement",
+    )
+    session.add(voice)
+    session.commit()
+    receive(session, "identity-followup", "Como você se chama?")
+    assert session.scalar(select(func.count()).select_from(OutboxMessageRow)) == 2
+    assert session.scalar(select(func.count()).select_from(AuditEventRow).where(
+        AuditEventRow.event_type == "response_suppressed"
+    )) == 1

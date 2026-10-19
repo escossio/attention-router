@@ -15,6 +15,7 @@ from attention_router.application.agents.andy_agent import build_andy_agent
 from attention_router.application.agents.first_contact import render_public_identity_response
 from attention_router.application.agents.service import AndyAgentError
 from attention_router.application.first_contact_runtime import reconcile_presentations
+from attention_router.application.voice_tts import process_tts_derivations, source_text_hash, validate_voice_outbox
 from attention_router.application import first_contact_runtime
 from attention_router.config import Settings, settings
 from attention_router.core.tenancy import DEFAULT_TENANT_ID
@@ -22,12 +23,13 @@ from attention_router.infrastructure.first_contact_models import (
     FirstContactAttemptRow, FirstContactPresentationRow,
 )
 from attention_router.infrastructure.models import (
-    ActorBindingRow, CapabilityGrantRow, OutboxMessageRow,
+    ActorBindingRow, CapabilityGrantRow, OutboxMessageRow, AgentExecutionIntentRow,
     AgentResponseReviewRow, PolicyRow, PolicyVersionRow,
 )
 from attention_router.infrastructure.repository import ensure_policy_version, upsert_actor_binding
 from tests.test_direct_conversation import PEER, direct_event
 from tests.test_first_contact import signed_proof
+from tests.test_whatsapp_voice_flow import FakeTTS
 from tests.test_visitor_default_runtime_guard import setup_guarded_visitor, visitor_decision
 
 
@@ -110,6 +112,50 @@ def confirm(session, outbox, ack=2):
     result = fc.confirm_delivery(session, outbox.id, proof)
     session.commit()
     return result
+
+
+def test_intro_supplemental_audio_waits_for_text_ack_and_keeps_visitor_guard(
+    session, monkeypatch, tmp_path,
+):
+    captured = enabled(session, monkeypatch)
+    monkeypatch.setattr(settings, "tts_enabled", True)
+    monkeypatch.setattr(settings, "tts_auto_send", True)
+    monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
+    monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path))
+    decision = visitor_decision(session, event(content="Olá"))
+    text = enqueue(session, decision)
+    intent = session.get(AgentExecutionIntentRow, text.execution_intent_id)
+    assert text.payload["supplemental_audio_text_hash"] == source_text_hash(text.payload["text"])
+    assert captured[0].available_capabilities == []
+    fake = FakeTTS()
+    assert process_tts_derivations(session, "tts", client=fake) == 0
+    send(session, monkeypatch, text)
+    assert process_tts_derivations(session, "tts", client=fake) == 0
+    assert not confirm(session, text, ack=1)
+    assert process_tts_derivations(session, "tts", client=fake) == 0
+    assert confirm(session, text, ack=2)
+    assert process_tts_derivations(session, "tts", client=fake) == 1
+    voice = session.scalar(select(OutboxMessageRow).where(
+        OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
+    ))
+    assert voice.payload["source_text_hash"] == source_text_hash(intent.effective_response_snapshot)
+    assert voice.payload["parent_outbox_id"] == text.id
+    validate_voice_outbox(session, voice, intent)
+    calls = []
+
+    def send_audio(row):
+        calls.append(row.id)
+        return SimpleNamespace(status="sent", response={"message_reference": "synthetic-fc-audio"})
+
+    monkeypatch.setattr(services.local_transport_outbound, "dispatch_outbox", send_audio)
+    services.process_outbox(session, "synthetic-audio-worker")
+    assert calls == [voice.id] and voice.status == "DONE" and text.status == "DONE"
+    assert session.scalar(select(FirstContactPresentationRow)).state == "CONFIRMED"
+    assert process_tts_derivations(session, "tts", client=fake) == 0
+    assert fake.calls == 1 and len(captured) == 1
+    next_decision = visitor_decision(session, event(content="E depois?"))
+    assert next_decision.response_introduction_included is False
+    assert captured[-1].first_contact["mode"] == "CONTINUE"
 
 
 def test_first_contact_flows_through_agent_intent_outbox_but_done_is_not_confirmation(
