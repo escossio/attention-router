@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+import secrets
 
 from attention_router.application.direct_conversation import direct_conversation_eligibility
 from attention_router.config import settings
@@ -64,7 +65,12 @@ def presentation_scope(event, *, visitor_default: bool, binding):
     ):
         return None
     digest = canonical_peer_hash(event)
-    if digest is None:
+    allowed = settings.first_contact_canary_peer_sha256
+    if (
+        digest is None or not isinstance(allowed, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", allowed)
+        or not secrets.compare_digest(digest, allowed)
+    ):
         return None
     return FirstContactScope(
         tenant_id=event.tenant_id,

@@ -158,6 +158,10 @@ def preflight(*, previous: bool = False) -> tuple[dict, dict, dict, list[str]]:
         require(env["FIRST_CONTACT_TENANT_ID"] == os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_TENANT_ID") and
                 env["FIRST_CONTACT_SOURCE_ACCOUNT"] == os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_SOURCE_ACCOUNT"),
                 "FIRST_CONTACT_BOOT_SCOPE_DRIFT")
+        canary = env.get("FIRST_CONTACT_CANARY_PEER_SHA256", "")
+        require(type(canary) is str and bool(SHA256.fullmatch(canary)), "FIRST_CONTACT_CANARY_MISSING")
+        require(canary == os.environ.get("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256"),
+                "FIRST_CONTACT_CANARY_BOOT_DRIFT")
     image = inspect("image", service["image"])
     require(image.get("Id") == manifest["image_id"], "IMAGE_DRIFT")
     require(service["image"] == manifest["image_id"], "IMAGE_REFERENCE_UNPINNED")

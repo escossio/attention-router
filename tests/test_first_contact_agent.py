@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 from copy import deepcopy
+import hashlib
 import sys
 
 import pytest
@@ -35,6 +36,7 @@ def enabled(session, monkeypatch):
     monkeypatch.setattr(settings, "first_contact_enabled", True)
     monkeypatch.setattr(settings, "first_contact_tenant_id", DEFAULT_TENANT_ID)
     monkeypatch.setattr(settings, "first_contact_source_account", "default")
+    monkeypatch.setattr(settings, "first_contact_canary_peer_sha256", hashlib.sha256(PEER.encode()).hexdigest())
     session.commit()
     return captured
 
@@ -211,9 +213,9 @@ def test_unproven_identity_preserves_conversation_without_durable_inauguration(
     else:
         incoming = event(peer="5500000000027@c.us", proof=False)
     decision = visitor_decision(session, incoming)
-    assert decision.proposed_response.startswith("[Andy • IA]")
-    assert decision.response_introduction_included is False
-    assert captured[-1].first_contact["mode"] == "UNAVAILABLE"
+    assert decision.proposed_response == "Fibra óptica transmite dados por luz."
+    assert decision.response_introduction_included is None
+    assert captured[-1].first_contact is None
     assert not session.scalar(select(FirstContactPresentationRow))
     assert not session.scalar(select(ActorBindingRow).where(
         ActorBindingRow.external_actor_id.in_([PEER, "5500000000027@c.us"]),
@@ -316,6 +318,31 @@ def test_enable_requires_explicit_tenant_and_account():
         Settings(_env_file=None, app_env="test", admin_auth_enabled=False, first_contact_enabled=True)
 
 
+def test_enable_requires_canonical_canary_hash():
+    with pytest.raises(ValueError, match="FIRST_CONTACT_CANARY_PEER_SHA256_REQUIRED"):
+        Settings(_env_file=None, app_env="test", admin_auth_enabled=False,
+                 first_contact_enabled=True, first_contact_tenant_id="tenant-test",
+                 first_contact_source_account="account-test")
+    with pytest.raises(ValueError, match="FIRST_CONTACT_CANARY_PEER_SHA256_REQUIRED"):
+        Settings(_env_file=None, app_env="test", admin_auth_enabled=False,
+                 first_contact_enabled=True, first_contact_tenant_id="tenant-test",
+                 first_contact_source_account="account-test",
+                 first_contact_canary_peer_sha256="not-a-canonical-hash")
+
+
+def test_other_verified_peer_keeps_ordinary_visitor_path(session, monkeypatch):
+    captured = enabled(session, monkeypatch)
+    incoming = event(peer="5500000000099@lid")
+    incoming.metadata["conversation_key"] = "wwebjs:" + incoming.actor_id
+    incoming.metadata["peer_identifiers"] = [incoming.actor_id]
+    incoming.metadata["first_contact_identity"]["canonical_peer_id"] = incoming.actor_id
+    decision = visitor_decision(session, incoming)
+    assert decision.proposed_response == "Fibra óptica transmite dados por luz."
+    assert decision.response_introduction_included is None
+    assert captured[-1].first_contact is None
+    assert not session.scalar(select(FirstContactPresentationRow))
+
+
 def test_receipt_poll_rotates_pending_attempts_without_releasing_unknown_effects(session, monkeypatch):
     enabled(session, monkeypatch)
     outboxes = []
@@ -325,6 +352,8 @@ def test_receipt_poll_rotates_pending_attempts_without_releasing_unknown_effects
         incoming.metadata["peer_identifiers"] = [incoming.actor_id]
         incoming.metadata["first_contact_identity"]["canonical_peer_id"] = incoming.actor_id
         incoming.metadata["first_contact_identity"]["provenance"] = "DIRECTIONAL_LID"
+        monkeypatch.setattr(settings, "first_contact_canary_peer_sha256",
+                            hashlib.sha256(incoming.actor_id.encode()).hexdigest())
         outboxes.append(enqueue(session, visitor_decision(session, incoming)))
     probed = []
 
@@ -395,6 +424,8 @@ def test_stale_attempt_during_receipt_poll_does_not_abort_the_batch(session, mon
         incoming.metadata["peer_identifiers"] = [incoming.actor_id]
         incoming.metadata["first_contact_identity"]["canonical_peer_id"] = incoming.actor_id
         incoming.metadata["first_contact_identity"]["provenance"] = "DIRECTIONAL_LID"
+        monkeypatch.setattr(settings, "first_contact_canary_peer_sha256",
+                            hashlib.sha256(incoming.actor_id.encode()).hexdigest())
         outboxes.append(enqueue(session, visitor_decision(session, incoming)))
 
     def raced(db, outbox_id):

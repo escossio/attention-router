@@ -154,6 +154,14 @@ def test_on_mode_requires_scoped_tenant_and_account(scenario, monkeypatch):
         lifecycle.preflight()
     monkeypatch.setenv("ATTENTION_LIVE_FIRST_CONTACT_TENANT_ID", "synthetic-tenant")
     monkeypatch.setenv("ATTENTION_LIVE_FIRST_CONTACT_SOURCE_ACCOUNT", "synthetic-account")
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_CANARY_MISSING"):
+        lifecycle.preflight()
+    env["FIRST_CONTACT_CANARY_PEER_SHA256"] = "c" * 64
+    manifest["render_sha256"] = lifecycle.digest(lifecycle.canonical(rendered))
+    repin(scenario, monkeypatch)
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_CANARY_BOOT_DRIFT"):
+        lifecycle.preflight()
+    monkeypatch.setenv("ATTENTION_LIVE_FIRST_CONTACT_CANARY_PEER_SHA256", "c" * 64)
     assert lifecycle.preflight()[0]["first_contact_mode"] == "on"
 
 

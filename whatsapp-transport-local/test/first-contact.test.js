@@ -32,7 +32,8 @@ const payload = { external_actor_id: lid, message_type: 'text',
 
 function config(extra = {}) {
   return createConfig({ FIRST_CONTACT_ENABLED: 'true', FIRST_CONTACT_TENANT_ID: scope.tenant_id,
-    FIRST_CONTACT_SOURCE_ACCOUNT: scope.source_account, LOCAL_TENANT_ID: scope.tenant_id,
+    FIRST_CONTACT_SOURCE_ACCOUNT: scope.source_account,
+    FIRST_CONTACT_CANARY_PEER_SHA256: scope.canonical_peer_hash, LOCAL_TENANT_ID: scope.tenant_id,
     LOCAL_SOURCE_ACCOUNT: scope.source_account, LOCAL_OUTBOUND_HMAC_SECRET: secret,
     EXTERNAL_DELIVERY_ENABLED: 'true', LOCAL_TRANSPORT_HTTP_PORT: '0', ...extra });
 }
@@ -114,6 +115,8 @@ test('new configuration defaults OFF and refuses incomplete or different namespa
   assert.throws(() => createConfig({ FIRST_CONTACT_ENABLED: 'true' }), /CONFIGURATION_INVALID/);
   assert.throws(() => config({ FIRST_CONTACT_TENANT_ID: 'other' }), /CONFIGURATION_INVALID/);
   assert.throws(() => config({ FIRST_CONTACT_SOURCE_ACCOUNT: 'other' }), /CONFIGURATION_INVALID/);
+  assert.throws(() => config({ FIRST_CONTACT_CANARY_PEER_SHA256: '' }), /CONFIGURATION_INVALID/);
+  assert.throws(() => config({ FIRST_CONTACT_CANARY_PEER_SHA256: 'A'.repeat(64) }), /CONFIGURATION_INVALID/);
   assert.throws(() => config({ LOCAL_INBOUND_SOURCE: 'other' }), /CONFIGURATION_INVALID/);
   assert.throws(() => config({ LOCAL_INBOUND_CHANNEL: 'other' }), /CONFIGURATION_INVALID/);
 });
@@ -154,6 +157,7 @@ test('proof endpoint is flag-gated, authenticated, fresh and ledger-only even br
   assert.equal((await request(port, scope, { proof: true,
     timestamp: String(Math.floor(Date.now() / 1000) - 61) })).code, 401);
   assert.equal((await request(port, { ...scope, tenant_id: 'other' }, { proof: true })).code, 403);
+  assert.equal((await request(port, { ...scope, canonical_peer_hash: sha('other@lid') }, { proof: true })).code, 403);
   const unknown = await request(port, scope, { proof: true });
   assert.equal(unknown.code, 200);
   assert.equal(unknown.body.status, 'UNKNOWN');
@@ -183,6 +187,8 @@ test('FC send compares canonical provider peer, full scope, durable replay and A
   assert.equal((await request(port, { ...payload, execution_intent_id: 'other' })).code, 403);
   assert.equal((await request(port, { ...payload, external_actor_id: phone })).code, 403);
   assert.equal((await request(port, { ...payload, external_actor_id: '123@g.us' })).code, 403);
+  assert.equal((await request(port, { ...payload,
+    first_contact: { ...scope, canonical_peer_hash: sha('other@lid') } })).code, 403);
   assert.equal(sends, 0);
   assert.equal((await request(port, payload)).body.status, 'sent');
   assert.equal((await request(port, payload)).body.status, 'already_sent');

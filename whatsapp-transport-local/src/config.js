@@ -85,7 +85,9 @@ function createConfig(env = process.env) {
   const firstContactEnabled = parseBoolean(env.FIRST_CONTACT_ENABLED, false);
   const firstContactTenantId = (env.FIRST_CONTACT_TENANT_ID || '').trim() || null;
   const firstContactSourceAccount = (env.FIRST_CONTACT_SOURCE_ACCOUNT || '').trim() || null;
+  const firstContactCanaryPeerSha256 = env.FIRST_CONTACT_CANARY_PEER_SHA256 || null;
   if (firstContactEnabled && (!firstContactTenantId || !firstContactSourceAccount
+      || !/^[0-9a-f]{64}$/.test(firstContactCanaryPeerSha256 || '')
       || firstContactTenantId !== ((env.LOCAL_TENANT_ID || '').trim() || null)
       || firstContactSourceAccount !== (env.LOCAL_SOURCE_ACCOUNT || 'default')
       || (env.LOCAL_INBOUND_SOURCE || 'wwebjs') !== 'wwebjs'
@@ -96,6 +98,7 @@ function createConfig(env = process.env) {
     firstContactEnabled,
     firstContactTenantId,
     firstContactSourceAccount,
+    firstContactCanaryPeerSha256,
     httpHost: env.LOCAL_TRANSPORT_HTTP_HOST || '127.0.0.1',
     httpPort: parseInteger(env.LOCAL_TRANSPORT_HTTP_PORT, 18103),
     browserDebugUrl: browserURL,
