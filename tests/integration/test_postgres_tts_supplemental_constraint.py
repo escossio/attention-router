@@ -7,15 +7,13 @@ import pytest
 from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
-from attention_router.application import autonomy, execution, services
 from attention_router.application.voice_tts import process_tts_derivations
 from attention_router.config import settings
 from attention_router.domain.models import new_id, now_utc
-from attention_router.infrastructure.models import AgentDecisionRow, AgentExecutionIntentRow, OutboxMessageRow, TTSDerivationRow
-from attention_router.infrastructure.worker import process_agent_decisions
-from tests.test_direct_conversation import direct_event, setup_direct
+from attention_router.infrastructure.models import OutboxMessageRow, TTSDerivationRow
+from tests.test_first_contact_agent import enabled, enqueue, event, visitor_decision, send, confirm
 from tests.test_whatsapp_voice_flow import (
-    FakeTTS, release_grace,
+    FakeTTS,
     test_supplemental_commit_error_isolated_without_text_replay as commit_error_case,
 )
 
@@ -36,21 +34,14 @@ def _copy(row, *, key, action=None, parent=None):
 
 
 def _pair(db, monkeypatch, tmp_path):
-    setup_direct(db, monkeypatch)
+    enabled(db, monkeypatch)
     monkeypatch.setattr(settings, "tts_enabled", True)
     monkeypatch.setattr(settings, "tts_auto_send", True)
     monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
     monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path))
-    services.receive_normalized_inbound_event(db, direct_event())
-    release_grace(db)
-    process_agent_decisions(db, "worker")
-    autonomy.evaluate_and_route(db, db.scalar(select(AgentDecisionRow)))
-    assert execution.enqueue_ready_intents(db, transport_ready=True) == 1
-    primary = db.scalar(select(OutboxMessageRow))
-    primary.status = "DONE"
-    primary.completed_at = now_utc()
-    db.scalar(select(AgentExecutionIntentRow)).status = "SENT"
-    db.commit()
+    primary = enqueue(db, visitor_decision(db, event()))
+    send(db, monkeypatch, primary)
+    assert confirm(db, primary, ack=2)
     assert process_tts_derivations(db, "tts", client=FakeTTS()) == 1
     voice = db.scalar(select(OutboxMessageRow).where(
         OutboxMessageRow.supplemental_parent_outbox_id == primary.id))

@@ -6,7 +6,7 @@ import tempfile
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 from attention_router.adapters.tts import SwitcherTTSClient, TTSClientError
 from attention_router.application.conversation_language import resolve_interaction_locale_by_id
@@ -97,22 +97,21 @@ def supplemental_parent(session, intent: AgentExecutionIntentRow) -> OutboxMessa
     if (decision is None or interaction is None or parent.interaction_id != interaction.id
             or parent.causation_id != decision.id):
         return None
-    if decision.response_introduction_included is True:
-        if not settings.first_contact_enabled:
-            return None
-        attempt = session.scalar(select(FirstContactAttemptRow).join(
-            FirstContactPresentationRow,
-            FirstContactPresentationRow.id == FirstContactAttemptRow.presentation_id,
-        ).where(
-            FirstContactAttemptRow.outbox_id == parent.id,
-            FirstContactAttemptRow.execution_intent_id == intent.id,
-            FirstContactAttemptRow.state == "CONFIRMED",
-            FirstContactAttemptRow.ack >= 2,
-            FirstContactPresentationRow.state == "CONFIRMED",
-            FirstContactPresentationRow.tenant_id == interaction.tenant_id,
-        ))
-        if attempt is None:
-            return None
+    if decision.response_introduction_included is not True or not settings.first_contact_enabled:
+        return None
+    attempt = session.scalar(select(FirstContactAttemptRow).join(
+        FirstContactPresentationRow,
+        FirstContactPresentationRow.id == FirstContactAttemptRow.presentation_id,
+    ).where(
+        FirstContactAttemptRow.outbox_id == parent.id,
+        FirstContactAttemptRow.execution_intent_id == intent.id,
+        FirstContactAttemptRow.state == "CONFIRMED",
+        FirstContactAttemptRow.ack >= 2,
+        FirstContactPresentationRow.state == "CONFIRMED",
+        FirstContactPresentationRow.tenant_id == interaction.tenant_id,
+    ))
+    if attempt is None:
+        return None
     return parent
 
 
@@ -132,6 +131,7 @@ def enqueue_supplemental_derivations(session, *, limit: int = 10) -> int:
         FirstContactPresentationRow.id == FirstContactAttemptRow.presentation_id,
     ).where(
         FirstContactAttemptRow.outbox_id == OutboxMessageRow.id,
+        FirstContactAttemptRow.execution_intent_id == AgentExecutionIntentRow.id,
         FirstContactAttemptRow.state == "CONFIRMED",
         FirstContactAttemptRow.ack >= 2,
         FirstContactPresentationRow.state == "CONFIRMED",
@@ -147,7 +147,8 @@ def enqueue_supplemental_derivations(session, *, limit: int = 10) -> int:
         OutboxMessageRow.status == "DONE",
         OutboxMessageRow.execution_intent_id.is_not(None),
         OutboxMessageRow.payload["supplemental_audio_text_hash"].as_string().is_not(None),
-        or_(AgentDecisionRow.response_introduction_included.is_not(True), confirmed_intro),
+        AgentDecisionRow.response_introduction_included.is_(True),
+        confirmed_intro,
         ~select(TTSDerivationRow.id).where(
             TTSDerivationRow.execution_intent_id == OutboxMessageRow.execution_intent_id,
         ).exists(),

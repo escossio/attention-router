@@ -520,3 +520,8 @@ the assets and `docs/demo.md`.
 - Causa produtiva: `uq_outbox_messages_execution_intent` impedia segundo efeito de voz sob o mesmo intent; o Worker entrou em restart loop. Contenção operacional concluída mantendo First Contact ON, TTS Switcher ON e áudio complementar OFF.
 - Correção candidata: nova migration 0061 com índice parcial para um efeito principal e outro para um único áudio complementar autenticado pelo pai, FK composta, CHECK de tipo/chave e tratamento de erro TTS sem derrubar Worker. Sem backfill nem replay.
 - Testes locais: 187 PASS + Ruff/compileall/diff-check PASS; suíte PostgreSQL descartável e checks oficiais pendentes de PR. Nenhuma migration ou código deste reparo aplicada na produção.
+
+## Andy — áudio complementar somente na apresentação inaugural (20/10/2026)
+
+- Candidato `fix/first-contact-intro-audio-only-pass24` parte da main `aebeccfd7f9180bca1137629ada254ba1519c44b`. Somente `INTRODUCE` recebe marcador de áudio no texto; o seletor e a validação de saída exigem apresentação `CONFIRMED`, prova ACK >= 2, intent e hash vinculados. `CONTINUE`, conversas comuns e atores vinculados não geram complemento; recebimento/transcrição de áudio e resposta histórica somente em voz seguem independentes.
+- Testes locais sintéticos de First Contact e voz: 83 PASS, Ruff, compileall e diff-check PASS. PostgreSQL descartável e checks oficiais serão executados no SHA publicado; não houve migração 0061, reenfileiramento de históricos, mudança produtiva ou envio real.

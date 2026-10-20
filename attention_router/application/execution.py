@@ -561,7 +561,7 @@ def enqueue_ready_intents(
                 settings.tts_enabled and settings.tts_auto_send
                 and settings.tts_supplemental_enabled
                 and not requires_platform_execution_safety(session, intent)
-                and (decision.response_introduction_included is not True or settings.first_contact_enabled)
+                and (decision.response_introduction_included is True and settings.first_contact_enabled)
                 and response == intent.effective_response_snapshot
             )
             outbox = OutboxMessageRow(

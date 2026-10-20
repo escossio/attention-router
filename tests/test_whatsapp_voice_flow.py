@@ -629,8 +629,9 @@ def test_tts_auto_send_does_not_turn_text_input_into_voice(
     assert session.scalar(select(TTSDerivationRow)) is None
 
 
-def test_supplemental_voice_uses_delivered_text_snapshot_once(session, monkeypatch, tmp_path):
+def test_ordinary_direct_text_never_creates_supplemental_audio(session, monkeypatch, tmp_path):
     setup_direct(session, monkeypatch)
+    monkeypatch.setattr(settings, "first_contact_enabled", True)
     monkeypatch.setattr(settings, "tts_enabled", True)
     monkeypatch.setattr(settings, "tts_auto_send", True)
     monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
@@ -639,54 +640,41 @@ def test_supplemental_voice_uses_delivered_text_snapshot_once(session, monkeypat
     release_grace(session)
     process_agent_decisions(session, "worker")
     decision = session.scalar(select(AgentDecisionRow))
+    assert decision.response_introduction_included is not True
     autonomy.evaluate_and_route(session, decision)
     assert execution.enqueue_ready_intents(session, transport_ready=True) == 1
     intent = session.scalar(select(AgentExecutionIntentRow))
     primary = session.scalar(select(OutboxMessageRow))
-    fake = FakeTTS()
-    assert process_tts_derivations(session, "tts", client=fake) == 0
+    assert "supplemental_audio_text_hash" not in primary.payload
     primary.status = "DONE"
     primary.completed_at = now_utc()
     intent.status = "SENT"
     session.commit()
-    assert process_tts_derivations(session, "tts", client=fake) == 1
-    assert fake.texts == ["Fibra óptica transmite dados por luz."]
-    voice = session.scalar(select(OutboxMessageRow).where(
-        OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
-    ))
-    assert voice is not None and voice.payload["parent_outbox_id"] == primary.id
-    assert voice.payload["source_text_hash"] == source_text_hash(primary.payload["text"])
-    validate_voice_outbox(session, voice, intent)
+    fake = FakeTTS()
     assert process_tts_derivations(session, "tts", client=fake) == 0
-    assert fake.calls == 1 and intent.status == "SENT"
-    primary.status = "AMBIGUOUS"
-    session.flush()
-    try:
-        validate_voice_outbox(session, voice, intent)
-    except ValueError as exc:
-        assert str(exc) == "VOICE_SUPPLEMENTAL_PARENT_MISMATCH"
-    else:
-        raise AssertionError("ambiguous parent accepted")
-    primary.status = "DONE"
-    session.flush()
-    services._mark_external_ambiguous(session, voice, "EXTERNAL_REQUEST_OUTCOME_AMBIGUOUS")
-    assert voice.status == "AMBIGUOUS" and intent.status == "SENT"
+    assert fake.calls == 0
+    assert session.scalar(select(TTSDerivationRow)) is None
+    assert session.scalar(select(OutboxMessageRow).where(
+        OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
+    )) is None
+    # A previously marked ordinary text must also fail closed in the selector.
+    primary.payload = {**primary.payload, "supplemental_audio_text_hash": source_text_hash(primary.payload["text"])}
+    session.commit()
+    assert process_tts_derivations(session, "tts", client=fake) == 0
+    assert session.scalar(select(TTSDerivationRow)) is None
 
 
 def test_supplemental_failure_preserves_delivered_text(session, monkeypatch):
-    setup_direct(session, monkeypatch)
+    from tests.test_first_contact_agent import enabled, event, visitor_decision, enqueue, send, confirm
+
+    enabled(session, monkeypatch)
     monkeypatch.setattr(settings, "tts_enabled", True)
     monkeypatch.setattr(settings, "tts_auto_send", True)
     monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
-    services.receive_normalized_inbound_event(session, direct_event())
-    release_grace(session)
-    process_agent_decisions(session, "worker")
-    autonomy.evaluate_and_route(session, session.scalar(select(AgentDecisionRow)))
-    execution.enqueue_ready_intents(session, transport_ready=True)
+    primary = enqueue(session, visitor_decision(session, event()))
+    send(session, monkeypatch, primary)
+    assert confirm(session, primary, ack=2)
     intent = session.scalar(select(AgentExecutionIntentRow))
-    primary = session.scalar(select(OutboxMessageRow))
-    primary.status = "DONE"
-    primary.completed_at = now_utc()
     intent.status = "SENT"
     session.commit()
 
@@ -704,19 +692,16 @@ def test_supplemental_failure_preserves_delivered_text(session, monkeypatch):
 
 
 def test_supplemental_commit_error_isolated_without_text_replay(session, monkeypatch, tmp_path):
-    setup_direct(session, monkeypatch)
+    from tests.test_first_contact_agent import enabled, event, visitor_decision, enqueue, send, confirm
+
+    enabled(session, monkeypatch)
     monkeypatch.setattr(settings, "tts_enabled", True)
     monkeypatch.setattr(settings, "tts_auto_send", True)
     monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
     monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path))
-    services.receive_normalized_inbound_event(session, direct_event())
-    release_grace(session)
-    process_agent_decisions(session, "worker")
-    autonomy.evaluate_and_route(session, session.scalar(select(AgentDecisionRow)))
-    execution.enqueue_ready_intents(session, transport_ready=True)
-    primary = session.scalar(select(OutboxMessageRow))
-    primary.status = "DONE"
-    primary.completed_at = now_utc()
+    primary = enqueue(session, visitor_decision(session, event()))
+    send(session, monkeypatch, primary)
+    assert confirm(session, primary, ack=2)
     session.scalar(select(AgentExecutionIntentRow)).status = "SENT"
     session.commit()
 
