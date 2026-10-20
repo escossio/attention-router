@@ -125,6 +125,7 @@ def test_intro_supplemental_audio_waits_for_text_ack_and_keeps_visitor_guard(
     decision = visitor_decision(session, event(content="Olá"))
     text = enqueue(session, decision)
     intent = session.get(AgentExecutionIntentRow, text.execution_intent_id)
+    assert text.payload["text"].startswith("[Andy • IA]")
     assert text.payload["supplemental_audio_text_hash"] == source_text_hash(text.payload["text"])
     assert captured[0].available_capabilities == []
     fake = FakeTTS()
@@ -157,6 +158,59 @@ def test_intro_supplemental_audio_waits_for_text_ack_and_keeps_visitor_guard(
     next_decision = visitor_decision(session, event(content="E depois?"))
     assert next_decision.response_introduction_included is False
     assert captured[-1].first_contact["mode"] == "CONTINUE"
+    continued = enqueue(session, next_decision)
+    assert "supplemental_audio_text_hash" not in continued.payload
+    continued.status = "DONE"
+    session.commit()
+    assert process_tts_derivations(session, "tts", client=fake) == 0
+    assert fake.calls == 1
+    assert len(session.scalars(select(OutboxMessageRow).where(
+        OutboxMessageRow.action_type == "agent_execution_voice"
+    )).all()) == 1
+
+
+@pytest.mark.parametrize("case", ["linked_actor", "already_presented", "unconfirmed", "ambiguous"])
+def test_non_intro_or_unconfirmed_first_contact_never_enqueues_audio(
+    session, monkeypatch, tmp_path, case,
+):
+    enabled(session, monkeypatch)
+    monkeypatch.setattr(settings, "tts_enabled", True)
+    monkeypatch.setattr(settings, "tts_auto_send", True)
+    monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
+    monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path))
+    if case == "linked_actor":
+        phone = "5500000000027@c.us"
+        upsert_actor_binding(session, "wwebjs", phone, "synthetic-owner", "owner",
+                             metadata={"owner": True, "audience": "owner"})
+        session.commit()
+    if case == "already_presented":
+        first = enqueue(session, visitor_decision(session, event()))
+        send(session, monkeypatch, first)
+        assert confirm(session, first)
+        assert process_tts_derivations(session, "tts", client=FakeTTS()) == 1
+    incoming = event()
+    if case == "linked_actor":
+        incoming.metadata["peer_identifiers"] = [PEER, phone]
+        incoming.metadata["first_contact_identity"]["provenance"] = "PROVIDER_LID_PN_MAPPING"
+    decision = visitor_decision(session, incoming)
+    if case == "linked_actor":
+        assert decision.response_introduction_included is not True
+    else:
+        assert decision.response_introduction_included is (case in ("unconfirmed", "ambiguous"))
+    text = enqueue(session, decision)
+    intent = session.get(AgentExecutionIntentRow, text.execution_intent_id)
+    if case in ("linked_actor", "already_presented"):
+        assert "supplemental_audio_text_hash" not in text.payload
+    if case == "ambiguous":
+        text.status = "AMBIGUOUS"
+        first_contact_runtime.observe_presentation_outbox(session, text)
+    else:
+        text.status = "DONE"
+    session.commit()
+    assert process_tts_derivations(session, "tts", client=FakeTTS()) == 0
+    assert session.scalar(select(OutboxMessageRow).where(
+        OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
+    )) is None
 
 
 def test_first_contact_flows_through_agent_intent_outbox_but_done_is_not_confirmation(
