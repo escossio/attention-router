@@ -1,5 +1,11 @@
 # Project status
 
+## PASSADA 21A — correção local de constraint TTS (20/10/2026 UTC)
+
+- Branch isolada sobre `a7db17e5dd791e27b232ec0f4f0ed5d8a9dbda20`, sem commit, push, PR, deploy ou acesso produtivo. Migration 0061 e modelo alinham unicidade do efeito principal e no máximo um áudio complementar vinculado ao mesmo intent; nenhum dado histórico é alterado.
+- Derivação TTS e Worker passam a conter exceções de banco sem repetir texto; First Contact mantém ACK autenticado >= 2 antes de áudio. Flags automáticas permanecem desligadas por padrão.
+- Testes locais direcionados: 4 PASS (SQLite); Ruff, compileall e diff-check PASS. Gate PostgreSQL real foi criado para CI descartável, mas está pendente porque esta passada proíbe publicar um SHA. Ver [reparo da constraint](docs/architecture/first-contact-tts-constraint-repair.md).
+
 ## PASSADA 19 — implementação local em validação (19/10/2026 UTC)
 
 - Worktree isolada `feat/andy-first-contact-dual-tts-pass19`: áudio complementar opt-in ligado apenas a novos efeitos de texto, com chave `execution:<id>:audio`, derivação do snapshot aprovado e dependência do texto `DONE`; INTRODUCE também exige confirmação autenticada ACK >= 2 do texto. Voz inbound legada preservada; repetição textual consulta o efeito de texto. Nenhum envio, provider live, deploy, push ou banco produtivo.
@@ -502,3 +508,9 @@ the assets and `docs/demo.md`.
 - Investigação da apresentação real identificou `FIRST_CONTACT_MESSAGE_REFERENCE_UNKNOWN`: WhatsApp entregou o texto mas retornou ID pelo formato `$1`, ignorado na correlação anterior. O ledger e a outbox ficaram `FAILED`/`AMBIGUOUS`; TTS não foi acionado pois não havia prova HMAC/ACK correlacionada. Perícia read-only confirmou observação única com hash do texto e peer, referência canônica e ACK 3.
 - Branch de correção isolada `fix/andy-first-contact-reference-pass21` parte da main `a7db17e5dd791e27b232ec0f4f0ed5d8a9dbda20`. Extração `$1`, fallback limitado a observação única, ACK monotônico no ledger e recuperação de texto ambíguo exclusivamente após prova HMAC autenticada. Sem replay/alteração de autoridade. Apresentação PT-BR com linguagem mais natural.
 - A execução de reconciliação histórica é operacional e separada da implantação: requer evidência estrita e não pode reenviar o texto original. Consulte `docs/architecture/first-contact-wa-reference-reconciliation.md`.
+
+## Passada 21A — contenção de crash-loop TTS e reparo de cardinalidade (20/10/2026)
+
+- Causa produtiva: `uq_outbox_messages_execution_intent` impedia segundo efeito de voz sob o mesmo intent; o Worker entrou em restart loop. Contenção operacional concluída mantendo First Contact ON, TTS Switcher ON e áudio complementar OFF.
+- Correção candidata: nova migration 0061 com índice parcial para um efeito principal e outro para um único áudio complementar autenticado pelo pai, FK composta, CHECK de tipo/chave e tratamento de erro TTS sem derrubar Worker. Sem backfill nem replay.
+- Testes locais: 187 PASS + Ruff/compileall/diff-check PASS; suíte PostgreSQL descartável e checks oficiais pendentes de PR. Nenhuma migration ou código deste reparo aplicada na produção.

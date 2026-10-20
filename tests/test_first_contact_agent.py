@@ -692,7 +692,7 @@ def test_ptbr_inaugural_message_is_impactful_without_duplicate_generic_reply():
     )
     assert response.startswith('[Andy • IA] Olá! Sou a Andy')
     assert 'com voz' in response and 'inteligência artificial' in response
-    assert response.count('Vamos conversar?') == 1
+    assert response.endswith('Me conta: o que te trouxe até esta conversa?')
     assert 'Oi! Como posso ajudar?' not in response
     assert 'Alex' not in response
     meaningful = render_public_identity_response(

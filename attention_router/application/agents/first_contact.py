@@ -52,11 +52,10 @@ def render_public_identity_response(
         offer = "Puedo ayudar con conversaciones generales."
     else:
         introduction = (
-            "Olá! Sou a Andy, uma assistente virtual com voz e um jeito próprio de conversar. Sou uma inteligência artificial, "
-            "Por aqui, você não precisa falar como se estivesse diante de uma máquina. "
-            "Posso ajudar com dúvidas, "
-            "informações e ideias, sempre deixando claro o que sei e o que não sei. "
-            "Pode falar comigo naturalmente. Que bom ter você por aqui! Vamos conversar?"
+            "Olá! Sou a Andy, uma assistente virtual com voz e um jeito próprio de conversar.\n\n"
+            "Sou uma inteligência artificial. Você não precisa decorar comandos nem falar comigo como se estivesse diante de uma máquina. "
+            "Pode conversar naturalmente. Vou ajudar com dúvidas e ideias, sempre deixando claro o que sei — e o que ainda não sei.\n\n"
+            "Que bom ter você aqui. Me conta: o que te trouxe até esta conversa?"
         )
         identity = "Sou a Andy, uma assistente virtual nesta conta."
         offer = "Posso ajudar em conversas gerais."
