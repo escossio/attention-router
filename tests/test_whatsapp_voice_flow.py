@@ -700,6 +700,41 @@ def test_supplemental_failure_preserves_delivered_text(session, monkeypatch):
     )) is None
 
 
+def test_supplemental_commit_error_isolated_without_text_replay(session, monkeypatch, tmp_path):
+    setup_direct(session, monkeypatch)
+    monkeypatch.setattr(settings, "tts_enabled", True)
+    monkeypatch.setattr(settings, "tts_auto_send", True)
+    monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
+    monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path))
+    services.receive_normalized_inbound_event(session, direct_event())
+    release_grace(session)
+    process_agent_decisions(session, "worker")
+    autonomy.evaluate_and_route(session, session.scalar(select(AgentDecisionRow)))
+    execution.enqueue_ready_intents(session, transport_ready=True)
+    primary = session.scalar(select(OutboxMessageRow))
+    primary.status = "DONE"
+    primary.completed_at = now_utc()
+    session.scalar(select(AgentExecutionIntentRow)).status = "SENT"
+    session.commit()
+
+    original_commit = session.commit
+    failures = 0
+
+    def fail_once():
+        nonlocal failures
+        if failures == 0 and any(isinstance(item, OutboxMessageRow) for item in session.new):
+            failures += 1
+            raise RuntimeError("synthetic database commit failure")
+        return original_commit()
+
+    monkeypatch.setattr(session, "commit", fail_once)
+    assert process_tts_derivations(session, "tts", client=FakeTTS()) == 1
+    assert failures == 1
+    assert session.scalar(select(TTSDerivationRow)).status == "FAILED"
+    assert session.get(OutboxMessageRow, primary.id).status == "DONE"
+    assert len(session.scalars(select(OutboxMessageRow)).all()) == 1
+
+
 def test_shared_digest_keeps_bytes_until_final_live_reference_expires(
     session, monkeypatch, tmp_path
 ):

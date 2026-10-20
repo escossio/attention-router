@@ -211,6 +211,7 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
         interaction = session.get(InteractionRow, decision.interaction_id) if decision else None
         temp_path: Path | None = None
         provider_attempted = False
+        supplemental = False
         try:
             parent = supplemental_parent(session, intent) if intent else None
             supplemental = supplemental_marked(session, intent) if intent else False
@@ -276,6 +277,7 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
                 outbox.action_type != "agent_execution_voice"
                 or outbox.execution_intent_id != intent.id
                 or outbox.interaction_id != interaction.id
+                or outbox.supplemental_parent_outbox_id != (parent.id if supplemental else None)
             ):
                 raise TTSClientError("tts_outbox_key_conflict")
             if outbox is None:
@@ -299,6 +301,7 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
                     attempt_count=0, idempotency_key=key,
                     correlation_id=interaction.correlation_id, causation_id=decision.id,
                     execution_intent_id=intent.id,
+                    supplemental_parent_outbox_id=parent.id if supplemental else None,
                 )
                 session.add(outbox)
             if not supplemental:
@@ -322,6 +325,21 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
                     audit(session, interaction.id, "tts.derivation_failed", {
                         "reason": "TTS_DERIVATION_FAILED",
                     }, origin="voice_tts")
+        except Exception:
+            # A failed flush leaves SQLAlchemy's transaction unusable. The
+            # provider attempt was already recorded; never replay an outbox.
+            session.rollback()
+            row = session.get(TTSDerivationRow, claimed.id)
+            if row is None:
+                continue
+            row.status = "FAILED"
+            row.error_code = "TTS_DERIVATION_FAILED"
+            row.completed_at = now_utc()
+            if intent and not supplemental:
+                restored_intent = session.get(AgentExecutionIntentRow, intent.id)
+                if restored_intent:
+                    restored_intent.status = "BLOCKED"
+                    restored_intent.blocked_reason = "TTS_DERIVATION_FAILED"
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
@@ -330,7 +348,18 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
         row.updated_at = now_utc()
         if row.status == "READY":
             row.completed_at = row.updated_at
-        session.commit()
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            failed = session.get(TTSDerivationRow, claimed.id)
+            if failed is not None:
+                failed.status = "FAILED"
+                failed.error_code = "TTS_DERIVATION_FAILED"
+                failed.completed_at = now_utc()
+                failed.claimed_at = None
+                failed.claimed_by = None
+                session.commit()
         completed += 1
     return completed
 
@@ -358,6 +387,7 @@ def validate_voice_outbox(session, outbox: OutboxMessageRow, intent: AgentExecut
                 or gate != "ALLOWED" or recipient is None
                 or parent is None or outbox.idempotency_key != f"execution:{intent.id}:audio"
                 or payload.get("parent_outbox_id") != parent.id
+                or outbox.supplemental_parent_outbox_id != parent.id
                 or payload.get("source_text_hash") != derivation.source_text_hash
                 or payload.get("external_actor_id") != recipient.reference
                 or payload.get("external_actor_id") != (parent.payload or {}).get("external_actor_id")

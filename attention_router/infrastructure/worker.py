@@ -490,7 +490,12 @@ def run_forever() -> None:
                 transport_ready=transport_ready,
             )
             session.commit()
-            tts_count = process_tts_derivations(session, identity)
+            try:
+                tts_count = process_tts_derivations(session, identity)
+            except Exception:
+                session.rollback()
+                tts_count = 0
+                logger.exception("tts derivation cycle failed worker_id=%s", identity)
             outbox_count = process_outbox(session, identity)
             if settings.first_contact_enabled:
                 from attention_router.application.first_contact_runtime import reconcile_presentations

@@ -210,6 +210,6 @@ def test_migration_refuses_to_destroy_committed_presentation_history(migration_d
     assert outcome.returncode != 0
     assert "FIRST_CONTACT_DOWNGRADE_REQUIRES_DATA_EXPORT" in outcome.stderr
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0060_first_contact_v1"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0061_tts_outbox_constraint"
         assert connection.scalar(text("SELECT count(*) FROM first_contact_presentations")) == 1
         assert connection.scalar(text("SELECT count(*) FROM first_contact_attempts")) == 1
