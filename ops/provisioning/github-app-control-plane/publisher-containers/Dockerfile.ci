@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m pip install --no-cache-dir cryptography==46.0.3
 WORKDIR /usr/local/lib/andy-github-app
 COPY ops/provisioning/github-app-control-plane/probe.py ./probe.py
+COPY ops/provisioning/github-app-control-plane/ci_impact_policy.py ./ci_impact_policy.py
 COPY ops/provisioning/github-app-control-plane/publisher-containers/preflight.py ./preflight.py
 COPY ops/provisioning/github-app-control-plane/distributed_postgres_check.py ./distributed_postgres_check.py
 COPY ops/provisioning/github-app-control-plane/distributed_shadow_checks.py ./distributed_shadow_checks.py

@@ -13,7 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, "/usr/local/lib/andy-github-app")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from probe import CONFIG, INSTALLATION_CONFIG, load_env, make_jwt, request_json
+from ci_impact_policy import get_pr_impact
 
 DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
 TARGET_REPO = "escossio/attention-router"
@@ -342,6 +344,13 @@ def execute_exact_sha(
 
     check_id = create_check(token, repo, sha, pr_number, suite)
     try:
+        if repo == TARGET_REPO:
+            impact = get_pr_impact(repo, pr_number, sha, lambda path: request_json(path, token))
+            if not impact.required(suite):
+                detail = impact.summary(suite)
+                complete_check(token, repo, check_id, "success",
+                               f"NOT APPLICABLE: distributed-{suite} (no test run)", detail)
+                return "NOT_APPLICABLE", detail, check_id
         project = REPOSITORIES[repo]["project"]
         result = run_command([CI_RUN, project, sha, suite])
         summary = extract_summary(result.stdout)

@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, "/usr/local/lib/andy-github-app")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from probe import CONFIG, INSTALLATION_CONFIG, load_env, make_jwt, request_json
+from ci_impact_policy import get_pr_impact
 
 DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
 CHECK_NAME = "distributed-postgres"
@@ -247,6 +249,12 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, in
     check_id = create_check(token, repo, sha, pr_number)
     reprofiled = False
     try:
+        impact = get_pr_impact(repo, pr_number, sha, lambda path: request_json(path, token))
+        if not impact.required("postgres"):
+            detail = impact.summary("postgres")
+            complete_check(token, repo, check_id, "success",
+                           "NOT APPLICABLE: distributed-postgres (no test run)", detail)
+            return "NOT_APPLICABLE", detail, check_id
         result = run_command([CI_RUN, sha, "postgres"])
         if result.returncode == 66:
             reprofiled = True
