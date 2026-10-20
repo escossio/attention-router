@@ -11,6 +11,8 @@ from attention_router.application import services, autonomy, execution
 from attention_router.application.direct_conversation import (
     direct_conversation_eligibility,
     conversational_policy_config,
+    identified_direct_response,
+    spoken_direct_response,
 )
 from attention_router.application.decision_pipeline import process_agent_decision, _blueprint
 from attention_router.application.agents.output import AndyAgentOutput
@@ -79,6 +81,12 @@ def row_event(event=None):
 def test_direct_peer(peer):
     result = direct_conversation_eligibility(row_event(direct_event(peer)))
     assert result.eligible and result.return_channel_available
+
+
+def test_direct_identity_is_single_and_not_spoken():
+    text = identified_direct_response("[Andy • IA] [Andy • IA] Oi! Tudo bem?")
+    assert text == "[Andy • IA] Oi! Tudo bem?"
+    assert spoken_direct_response(text) == "Oi! Tudo bem?"
 
 
 @pytest.mark.parametrize(
@@ -231,6 +239,7 @@ def test_unknown_full_pipeline_without_binding(session, monkeypatch):
     assert window.operational_control_revision == 3
     process_due_grace_windows(session, "test", timestamp=window.due_at + timedelta(seconds=1))
     decision = process_agent_decision(session, accepted["inbound_event_id"])
+    assert decision.proposed_response == "[Andy • IA] Fibra óptica transmite dados por luz."
     assert session.get(PolicyVersionRow, decision.policy_version_id).policy_id == "desconhecido"
     assert captured and captured[0].whatsapp_return_channel_available
     prompt = json.dumps(captured[0].prompt_payload())
@@ -245,6 +254,7 @@ def test_unknown_full_pipeline_without_binding(session, monkeypatch):
     assert execution.enqueue_ready_intents(session, transport_ready=True) == 0
     outbox = session.scalar(select(OutboxMessageRow))
     assert outbox.action_type == "agent_execution_text" and outbox.execution_intent_id == intent.id
+    assert outbox.payload["text"] == decision.proposed_response
     assert session.scalar(select(func.count()).select_from(ActorBindingRow)) == before
     assert captured[0].allowed_disclosures == []
 
@@ -622,9 +632,29 @@ def test_specific_policy_preserved_with_text_baseline(
     received = services.receive_normalized_inbound_event(session, direct_event())
     decision = process_agent_decision(session, received["inbound_event_id"])
     policy = session.get(PolicyVersionRow, decision.policy_version_id)
+    assert decision.proposed_response == "[Andy • IA] Fibra óptica transmite dados por luz."
+    assert decision.proposed_response.count("[Andy • IA]") == 1
     assert policy.policy_id == policy_id
     assert captured[0].allowed_disclosures == policy.config["allowed_disclosures"]
     assert autonomy.evaluate_and_route(session, decision).automatic_execution_allowed
+
+
+def test_bound_direct_continuation_keeps_single_identity(session, monkeypatch):
+    setup_direct(session, monkeypatch)
+    upsert_actor_binding(
+        session, source="wwebjs", external_actor_id=PEER,
+        actor_key="contact_bound", actor_category="friend", display_name="Fixture",
+    )
+    for content in ("Primeira pergunta", "E depois?"):
+        received = services.receive_normalized_inbound_event(
+            session, direct_event(content=content)
+        )
+        decision = process_agent_decision(session, received["inbound_event_id"])
+        assert decision.actor_binding_id is not None
+        assert decision.proposed_response.count("[Andy • IA]") == 1
+        assert spoken_direct_response(decision.proposed_response) == (
+            "Fibra óptica transmite dados por luz."
+        )
 
 
 def test_explicit_text_policy_restriction_is_not_overridden(session, monkeypatch):

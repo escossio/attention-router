@@ -135,6 +135,7 @@ def test_intro_supplemental_audio_waits_for_text_ack_and_keeps_visitor_guard(
     assert process_tts_derivations(session, "tts", client=fake) == 0
     assert confirm(session, text, ack=2)
     assert process_tts_derivations(session, "tts", client=fake) == 1
+    assert fake.texts and not fake.texts[0].startswith("[Andy • IA]")
     voice = session.scalar(select(OutboxMessageRow).where(
         OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
     ))
@@ -166,6 +167,7 @@ def test_first_contact_flows_through_agent_intent_outbox_but_done_is_not_confirm
     first = visitor_decision(session, event())
     assert first.response_introduction_included is True
     assert first.proposed_response.startswith("[Andy • IA] Olá! Sou a Andy, uma assistente virtual")
+    assert first.proposed_response.count("[Andy • IA]") == 1
     assert captured[0].first_contact["mode"] == "INTRODUCE"
     assert captured[0].represented_subject is None
     assert captured[0].available_capabilities == [] and captured[0].allowed_disclosures == []
@@ -184,6 +186,7 @@ def test_first_contact_flows_through_agent_intent_outbox_but_done_is_not_confirm
     second = visitor_decision(session, event())
     assert captured[-1].first_contact["mode"] == "CONTINUE"
     assert second.proposed_response.startswith("[Andy • IA] Fibra")
+    assert second.proposed_response.count("[Andy • IA]") == 1
     assert "Olá!" not in second.proposed_response
     assert second.response_introduction_included is False
 

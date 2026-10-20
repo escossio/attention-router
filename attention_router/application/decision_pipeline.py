@@ -1,6 +1,6 @@
 import json
 import hashlib
-from attention_router.application.direct_conversation import direct_conversation_eligibility, DIRECT_TEXT_CONVERSATION_CONTRACT_VERSION
+from attention_router.application.direct_conversation import direct_conversation_eligibility, identified_direct_response, DIRECT_TEXT_CONVERSATION_CONTRACT_VERSION
 from attention_router.application.voice_transcription import (
     effective_inbound_text,
     effective_interaction_text,
@@ -994,6 +994,8 @@ def process_agent_decision(session: Session, event_id: str) -> AgentDecisionRow 
         safe_set_attribute(behavior_span, "attention.response_text_present", bool(proposed_response))
         safe_set_attribute(behavior_span, "attention.response_text_length", len(proposed_response or ""))
         set_outcome(behavior_span, "GENERATED" if proposed_response else "NO_RESPONSE")
+    if proposed_response and direct.eligible:
+        proposed_response = identified_direct_response(proposed_response)
     row = AgentDecisionRow(
         id=new_id(),
         event_id=event.id,
