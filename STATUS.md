@@ -496,3 +496,9 @@ the assets and `docs/demo.md`.
 ## Passada 19 — regressão de repetição corrigida no SHA de revisão (19/10/2026 UTC)
 
 - Gate `distributed-python` do SHA inicial apontou falha real em `tests/test_repetition.py` (legado sem campo texto). Corrigido filtro para ignorar somente `agent_execution_voice`; novo teste de texto+áudio e 133 testes direcionados PASS. Nova certificação oficial necessária no SHA atualizado. Não houve alteração produtiva.
+
+## Andy First Contact V1 — WhatsApp Web `$1` e reconciliação de entrega (20/10/2026)
+
+- Investigação da apresentação real identificou `FIRST_CONTACT_MESSAGE_REFERENCE_UNKNOWN`: WhatsApp entregou o texto mas retornou ID pelo formato `$1`, ignorado na correlação anterior. O ledger e a outbox ficaram `FAILED`/`AMBIGUOUS`; TTS não foi acionado pois não havia prova HMAC/ACK correlacionada. Perícia read-only confirmou observação única com hash do texto e peer, referência canônica e ACK 3.
+- Branch de correção isolada `fix/andy-first-contact-reference-pass21` parte da main `a7db17e5dd791e27b232ec0f4f0ed5d8a9dbda20`. Extração `$1`, fallback limitado a observação única, ACK monotônico no ledger e recuperação de texto ambíguo exclusivamente após prova HMAC autenticada. Sem replay/alteração de autoridade. Apresentação PT-BR com linguagem mais natural.
+- A execução de reconciliação histórica é operacional e separada da implantação: requer evidência estrita e não pode reenviar o texto original. Consulte `docs/architecture/first-contact-wa-reference-reconciliation.md`.

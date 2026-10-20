@@ -40,6 +40,8 @@ function extractMessageId(result) {
     return (
       stringValue(result?.id?._serialized)
       || stringValue(result?._data?.id?._serialized)
+      || stringValue(result?.id?.$1)
+      || stringValue(result?._data?.id?.$1)
       || fallbackMessageId(result?.id)
       || fallbackMessageId(result?._data?.id)
       || nativeCanonicalId(result?.id)

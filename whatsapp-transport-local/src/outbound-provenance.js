@@ -123,16 +123,29 @@ function createOutboundProvenanceLedger(config, deps = {}) {
   }
 
   function markSent(record, messageReference, initialAck = null) {
-    const ack = Number.isInteger(initialAck) && initialAck >= 0 ? initialAck : record.ack;
-    return update(record, {
-      status: 'SENT', message_reference: messageReference || record.message_reference || null,
-      ack, ack_at: ack === null ? record.ack_at : clock().toISOString(),
+    // message_create / message_ack can advance the same durable record while
+    // sendMessage is still resolving. Preserve that evidence, not the stale copy.
+    const latest = statusForKey(record.idempotency_key, {readOnly: true});
+    if (!latest || latest.fingerprint !== record.fingerprint || latest.status !== 'SENDING') {
+      throw new Error('OUTBOUND_PROVENANCE_FINALIZATION_CONFLICT');
+    }
+    const ack = Number.isInteger(initialAck) && initialAck >= 0
+      ? Math.max(initialAck, Number.isInteger(latest.ack) ? latest.ack : initialAck)
+      : latest.ack;
+    return update(latest, {
+      status: 'SENT', message_reference: messageReference || latest.message_reference || null,
+      ack, ack_at: ack === null ? latest.ack_at : latest.ack_at || clock().toISOString(),
     });
   }
 
   function markAck(messageReference, ack) {
-    if (typeof messageReference !== 'string' || !messageReference || !Number.isInteger(ack) || ack < 0) return false;
-    const matches = all().filter((record) => record.status === 'SENT' && record.message_reference === messageReference);
+    if (typeof messageReference !== 'string' || !messageReference
+        || !Number.isInteger(ack) || ack < 0 || ack > 4) return false;
+    const matches = all().filter((record) => (
+      (record.status === 'SENT' && record.message_reference === messageReference)
+      || (record.status === 'SENDING' && (record.observed_message_ids || []).length === 1
+        && record.observed_message_ids[0] === messageReference)
+    ));
     if (matches.length !== 1) return false;
     const record = matches[0];
     if (record.ack !== null && record.ack !== undefined && ack <= record.ack) return true;
@@ -155,6 +168,53 @@ function createOutboundProvenanceLedger(config, deps = {}) {
 
   function markFailed(record, reason = 'SEND_FAILED') {
     return update(record, { status: 'FAILED', failure_reason: reason });
+  }
+
+  // Privileged operator-only reconciliation of an inaugural WhatsApp message that
+  // was demonstrably received but whose sendMessage result lacked a reference.
+  // No HTTP route calls this method. It NEVER sends or retries a message.
+  function reconcileObservedFirstContact(idempotencyKey, observation) {
+    const reject = () => { throw new Error('FIRST_CONTACT_RECONCILIATION_UNPROVEN'); };
+    const current = statusForKey(idempotencyKey, {readOnly: true});
+    if (!current || current.status !== 'FAILED' || !current.first_contact
+        || current.message_type !== 'text' || current.message_reference
+        || !validFirstContact(current.first_contact)) reject();
+    const reference = extractMessageId(observation);
+    const remote = observation?.id?.remote?._serialized || observation?.id?.remote?.$1;
+    const ack = observation?.ack;
+    const unixSeconds = observation?.timestamp;
+    if (observation?.fromMe !== true || observation?.id?.fromMe !== true
+        || typeof reference !== 'string'
+        || !/^true_.+@(?:lid|c\.us)_[^_]+$/.test(reference)
+        || typeof remote !== 'string' || !remote.endsWith('@lid')
+        || !reference.startsWith(`true_${remote}_`)
+        || !Number.isInteger(ack) || ack < 2 || ack > 4
+        || !Number.isInteger(unixSeconds) || unixSeconds <= 0
+        || typeof observation.body !== 'string') reject();
+    const textHash = stableHash(observation.body);
+    if (current.text_hash !== textHash
+        || current.first_contact.text_hash !== textHash
+        || current.first_contact.canonical_peer_hash !== stableHash(remote)
+        || current.first_contact.idempotency_key !== idempotencyKey
+        || current.first_contact.outbox_id !== current.outbox_id
+        || current.first_contact.execution_intent_id !== current.execution_intent_id
+        || !current.peer_identifiers.includes(remote)) reject();
+    const messageMs = unixSeconds * 1000;
+    const startedMs = Date.parse(current.started_at || '');
+    if (!Number.isFinite(startedMs) || Math.abs(messageMs - startedMs) > 120000) reject();
+    const competing = all().filter(record => record.message_type === 'text'
+        && record.text_hash === textHash
+        && record.peer_identifiers.includes(remote)
+        && Number.isFinite(Date.parse(record.started_at || ''))
+        && Math.abs(messageMs - Date.parse(record.started_at)) <= 120000);
+    if (competing.length !== 1 || competing[0].idempotency_key !== idempotencyKey) reject();
+    const receiptHash = stableHash(JSON.stringify({reference, remoteHash: stableHash(remote),
+      textHash, timestamp: unixSeconds, ack, ledgerFingerprint: current.fingerprint}));
+    return update(current, {
+      status: 'SENT', message_reference: reference, ack, ack_at: clock().toISOString(),
+      observed_message_ids: [reference],
+      recovery_evidence: {type: 'WA_OBSERVED_CONFIRMED_V1', receipt_sha256: receiptHash},
+    });
   }
 
   function classify(message, conversationIdentity) {
@@ -259,6 +319,7 @@ function createOutboundProvenanceLedger(config, deps = {}) {
     markAck,
     markSent,
     statusForKey,
+    reconcileObservedFirstContact,
     records: all,
   };
 }

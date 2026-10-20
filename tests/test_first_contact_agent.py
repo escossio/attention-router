@@ -684,3 +684,84 @@ def test_human_review_keeps_authority_and_changed_intro_is_quarantined_per_item(
         assert state.state == "QUEUED"
         send(session, monkeypatch, outbox)
         assert confirm(session, outbox)
+
+
+def test_ptbr_inaugural_message_is_impactful_without_duplicate_generic_reply():
+    response = render_public_identity_response(
+        'Oi! Como posso ajudar?', mode='INTRODUCE', current_message='Oi Leo', locale='pt-BR',
+    )
+    assert response.startswith('[Andy • IA] Olá! Sou a Andy')
+    assert 'com voz' in response and 'inteligência artificial' in response
+    assert response.count('Vamos conversar?') == 1
+    assert 'Oi! Como posso ajudar?' not in response
+    assert 'Alex' not in response
+    meaningful = render_public_identity_response(
+        'Posso explicar como funciona a tecnologia.', mode='INTRODUCE',
+        current_message='Me explica a tecnologia', locale='pt-BR',
+    )
+    assert meaningful.endswith('Posso explicar como funciona a tecnologia.')
+    assert meaningful.count('Olá! Sou a Andy') == 1
+
+
+def test_authenticated_reconciliation_recovers_ambiguous_text_and_allows_tts(
+    session, monkeypatch, tmp_path,
+):
+    enabled(session, monkeypatch)
+    monkeypatch.setattr(settings, "tts_enabled", True)
+    monkeypatch.setattr(settings, "tts_auto_send", True)
+    monkeypatch.setattr(settings, "tts_supplemental_enabled", True)
+    monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path))
+    decision = visitor_decision(session, event(content="Olá"))
+    text = enqueue(session, decision)
+    intent = session.get(AgentExecutionIntentRow, text.execution_intent_id)
+    text.status = "AMBIGUOUS"
+    text.last_error = "TRANSPORT_REQUEST_OUTCOME_AMBIGUOUS"
+    intent.status = "BLOCKED"
+    intent.blocked_reason = text.last_error
+    first_contact_runtime.observe_presentation_outbox(session, text)
+    session.commit()
+    assert session.scalar(select(FirstContactPresentationRow)).state == "AMBIGUOUS"
+    proof = signed_proof(session, SimpleNamespace(outbox=text), ack=3)
+    adapter = SimpleNamespace(probe=lambda expected: proof)
+    assert reconcile_presentations(session, adapter=adapter) == 1
+    assert text.status == "DONE" and text.completed_at is not None
+    assert text.last_error is None
+    assert intent.status == "SENT" and intent.blocked_reason is None
+    assert session.scalar(select(FirstContactPresentationRow)).state == "CONFIRMED"
+    fake = FakeTTS()
+    assert process_tts_derivations(session, "tts", client=fake) == 1
+    voice = session.scalar(select(OutboxMessageRow).where(
+        OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
+    ))
+    assert voice is not None and voice.action_type == "agent_execution_voice"
+    assert voice.payload["parent_outbox_id"] == text.id
+    assert fake.calls == 1
+    validate_voice_outbox(session, voice, intent)
+    calls = []
+
+    def dispatch_only_audio(item):
+        calls.append(item.id)
+        return SimpleNamespace(status="sent", response={"message_reference": "synthetic-audio-reference"})
+
+    monkeypatch.setattr(services.local_transport_outbound, "dispatch_outbox", dispatch_only_audio)
+    services.process_outbox(session, "synthetic-recovery-audio")
+    assert calls == [voice.id]
+    assert voice.status == "DONE" and text.status == "DONE"
+    assert intent.status == "SENT"
+    assert reconcile_presentations(session, adapter=adapter) == 0
+
+
+def test_unverified_transport_failure_never_recovers_primary_outbox(session, monkeypatch):
+    enabled(session, monkeypatch)
+    decision = visitor_decision(session, event())
+    text = enqueue(session, decision)
+    intent = session.get(AgentExecutionIntentRow, text.execution_intent_id)
+    text.status = "AMBIGUOUS"
+    text.last_error = "TRANSPORT_REQUEST_OUTCOME_AMBIGUOUS"
+    intent.status = "BLOCKED"
+    intent.blocked_reason = text.last_error
+    first_contact_runtime.observe_presentation_outbox(session, text)
+    session.commit()
+    assert reconcile_presentations(session, adapter=SimpleNamespace(probe=lambda expected: None)) == 0
+    assert text.status == "AMBIGUOUS" and intent.status == "BLOCKED"
+    assert session.scalar(select(FirstContactPresentationRow)).state == "AMBIGUOUS"

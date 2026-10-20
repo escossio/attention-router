@@ -13,6 +13,10 @@ _IDENTITY_QUESTION = re.compile(
     r"who are you|what is your name|qui[eé]n eres)\b",
     re.I,
 )
+_GENERIC_HELP_REPLY = re.compile(
+    r"^(?:oi|ol[aá])\s*[,!.]?\s*(?:em que|como)\s+posso\s+(?:te\s+)?ajudar\s*[?!.]?\s*$",
+    re.I,
+)
 _SELF_INTRODUCTION = re.compile(
     r"\b(?:(?:eu )?sou (?:a |uma? )?(?:andy|assistente (?:virtual|automatizad[ao]))|"
     r"(?:eu )?me chamo andy|meu nome [eé] andy|aqui [eé] a? ?andy|"
@@ -47,7 +51,13 @@ def render_public_identity_response(
         identity = "Soy Andy, una asistente virtual en esta cuenta."
         offer = "Puedo ayudar con conversaciones generales."
     else:
-        introduction = "Olá! Sou a Andy, uma assistente virtual nesta conta."
+        introduction = (
+            "Olá! Sou a Andy, uma assistente virtual com voz e um jeito próprio de conversar. Sou uma inteligência artificial, "
+            "Por aqui, você não precisa falar como se estivesse diante de uma máquina. "
+            "Posso ajudar com dúvidas, "
+            "informações e ideias, sempre deixando claro o que sei e o que não sei. "
+            "Pode falar comigo naturalmente. Que bom ter você por aqui! Vamos conversar?"
+        )
         identity = "Sou a Andy, uma assistente virtual nesta conta."
         offer = "Posso ajudar em conversas gerais."
     body = text.strip()
@@ -58,5 +68,6 @@ def render_public_identity_response(
         # Never trust a model to decide to reintroduce itself or add a second label.
         raise AndyAgentError("FIRST_CONTACT_UNSOLICITED_INTRODUCTION")
     if mode == "INTRODUCE":
-        body = f"{introduction}\n\n{body}"
+        # Avoid placing a second generic greeting immediately after the welcome.
+        body = introduction if not body or _GENERIC_HELP_REPLY.fullmatch(body) else f"{introduction}\n\n{body}"
     return f"{LABEL} {body}"

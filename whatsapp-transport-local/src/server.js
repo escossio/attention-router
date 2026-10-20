@@ -5,6 +5,7 @@ const { fetchHistoryMessages, listHistoryChats, verifyHistoryHmac } = require('.
 const { identityFromAliases, resolveConversationIdentity } = require('./conversation');
 const firstContact = require('./first-contact');
 const { createOutboundProvenanceLedger } = require('./outbound-provenance');
+const { extractMessageId } = require('./message-id');
 const { createNoopTransportTracing } = require('./observability');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -30,6 +31,28 @@ function loadVoiceMedia(config, payload, MessageMediaClass = MessageMedia) {
     throw new Error('VOICE_MEDIA_HASH_MISMATCH');
   }
   return new MessageMediaClass(payload.mime_type, bytes.toString('base64'));
+}
+
+// Only a uniquely observed, canonical outbound ID may complete an inaugural send.
+// sendMessage sometimes resolves without an ID even after WhatsApp emitted message_create.
+// Never synthesize an ID and never retry the external effect from this branch.
+async function awaitObservedFirstContactReference(ledger, original, key, maxWaitMs = 1000) {
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    const latest = ledger.statusForKey?.(key, {readOnly: true});
+    if (!latest || latest.status !== 'SENDING' || latest.fingerprint !== original.fingerprint
+        || latest.idempotency_key !== key || !latest.first_contact) return null;
+    const observed = latest.observed_message_ids || [];
+    if (observed.length > 1) return null;
+    if (observed.length === 1) {
+      const reference = observed[0];
+      // Do not accept a bare local message token or a synthetic reference.
+      return typeof reference === 'string' && /^true_.+@(?:lid|c\.us)_[^_]+$/.test(reference)
+        ? reference : null;
+    }
+    if (Date.now() >= deadline) return null;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
 }
 
 function sanitizeOutboundErrorMessage(error) {
@@ -254,7 +277,11 @@ function createServer(config, status, client = null, deps = {}) {
                   { sendAudioAsVoice: true },
                 )
                 : await client.sendMessage(destination, payload.text);
-              reference = message?.id?._serialized || message?.id?.id || (hasFirstContact ? null : `accepted-${now()}`);
+              reference = extractMessageId(message) || (hasFirstContact ? null :
+                (message?.id?.id || `accepted-${now()}`));
+              if (hasFirstContact && !reference) {
+                reference = await awaitObservedFirstContactReference(outboundProvenance, provenance, key);
+              }
               if (hasFirstContact && !reference) throw new Error('FIRST_CONTACT_MESSAGE_REFERENCE_UNKNOWN');
               outboundProvenance.markSent(provenance, reference, message?.ack);
               deliveries.set(key, reference);

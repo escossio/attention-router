@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
-const { firstContactIdentity, resolveConversationIdentity } = require('../src/conversation');
+const { firstContactIdentity, resolveConversationIdentity, identityFromAliases } = require('../src/conversation');
 const { normalizeInboundMessage } = require('../src/inbound');
 const { createConfig } = require('../src/config');
 const { createStatus } = require('../src/status');
@@ -264,4 +264,85 @@ test('unknown send result stays blocked on retry and synthetic references never 
   assert.equal(proof.body.status, 'FAILED');
   assert.equal(proof.body.message_reference, null);
   assert.equal(proof.body.ack, null);
+});
+
+
+test('First Contact recovers unique real $1 ID observed from message_create while sendMessage lacks ID', async (t) => {
+  let sends = 0;
+  let ledger;
+  const reference = `true_${lid}_3EB0SYNTHETIC`;
+  const client = { async sendMessage(_destination, text) {
+    sends += 1;
+    setTimeout(() => {
+      const observed = ledger.classify({ fromMe: true, body: text,
+        id: { fromMe: true, remote: { _serialized: lid }, id: '3EB0SYNTHETIC', $1: reference },
+      }, identityFromAliases([lid]));
+      assert.equal(observed.classification, 'ROUTER_AUTOMATED_OUTBOUND_OBSERVED');
+      assert.equal(ledger.markAck(reference, 3), true);
+    }, 10);
+    return {}; // Real-world sendMessage shape: message is sent but ref omitted.
+  } };
+  const fixtureResult = await fixture(t, {client});
+  ledger = fixtureResult.ledger;
+  const reply = await request(fixtureResult.port, payload);
+  assert.equal(reply.code, 200);
+  assert.equal(reply.body.status, 'sent');
+  assert.equal(reply.body.message_reference, reference);
+  assert.equal(sends, 1);
+  assert.equal((await request(fixtureResult.port, payload)).body.status, 'already_sent');
+  const proof = await request(fixtureResult.port, scope, {proof: true});
+  assert.equal(proof.code, 200);
+  assert.equal(proof.body.status, 'SENT');
+  assert.equal(proof.body.message_reference, reference);
+  assert.equal(proof.body.ack, 3);
+  assert.equal(ledger.statusForKey(scope.idempotency_key).observed_message_ids.length, 1);
+});
+
+test('two competing observed $1 IDs cannot certify the same First Contact', async (t) => {
+  let ledger;
+  const client = {async sendMessage(_destination,text) {
+    setTimeout(() => {
+      for (const token of ['3EB0FIRST','3EB0SECOND']) {
+        const ref = `true_${lid}_${token}`;
+        ledger.classify({fromMe: true,body:text,
+          id:{fromMe:true,remote:{_serialized:lid},id:token,$1:ref}}, identityFromAliases([lid]));
+      }
+    },10);
+    return {};
+  }};
+  const f = await fixture(t,{client});ledger=f.ledger;
+  const reply = await request(f.port,payload);
+  assert.equal(reply.code,503);
+  const proof = await request(f.port,scope,{proof:true});
+  assert.equal(proof.body.status,'FAILED');
+  assert.equal(proof.body.message_reference,null);
+  assert.equal((await request(f.port,payload)).code,409);
+});
+
+test('operator-only recovery requires exact observed device ACK, canonical identity and text', async (t) => {
+  const {port, ledger} = await fixture(t, {client: {async sendMessage() { assert.fail('reconciliation must not send'); }}});
+  const before = ledger.begin({...payload, destination: lid}).record;
+  ledger.markFailed(before, 'Error');
+  const observation = {fromMe:true,body:payload.text,ack:3,
+    timestamp: Math.floor(Date.now()/1000),
+    id:{fromMe:true,remote:{_serialized:lid},id:'3EB0SYNTHETIC',
+      $1:`true_${lid}_3EB0SYNTHETIC`}};
+  assert.throws(() => ledger.reconcileObservedFirstContact(scope.idempotency_key,
+    {...observation,body:'Tampered'}), /RECONCILIATION_UNPROVEN/);
+  assert.throws(() => ledger.reconcileObservedFirstContact(scope.idempotency_key,
+    {...observation,ack:1}), /RECONCILIATION_UNPROVEN/);
+  assert.throws(() => ledger.reconcileObservedFirstContact(scope.idempotency_key,
+    {...observation,id:{...observation.id,remote:{_serialized:'unrelated@lid'}}}), /RECONCILIATION_UNPROVEN/);
+  assert.equal(ledger.statusForKey(scope.idempotency_key).status,'FAILED');
+  const recovered = ledger.reconcileObservedFirstContact(scope.idempotency_key, observation);
+  assert.equal(recovered.status,'SENT');
+  assert.equal(recovered.ack,3);
+  assert.equal(recovered.message_reference,observation.id.$1);
+  assert.equal(recovered.recovery_evidence.type,'WA_OBSERVED_CONFIRMED_V1');
+  const proof = await request(port,scope,{proof:true});
+  assert.equal(proof.code,200);
+  assert.equal(proof.body.status,'SENT');
+  assert.equal(proof.body.ack,3);
+  assert.throws(() => ledger.reconcileObservedFirstContact(scope.idempotency_key,observation),/RECONCILIATION_UNPROVEN/);
+  assert.equal((await request(port,payload)).body.status,'already_sent');
 });

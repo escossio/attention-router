@@ -11,7 +11,7 @@ from attention_router.domain.models import now_utc
 from attention_router.infrastructure.first_contact_models import (
     FirstContactAttemptRow, FirstContactPresentationRow,
 )
-from attention_router.infrastructure.models import AuditEventRow
+from attention_router.infrastructure.models import AuditEventRow, AgentExecutionIntentRow, OutboxMessageRow
 from attention_router.infrastructure.repository import audit
 
 
@@ -69,6 +69,60 @@ def observe_presentation_outbox(
               {"outbox_id": outbox.id}, origin="first_contact")
 
 
+def reconcile_proven_text_outbox(session, outbox_id: str, proof) -> bool:
+    """Finish only a proven inaugural text effect; never dispatch or replay it.
+
+    External send can succeed while a local HTTP response fails. An authenticated
+    Transport receipt with ACK >= 2 resolves that ambiguity without repeating
+    the original message, and restores the primary text for optional TTS.
+    """
+    from attention_router.adapters.first_contact_delivery import VerifiedDeliveryProof
+    from attention_router.infrastructure.models import AgentDecisionRow
+
+    if (not isinstance(proof, VerifiedDeliveryProof) or proof.status != "SENT"
+            or proof.ack is None or proof.ack < 2 or not proof.message_reference):
+        return False
+    outbox = session.get(OutboxMessageRow, outbox_id)
+    if (outbox is None or outbox.status != "AMBIGUOUS"
+            or outbox.action_type != "agent_execution_text"
+            or outbox.destination != "local_transport"
+            or outbox.last_error != "TRANSPORT_REQUEST_OUTCOME_AMBIGUOUS"
+            or not (outbox.payload or {}).get("first_contact")):
+        return False
+    expected = delivery_scope(session, outbox_id)
+    if expected is None or any(getattr(proof, field, None) != value
+                               for field, value in expected.items()):
+        return False
+    attempt = session.scalar(select(FirstContactAttemptRow).where(
+        FirstContactAttemptRow.outbox_id == outbox_id,
+        FirstContactAttemptRow.state == "CONFIRMED",
+        FirstContactAttemptRow.message_reference == proof.message_reference,
+        FirstContactAttemptRow.ack >= 2,
+    ))
+    intent = session.get(AgentExecutionIntentRow, outbox.execution_intent_id)
+    decision = session.get(AgentDecisionRow, intent.agent_decision_id) if intent else None
+    if (attempt is None or intent is None or decision is None
+            or decision.response_introduction_included is not True
+            or outbox.causation_id != decision.id
+            or intent.id != expected["execution_intent_id"]
+            or intent.status != "BLOCKED"
+            or intent.blocked_reason != "TRANSPORT_REQUEST_OUTCOME_AMBIGUOUS"
+            or outbox.payload.get("first_contact") != expected):
+        return False
+    # Authentication came from confirm_delivery, not the local HTTP transport.
+    outbox.status = "DONE"
+    outbox.completed_at = now_utc()
+    outbox.last_error = None
+    intent.status = "SENT"
+    intent.blocked_reason = None
+    intent.execution_allowed = True
+    intent.external_delivery_allowed = True
+    audit(session, outbox.interaction_id, "first_contact.proven_text_outbox_reconciled",
+          {"outbox_id": outbox.id, "proof_sha256": proof.body_sha256,
+           "ack": proof.ack, "no_replay": True}, origin="first_contact")
+    return True
+
+
 def reconcile_presentations(session, *, adapter=None, limit: int = 10) -> int:
     """Bounded authenticated read of receipts; never enqueue or retry an effect."""
     if not settings.first_contact_enabled:
@@ -113,6 +167,7 @@ def reconcile_presentations(session, *, adapter=None, limit: int = 10) -> int:
             proof = adapter.probe(expected)
             if proof is not None:
                 confirmed += bool(confirm_delivery(session, outbox_id, proof))
+                reconcile_proven_text_outbox(session, outbox_id, proof)
             session.commit()
         except Exception:
             # Missing/invalid proof is not failure-before-effect or retry permission.
