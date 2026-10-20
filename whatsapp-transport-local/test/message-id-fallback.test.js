@@ -17,3 +17,11 @@ test('extracts a stable id when serialized message id is unavailable', () => {
     'wwebjs:inbound:fixture@c.us:3EB0123456789ABC',
   );
 });
+
+
+test('reads the current WhatsApp Web $1 composite ID when _serialized is unavailable', () => {
+  const id = { fromMe: true, remote: { _serialized: 'fixture@lid' },
+    id: '3EB0SYNTHETIC', $1: 'true_fixture@lid_3EB0SYNTHETIC' };
+  assert.equal(extractMessageId({ id }), id.$1);
+  assert.equal(extractMessageId({ _data: { id } }), id.$1);
+});
