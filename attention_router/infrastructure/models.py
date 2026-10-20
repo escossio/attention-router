@@ -559,7 +559,29 @@ class OutboxMessageRow(Base):
     correlation_id: Mapped[str | None] = mapped_column(String(64), index=True)
     causation_id: Mapped[str | None] = mapped_column(String(64))
     execution_intent_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("agent_execution_intents.id"))
-    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_outbox_idempotency_key"),)
+    supplemental_parent_outbox_id: Mapped[str | None] = mapped_column(String(64))
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_outbox_idempotency_key"),
+        UniqueConstraint("id", "execution_intent_id", name="uq_outbox_id_intent"),
+        ForeignKeyConstraint(
+            ["supplemental_parent_outbox_id", "execution_intent_id"],
+            ["outbox_messages.id", "outbox_messages.execution_intent_id"],
+            name="fk_outbox_supplemental_parent_intent",
+        ),
+        CheckConstraint(
+            "supplemental_parent_outbox_id IS NULL OR ("
+            "execution_intent_id IS NOT NULL AND action_type = 'agent_execution_voice' "
+            "AND destination = 'local_transport' "
+            "AND idempotency_key = 'execution:' || execution_intent_id || ':' || 'audio')",
+            name="ck_outbox_supplemental_voice",
+        ),
+        Index("uq_outbox_primary_intent", "execution_intent_id", unique=True,
+              postgresql_where=text("execution_intent_id IS NOT NULL AND supplemental_parent_outbox_id IS NULL"),
+              sqlite_where=text("execution_intent_id IS NOT NULL AND supplemental_parent_outbox_id IS NULL")),
+        Index("uq_outbox_supplemental_intent", "execution_intent_id", unique=True,
+              postgresql_where=text("supplemental_parent_outbox_id IS NOT NULL"),
+              sqlite_where=text("supplemental_parent_outbox_id IS NOT NULL")),
+    )
 
 
 class GroupContextualPresenceRow(Base):
