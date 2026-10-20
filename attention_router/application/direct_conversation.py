@@ -4,9 +4,24 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
+from attention_router.application.group_contextual_policy import LABEL
+
 DIRECT_TEXT_CONVERSATION_CONTRACT_VERSION = "v1"
 DIRECT_TEXT_ACTIONS = frozenset({"respond", "request_information"})
 _PEER = re.compile(r"[0-9]+@(c\.us|lid)\Z")
+
+
+def spoken_direct_response(text: str) -> str:
+    """Remove only the server-owned leading label from TTS input."""
+    body = text.strip()
+    while body.startswith(LABEL):
+        body = body[len(LABEL):].lstrip()
+    return body
+
+
+def identified_direct_response(text: str) -> str:
+    """Mark every direct automated reply once, including bound conversations."""
+    return f"{LABEL} {spoken_direct_response(text)}"
 
 
 @dataclass(frozen=True)

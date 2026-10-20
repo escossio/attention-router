@@ -100,9 +100,11 @@ _VALID_MP3 = subprocess.run(
 class FakeTTS:
     def __init__(self):
         self.calls = 0
+        self.texts = []
 
     def synthesize(self, _text, output_path: Path, *, language=None):
         self.calls += 1
+        self.texts.append(_text)
         output_path.write_bytes(_VALID_MP3)
         return SimpleNamespace(provider="xai", request_id="opaque-tts", output_mime="audio/mpeg")
 
@@ -648,6 +650,7 @@ def test_supplemental_voice_uses_delivered_text_snapshot_once(session, monkeypat
     intent.status = "SENT"
     session.commit()
     assert process_tts_derivations(session, "tts", client=fake) == 1
+    assert fake.texts == ["Fibra óptica transmite dados por luz."]
     voice = session.scalar(select(OutboxMessageRow).where(
         OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
     ))

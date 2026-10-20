@@ -135,6 +135,7 @@ def test_intro_supplemental_audio_waits_for_text_ack_and_keeps_visitor_guard(
     assert process_tts_derivations(session, "tts", client=fake) == 0
     assert confirm(session, text, ack=2)
     assert process_tts_derivations(session, "tts", client=fake) == 1
+    assert fake.texts and not fake.texts[0].startswith("[Andy • IA]")
     voice = session.scalar(select(OutboxMessageRow).where(
         OutboxMessageRow.idempotency_key == f"execution:{intent.id}:audio"
     ))
@@ -166,6 +167,7 @@ def test_first_contact_flows_through_agent_intent_outbox_but_done_is_not_confirm
     first = visitor_decision(session, event())
     assert first.response_introduction_included is True
     assert first.proposed_response.startswith("[Andy • IA] Olá! Sou a Andy, uma assistente virtual")
+    assert first.proposed_response.count("[Andy • IA]") == 1
     assert captured[0].first_contact["mode"] == "INTRODUCE"
     assert captured[0].represented_subject is None
     assert captured[0].available_capabilities == [] and captured[0].allowed_disclosures == []
@@ -184,6 +186,7 @@ def test_first_contact_flows_through_agent_intent_outbox_but_done_is_not_confirm
     second = visitor_decision(session, event())
     assert captured[-1].first_contact["mode"] == "CONTINUE"
     assert second.proposed_response.startswith("[Andy • IA] Fibra")
+    assert second.proposed_response.count("[Andy • IA]") == 1
     assert "Olá!" not in second.proposed_response
     assert second.response_introduction_included is False
 
@@ -386,7 +389,7 @@ def test_unproven_identity_preserves_conversation_without_durable_inauguration(
     else:
         incoming = event(peer="5500000000027@c.us", proof=False)
     decision = visitor_decision(session, incoming)
-    assert decision.proposed_response == "Fibra óptica transmite dados por luz."
+    assert decision.proposed_response == "[Andy • IA] Fibra óptica transmite dados por luz."
     assert decision.response_introduction_included is None
     assert captured[-1].first_contact is None
     assert not session.scalar(select(FirstContactPresentationRow))
@@ -458,7 +461,7 @@ def test_flag_off_preserves_existing_response_and_prompt_payload(session, monkey
     decision = visitor_decision(session, event())
     assert captured[0].first_contact is None
     assert "first_contact" not in captured[0].prompt_payload()
-    assert decision.proposed_response == "Fibra óptica transmite dados por luz."
+    assert decision.proposed_response == "[Andy • IA] Fibra óptica transmite dados por luz."
     assert not session.scalar(select(FirstContactPresentationRow))
 
 
@@ -531,7 +534,7 @@ def test_other_verified_peer_keeps_ordinary_visitor_path(session, monkeypatch):
     incoming.metadata["peer_identifiers"] = [incoming.actor_id]
     incoming.metadata["first_contact_identity"]["canonical_peer_id"] = incoming.actor_id
     decision = visitor_decision(session, incoming)
-    assert decision.proposed_response == "Fibra óptica transmite dados por luz."
+    assert decision.proposed_response == "[Andy • IA] Fibra óptica transmite dados por luz."
     assert decision.response_introduction_included is None
     assert captured[-1].first_contact is None
     assert not session.scalar(select(FirstContactPresentationRow))

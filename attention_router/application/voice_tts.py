@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 
 from attention_router.adapters.tts import SwitcherTTSClient, TTSClientError
 from attention_router.application.conversation_language import resolve_interaction_locale_by_id
+from attention_router.application.direct_conversation import spoken_direct_response
 from attention_router.application.voice_media import mark_artifact_terminal
 from attention_router.application.voice_transcription import is_voice_input_event
 from attention_router.config import settings
@@ -234,7 +235,7 @@ def process_tts_derivations(session, worker: str, limit: int = 10, client=None) 
             provider_attempted = True
             resolved_locale = resolve_interaction_locale_by_id(session, interaction.id)
             result = provider.synthesize(
-                intent.effective_response_snapshot,
+                spoken_direct_response(intent.effective_response_snapshot),
                 temp_path,
                 language=resolved_locale.locale,
             )
