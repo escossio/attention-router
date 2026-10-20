@@ -11,31 +11,83 @@ concurrency:
   group: public-ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  impact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      python: ${{ steps.classify.outputs.python }}
+      transport: ${{ steps.classify.outputs.transport }}
+      docker: ${{ steps.classify.outputs.docker }}
+      postgres: ${{ steps.classify.outputs.postgres }}
+      reason: ${{ steps.classify.outputs.reason }}
+    steps:
+      - name: Checkout trusted default-branch impact classifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          path: ci-impact-trusted
+      - name: Classify exact PR or push delta; fail closed to full suite
+        id: classify
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if test -f ci-impact-trusted/scripts/ci_impact_report.py && python3 ci-impact-trusted/scripts/ci_impact_report.py; then
+            echo 'CI_IMPACT_CLASSIFIER=trusted_default_branch'
+          else
+            # During initial bootstrap, or any classifier error, run ALL suites.
+            for suite in python transport docker postgres; do
+              echo "$suite=true" >> "$GITHUB_OUTPUT"
+            done
+            echo 'reason=FAIL_CLOSED_POLICY_BOOTSTRAP_OR_FAILURE' >> "$GITHUB_OUTPUT"
+            echo 'CI impact classifier missing/failed: ALL SUITES REQUIRED' >> "$GITHUB_STEP_SUMMARY"
+          fi
   python-tests:
+    needs: impact
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Explicit no-test decision for out-of-scope changes
+        if: ${{ needs.impact.outputs.python == 'false' }}
+        run: |
+          echo "CI_IMPACT=NOT_APPLICABLE for python — no test executed"
+          echo "### python-tests — NOT APPLICABLE (no test executed)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Trusted policy: ${{ needs.impact.outputs.reason }}" >> "$GITHUB_STEP_SUMMARY"
+      - if: ${{ needs.impact.outputs.python != 'false' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - if: ${{ needs.impact.outputs.python != 'false' }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
           cache: pip
-      - run: |
+      - if: ${{ needs.impact.outputs.python != 'false' }}
+        run: |
           for source in $(grep -rl --include='*.list' --include='*.sources' 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null || true); do
             sudo rm -f "$source"
           done
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-      - run: python -m pip install -e '.[dev]'
-      - run: python -m ruff check .
-      - run: python -m compileall -q attention_router tests
-      - name: Check generated integration SDK types and schemas
+      - if: ${{ needs.impact.outputs.python != 'false' }}
+        run: python -m pip install -e '.[dev]'
+      - if: ${{ needs.impact.outputs.python != 'false' }}
+        run: python -m ruff check .
+      - if: ${{ needs.impact.outputs.python != 'false' }}
+        run: python -m compileall -q attention_router tests
+      - if: ${{ needs.impact.outputs.python != 'false' }}
+        name: Check generated integration SDK types and schemas
         run: python scripts/generate_integration_sdks.py --check
-      - name: Build and test the standalone Python SDK wheel
+      - if: ${{ needs.impact.outputs.python != 'false' }}
+        name: Build and test the standalone Python SDK wheel
         run: python scripts/test_python_integration_sdk.py
   transport-tests:
+    needs: impact
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -44,10 +96,19 @@ jobs:
     env:
       PUPPETEER_SKIP_DOWNLOAD: 'true'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Explicit no-test decision for out-of-scope changes
+        if: ${{ needs.impact.outputs.transport == 'false' }}
+        working-directory: .
+        run: |
+          echo "CI_IMPACT=NOT_APPLICABLE for transport — no test executed"
+          echo "### transport-tests — NOT APPLICABLE (no test executed)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Trusted policy: ${{ needs.impact.outputs.reason }}" >> "$GITHUB_STEP_SUMMARY"
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -55,41 +116,64 @@ jobs:
             whatsapp-transport-local/package-lock.json
             contracts/integration/conformance/package-lock.json
             sdks/typescript/package-lock.json
-      - name: Check cognitive public page JavaScript syntax
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        name: Check cognitive public page JavaScript syntax
         working-directory: .
         run: node --check docs/public/cognitive-architecture/app.js
-      - run: npm ci --ignore-scripts
-      - run: node ../tests/fixtures/synthetic-identity-contract.cjs
-      - run: npm test
-      - name: Install integration contract conformance validators
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        run: npm ci --ignore-scripts
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        run: node ../tests/fixtures/synthetic-identity-contract.cjs
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        run: npm test
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        name: Install integration contract conformance validators
         working-directory: contracts/integration/conformance
         run: npm ci --ignore-scripts
-      - name: Validate shared integration wire fixtures in JavaScript
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        name: Validate shared integration wire fixtures in JavaScript
         working-directory: contracts/integration/conformance
         run: npm test
-      - name: Install TypeScript SDK build dependencies
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        name: Install TypeScript SDK build dependencies
         working-directory: sdks/typescript
         run: npm ci --ignore-scripts
-      - name: Build and test the installed TypeScript SDK tarball
+      - if: ${{ needs.impact.outputs.transport != 'false' }}
+        name: Build and test the installed TypeScript SDK tarball
         working-directory: sdks/typescript
         run: npm test
   docker-build:
+    needs: impact
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Explicit no-test decision for out-of-scope changes
+        if: ${{ needs.impact.outputs.docker == 'false' }}
+        run: |
+          echo "CI_IMPACT=NOT_APPLICABLE for docker — no test executed"
+          echo "### docker-build — NOT APPLICABLE (no test executed)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Trusted policy: ${{ needs.impact.outputs.reason }}" >> "$GITHUB_STEP_SUMMARY"
+      - if: ${{ needs.impact.outputs.docker != 'false' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Enforce containerized WhatsApp runtime architecture
+      - if: ${{ needs.impact.outputs.docker != 'false' }}
+        name: Enforce containerized WhatsApp runtime architecture
         run: python scripts/check_whatsapp_runtime_architecture.py
-      - run: docker build --build-arg ATTENTION_ROUTER_BUILD_SHA=${{ github.sha }} -t attention-router:ci .
-      - name: Build WhatsApp Transport candidate
+      - if: ${{ needs.impact.outputs.docker != 'false' }}
+        run: docker build --build-arg ATTENTION_ROUTER_BUILD_SHA=${{ github.sha }} -t attention-router:ci .
+      - if: ${{ needs.impact.outputs.docker != 'false' }}
+        name: Build WhatsApp Transport candidate
         run: docker build -f ops/whatsapp-container/Dockerfile.transport --build-arg SOURCE_SHA=${{ github.sha }} -t andy-whatsapp-transport:ci .
-      - name: Build WhatsApp Browser candidate
+      - if: ${{ needs.impact.outputs.docker != 'false' }}
+        name: Build WhatsApp Browser candidate
         run: docker build -f ops/whatsapp-container/Dockerfile.browser --build-arg SOURCE_SHA=${{ github.sha }} -t andy-whatsapp-browser:ci .
-      - name: Smoke WhatsApp candidate without provider network
+      - if: ${{ needs.impact.outputs.docker != 'false' }}
+        name: Smoke WhatsApp candidate without provider network
         run: bash ops/whatsapp-container/offline-smoke.sh
-      - name: Smoke Browser restart and recreate with an isolated profile
+      - if: ${{ needs.impact.outputs.docker != 'false' }}
+        name: Smoke Browser restart and recreate with an isolated profile
         run: bash ops/whatsapp-container/browser-lifecycle-smoke.sh
   secret-scan:
     runs-on: ubuntu-latest

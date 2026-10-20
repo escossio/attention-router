@@ -3,6 +3,12 @@ name: Deploy Pages
 on:
   push:
     branches: [main]
+    paths:
+      - 'docs/site/**'
+      - 'docs/assets/social-preview.png'
+      - 'docs/assets/demo/attention-router-demo.mp4'
+      - 'docs/assets/demo/attention-router-demo-poster.png'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
