@@ -4,7 +4,7 @@
 
 - Branch `fix/whatsapp-direct-identity-ptt-media-pass22` adds one server-owned `[Andy • IA]` label to eligible direct replies, including bound actors and continuations; TTS strips that leading label from speech input while retaining the labelled snapshot and its hash for delivery integrity.
 - The pinned `whatsapp-web.js` 1.34.7 build removes media model `__x_id` from the composed outgoing message. The build patch checks the exact dependency version and source anchor, and fails closed on drift. No production deployment, replay, reconciliation or live send is part of this candidate.
-- Synthetic targeted tests and Transport package checks passed locally/on CI01; branch Actions and distributed gates remain to be certified before promotion. The failed production PTT stays AMBIGUOUS.
+- Synthetic targeted tests and Transport package checks passed locally/on CI01. The first CI03 sweep passed 642 PostgreSQL cases and found five stale assertions expecting an unlabeled direct response; those assertions now reflect the new contract and the final SHA requires a fresh distributed gate. The failed production PTT stays AMBIGUOUS.
 
 ## PASSADA 21A — correção local de constraint TTS (20/10/2026 UTC)
 

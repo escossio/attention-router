@@ -389,7 +389,7 @@ def test_unproven_identity_preserves_conversation_without_durable_inauguration(
     else:
         incoming = event(peer="5500000000027@c.us", proof=False)
     decision = visitor_decision(session, incoming)
-    assert decision.proposed_response == "Fibra óptica transmite dados por luz."
+    assert decision.proposed_response == "[Andy • IA] Fibra óptica transmite dados por luz."
     assert decision.response_introduction_included is None
     assert captured[-1].first_contact is None
     assert not session.scalar(select(FirstContactPresentationRow))
@@ -461,7 +461,7 @@ def test_flag_off_preserves_existing_response_and_prompt_payload(session, monkey
     decision = visitor_decision(session, event())
     assert captured[0].first_contact is None
     assert "first_contact" not in captured[0].prompt_payload()
-    assert decision.proposed_response == "Fibra óptica transmite dados por luz."
+    assert decision.proposed_response == "[Andy • IA] Fibra óptica transmite dados por luz."
     assert not session.scalar(select(FirstContactPresentationRow))
 
 
@@ -534,7 +534,7 @@ def test_other_verified_peer_keeps_ordinary_visitor_path(session, monkeypatch):
     incoming.metadata["peer_identifiers"] = [incoming.actor_id]
     incoming.metadata["first_contact_identity"]["canonical_peer_id"] = incoming.actor_id
     decision = visitor_decision(session, incoming)
-    assert decision.proposed_response == "Fibra óptica transmite dados por luz."
+    assert decision.proposed_response == "[Andy • IA] Fibra óptica transmite dados por luz."
     assert decision.response_introduction_included is None
     assert captured[-1].first_contact is None
     assert not session.scalar(select(FirstContactPresentationRow))
