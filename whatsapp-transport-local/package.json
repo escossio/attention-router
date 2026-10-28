@@ -9,9 +9,9 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api": "1.10.0",
     "@opentelemetry/core": "2.11.0",
-    "@opentelemetry/exporter-trace-otlp-proto": "0.222.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.300.0",
     "@opentelemetry/resources": "2.11.0",
     "@opentelemetry/sdk-trace": "2.11.0",
     "whatsapp-web.js": "1.34.7"
