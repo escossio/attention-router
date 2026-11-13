@@ -154,6 +154,34 @@ def test_guard_transcribed_ptt_enqueues_text_without_tts(session, guarded_visito
     assert not session.scalar(select(TTSDerivationRow))
 
 
+def test_guard_transcribed_ptt_mirrors_voice_when_rollout_enabled(
+    session, guarded_visitor, monkeypatch, tmp_path,
+):
+    from tests.test_whatsapp_voice_flow import FakeTTS
+
+    monkeypatch.setattr(settings, "visitor_default_voice_mirroring_enabled", True)
+    monkeypatch.setattr(settings, "tts_enabled", True)
+    monkeypatch.setattr(settings, "tts_auto_send", True)
+    monkeypatch.setattr(settings, "whatsapp_media_root", str(tmp_path))
+    decision = visitor_voice_decision(session, monkeypatch, tmp_path)
+    assert autonomy.evaluate_and_route(session, decision).automatic_execution_allowed
+    intent = session.scalar(select(AgentExecutionIntentRow))
+    assert intent_is_voice_response(session, intent)
+
+    assert execution.enqueue_ready_intents(session, transport_ready=True) == 1
+    derivation = session.scalar(select(TTSDerivationRow))
+    assert derivation.status == "PENDING" and intent.status == "TTS_PENDING"
+    assert session.scalar(select(OutboxMessageRow)) is None
+
+    assert process_tts_derivations(session, "synthetic-visitor-tts", client=FakeTTS()) == 1
+    session.refresh(derivation)
+    outbox = session.scalar(select(OutboxMessageRow))
+    assert derivation.status == "READY"
+    assert outbox.action_type == "agent_execution_voice"
+    assert outbox.payload["message_type"] == "ptt"
+    assert outbox.supplemental_parent_outbox_id is None
+
+
 def test_guard_rejects_synthetic_tts_after_flag_loss_and_pointer_change(
     session, guarded_visitor, monkeypatch, tmp_path,
 ):
@@ -555,7 +583,35 @@ def test_independent_session_cannot_dispatch_cached_visitor_authority(independen
 
 def test_visitor_default_setting_is_disabled_by_default(monkeypatch):
     monkeypatch.delenv("AGENT_DECISION_DEFAULT_VISITOR_ONLY", raising=False)
-    assert Settings(_env_file=None).agent_decision_default_visitor_only is False
+    monkeypatch.delenv("VISITOR_DEFAULT_VOICE_MIRRORING_ENABLED", raising=False)
+    configured = Settings(_env_file=None)
+    assert configured.agent_decision_default_visitor_only is False
+    assert configured.visitor_default_voice_mirroring_enabled is False
+
+
+def test_visitor_voice_mirroring_requires_guard_and_tts():
+    with pytest.raises(ValueError, match="VISITOR_DEFAULT_VOICE_MIRRORING_REQUIRES_GUARD"):
+        Settings(
+            _env_file=None,
+            visitor_default_voice_mirroring_enabled=True,
+            tts_enabled=True,
+            tts_auto_send=True,
+        )
+    guarded = {
+        "agent_decision_default_visitor_only": True,
+        "agent_decision_default_blueprint_id": "synthetic-approved-id",
+        "visitor_default_voice_mirroring_enabled": True,
+    }
+    with pytest.raises(ValueError, match="VISITOR_DEFAULT_VOICE_MIRRORING_REQUIRES_TTS"):
+        Settings(_env_file=None, **guarded)
+    configured = Settings(
+        _env_file=None,
+        **guarded,
+        tts_enabled=True,
+        tts_auto_send=True,
+        tts_internal_token="synthetic-test-token",
+    )
+    assert configured.visitor_default_voice_mirroring_enabled is True
 
 
 def test_guard_enabled_startup_requires_explicit_default_blueprint():

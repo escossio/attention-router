@@ -139,6 +139,7 @@ class Settings(BaseSettings):
     agent_decision_pipeline_version: str = "v1"
     agent_decision_default_blueprint_id: str | None = None
     agent_decision_default_visitor_only: bool = False
+    visitor_default_voice_mirroring_enabled: bool = False
     andy_behavior_enabled: bool = False
     andy_behavior_canary_binding_id: str | None = None
     andy_agent_enabled: bool = False
@@ -312,6 +313,12 @@ class Settings(BaseSettings):
             self.agent_decision_default_blueprint_id and self.agent_decision_default_blueprint_id.strip()
         ):
             raise ValueError("VISITOR_DEFAULT_BLUEPRINT_REQUIRED")
+        if self.visitor_default_voice_mirroring_enabled and not self.agent_decision_default_visitor_only:
+            raise ValueError("VISITOR_DEFAULT_VOICE_MIRRORING_REQUIRES_GUARD")
+        if self.visitor_default_voice_mirroring_enabled and not (
+            self.tts_enabled and self.tts_auto_send
+        ):
+            raise ValueError("VISITOR_DEFAULT_VOICE_MIRRORING_REQUIRES_TTS")
         allowed = {"test", "development", "production", "private"}
         if self.app_env not in allowed:
             raise ValueError(f"APP_ENV must be one of {sorted(allowed)}")
