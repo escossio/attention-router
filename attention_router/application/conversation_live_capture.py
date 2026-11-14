@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, literal, or_, select
 from sqlalchemy.orm import Session
 
 from attention_router.application.memory import (
@@ -22,6 +22,11 @@ from attention_router.application.memory import (
 from attention_router.application.platform.context import resolve_represented_subject
 from attention_router.config import settings
 from attention_router.infrastructure.hashing import stable_hash
+from attention_router.infrastructure.artifact_models import (
+    ArtifactReceiptRow,
+    ArtifactRow,
+    ArtifactUnderstandingRow,
+)
 from attention_router.infrastructure.models import (
     ConversationMessageRow,
     ConversationThreadRow,
@@ -38,6 +43,20 @@ _CAPTURE_ORIGINS = frozenset({
 })
 _VOICE_TYPES = frozenset({"ptt", "audio"})
 _TEXT_TYPES = frozenset({"chat", "text"})
+_MEDIA_TYPES = {
+    "image": "IMAGE",
+    "document": "DOCUMENT",
+    "video": "VIDEO",
+}
+_STORED_MEDIA_KINDS = frozenset({"IMAGE", "DOCUMENT", "VIDEO", "VOICE"})
+_MEDIA_CONFLICT_CODES = frozenset({
+    "ARTIFACT_CONVERSATION_SCOPE_CONFLICT",
+    "ARTIFACT_UNDERSTANDING_KIND_CONFLICT",
+    "ARTIFACT_REFERENCE_CONFLICT",
+    "ARTIFACT_RECEIPT_MISSING",
+    "ARTIFACT_KIND_OR_TENANT_CONFLICT",
+    "ARTIFACT_UNDERSTANDING_LINK_CONFLICT",
+})
 
 
 @dataclass(frozen=True)
@@ -114,7 +133,10 @@ def _fields(receipt: InboundEventRow) -> dict[str, Any] | None:
     if not isinstance(raw_kind, str):
         return None
     kind = raw_kind.casefold()
-    if kind not in _TEXT_TYPES | _VOICE_TYPES:
+    if kind not in _TEXT_TYPES | _VOICE_TYPES | _MEDIA_TYPES.keys():
+        return None
+    if kind in _MEDIA_TYPES and metadata.get("has_media") is not True:
+        # A media-type hint alone does not prove that a file was observed.
         return None
 
     occurred_at = payload.get("occurred_at")
@@ -147,12 +169,19 @@ def _fields(receipt: InboundEventRow) -> dict[str, Any] | None:
     # or a missing media transcript as something a human actually said.
     if content.strip() == "[owner outbound observation]":
         content = ""
-    text = content.strip() if kind in _TEXT_TYPES else ""
-    message_kind = "VOICE" if kind in _VOICE_TYPES else "TEXT"
-    state = (
-        "PENDING_TRANSCRIPTION" if message_kind == "VOICE"
-        else ("TEXT_AVAILABLE" if text else "TEXT_UNAVAILABLE")
+    # For media, the original caption is conversation text. It is NOT OCR,
+    # a visual fact, or permission to display the Artifact's contents.
+    text = content.strip() if kind in _TEXT_TYPES or kind in _MEDIA_TYPES else ""
+    message_kind = (
+        "VOICE" if kind in _VOICE_TYPES
+        else _MEDIA_TYPES.get(kind, "TEXT")
     )
+    if message_kind == "VOICE":
+        state = "PENDING_TRANSCRIPTION"
+    elif message_kind in _STORED_MEDIA_KINDS:
+        state = "CAPTION_AVAILABLE" if text else "CAPTION_UNAVAILABLE"
+    else:
+        state = "TEXT_AVAILABLE" if text else "TEXT_UNAVAILABLE"
     raw_quote = metadata.get("quoted_message_id")
     quote = raw_quote if isinstance(raw_quote, str) and len(raw_quote) <= 240 else None
     return {
@@ -170,6 +199,7 @@ def _fields(receipt: InboundEventRow) -> dict[str, Any] | None:
         "sent_at": stamp,
         "timestamp_basis": "PROVIDER_OCCURRED_AT" if provider_timestamp_used else "RECEIPT_FALLBACK",
         "reply_reference": quote,
+        "has_media": metadata.get("has_media") is True,
     }
 
 
@@ -201,6 +231,12 @@ def capture_live_receipt(
         "content_state": details["content_state"],
         "reply_reference": details["reply_reference"],
     }
+    if details["message_kind"] in _STORED_MEDIA_KINDS:
+        # The arrival of a WhatsApp message never proves the media bytes
+        # were downloaded. Artifact status is attached separately and later.
+        metadata["attachment_state"] = (
+            "PENDING" if details["has_media"] else "NOT_OBSERVED"
+        )
     archived, created = archive_message(
         session,
         ArchivedMessageInput(
@@ -237,6 +273,167 @@ def capture_live_receipt(
     return ConversationCaptureResult(
         "ARCHIVED" if created else "DUPLICATE", message_id=archived.id
     )
+
+
+def attach_canonical_artifact(
+    session: Session,
+    receipt: InboundEventRow,
+) -> ConversationCaptureResult:
+    """Link one already-staged Artifact to its original WhatsApp message.
+
+    The sole authority for a link is the persisted signed ingress event and
+    the exact, tenant/account-scoped Artifact receipt. A READY visual
+    understanding is evidence, never an authorization or an implicit message.
+    No OCR, inference, credential or model output is copied into the archive.
+    """
+    details = _fields(receipt)
+    if (
+        details is None
+        or details["message_kind"] not in _STORED_MEDIA_KINDS
+        or not details["has_media"]
+    ):
+        return ConversationCaptureResult("SKIPPED", reason="NOT_ELIGIBLE")
+
+    row = session.scalar(select(ConversationMessageRow).where(
+        ConversationMessageRow.tenant_id == receipt.tenant_id,
+        ConversationMessageRow.source == receipt.source,
+        ConversationMessageRow.source_account == details["source_account"],
+        ConversationMessageRow.source_message_id == receipt.external_event_id,
+    ))
+    if row is None:
+        return ConversationCaptureResult("SKIPPED", reason="MESSAGE_NOT_ARCHIVED")
+
+    thread = session.get(ConversationThreadRow, row.conversation_id)
+    previous = dict(row.metadata_json or {})
+    if (
+        thread is None
+        or thread.tenant_id != receipt.tenant_id
+        or thread.source != receipt.source
+        or thread.source_account != details["source_account"]
+        or thread.external_thread_key != details["conversation_key"]
+        or row.from_me != details["from_me"]
+        or row.message_type != details["message_kind"]
+        or previous.get("capture_contract") != "LIVE_CONVERSATION_ARCHIVE_V0"
+        or previous.get("source_inbound_event_id") != receipt.id
+    ):
+        raise ConversationCaptureConflict("ARTIFACT_CONVERSATION_SCOPE_CONFLICT")
+
+    receipt_key = f"whatsapp:{receipt.external_event_id}:media"
+    linked_receipt = session.scalar(select(ArtifactReceiptRow).where(
+        ArtifactReceiptRow.tenant_id == receipt.tenant_id,
+        ArtifactReceiptRow.source_channel == "channel.whatsapp",
+        ArtifactReceiptRow.source_account == details["source_account"],
+        ArtifactReceiptRow.external_receipt_id == receipt_key,
+    ))
+    understanding = session.scalar(select(ArtifactUnderstandingRow).where(
+        ArtifactUnderstandingRow.tenant_id == receipt.tenant_id,
+        ArtifactUnderstandingRow.inbound_event_id == receipt.id,
+    ))
+    if understanding is not None:
+        if (
+            understanding.content_kind not in (
+                {"IMAGE"} if details["message_kind"] == "IMAGE"
+                else {"IMAGE", "DOCUMENT"} if details["message_kind"] == "DOCUMENT"
+                else set()
+            )
+            or understanding.status not in {"PENDING", "PROCESSING", "READY", "FAILED"}
+        ):
+            raise ConversationCaptureConflict("ARTIFACT_UNDERSTANDING_KIND_CONFLICT")
+
+    if linked_receipt is None and understanding is None:
+        return ConversationCaptureResult("PENDING", message_id=row.id)
+
+    next_meta = dict(previous)
+
+    def set_reference(key: str, value: str) -> None:
+        old = next_meta.get(key)
+        if old is not None and old != value:
+            raise ConversationCaptureConflict("ARTIFACT_REFERENCE_CONFLICT")
+        next_meta[key] = value
+
+    if understanding is not None:
+        set_reference("artifact_understanding_id", understanding.id)
+        next_meta["artifact_understanding_status"] = understanding.status
+
+    if linked_receipt is None:
+        if understanding is None or understanding.status in {"PENDING", "PROCESSING"}:
+            return ConversationCaptureResult("PENDING", message_id=row.id)
+        if understanding.artifact_id or understanding.status == "READY":
+            # A terminal understanding with an Artifact reference but no
+            # matching source receipt is not proof of this message's media.
+            raise ConversationCaptureConflict("ARTIFACT_RECEIPT_MISSING")
+        next_meta["attachment_state"] = "FAILED"
+    else:
+        artifact = session.get(ArtifactRow, linked_receipt.artifact_id)
+        if (
+            artifact is None
+            or artifact.tenant_id != receipt.tenant_id
+            or artifact.status != "AVAILABLE"
+            or artifact.artifact_kind not in {
+                "VOICE": {"AUDIO"},
+                "IMAGE": {"IMAGE"},
+                "DOCUMENT": {"DOCUMENT", "IMAGE"},
+                "VIDEO": {"VIDEO"},
+            }[details["message_kind"]]
+        ):
+            raise ConversationCaptureConflict("ARTIFACT_KIND_OR_TENANT_CONFLICT")
+        if understanding is not None and (
+            understanding.artifact_id is not None
+            and understanding.artifact_id != artifact.id
+        ):
+            raise ConversationCaptureConflict("ARTIFACT_UNDERSTANDING_LINK_CONFLICT")
+        set_reference("artifact_receipt_id", linked_receipt.id)
+        set_reference("artifact_id", artifact.id)
+        next_meta["artifact_kind"] = artifact.artifact_kind
+        next_meta["attachment_state"] = "READY"
+        if details["message_kind"] in {"VOICE", "VIDEO"}:
+            next_meta["artifact_understanding_status"] = "NOT_APPLICABLE"
+        elif understanding is None:
+            next_meta["artifact_understanding_status"] = "UNAVAILABLE"
+
+    if next_meta == previous:
+        return ConversationCaptureResult("UNCHANGED", message_id=row.id)
+    row.metadata_json = next_meta
+    session.flush()
+    return ConversationCaptureResult("ARTIFACT_LINKED", message_id=row.id)
+
+
+def _quarantine_artifact_link_conflict(
+    session: Session,
+    receipt: InboundEventRow,
+    conflict: ConversationCaptureConflict,
+) -> None:
+    """Flag a source-integrity discrepancy without dropping its message.
+
+    An impossible link should not occupy the same 25 recovery slots on every
+    future poll; a separate deliberate repair can clear the quarantine.
+    """
+    details = _fields(receipt)
+    if details is None or details["message_kind"] not in _STORED_MEDIA_KINDS:
+        return
+    row = session.scalar(select(ConversationMessageRow).where(
+        ConversationMessageRow.tenant_id == receipt.tenant_id,
+        ConversationMessageRow.source == receipt.source,
+        ConversationMessageRow.source_account == details["source_account"],
+        ConversationMessageRow.source_message_id == receipt.external_event_id,
+    ))
+    if row is None:
+        return
+    metadata = dict(row.metadata_json or {})
+    if (
+        metadata.get("capture_contract") != "LIVE_CONVERSATION_ARCHIVE_V0"
+        or metadata.get("source_inbound_event_id") != receipt.id
+    ):
+        return
+    metadata["attachment_state"] = "LINK_CONFLICT"
+    # Restrict metadata to a fixed list; never store arbitrary exception
+    # strings, provider names, source accounts, phone numbers or message text.
+    code = str(conflict)
+    metadata["artifact_link_error_code"] = (
+        code if code in _MEDIA_CONFLICT_CODES else "ARTIFACT_PROVENANCE_CONFLICT"
+    )
+    row.metadata_json = metadata
+    session.flush()
 
 
 def capture_voice_transcription(
@@ -312,6 +509,7 @@ class ConversationCaptureReconciliationResult:
     examined: int = 0
     archived: int = 0
     attached_transcripts: int = 0
+    linked_artifacts: int = 0
     skipped: int = 0
     failed: int = 0
 
@@ -359,7 +557,7 @@ def reconcile_live_capture_batch(
             InboundEventRow.payload["event_origin"].as_string().in_(_CAPTURE_ORIGINS),
             InboundEventRow.payload["metadata"]["conversation_state"].as_string() == "READY",
             InboundEventRow.payload["metadata"]["message_type"].as_string().in_(
-                _TEXT_TYPES | _VOICE_TYPES
+                _TEXT_TYPES | _VOICE_TYPES | _MEDIA_TYPES.keys()
             ),
             InboundEventRow.payload["metadata"]["conversation_key"].as_string().like("wwebjs:%"),
             ~existing,
@@ -372,32 +570,53 @@ def reconcile_live_capture_batch(
             InboundEventRow.tenant_id == settings.conversation_capture_tenant_id
         )
     receipts = session.scalars(query).all()
-    archived = attached = skipped = failed = 0
+    archived = attached = linked = skipped = failed = 0
     for receipt in receipts:
         try:
-            attached_here = False
             with session.begin_nested():
                 result = capture_live_receipt(session, receipt)
-                details = _fields(receipt)
-                if result.status == "ARCHIVED" and details is not None and details["message_kind"] == "VOICE":
-                    transcription = session.scalar(
-                        select(VoiceTranscriptionRow).where(
-                            VoiceTranscriptionRow.inbound_event_id == receipt.id,
-                            VoiceTranscriptionRow.tenant_id == receipt.tenant_id,
-                        )
-                    )
-                    if transcription is not None:
-                        status = capture_voice_transcription(session, receipt, transcription)
-                        attached_here = status.status == "TRANSCRIPTION_ATTACHED"
-            if result.status == "ARCHIVED":
-                archived += 1
-                if attached_here:
-                    attached += 1
-            else:
-                skipped += 1
         except Exception:
-            # Keep receipt for a later retry; no content in logs or exceptions.
+            # An invalid conversation identity cannot be archived. The
+            # ingress event remains durable for an explicit later repair.
             failed += 1
+            continue
+        if result.status != "ARCHIVED":
+            skipped += 1
+            continue
+        archived += 1
+        details = _fields(receipt)
+        if details is None:
+            continue
+        if details["message_kind"] == "VOICE":
+            try:
+                transcription = session.scalar(
+                    select(VoiceTranscriptionRow).where(
+                        VoiceTranscriptionRow.inbound_event_id == receipt.id,
+                        VoiceTranscriptionRow.tenant_id == receipt.tenant_id,
+                    )
+                )
+                if transcription is not None:
+                    with session.begin_nested():
+                        status = capture_voice_transcription(session, receipt, transcription)
+                    attached += int(status.status == "TRANSCRIPTION_ATTACHED")
+            except Exception:
+                # STT failure must not erase the already archived event.
+                failed += 1
+        if details["message_kind"] in _STORED_MEDIA_KINDS:
+            try:
+                with session.begin_nested():
+                    outcome = attach_canonical_artifact(session, receipt)
+                linked += int(outcome.status == "ARTIFACT_LINKED")
+            except ConversationCaptureConflict as exc:
+                failed += 1
+                try:
+                    with session.begin_nested():
+                        _quarantine_artifact_link_conflict(session, receipt, exc)
+                except Exception:
+                    failed += 1
+            except Exception:
+                # Media staging is independent from archive durability.
+                failed += 1
     # Reconcile a *separate* failure boundary: the archive exists, STT has
     # already reached terminal state, but its text/status update was missed.
     # A missing-archive-only retry cannot repair this case. Limit both
@@ -441,9 +660,114 @@ def reconcile_live_capture_batch(
         except Exception:
             failed += 1
 
+    # A different asynchronous boundary: canonical media and its semantic
+    # interpretation can arrive *after* the original message was archived.
+    # Only rows with a source-backed media result are eligible. Pending
+    # downloads without a result must not starve later READY media.
+    source_key = ConversationMessageRow.metadata_json["source_inbound_event_id"].as_string()
+    link_state = ConversationMessageRow.metadata_json["attachment_state"].as_string()
+    prior_understanding = ConversationMessageRow.metadata_json[
+        "artifact_understanding_status"
+    ].as_string()
+    link_key = (
+        literal("whatsapp:") + InboundEventRow.external_event_id + literal(":media")
+    )
+    pending_media_query = (
+        select(InboundEventRow)
+        .join(
+            ConversationMessageRow,
+            and_(
+                ConversationMessageRow.tenant_id == InboundEventRow.tenant_id,
+                ConversationMessageRow.source == InboundEventRow.source,
+                source_key == InboundEventRow.id,
+                ConversationMessageRow.metadata_json["capture_contract"].as_string()
+                == "LIVE_CONVERSATION_ARCHIVE_V0",
+                ConversationMessageRow.message_type.in_(_STORED_MEDIA_KINDS),
+            ),
+        )
+        .outerjoin(
+            ArtifactReceiptRow,
+            and_(
+                ArtifactReceiptRow.tenant_id == InboundEventRow.tenant_id,
+                ArtifactReceiptRow.source_channel == "channel.whatsapp",
+                ArtifactReceiptRow.source_account == ConversationMessageRow.source_account,
+                ArtifactReceiptRow.external_receipt_id == link_key,
+            ),
+        )
+        .outerjoin(
+            ArtifactUnderstandingRow,
+            and_(
+                ArtifactUnderstandingRow.tenant_id == InboundEventRow.tenant_id,
+                ArtifactUnderstandingRow.inbound_event_id == InboundEventRow.id,
+            ),
+        )
+        .where(
+            InboundEventRow.source == "wwebjs",
+            InboundEventRow.event_type == "message",
+            InboundEventRow.status == "PROCESSED",
+            InboundEventRow.lineage_classification == "ORGANIC",
+            InboundEventRow.received_at >= _utc(start),
+            or_(
+                and_(
+                    or_(
+                        link_state == "PENDING",
+                        link_state.is_(None),  # pre-V1 live VOICE rows
+                    ),
+                    or_(
+                        ArtifactReceiptRow.id.isnot(None),
+                        ArtifactUnderstandingRow.status == "FAILED",
+                    ),
+                ),
+                # A terminal failed download can be repaired only when the
+                # canonical source receipt actually becomes available. It
+                # must not occupy all 25 slots in every subsequent cycle.
+                and_(
+                    link_state == "FAILED",
+                    ArtifactReceiptRow.id.isnot(None),
+                ),
+                and_(
+                    link_state == "READY",
+                    ConversationMessageRow.message_type.in_(("IMAGE", "DOCUMENT")),
+                    prior_understanding.in_(
+                        ("PENDING", "PROCESSING", "UNAVAILABLE", "FAILED")
+                    ),
+                    ArtifactUnderstandingRow.status.in_(("READY", "FAILED")),
+                    prior_understanding != ArtifactUnderstandingRow.status,
+                ),
+            ),
+        )
+        .order_by(InboundEventRow.received_at, InboundEventRow.id)
+        .limit(limit)
+    )
+    if settings.conversation_capture_tenant_id:
+        pending_media_query = pending_media_query.where(
+            InboundEventRow.tenant_id == settings.conversation_capture_tenant_id
+        )
+    pending_media = session.scalars(pending_media_query).all()
+    for receipt in pending_media:
+        try:
+            with session.begin_nested():
+                outcome = attach_canonical_artifact(session, receipt)
+            if outcome.status == "ARTIFACT_LINKED":
+                linked += 1
+            else:
+                skipped += 1
+        except ConversationCaptureConflict as exc:
+            # Do not retry a contradictory Artifact identity forever.
+            failed += 1
+            try:
+                with session.begin_nested():
+                    _quarantine_artifact_link_conflict(session, receipt, exc)
+            except Exception:
+                failed += 1
+        except Exception:
+            # An unexpected transient database/media failure is retryable.
+            failed += 1
+
     return ConversationCaptureReconciliationResult(
-        examined=len(receipts) + len(pending_voice_rows), archived=archived,
-        attached_transcripts=attached, skipped=skipped, failed=failed,
+        examined=len(receipts) + len(pending_voice_rows) + len(pending_media),
+        archived=archived, attached_transcripts=attached,
+        linked_artifacts=linked, skipped=skipped, failed=failed,
     )
 
 
@@ -453,5 +777,6 @@ __all__ = [
     "reconcile_live_capture_batch",
     "ConversationCaptureResult",
     "capture_live_receipt",
+    "attach_canonical_artifact",
     "capture_voice_transcription",
 ]
