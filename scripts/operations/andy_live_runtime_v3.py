@@ -101,7 +101,10 @@ def first_contact_transport_pin(manifest: dict) -> dict:
             and bool(re.fullmatch(r"sha256:[0-9a-f]{64}", pair["image_id"]))
             and type(pair["source_sha"]) is str
             and bool(SOURCE_SHA.fullmatch(pair["source_sha"])), "FIRST_CONTACT_TRANSPORT_PIN_INVALID")
-    require(pair["source_sha"] == manifest["source_sha"], "FIRST_CONTACT_PAIR_SOURCE_DRIFT")
+    # Worker and transport have independent release SHAs. Both remain pinned
+    # to exact image IDs and independently checked OCI revision labels.
+    # Do not equate their source SHAs; verify_first_contact_transport()
+    # enforces the complete transport image, revision and scope contract.
     return pair
 
 
@@ -312,6 +315,20 @@ def reconcile(manifest: dict, rendered: dict, image: dict, command: list[str], *
     # be treated as the current runtime. The source manifest remains a rollback pin.
     if previous is None:
         verify(manifest, rendered, image, require_running=False)
+        # A fully healthy and provenance-matched runtime needs no Docker writes.
+        # Avoid a needless Compose up/recreate after the boot health gates pass.
+        try:
+            verify(manifest, rendered, image, require_running=True)
+        except InvariantError as error:
+            if str(error) != "SERVICE_UNHEALTHY":
+                raise
+        else:
+            # Re-read all pins after the live-state check. A concurrent change
+            # must not be accepted merely because the first snapshot passed.
+            fresh = preflight()
+            require(fresh == (manifest, rendered, image, command),
+                    "TARGET_CHANGED_BEFORE_UP")
+            return
     else:
         old_manifest, old_rendered, old_image, _ = previous
         require(same_scope(old_manifest, manifest), "TRANSITION_SCOPE_DRIFT")

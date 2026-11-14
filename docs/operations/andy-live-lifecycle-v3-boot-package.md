@@ -60,6 +60,24 @@ successful directed transition: a later reboot would try to verify a source
 that is no longer current and correctly fail closed. Clear that pin only with
 an explicit CAS-checked boot update after verification.
 
+## Independent component pins and idempotent healthy boot (13/11/2026)
+
+A later production incident demonstrated that Worker and Transport can be running
+distinct reviewed image SHAs while sharing the same First Contact scope.
+The controller now validates both exact OCI image revisions and immutable IDs
+independently. It no longer assumes that Worker and Transport originate from
+the same source commit.
+
+For a runtime that already matches every pin and is healthy, the reconciler
+rechecks its inputs and returns without issuing Docker updates or Compose up.
+A dirty, stale or unhealthy runtime still takes the guarded failure/recovery
+path; the change does not relax fail-closed controls.
+
+The companion [boot recovery certification](andy-boot-recovery-certification-20261113.md)
+records the synthetic tests, real reboot observation and rollback boundary.
+The repository also includes an exact-SHA host bootstrap repair reproducer;
+the full private host bootstrap is not distributed as public configuration.
+
 ## Validation and operational boundary
 
 Use `--check` for an already-running target and `--transition-check` before
