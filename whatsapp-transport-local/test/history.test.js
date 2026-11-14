@@ -61,7 +61,7 @@ function syntheticChatPage(chats, calls = []) {
   } };
 }
 
-test('history capabilities are explicit for whatsapp-web.js v1.34.7', () => {
+test('history capabilities are explicit for whatsapp-web.js v1.34.8', () => {
   assert.deepEqual(capabilities(), {
     can_list_chats: true,
     can_fetch_historical_messages: true,

@@ -1,5 +1,15 @@
 # Project status
 
+## WhatsApp inbound media and visitor PTT modality, PR #398 (13/11/2026)
+
+- Commit d5c414b pins whatsapp-web.js 1.34.8, verifies inbound media-cache resolution and outbound media-ID compatibility and repairs non-root transport image file permissions.
+- Commit 2ced65c permits explicitly gated visitor voice mirroring: an eligible voice inbound can use STT, TTS and one PTT outbox; ordinary text inbound stays text. The visitor-only guard, TTS and auto-send are prerequisites, and the rollout flag defaults to disabled.
+- The exact patch head passed twelve GitHub checks (including CodeQL and distributed PostgreSQL), plus directed local tests. The operational Worker, Transport and API revisions are independently pinned and checked; they are not necessarily identical.
+- A controlled AGT reboot on 13/11 demonstrated autonomous recovery of Browser, Transport, Observer, Worker, API, PostgreSQL and MAESTRO, with BOOT_CONVERGENCE=PASS and reconciliation status=ok. This is boot certification, **not** proof of real text/voice delivery.
+- Owner automatic responses stayed paused (automatic_responses_enabled=false, observed revision 65). No live text/PTT canary, pairing, logout, tenant-policy change, replay or outbound send was authorized by this certification.
+- See [voice modality acceptance and provenance](docs/operations/whatsapp-voice-modality-20261113.md). Historical import remains outside this change; ingress cursor and delivery/outbox semantics stay unchanged.
+
+
 ## WhatsApp direct identity and PTT media candidate (20/10/2026 UTC)
 
 - Branch `fix/whatsapp-direct-identity-ptt-media-pass22` adds one server-owned `[Andy • IA]` label to eligible direct replies, including bound actors and continuations; TTS strips that leading label from speech input while retaining the labelled snapshot and its hash for delivery integrity.

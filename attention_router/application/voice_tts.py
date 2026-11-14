@@ -45,12 +45,16 @@ def intent_is_voice_response(session, intent: AgentExecutionIntentRow) -> bool:
 
     blueprint = session.get(AgentBlueprintRow, decision.agent_blueprint_id) if decision.agent_blueprint_id else None
     # The decision's immutable contract survives rollout flag loss and rollback
-    # of the blueprint's current pointer. Text-only visitors never request TTS.
+    # of the blueprint's current pointer. Guarded visitors mirror voice only
+    # through the explicit, fail-closed rollout setting; text input never enters
+    # this path because is_voice_input_event() was checked above.
     version = session.scalar(select(AgentBlueprintVersionRow).where(
         AgentBlueprintVersionRow.blueprint_id == decision.agent_blueprint_id,
         AgentBlueprintVersionRow.version == decision.agent_blueprint_version,
     )) if decision.agent_blueprint_id and decision.agent_blueprint_version is not None else None
-    return not _guarded_visitor_default(blueprint, version)
+    if _guarded_visitor_default(blueprint, version):
+        return settings.visitor_default_voice_mirroring_enabled
+    return True
 
 
 def ensure_tts_derivation(session, intent: AgentExecutionIntentRow) -> TTSDerivationRow:

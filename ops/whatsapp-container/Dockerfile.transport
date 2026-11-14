@@ -7,15 +7,15 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl socat tini \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY whatsapp-transport-local/package.json whatsapp-transport-local/package-lock.json ./
-COPY ops/whatsapp-container/patch-wwebjs-media-id.js ./patch-wwebjs-media-id.js
+COPY --chmod=0644 whatsapp-transport-local/package.json whatsapp-transport-local/package-lock.json ./
+COPY --chmod=0644 ops/whatsapp-container/patch-wwebjs-media-id.js ./patch-wwebjs-media-id.js
 RUN npm ci --omit=dev --ignore-scripts \
     && node ./patch-wwebjs-media-id.js \
     && rm ./patch-wwebjs-media-id.js \
     && npm cache clean --force
 COPY whatsapp-transport-local/src ./src
-COPY ops/whatsapp-container/transport-entrypoint.sh /usr/local/bin/transport-entrypoint
-RUN chmod 0755 /usr/local/bin/transport-entrypoint
+RUN chmod -R a+rX ./src
+COPY --chmod=0755 ops/whatsapp-container/transport-entrypoint.sh /usr/local/bin/transport-entrypoint
 USER 1000:1000
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/transport-entrypoint"]
 HEALTHCHECK --interval=20s --timeout=5s --start-period=60s --retries=3 \
