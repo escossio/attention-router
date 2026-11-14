@@ -4,6 +4,18 @@
 `PRE_CUTOVER`: AGT production still runs the host units. This package must not
 be launched against the live profile until the reviewed cutover window.
 
+## Host startup evidence (13/11/2026)
+
+The container runtime and the host-native bootstrap are separate boundaries.
+The validated post-reboot auth check accepts a missing Browser AppState only
+while the native socket is CONNECTED and the independent Transport identity,
+QR, page and readiness checks all pass. The exact pinned patch reproducer is
+in scripts/operations/whatsapp_bootstrap_auth_patch.py. It does not edit the
+installed bootstrap or trigger Docker commands by itself.
+
+See [boot recovery certification](../../docs/operations/andy-boot-recovery-certification-20261113.md).
+No new network placement, historical replay or live send is introduced.
+
 ## Provenance and forensics
 
 - Stage 3.5 (`9b696ff`) proved an authenticated official Chrome profile plus
