@@ -11,7 +11,11 @@ from attention_router.application.owner_automation_control import (
     OwnerAutomationControlMutation,
     set_automatic_responses_enabled,
 )
+from attention_router.application.owner_temporal_duration import (
+    TemporalUnit, TemporalValidationError, normalized_period,
+)
 from attention_router.application.owner_operational_control import (
+    set_owner_reply_grace_period,
     OwnerReplyGraceCommandType,
     OwnerReplyGraceControlCommand,
     OwnerReplyGraceControlMutation,
@@ -23,7 +27,7 @@ from attention_router.application.owner_response_review_control import (
     apply_owner_response_review,
 )
 from attention_router.application.platform.context import resolve_represented_subject
-from attention_router.core.events import OperatorAuthority
+from attention_router.core.events import OperatorAuthority, OwnerCommandUnauthorized
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     InboundEventRow,
@@ -47,6 +51,7 @@ class OwnerControlSignalKind(StrEnum):
 class OwnerControlAction(StrEnum):
     SET_AUTOMATIC_RESPONSES_ENABLED = "SET_AUTOMATIC_RESPONSES_ENABLED"
     SET_OWNER_REPLY_GRACE_SECONDS = "SET_OWNER_REPLY_GRACE_SECONDS"
+    SET_OWNER_REPLY_GRACE_PERIOD = "SET_OWNER_REPLY_GRACE_PERIOD"
     SET_OWNER_REPLY_GRACE_ENABLED = "SET_OWNER_REPLY_GRACE_ENABLED"
     APPROVE_RESPONSE_REVIEW = "APPROVE_RESPONSE_REVIEW"
     REJECT_RESPONSE_REVIEW = "REJECT_RESPONSE_REVIEW"
@@ -59,6 +64,21 @@ class GraceSecondsParameters:
     def __post_init__(self) -> None:
         if not isinstance(self.seconds, int) or isinstance(self.seconds, bool):
             raise OwnerControlError("CONTROL_COMMAND_INVALID_VALUE")
+
+
+@dataclass(frozen=True, slots=True)
+class GracePeriodParameters:
+    quantity: int
+    unit: TemporalUnit
+
+    def __post_init__(self) -> None:
+        try:
+            normalized = normalized_period(
+                self.quantity, self.unit, timezone_name="UTC"
+            )
+        except (TemporalValidationError, ValueError, TypeError) as exc:
+            raise OwnerControlError("CONTROL_COMMAND_INVALID_TEMPORAL_PERIOD") from exc
+        object.__setattr__(self, "unit", TemporalUnit(normalized["unit"]))
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +113,7 @@ class ReviewReferenceParameters:
 
 OwnerControlParameters = (
     GraceSecondsParameters
+    | GracePeriodParameters
     | GraceEnabledParameters
     | AutomaticResponsesEnabledParameters
     | ReviewReferenceParameters
@@ -143,6 +164,7 @@ class OwnerControlSignal:
         expected = {
             OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED: AutomaticResponsesEnabledParameters,
             OwnerControlAction.SET_OWNER_REPLY_GRACE_SECONDS: GraceSecondsParameters,
+            OwnerControlAction.SET_OWNER_REPLY_GRACE_PERIOD: GracePeriodParameters,
             OwnerControlAction.SET_OWNER_REPLY_GRACE_ENABLED: GraceEnabledParameters,
             OwnerControlAction.APPROVE_RESPONSE_REVIEW: ReviewReferenceParameters,
             OwnerControlAction.REJECT_RESPONSE_REVIEW: ReviewReferenceParameters,
@@ -300,6 +322,32 @@ def dispatch_owner_control_action(
         raise OwnerControlError("CONTROL_SOURCE_EVENT_REQUIRED")
     evidence = {"action": action.value, **(provenance or {})}
 
+    if action == OwnerControlAction.SET_OWNER_REPLY_GRACE_PERIOD:
+        if not isinstance(parameters, GracePeriodParameters):
+            raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
+        if (
+            authority.tenant_id != tenant_id
+            or not authority.can_issue_owner_commands
+            or authority.operator_actor_id != owner_actor_key
+        ):
+            raise OwnerCommandUnauthorized("OWNER_COMMAND_REQUIRES_REPRESENTED_OWNER")
+        from attention_router.config import settings
+
+        mutation = set_owner_reply_grace_period(
+            session,
+            tenant_id=tenant_id,
+            represented_owner_actor_key=owner_actor_key,
+            quantity=parameters.quantity,
+            unit=parameters.unit.value,
+            timezone_name=settings.owner_temporal_timezone,
+            updated_by_actor_key=authority.operator_actor_id,
+            authorization_source="OWNER_COMMAND",
+            source_channel=source_channel,
+            source_event_id=command_id or source_event_id,
+            provenance=evidence,
+        )
+        return OwnerControlDispatchResult(policy_id=None, mutation=mutation)
+
     if action == OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED:
         if not isinstance(parameters, AutomaticResponsesEnabledParameters):
             raise OwnerControlError("OWNER_CONTROL_PARAMETERS_INVALID")
@@ -389,6 +437,7 @@ __all__ = [
     "AutomaticResponsesEnabledParameters",
     "GraceEnabledParameters",
     "GraceSecondsParameters",
+    "GracePeriodParameters",
     "ReviewReferenceParameters",
     "OwnerControlAction",
     "OwnerControlAuthorityEvidence",

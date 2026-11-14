@@ -150,6 +150,26 @@ def _candidate_label(
         label = (
             f"esperar {params['seconds']} segundos apenas nesta resposta"
         )
+    elif key in {
+        "CONFIGURE_OWNER_REPLY_GRACE_PERIOD",
+        "ONE_SHOT_REPLY_DELAY_PERIOD",
+    }:
+        unit_names = {
+            "SECOND": ("segundo", "segundos"),
+            "MINUTE": ("minuto", "minutos"),
+            "HOUR": ("hora", "horas"),
+            "DAY": ("dia", "dias"),
+            "WEEK": ("semana", "semanas"),
+            "MONTH": ("mês", "meses"),
+            "YEAR": ("ano", "anos"),
+        }
+        amount = params["quantity"]
+        word = unit_names[params["unit"]][0 if amount == 1 else 1]
+        duration = f"{amount} {word}"
+        if key == "CONFIGURE_OWNER_REPLY_GRACE_PERIOD":
+            label = f"mudar a espera padrão das respostas para {duration}"
+        else:
+            label = f"esperar {duration} somente nesta conversa"
     else:
         raise OwnerControlClarificationError(
             "OWNER_CLARIFICATION_CANDIDATE_INVALID"

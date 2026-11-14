@@ -156,6 +156,10 @@ class Settings(BaseSettings):
     andy_agent_max_turns: int = 3
     owner_control_semantic_enabled: bool = False
     owner_control_semantic_model: str = "gpt-5.6-sol"
+    # Disabled by default until its full cancellation/freshness gates are certified.
+    owner_temporal_wait_enabled: bool = False
+    # Trusted operator timezone, never populated by the semantic model.
+    owner_temporal_timezone: str = "UTC"
     owner_control_clarification_ttl_seconds: int = 120
     andy_behavior_profile_path: str = "config/andy_behavior_profile.json"
     legacy_external_fallback_enabled: bool = False

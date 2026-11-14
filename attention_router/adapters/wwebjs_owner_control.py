@@ -9,12 +9,16 @@ from attention_router.application.owner_control import (
     AutomaticResponsesEnabledParameters,
     GraceEnabledParameters,
     GraceSecondsParameters,
+    GracePeriodParameters,
     OwnerControlAction,
     OwnerControlDispatchResult,
     OwnerControlParameters,
     ReviewReferenceParameters,
 )
 from attention_router.application.owner_response_review_control import OwnerResponseReviewMutation
+from attention_router.application.owner_temporal_duration import (
+    TemporalIntention, TemporalUnit, propose_from_portuguese,
+)
 
 
 class OwnerControlParseStatus(StrEnum):
@@ -141,6 +145,23 @@ def parse_owner_grace_control(text: str) -> OwnerControlParseResult:
             OwnerControlParseStatus.REJECTED,
             reason_code="OWNER_REVIEW_REFERENCE_INVALID",
         )
+    temporal = propose_from_portuguese(text)
+    if (
+        temporal is not None
+        and temporal.intention == TemporalIntention.DEFAULT_REPLY_GRACE
+        and (
+            temporal.unit not in {TemporalUnit.SECOND, TemporalUnit.MINUTE}
+            or (
+                temporal.quantity * (60 if temporal.unit == TemporalUnit.MINUTE else 1)
+                > 300
+            )
+        )
+    ):
+        return OwnerControlParseResult(
+            OwnerControlParseStatus.MATCHED,
+            OwnerControlAction.SET_OWNER_REPLY_GRACE_PERIOD,
+            GracePeriodParameters(quantity=temporal.quantity, unit=temporal.unit),
+        )
     for pattern in _SECONDS_PATTERNS:
         match = pattern.fullmatch(normalized)
         if match:
@@ -190,6 +211,12 @@ def canonical_command_text(result: OwnerControlParseResult) -> str:
         assert isinstance(result.parameters, AutomaticResponsesEnabledParameters)
         value = "true" if result.parameters.enabled else "false"
         return f"SET_AUTOMATIC_RESPONSES_ENABLED enabled={value}"
+    if result.action == OwnerControlAction.SET_OWNER_REPLY_GRACE_PERIOD:
+        assert isinstance(result.parameters, GracePeriodParameters)
+        return (
+            f"SET_OWNER_REPLY_GRACE_PERIOD quantity={result.parameters.quantity} "
+            f"unit={result.parameters.unit.value}"
+        )
     if result.action == OwnerControlAction.SET_OWNER_REPLY_GRACE_SECONDS:
         assert isinstance(result.parameters, GraceSecondsParameters)
         return f"SET_OWNER_REPLY_GRACE_SECONDS seconds={result.parameters.seconds}"
@@ -241,6 +268,16 @@ def render_owner_control_confirmation(
             "Andy pausada. Continuo recebendo mensagens, mas não vou responder automaticamente."
             if result.mutation.changed else "Andy já está pausada."
         )
+    if action == OwnerControlAction.SET_OWNER_REPLY_GRACE_PERIOD:
+        period = control.temporal_period
+        if not period:
+            return "A espera não foi aplicada: contrato temporal indisponível."
+        detail = f"{period['quantity']} {period['unit'].lower()}"
+        return (
+            f"Espera padrão configurada para {detail}; respostas automáticas continuam pausadas."
+            if not control.enabled else
+            f"Espera padrão configurada para {detail}, respeitando o calendário."
+        )
     if action == OwnerControlAction.SET_OWNER_REPLY_GRACE_SECONDS:
         if not control.enabled:
             return (
@@ -262,6 +299,10 @@ def render_owner_control_error(reason_code: str) -> str:
         return "Não consegui interpretar o comando com segurança."
     if reason_code in {"CONTROL_COMMAND_INVALID_VALUE", "GRACE_SECONDS_MUST_BE_INTEGER"}:
         return "Não consegui alterar a espera: valor inválido."
+    if reason_code == "TEMPORAL_WAIT_DISABLED_OR_SCOPE_INVALID":
+        return "A compreensão de tempo está pronta, mas a execução temporal ainda não foi habilitada."
+    if reason_code.startswith("TEMPORAL_") or reason_code == "CONTROL_COMMAND_INVALID_TEMPORAL_PERIOD":
+        return "Não consegui configurar o prazo temporal com segurança."
     if reason_code == "GRACE_SECONDS_OUT_OF_POLICY_BOUNDS":
         return "Não consegui alterar a espera: valor fora do limite permitido."
     if reason_code == "OWNER_CONTROL_GRACE_POLICY_UNAVAILABLE":

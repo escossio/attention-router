@@ -13,6 +13,10 @@ from attention_router.application.direct_conversation import (
     direct_conversation_eligibility, conversational_policy_config,
 )
 from attention_router.application.owner_automation_control import automation_denial_reason
+from attention_router.application.owner_temporal_duration import (
+    TEMPORAL_PERIOD_PROVENANCE_FIELD, TemporalValidationError,
+    deadline_for_period, period_legacy_seconds,
+)
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.models import (
     AgentBlueprintVersionRow,
@@ -21,6 +25,7 @@ from attention_router.infrastructure.models import (
     AutonomyEvaluationRow,
     InboundEventRow,
     InteractionRow,
+    ConversationResponseGraceWindowRow,
 )
 from attention_router.infrastructure.repository import audit
 from attention_router.application.repetition import suppress_if_repeated
@@ -82,20 +87,87 @@ def _scope_match(scope: dict[str, Any], decision: AgentDecisionRow, interaction:
     return actor_ok, audience_ok
 
 
-def _fresh(event: InboundEventRow) -> bool:
+def _fresh(
+    event: InboundEventRow,
+    *,
+    session: Session | None = None,
+) -> bool:
     if not settings.autonomous_execution_activated_at:
         return False
     try:
-        watermark = datetime.fromisoformat(settings.autonomous_execution_activated_at.replace("Z", "+00:00"))
+        watermark = datetime.fromisoformat(
+            settings.autonomous_execution_activated_at.replace("Z", "+00:00")
+        )
         if watermark.tzinfo is None:
             watermark = watermark.replace(tzinfo=timezone.utc)
+        watermark = watermark.astimezone(timezone.utc)
     except ValueError:
         return False
     received = event.received_at
     if received.tzinfo is None:
         received = received.replace(tzinfo=timezone.utc)
-    age = (datetime.now(timezone.utc) - received).total_seconds()
-    return received >= watermark and 0 <= age <= settings.autonomous_decision_max_age_seconds
+    received = received.astimezone(timezone.utc)
+    stamp = datetime.now(timezone.utc)
+    age = (stamp - received).total_seconds()
+    if received < watermark or age < 0:
+        return False
+    if age <= settings.autonomous_decision_max_age_seconds:
+        return True
+    if session is None or not settings.owner_temporal_wait_enabled:
+        return False
+    if not direct_conversation_eligibility(event).eligible:
+        return False
+
+    # A deliberately authorized long wait may release an old inbound. Its
+    # original event remains old: only a recent, exact, proven release grants
+    # an exceptional freshness lease, not a global relaxation of age checks.
+    windows = session.scalars(
+        select(ConversationResponseGraceWindowRow).where(
+            ConversationResponseGraceWindowRow.anchor_event_id == event.id,
+            ConversationResponseGraceWindowRow.tenant_id == event.tenant_id,
+            ConversationResponseGraceWindowRow.source == event.source,
+            ConversationResponseGraceWindowRow.state == "RELEASED",
+            ConversationResponseGraceWindowRow.auto_release_enabled.is_(True),
+        )
+    ).all()
+    for window in windows:
+        provenance = window.provenance or {}
+        period = provenance.get(TEMPORAL_PERIOD_PROVENANCE_FIELD)
+        if not isinstance(period, dict):
+            continue
+        if (
+            not window.released_at or not window.claimed_at or not window.claimed_by
+            or window.claimed_generation != window.generation
+            or window.generation <= 0 or not window.represented_owner_actor_key
+        ):
+            continue
+        try:
+            if period_legacy_seconds(period) != window.effective_grace_seconds:
+                continue
+            last_inbound = window.last_inbound_at
+            if last_inbound.tzinfo is None:
+                last_inbound = last_inbound.replace(tzinfo=timezone.utc)
+            scheduled = deadline_for_period(last_inbound, period)
+        except (TemporalValidationError, TypeError, ValueError):
+            continue
+        due = window.due_at
+        released = window.released_at
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+        if released.tzinfo is None:
+            released = released.replace(tzinfo=timezone.utc)
+        due = due.astimezone(timezone.utc)
+        released = released.astimezone(timezone.utc)
+        tolerance = settings.autonomous_decision_max_age_seconds
+        if (
+            scheduled == due
+            and received <= due
+            and released >= due
+            and 0 <= (released - due).total_seconds() <= tolerance
+            and 0 <= (stamp - released).total_seconds() <= tolerance
+        ):
+            return True
+    return False
 
 
 def evaluate(
@@ -104,6 +176,8 @@ def evaluate(
     interaction: InteractionRow,
     blueprint: AgentBlueprintVersionRow | None,
     policy_config: dict[str, Any] | None,
+    *,
+    session: Session | None = None,
 ) -> AutonomyResult:
     selected_policy_present = policy_config is not None
     direct = direct_conversation_eligibility(event)
@@ -128,7 +202,7 @@ def evaluate(
         or metadata.get("from_me")
         or metadata.get("fromMe")
     )
-    fresh = _fresh(event)
+    fresh = _fresh(event, session=session)
     if text_conversation and not selected_policy_present:
         return AutonomyResult(b_mode, p_mode, effective, False, actor_ok,
                               audience_ok, fresh, from_me, False, "POLICY_VERSION_MISSING")
@@ -200,7 +274,7 @@ def evaluate_and_route(session: Session, decision: AgentDecisionRow) -> Autonomy
         from attention_router.infrastructure.models import PolicyVersionRow
         policy = session.get(PolicyVersionRow, decision.policy_version_id)
         policy_config = policy.config if policy else None
-    result = evaluate(decision, event, interaction, blueprint, policy_config)
+    result = evaluate(decision, event, interaction, blueprint, policy_config, session=session)
     pause_reason = automation_denial_reason(session, interaction.tenant_id)
     if pause_reason:
         result = replace(result, automatic_execution_allowed=False, reason_code=pause_reason)

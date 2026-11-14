@@ -11,6 +11,7 @@ from attention_router.adapters.wwebjs_owner_control import (
 from attention_router.application.owner_control import (
     AutomaticResponsesEnabledParameters,
     GraceSecondsParameters,
+    GracePeriodParameters,
     OwnerControlAction,
     ReviewReferenceParameters,
 )
@@ -24,6 +25,7 @@ class OwnerControlSemanticError(RuntimeError):
 SemanticAction = Literal[
     "SET_AUTOMATIC_RESPONSES_ENABLED",
     "SET_OWNER_REPLY_GRACE_SECONDS",
+    "SET_OWNER_REPLY_GRACE_PERIOD",
     "APPROVE_RESPONSE_REVIEW",
     "REJECT_RESPONSE_REVIEW",
 ]
@@ -36,6 +38,8 @@ class OwnerControlSemanticOutput(BaseModel):
     action: SemanticAction | None = None
     confidence: Literal["high", "medium", "low"]
     seconds: int | None = None
+    quantity: int | None = None
+    unit: Literal["SECOND", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH", "YEAR"] | None = None
     enabled: bool | None = None
     reference: str | None = None
 
@@ -45,6 +49,7 @@ You are a narrow semantic interpreter for authenticated owner-control text in PT
 You DO NOT execute anything. You only classify text into a closed command catalog.
 
 Allowed actions:
+- SET_OWNER_REPLY_GRACE_PERIOD
 - SET_OWNER_REPLY_GRACE_SECONDS
 - SET_AUTOMATIC_RESPONSES_ENABLED
 - APPROVE_RESPONSE_REVIEW
@@ -56,6 +61,10 @@ Rules:
 2. SET_OWNER_REPLY_GRACE_SECONDS is a persistent configuration change. Use it only
    when the owner clearly asks to configure/change the default reply-grace setting.
    Example: "configure a espera padrão para 30 segundos" -> seconds=30.
+2a. For explicit long/short default wait changes in minutes, hours, days, weeks,
+    months or years, use SET_OWNER_REPLY_GRACE_PERIOD with quantity and unit.
+    Example: "configure a espera padrão para um ano" -> quantity=1, unit=YEAR.
+    This is a typed proposal, never a computed deadline or authorization.
 3. A timed reply phrase such as "retorne em 30 segundos", "responda em 1 minuto",
    "volta a responder daqui a 30 segundos", or "retome 30" is materially ambiguous
    between persistent configuration and a one-shot delay that this interpreter cannot
@@ -132,6 +141,8 @@ def normalize_semantic_output(output: OwnerControlSemanticOutput) -> OwnerContro
             output.seconds is None
             or output.enabled is not None
             or output.reference is not None
+            or output.quantity is not None
+            or output.unit is not None
         ):
             return _reject("CONTROL_COMMAND_SEMANTIC_INVALID")
         return OwnerControlParseResult(
@@ -140,11 +151,32 @@ def normalize_semantic_output(output: OwnerControlSemanticOutput) -> OwnerContro
             GraceSecondsParameters(seconds=output.seconds),
         )
 
+    if action == OwnerControlAction.SET_OWNER_REPLY_GRACE_PERIOD:
+        if (
+            output.quantity is None
+            or output.unit is None
+            or output.seconds is not None
+            or output.enabled is not None
+            or output.reference is not None
+        ):
+            return _reject("CONTROL_COMMAND_SEMANTIC_INVALID")
+        try:
+            parameters = GracePeriodParameters(
+                quantity=output.quantity, unit=output.unit
+            )
+        except (ValueError, TypeError):
+            return _reject("CONTROL_COMMAND_SEMANTIC_INVALID")
+        return OwnerControlParseResult(
+            OwnerControlParseStatus.MATCHED, action, parameters
+        )
+
     if action == OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED:
         if (
             output.enabled is None
             or output.seconds is not None
             or output.reference is not None
+            or output.quantity is not None
+            or output.unit is not None
         ):
             return _reject("CONTROL_COMMAND_SEMANTIC_INVALID")
         return OwnerControlParseResult(
