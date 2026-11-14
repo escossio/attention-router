@@ -23,6 +23,66 @@ class WhatsAppArtifactRetryable(RuntimeError):
     pass
 
 
+
+_ACCOUNT_MEDIA_REASONS = frozenset({
+    "UNMATCHED_MEDIA_FROM_ME",
+    "UNMATCHED_MEDIA_REFERENCE",
+})
+_ACCOUNT_MEDIA_KINDS = frozenset({"image", "document"})
+
+
+def _validate_outbound_media_origin(event: InboundEventRow) -> None:
+    """Only a matching stored receipt may authorize a fromMe media attachment.
+
+    Unattributed account media is source evidence; it cannot authorize a
+    command, prove the human author, or promote a semantic fact.
+    """
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    metadata = payload.get("metadata")
+    origin = payload.get("event_origin")
+    account_origin = origin in {
+        "UNKNOWN_FROM_ME",
+        "OWNER_MANUAL_OUTBOUND_OBSERVED",
+        "ROUTER_AUTOMATED_OUTBOUND_OBSERVED",
+        "OWNER_COMMAND",
+    }
+    if (
+        (not isinstance(metadata, dict))
+        or metadata.get("from_me") is not True
+    ):
+        if account_origin:
+            raise ValueError("WHATSAPP_ARTIFACT_OUTBOUND_FROM_ME_MISSING")
+        return
+    if (
+        event.source != "wwebjs"
+        or event.event_type != "message"
+        or payload.get("channel") != "whatsapp"
+        or payload.get("owner_authenticated") is True
+        or metadata.get("conversation_state") != "READY"
+        or metadata.get("owner_self_chat") is True
+        or metadata.get("authenticated_owner_self_chat_target") is True
+        or metadata.get("is_group") is True
+        or metadata.get("has_media") is not True
+        or metadata.get("from_me_classification") != origin
+        or metadata.get("final_from_me_classification") != origin
+    ):
+        raise ValueError("WHATSAPP_ARTIFACT_OUTBOUND_PROVENANCE_INVALID")
+    if origin == "OWNER_MANUAL_OUTBOUND_OBSERVED":
+        # Preserve the previously certified manual owner voice path.
+        return
+    if origin != "UNKNOWN_FROM_ME" or (
+        metadata.get("message_type") not in _ACCOUNT_MEDIA_KINDS
+        or metadata.get("peer_id_kind") not in {"lid", "c.us"}
+        or not isinstance(metadata.get("conversation_key"), str)
+        or not metadata["conversation_key"].startswith("wwebjs:")
+        or metadata.get("outbound_provenance") is not None
+        or metadata.get("from_me_classification_reason") not in _ACCOUNT_MEDIA_REASONS
+        or metadata.get("account_outbound_media_capture_basis")
+        != "VERIFIED_ACCOUNT_UNATTRIBUTED"
+    ):
+        raise ValueError("WHATSAPP_ARTIFACT_OUTBOUND_NOT_AUTHORIZED")
+
+
 def _artifact_kind(mime_type: str) -> str:
     normalized = mime_type.casefold()
     if normalized.startswith("image/"):
@@ -47,6 +107,11 @@ def _source_account(event: InboundEventRow) -> str:
 
 def _sender_actor_id(event: InboundEventRow) -> str | None:
     payload = event.payload if isinstance(event.payload, dict) else {}
+    metadata = payload.get("metadata") or {}
+    if isinstance(metadata, dict) and metadata.get("from_me") is True:
+        # For an account observation the actor_id may point to the peer,
+        # not the human sender. Never misattribute the peer as author.
+        return None
     value = payload.get("actor_id")
     if not isinstance(value, str):
         return None
@@ -86,6 +151,17 @@ def stage_whatsapp_artifact_notification(
     if len(events) != 1:
         raise ValueError("INBOUND_EVENT_SCOPE_AMBIGUOUS")
     event = events[0]
+    _validate_outbound_media_origin(event)
+    event_metadata = (event.payload or {}).get("metadata") or {}
+    if (
+        isinstance(event_metadata, dict)
+        and event_metadata.get("from_me") is True
+        and event_metadata.get("message_type") == "image"
+        and notification.mime_type not in {
+            "image/jpeg", "image/png", "image/webp", "image/gif"
+        }
+    ):
+        raise ValueError("WHATSAPP_ARTIFACT_OUTBOUND_IMAGE_MIME_INVALID")
 
     if not notification.media_ref or not notification.content_sha256:
         raise ValueError("WHATSAPP_ARTIFACT_MEDIA_REFERENCE_REQUIRED")

@@ -1,5 +1,7 @@
 # Andy Live Conversation Archive V0
 
+> This V0 document describes the original text/voice archive. See [Live Conversation Artifact Links V1](andy-live-conversation-artifact-links-v1.md) for the separate image/document/video association candidate. It does not authorize any historical imports.
+
 Status: isolated implementation candidate, disabled by default. Source of truth: existing Attention Router PostgreSQL. No new database, table, graph engine, APK interface or LLM service.
 
 ## Goal

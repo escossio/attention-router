@@ -96,6 +96,11 @@ function normalizeInboundMessage(message, options = {}) {
         ? { first_contact_identity: conversation.first_contact_identity } : {}),
       from_me_classification: fromMeClassification,
       final_from_me_classification: normalizedFinalFromMeClassification,
+      from_me_classification_reason: (
+        typeof message?.__fromMeClassificationReason === 'string'
+          ? message.__fromMeClassificationReason.slice(0, 80)
+          : null
+      ),
       outbound_provenance: message?.__outboundProvenance || null,
       has_media: hasMedia,
       input_modality: ['ptt', 'audio'].includes(type.toLowerCase()) ? 'voice' : 'text',
