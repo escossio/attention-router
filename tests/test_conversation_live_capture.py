@@ -491,3 +491,64 @@ def test_manually_sent_voice_enters_existing_media_stt_and_archives_without_repl
     assert original.id == messages(capture)[0].id
     assert capture.scalar(select(func.count()).select_from(OutboxMessageRow)) == 0
     assert capture.scalar(select(func.count()).select_from(MemoryIngestionJobRow)) == 0
+
+
+def test_reconciliation_repairs_terminal_stt_missing_from_existing_voice_record(capture):
+    from attention_router.application.conversation_live_capture import (
+        reconcile_live_capture_batch,
+    )
+    event = inbound(
+        "synthetic-stt-attachment-missed",
+        "",
+        metadata={"message_type": "ptt", "has_media": True},
+    )
+    services.receive_normalized_inbound_event(capture, event)
+    receipt, stt = _transcription(capture, event, text="Pretão é um gato.")
+    capture.commit()
+
+    original = messages(capture)[0]
+    assert original.text is None
+    original_id = original.id
+    assert original.metadata_json["content_state"] == "PENDING_TRANSCRIPTION"
+
+    # Model a transient commit/attach failure after STT reached READY.
+    recovered = reconcile_live_capture_batch(capture, limit=10)
+    capture.commit()
+    assert recovered.archived == 0
+    assert recovered.attached_transcripts == 1
+    assert recovered.failed == 0
+    assert recovered.examined == 1
+    capture.refresh(original)
+    assert original.id == original_id
+    assert original.text == "Pretão é um gato."
+    assert original.metadata_json["transcription_status"] == "READY"
+    assert original.metadata_json["source_inbound_event_id"] == receipt.id
+    assert len(messages(capture)) == 1
+    assert stt.status == "READY"
+    assert reconcile_live_capture_batch(capture).examined == 0
+
+
+def test_reconciliation_ignores_unfinished_voice_transcription(capture):
+    from attention_router.application.conversation_live_capture import (
+        reconcile_live_capture_batch,
+    )
+    event = inbound(
+        "synthetic-stt-still-working",
+        "",
+        metadata={"message_type": "ptt", "has_media": True},
+    )
+    services.receive_normalized_inbound_event(capture, event)
+    record = _receipt(capture, event)
+    assert record is not None
+    stamp = now_utc()
+    capture.add(VoiceTranscriptionRow(
+        id=new_id(), tenant_id=event.tenant_id, inbound_event_id=record.id,
+        media_artifact_id=None, status="PENDING", transcript_text=None,
+        provider=None, model=None, provider_request_reference=None,
+        error_code=None, attempt_count=0, claimed_at=None, claimed_by=None,
+        created_at=stamp, updated_at=stamp, completed_at=None,
+    ))
+    capture.commit()
+    result = reconcile_live_capture_batch(capture, limit=10)
+    assert result.examined == 0
+    assert messages(capture)[0].metadata_json["content_state"] == "PENDING_TRANSCRIPTION"

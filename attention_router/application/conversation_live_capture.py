@@ -398,8 +398,51 @@ def reconcile_live_capture_batch(
         except Exception:
             # Keep receipt for a later retry; no content in logs or exceptions.
             failed += 1
+    # Reconcile a *separate* failure boundary: the archive exists, STT has
+    # already reached terminal state, but its text/status update was missed.
+    # A missing-archive-only retry cannot repair this case. Limit both
+    # queries independently so pending media cannot starve new messages.
+    pending_voice_rows = session.execute(
+        select(InboundEventRow, VoiceTranscriptionRow)
+        .join(
+            ConversationMessageRow,
+            ConversationMessageRow.tenant_id == InboundEventRow.tenant_id,
+        )
+        .join(
+            VoiceTranscriptionRow,
+            VoiceTranscriptionRow.inbound_event_id == InboundEventRow.id,
+        )
+        .where(
+            InboundEventRow.source == "wwebjs",
+            InboundEventRow.received_at >= _utc(start),
+            InboundEventRow.id
+            == ConversationMessageRow.metadata_json["source_inbound_event_id"].as_string(),
+            ConversationMessageRow.source == "wwebjs",
+            ConversationMessageRow.message_type == "VOICE",
+            ConversationMessageRow.metadata_json["capture_contract"].as_string()
+            == "LIVE_CONVERSATION_ARCHIVE_V0",
+            ConversationMessageRow.metadata_json["content_state"].as_string()
+            == "PENDING_TRANSCRIPTION",
+            ConversationMessageRow.tenant_id == VoiceTranscriptionRow.tenant_id,
+            VoiceTranscriptionRow.tenant_id == InboundEventRow.tenant_id,
+            VoiceTranscriptionRow.status.in_(("READY", "FAILED")),
+        )
+        .order_by(InboundEventRow.received_at, InboundEventRow.id)
+        .limit(limit)
+    ).all()
+    for receipt, transcription in pending_voice_rows:
+        try:
+            with session.begin_nested():
+                status = capture_voice_transcription(session, receipt, transcription)
+            if status.status == "TRANSCRIPTION_ATTACHED":
+                attached += 1
+            else:
+                skipped += 1
+        except Exception:
+            failed += 1
+
     return ConversationCaptureReconciliationResult(
-        examined=len(receipts), archived=archived,
+        examined=len(receipts) + len(pending_voice_rows), archived=archived,
         attached_transcripts=attached, skipped=skipped, failed=failed,
     )
 

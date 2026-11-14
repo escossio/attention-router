@@ -7,7 +7,6 @@ from sqlalchemy import func, select
 
 from attention_router.application.conversation_live_capture import (
     capture_live_receipt,
-    capture_voice_transcription,
     reconcile_live_capture_batch,
 )
 from attention_router.config import settings
@@ -90,9 +89,11 @@ def test_postgres_live_archive_same_thread_stt_and_reconciliation(
         )
         session.add(transcript)
         session.flush()
-        assert capture_voice_transcription(
-            session,session.get(InboundEventRow,voice.id),transcript,
-        ).status=="TRANSCRIPTION_ATTACHED"
+        # Exercise the PostgreSQL JSONB join for an archive that was already
+        # created before STT completed, but missed the original callback.
+        recovered_transcript = reconcile_live_capture_batch(session, limit=10)
+        assert recovered_transcript.archived == 0
+        assert recovered_transcript.attached_transcripts == 1
         session.commit()
 
     with Session() as session:

@@ -28,7 +28,7 @@ Two times: sent_at (provider occurrence time when valid, otherwise receipt time)
 
 If a trusted manual outbound message comes without text, keep TEXT_UNAVAILABLE. The Transport normally suppresses manual-owner direct-chat text. A separate explicit operator flag can allow text from a fully classified manual owner direct-chat event; unknown, automated, unresolved and nontext input remains masked by default.
 
-A bounded Worker reconciliation pass (25 eligible missing receipts about once a minute) recovers errors after the fixed capture watermark from existing durable ingress events, including completed STT when available. It does not replay decisions, execute actions, send responses or scan old conversations. Duplicate scope disagreements fail closed.
+A bounded Worker reconciliation pass (up to 25 eligible missing receipts and 25 already archived but not yet enriched voice messages about once a minute) recovers errors after the fixed capture watermark from existing durable ingress events, including completed STT when available. Both queries are bounded independently to avoid STT repair starvation. It does not replay decisions, execute actions, send responses or scan old conversations. Duplicate scope disagreements fail closed.
 
 ## Historical acceleration
 
