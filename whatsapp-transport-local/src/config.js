@@ -124,6 +124,19 @@ function createConfig(env = process.env) {
       env.CONVERSATION_CAPTURE_OWNER_VOICE_ENABLED, false,
     ) && Boolean((env.LOCAL_TENANT_ID || '').trim())
       && parseBoolean(env.INBOUND_FORWARD_ENABLED, false),
+    // Opt-in evidence-only capture for account-originated image/document
+    // observations whose human authorship remains UNKNOWN_FROM_ME.
+    // Requires the existing signed ingress and canonical Artifact plane.
+    conversationCaptureUnattributedOutboundMediaEnabled: parseBoolean(
+      env.CONVERSATION_CAPTURE_UNATTRIBUTED_OUTBOUND_MEDIA_ENABLED, false,
+    ) && Boolean((env.LOCAL_TENANT_ID || '').trim())
+      && parseBoolean(env.INBOUND_FORWARD_ENABLED, false)
+      && parseBoolean(env.WHATSAPP_ARTIFACT_INGESTION_ENABLED, false)
+      && Boolean(normalizeInboundForwardUrl(env))
+      && typeof env.INTERNAL_INGRESS_HMAC_SECRET === 'string'
+      && env.INTERNAL_INGRESS_HMAC_SECRET.length >= 32
+      && (env.LOCAL_INBOUND_SOURCE || 'wwebjs') === 'wwebjs'
+      && (env.LOCAL_INBOUND_CHANNEL || 'whatsapp') === 'whatsapp',
     inboundForwardUrl: normalizeInboundForwardUrl(env),
     inboundForwardHosts: inboundForwardHosts(env),
     externalDeliveryEnabled: parseBoolean(env.EXTERNAL_DELIVERY_ENABLED, false),

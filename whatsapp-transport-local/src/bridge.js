@@ -1,6 +1,11 @@
 const { normalizeInboundMessage } = require('./inbound');
 const { enqueuePending, deliverPendingFile } = require('./spool');
 const { captureInboundMedia } = require('./media');
+const {
+  authenticatedSelfAliasSet,
+  canonicalIdentity,
+  isAuthenticatedOwnerSelfChatMessage,
+} = require('./message-id');
 const { createNoopTransportTracing } = require('./observability');
 
 function isLocalForwardTarget(url, allowedHosts = ['127.0.0.1', 'localhost', '::1']) {
@@ -21,6 +26,62 @@ function tracingResult(result) {
   if (result?.status === 'missing') return 'MISSING';
   if (String(result?.status || '').startsWith('ignored')) return 'IGNORED';
   return 'BLOCKED';
+}
+
+const UNATTRIBUTED_OUTBOUND_MEDIA_REASONS = new Set([
+  'UNMATCHED_MEDIA_FROM_ME',
+  'UNMATCHED_MEDIA_REFERENCE',
+]);
+
+function eligibleUnattributedOutboundMedia(config, message, normalized, options = {}) {
+  if (
+    config.conversationCaptureUnattributedOutboundMediaEnabled !== true
+    || config.whatsappArtifactIngestionEnabled !== true
+    || !config.tenantId || config.tenantId !== normalized?.tenant_id
+    || config.inboundForwardEnabled !== true
+    || typeof config.hmacSecret !== 'string' || config.hmacSecret.length < 32
+    || !config.mediaNotificationUrl
+    || !isLocalForwardTarget(config.mediaNotificationUrl, config.inboundForwardHosts)
+    || !message || message.fromMe !== true || message.__ownerSelfChat === true
+    || !normalized || !normalized.has_media
+    || normalized.source !== 'wwebjs' || normalized.channel !== 'whatsapp'
+    || !['image', 'document'].includes(String(normalized.message_type || '').toLowerCase())
+    || normalized.event_origin !== 'UNKNOWN_FROM_ME'
+    || normalized.owner_authenticated !== false
+    || normalized.metadata?.from_me !== true
+    || normalized.metadata?.from_me_classification !== 'UNKNOWN_FROM_ME'
+    || normalized.metadata?.final_from_me_classification !== 'UNKNOWN_FROM_ME'
+    || normalized.metadata?.conversation_state !== 'READY'
+    || normalized.metadata?.is_group === true
+    || !['c.us', 'lid'].includes(normalized.metadata?.peer_id_kind)
+    || normalized.metadata?.owner_self_chat === true
+    || normalized.metadata?.authenticated_owner_self_chat_target === true
+    || normalized.metadata?.outbound_provenance != null
+    || options.authenticatedSelfAuthorityCurrent !== true
+    || !UNATTRIBUTED_OUTBOUND_MEDIA_REASONS.has(message.__fromMeClassificationReason)
+    || message.__fromMeClassificationReason !== normalized.metadata?.from_me_classification_reason
+    || isAuthenticatedOwnerSelfChatMessage(message, options.authenticatedSelfIdentity)
+  ) return false;
+
+  // The owner account must be cryptographically associated with the
+  // currently authenticated WhatsApp identity. This does NOT establish
+  // the human author of the message.
+  const verified = authenticatedSelfAliasSet(options.authenticatedSelfIdentity);
+  if (!verified) return false;
+  const ownerWid = canonicalIdentity(options.clientInfo?.wid);
+  const observedSender = canonicalIdentity(message.from);
+  if (!ownerWid || !observedSender
+      || !verified.has(ownerWid) || !verified.has(observedSender)) {
+    return false;
+  }
+  // Only genuine account-originated message IDs in individual chats.
+  const remote = canonicalIdentity(message?.id?.remote);
+  const serialized = message?.id?._serialized;
+  const idFromMe = message?.id?.fromMe === true
+    || (message?.id?.fromMe == null
+      && typeof serialized === 'string' && serialized.startsWith('true_'));
+  return Boolean(remote && ['@c.us', '@lid'].some(suffix => remote.endsWith(suffix))
+    && idFromMe);
 }
 
 function createInboundBridge(config, logger = console, deps = {}) {
@@ -69,6 +130,15 @@ function createInboundBridge(config, logger = console, deps = {}) {
     if (!config.inboundForwardUrl || !isLocalForwardTarget(config.inboundForwardUrl, config.inboundForwardHosts)) {
       return { status: 'blocked_invalid_target', normalized, forwarded: false };
     }
+    const unattributedAccountMedia = eligibleUnattributedOutboundMedia(
+      config, message, normalized, options,
+    );
+    if (unattributedAccountMedia) {
+      // Recorded as ACCOUNT-ORIGINATED EVIDENCE only. Never a command,
+      // human-attributed owner message or an execution authorization.
+      normalized.metadata.account_outbound_media_capture_basis =
+        'VERIFIED_ACCOUNT_UNATTRIBUTED';
+    }
     const wirePayload = Object.fromEntries(
       Object.entries(normalized).filter(([key]) => key !== 'identity'),
     );
@@ -100,6 +170,7 @@ function createInboundBridge(config, logger = console, deps = {}) {
       (!fromMe && normalized.has_media
         && (isVoice || config.whatsappArtifactIngestionEnabled === true))
       || manualOwnerVoice
+      || unattributedAccountMedia
     );
     const mediaPromise = shouldCaptureMedia
       ? captureInboundMedia(config, message, normalized, logger, fetchImpl)
