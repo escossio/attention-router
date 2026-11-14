@@ -14,7 +14,7 @@ def test_client_device_bootstrap_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0061_tts_outbox_constraint"]
+            ).scalars().all() == ["0062_artifact_sensitive_review"]
 
             schema = inspect(connection)
             assert {

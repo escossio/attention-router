@@ -521,6 +521,20 @@ def artifact_decision_readiness(
         return "WAITING", "ARTIFACT_UNDERSTANDING_PENDING"
     if row.status != "READY" or not (row.summary_text or "").strip():
         return "FAILED", row.error_code or "ARTIFACT_UNDERSTANDING_FAILED"
+    if settings.artifact_sensitive_review_enabled and row.content_kind == "IMAGE":
+        from attention_router.application.artifact_sensitive_review import (
+            classify_sensitive_artifact,
+        )
+        category = classify_sensitive_artifact(
+            summary=row.summary_text, extracted_text=row.extracted_text,
+            visual_description=row.visual_description, key_facts=row.key_facts_json,
+        )
+        # Even classifier misses must not allow free-form image OCR to be
+        # forwarded automatically. Owner-approved retrieval is separate.
+        return "FAILED", (
+            "ARTIFACT_SENSITIVE_REVIEW_REQUIRED" if category
+            else "ARTIFACT_IMAGE_PRIVATE_RETRIEVAL_NOT_CERTIFIED"
+        )
     return "READY", "ARTIFACT_UNDERSTANDING_READY"
 
 
@@ -538,6 +552,12 @@ def effective_artifact_text(
     if row is None or row.status != "READY" or not row.summary_text:
         raise ArtifactUnderstandingError(
             "ARTIFACT_UNDERSTANDING_NOT_READY"
+        )
+    if settings.artifact_sensitive_review_enabled and row.content_kind == "IMAGE":
+        # For now, even an approved image cannot be copied into free-form
+        # agent prompts. A separate scoped private retrieval is needed.
+        raise ArtifactUnderstandingError(
+            "ARTIFACT_SENSITIVE_CONTEXT_RETRIEVAL_NOT_AUTHORIZED"
         )
     parts = []
     if base_text.strip():
@@ -765,6 +785,32 @@ def process_artifact_understandings(
                 row.claimed_by = None
                 row.updated_at = now_utc()
                 row.completed_at = row.updated_at
+            if settings.artifact_sensitive_review_enabled:
+                from attention_router.application.artifact_sensitive_review import (
+                    register_artifact_sensitive_review,
+                )
+                try:
+                    with session.begin_nested():
+                        request = register_artifact_sensitive_review(
+                            session, understanding=row,
+                        )
+                    if request is not None:
+                        audit(
+                            session, event.interaction_id if event else None,
+                            "artifact.sensitive_review_recorded",
+                            {"category": request.category, "state": request.state},
+                            origin="artifact_sensitive_review", tenant_id=row.tenant_id,
+                        )
+                except Exception:
+                    # The analyzed evidence remains immutable. A separate
+                    # reconciliation is required for failed review recording;
+                    # do not leak OCR into failure logs or trigger a reply.
+                    audit(
+                        session, event.interaction_id if event else None,
+                        "artifact.sensitive_review_write_failed",
+                        {"error_code": "REVIEW_WRITE_FAILED"},
+                        origin="artifact_sensitive_review", tenant_id=row.tenant_id,
+                    )
             _finish_waiting_queue(session, row)
             audit(
                 session,

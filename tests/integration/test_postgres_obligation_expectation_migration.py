@@ -21,7 +21,7 @@ def test_obligation_expectation_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0061_tts_outbox_constraint"]
+            ).scalars().all() == ["0062_artifact_sensitive_review"]
 
             schema = inspect(connection)
             assert {
@@ -234,7 +234,7 @@ def test_obligation_expectation_refuses_destructive_downgrade(
     with engine.connect() as connection:
         assert connection.scalar(
             text("SELECT version_num FROM alembic_version")
-        ) == "0061_tts_outbox_constraint"
+        ) == "0062_artifact_sensitive_review"
         assert connection.scalar(
             text("SELECT count(*) FROM recurring_obligation_definitions")
         ) == 1
