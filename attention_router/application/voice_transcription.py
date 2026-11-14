@@ -134,7 +134,13 @@ def _finish_waiting_queue(session, transcription: VoiceTranscriptionRow) -> None
     from attention_router.application.owner_reply_grace import grace_allows_interaction
 
     event = session.get(InboundEventRow, transcription.inbound_event_id)
-    interaction = session.get(InteractionRow, event.interaction_id) if event else None
+    # Manually observed outgoing voice has no InteractionRow by design.
+    # Transcribe it for context, never synthesize a decision queue or lookup
+    # a NULL interaction primary key.
+    interaction = (
+        session.get(InteractionRow, event.interaction_id)
+        if event is not None and event.interaction_id is not None else None
+    )
     queue = session.get(QueueRow, f"decision:{transcription.inbound_event_id}")
     if interaction is None or queue is None:
         return
@@ -228,6 +234,32 @@ def process_voice_transcriptions(session, worker: str, limit: int = 10, client=N
             artifact.terminal_at = row.updated_at
             artifact.expires_at = row.updated_at + timedelta(hours=settings.media_retention_hours)
         _finish_waiting_queue(session, row)
+        if settings.conversation_capture_enabled and row is not None:
+            from attention_router.application.conversation_live_capture import (
+                capture_voice_transcription,
+            )
+
+            try:
+                with session.begin_nested():
+                    source_event = session.get(InboundEventRow, row.inbound_event_id)
+                    if source_event is not None:
+                        captured = capture_voice_transcription(
+                            session, source_event, row,
+                        )
+                    else:
+                        captured = None
+                if captured is not None and captured.status == "TRANSCRIPTION_ATTACHED":
+                    audit(
+                        session, None, "conversation_capture.voice_transcribed",
+                        {"archive_state": captured.status},
+                        origin="conversation_capture", tenant_id=row.tenant_id,
+                    )
+            except Exception as exc:
+                audit(
+                    session, None, "conversation_capture.voice_attach_failed",
+                    {"error_type": type(exc).__name__},
+                    origin="conversation_capture", tenant_id=row.tenant_id,
+                )
         if artifact:
             event = session.get(InboundEventRow, row.inbound_event_id)
             audit(

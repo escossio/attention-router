@@ -112,6 +112,18 @@ function createConfig(env = process.env) {
     httpPort: parseInteger(env.LOCAL_TRANSPORT_HTTP_PORT, 18103),
     browserDebugUrl: browserURL,
     inboundForwardEnabled: parseBoolean(env.INBOUND_FORWARD_ENABLED, false),
+    // Opt-in evidence capture for verified manual owner text in direct chats.
+    // This does not change control classification, reply policy or delivery.
+    conversationCaptureOwnerTextEnabled: parseBoolean(
+      env.CONVERSATION_CAPTURE_OWNER_TEXT_ENABLED, false,
+    ) && Boolean((env.LOCAL_TENANT_ID || '').trim())
+      && parseBoolean(env.INBOUND_FORWARD_ENABLED, false),
+    // A separately approved flag for *manual owner* PTT/audio. No unknown
+    // fromMe, automated echo, owner-control, or group audio is downloaded.
+    conversationCaptureOwnerVoiceEnabled: parseBoolean(
+      env.CONVERSATION_CAPTURE_OWNER_VOICE_ENABLED, false,
+    ) && Boolean((env.LOCAL_TENANT_ID || '').trim())
+      && parseBoolean(env.INBOUND_FORWARD_ENABLED, false),
     inboundForwardUrl: normalizeInboundForwardUrl(env),
     inboundForwardHosts: inboundForwardHosts(env),
     externalDeliveryEnabled: parseBoolean(env.EXTERNAL_DELIVERY_ENABLED, false),
