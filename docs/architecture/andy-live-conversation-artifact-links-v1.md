@@ -20,7 +20,7 @@ The persisted event provides tenant, source account, provider message ID, normal
 
 The existing bounded Worker reconciliation now has independently limited phases for missing messages, late STT and late Artifact/semantic completion. A photo can reach the database first as an observed message, then be enriched with references after its image receipt and visual understanding are committed. Two messages with identical bytes retain separate provider message IDs and source receipts.
 
-Incomplete media with no available source-backed outcome is excluded from the pending-link query, so it cannot starve later ready files. A missing or conflicting tenant/source account, changed Artifact ID, incompatible media kind or impossible terminal result fails closed. No model call, notification, new reply, memory claim, execution intent or conversation replay is introduced.
+Incomplete media with no available source-backed outcome is excluded from the pending-link query, so it cannot starve later ready files. A missing or conflicting tenant/source account, changed Artifact ID, incompatible media kind or impossible terminal result fails closed. A source-integrity conflict is marked LINK_CONFLICT using only an internal error code, without deleting the observed message or repeatedly occupying the recovery slots. Explicit operator review is needed before a quarantined link can be retried. No model call, notification, new reply, memory claim, execution intent or conversation replay is introduced.
 
 ## The user's card example
 

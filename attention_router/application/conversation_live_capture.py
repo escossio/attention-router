@@ -49,6 +49,14 @@ _MEDIA_TYPES = {
     "video": "VIDEO",
 }
 _STORED_MEDIA_KINDS = frozenset({"IMAGE", "DOCUMENT", "VIDEO", "VOICE"})
+_MEDIA_CONFLICT_CODES = frozenset({
+    "ARTIFACT_CONVERSATION_SCOPE_CONFLICT",
+    "ARTIFACT_UNDERSTANDING_KIND_CONFLICT",
+    "ARTIFACT_REFERENCE_CONFLICT",
+    "ARTIFACT_RECEIPT_MISSING",
+    "ARTIFACT_KIND_OR_TENANT_CONFLICT",
+    "ARTIFACT_UNDERSTANDING_LINK_CONFLICT",
+})
 
 
 @dataclass(frozen=True)
@@ -390,6 +398,44 @@ def attach_canonical_artifact(
     return ConversationCaptureResult("ARTIFACT_LINKED", message_id=row.id)
 
 
+def _quarantine_artifact_link_conflict(
+    session: Session,
+    receipt: InboundEventRow,
+    conflict: ConversationCaptureConflict,
+) -> None:
+    """Flag a source-integrity discrepancy without dropping its message.
+
+    An impossible link should not occupy the same 25 recovery slots on every
+    future poll; a separate deliberate repair can clear the quarantine.
+    """
+    details = _fields(receipt)
+    if details is None or details["message_kind"] not in _STORED_MEDIA_KINDS:
+        return
+    row = session.scalar(select(ConversationMessageRow).where(
+        ConversationMessageRow.tenant_id == receipt.tenant_id,
+        ConversationMessageRow.source == receipt.source,
+        ConversationMessageRow.source_account == details["source_account"],
+        ConversationMessageRow.source_message_id == receipt.external_event_id,
+    ))
+    if row is None:
+        return
+    metadata = dict(row.metadata_json or {})
+    if (
+        metadata.get("capture_contract") != "LIVE_CONVERSATION_ARCHIVE_V0"
+        or metadata.get("source_inbound_event_id") != receipt.id
+    ):
+        return
+    metadata["attachment_state"] = "LINK_CONFLICT"
+    # Restrict metadata to a fixed list; never store arbitrary exception
+    # strings, provider names, source accounts, phone numbers or message text.
+    code = str(conflict)
+    metadata["artifact_link_error_code"] = (
+        code if code in _MEDIA_CONFLICT_CODES else "ARTIFACT_PROVENANCE_CONFLICT"
+    )
+    row.metadata_json = metadata
+    session.flush()
+
+
 def capture_voice_transcription(
     session: Session,
     receipt: InboundEventRow,
@@ -527,33 +573,50 @@ def reconcile_live_capture_batch(
     archived = attached = linked = skipped = failed = 0
     for receipt in receipts:
         try:
-            attached_here = linked_here = False
             with session.begin_nested():
                 result = capture_live_receipt(session, receipt)
-                details = _fields(receipt)
-                if result.status == "ARCHIVED" and details is not None:
-                    if details["message_kind"] == "VOICE":
-                        transcription = session.scalar(
-                            select(VoiceTranscriptionRow).where(
-                                VoiceTranscriptionRow.inbound_event_id == receipt.id,
-                                VoiceTranscriptionRow.tenant_id == receipt.tenant_id,
-                            )
-                        )
-                        if transcription is not None:
-                            status = capture_voice_transcription(session, receipt, transcription)
-                            attached_here = status.status == "TRANSCRIPTION_ATTACHED"
-                    if details["message_kind"] in _STORED_MEDIA_KINDS:
-                        media_status = attach_canonical_artifact(session, receipt)
-                        linked_here = media_status.status == "ARTIFACT_LINKED"
-            if result.status == "ARCHIVED":
-                archived += 1
-                attached += int(attached_here)
-                linked += int(linked_here)
-            else:
-                skipped += 1
         except Exception:
-            # Keep receipt for a later retry; no content in logs or exceptions.
+            # An invalid conversation identity cannot be archived. The
+            # ingress event remains durable for an explicit later repair.
             failed += 1
+            continue
+        if result.status != "ARCHIVED":
+            skipped += 1
+            continue
+        archived += 1
+        details = _fields(receipt)
+        if details is None:
+            continue
+        if details["message_kind"] == "VOICE":
+            try:
+                transcription = session.scalar(
+                    select(VoiceTranscriptionRow).where(
+                        VoiceTranscriptionRow.inbound_event_id == receipt.id,
+                        VoiceTranscriptionRow.tenant_id == receipt.tenant_id,
+                    )
+                )
+                if transcription is not None:
+                    with session.begin_nested():
+                        status = capture_voice_transcription(session, receipt, transcription)
+                    attached += int(status.status == "TRANSCRIPTION_ATTACHED")
+            except Exception:
+                # STT failure must not erase the already archived event.
+                failed += 1
+        if details["message_kind"] in _STORED_MEDIA_KINDS:
+            try:
+                with session.begin_nested():
+                    outcome = attach_canonical_artifact(session, receipt)
+                linked += int(outcome.status == "ARTIFACT_LINKED")
+            except ConversationCaptureConflict as exc:
+                failed += 1
+                try:
+                    with session.begin_nested():
+                        _quarantine_artifact_link_conflict(session, receipt, exc)
+                except Exception:
+                    failed += 1
+            except Exception:
+                # Media staging is independent from archive durability.
+                failed += 1
     # Reconcile a *separate* failure boundary: the archive exists, STT has
     # already reached terminal state, but its text/status update was missed.
     # A missing-archive-only retry cannot repair this case. Limit both
@@ -647,7 +710,7 @@ def reconcile_live_capture_batch(
             or_(
                 and_(
                     or_(
-                        link_state.in_(("PENDING", "FAILED")),
+                        link_state == "PENDING",
                         link_state.is_(None),  # pre-V1 live VOICE rows
                     ),
                     or_(
@@ -655,11 +718,21 @@ def reconcile_live_capture_batch(
                         ArtifactUnderstandingRow.status == "FAILED",
                     ),
                 ),
+                # A terminal failed download can be repaired only when the
+                # canonical source receipt actually becomes available. It
+                # must not occupy all 25 slots in every subsequent cycle.
+                and_(
+                    link_state == "FAILED",
+                    ArtifactReceiptRow.id.isnot(None),
+                ),
                 and_(
                     link_state == "READY",
                     ConversationMessageRow.message_type.in_(("IMAGE", "DOCUMENT")),
-                    prior_understanding.in_(("PENDING", "PROCESSING", "UNAVAILABLE")),
+                    prior_understanding.in_(
+                        ("PENDING", "PROCESSING", "UNAVAILABLE", "FAILED")
+                    ),
                     ArtifactUnderstandingRow.status.in_(("READY", "FAILED")),
+                    prior_understanding != ArtifactUnderstandingRow.status,
                 ),
             ),
         )
@@ -679,9 +752,16 @@ def reconcile_live_capture_batch(
                 linked += 1
             else:
                 skipped += 1
+        except ConversationCaptureConflict as exc:
+            # Do not retry a contradictory Artifact identity forever.
+            failed += 1
+            try:
+                with session.begin_nested():
+                    _quarantine_artifact_link_conflict(session, receipt, exc)
+            except Exception:
+                failed += 1
         except Exception:
-            # Bad provenance remains unapplied and retryable; no private data
-            # or source identifiers are written into error logs.
+            # An unexpected transient database/media failure is retryable.
             failed += 1
 
     return ConversationCaptureReconciliationResult(

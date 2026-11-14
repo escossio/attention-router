@@ -5,6 +5,7 @@ activity are required to certify the identity/provenance contract.
 """
 
 from datetime import timedelta
+import hashlib
 
 import pytest
 from sqlalchemy import func, select
@@ -87,11 +88,14 @@ def stage_synthetic_artifact(
         )
         session.add(resource)
         session.flush()
+        digest = hashlib.sha256(
+            ("synthetic-asset-" + event.external_event_id).encode()
+        ).hexdigest()
         artifact = ArtifactRow(
             id=new_id(),
             tenant_id=DEFAULT_TENANT_ID,
             resource_id=resource.id,
-            content_sha256="a" * 64,
+            content_sha256=digest,
             artifact_kind=kind,
             mime_type=(
                 "image/png" if kind == "IMAGE"
@@ -101,7 +105,7 @@ def stage_synthetic_artifact(
             ),
             size_bytes=40,
             storage_provider="local-fs-v1",
-            storage_reference="sha256:" + "a" * 64,
+            storage_reference="sha256:" + digest,
             status="AVAILABLE",
             metadata_json={},
             created_at=stamp,
@@ -310,6 +314,8 @@ def test_failed_photo_capture_remains_observation_without_fake_artifact(capture)
     assert row.metadata_json["artifact_understanding_id"] == failed.id
     assert "artifact_id" not in row.metadata_json
     assert row.text is None
+    repeat = reconcile_live_capture_batch(capture)
+    assert repeat.examined == 0 and repeat.linked_artifacts == 0
 
 
 def test_missing_media_does_not_starve_later_ready_artifact(capture):
@@ -471,3 +477,94 @@ def test_failed_media_can_later_attach_when_the_exact_source_is_repaired(capture
     assert row.metadata_json["artifact_receipt_id"] == receipt.id
     assert row.metadata_json["artifact_understanding_status"] == "READY"
     assert "DADO PRIVADO DE TESTE" not in str(row.metadata_json)
+
+def test_failed_semantic_result_is_repaired_if_original_understanding_turns_ready(capture):
+    # Evidence remains linked while a previously failed visual model result
+    # is later repaired through an independently authorized mechanism.
+    event = media_event("semantic-repaired")
+    services.receive_normalized_inbound_event(capture, event)
+    _source, artifact, _receipt_row, semantic = stage_synthetic_artifact(
+        capture, event, status="FAILED",
+    )
+    capture.commit()
+    assert reconcile_live_capture_batch(capture).linked_artifacts == 1
+    capture.commit()
+    row = _by_source(capture, event.external_event_id)
+    assert row.metadata_json["artifact_understanding_status"] == "FAILED"
+    assert row.metadata_json["attachment_state"] == "READY"
+
+    semantic.status = "READY"
+    semantic.summary_text = "SÍNTESE PRIVADA"
+    semantic.extracted_text = "SÍNTESE PRIVADA"
+    semantic.visual_description = "Imagem sintética"
+    capture.commit()
+    repaired = reconcile_live_capture_batch(capture)
+    capture.commit()
+    assert repaired.linked_artifacts == 1
+    assert row.metadata_json["artifact_understanding_status"] == "READY"
+    assert row.metadata_json["artifact_id"] == artifact.id
+    assert "SÍNTESE PRIVADA" not in str(row.metadata_json)
+    assert reconcile_live_capture_batch(capture).linked_artifacts == 0
+
+
+def test_document_message_with_image_mimetype_preserves_real_content_kind(capture):
+    # WhatsApp 'document' describes the source message category. An attached
+    # PNG remains an IMAGE Artifact and needs no invented PDF representation.
+    event = media_event("document-as-image", "document")
+    services.receive_normalized_inbound_event(capture, event)
+    _source, artifact, receipt, understanding = stage_synthetic_artifact(
+        capture, event, kind="IMAGE",
+    )
+    capture.commit()
+    result = reconcile_live_capture_batch(capture)
+    capture.commit()
+    row = _by_source(capture, event.external_event_id)
+    assert result.linked_artifacts == 1
+    assert row.message_type == "DOCUMENT"
+    assert row.metadata_json["artifact_kind"] == "IMAGE"
+    assert row.metadata_json["artifact_receipt_id"] == receipt.id
+    assert row.metadata_json["artifact_understanding_id"] == understanding.id
+    assert row.metadata_json["artifact_id"] == artifact.id
+    assert row.text is None
+
+
+def test_bad_media_identity_is_quarantined_without_erasing_archived_message(
+    capture, monkeypatch,
+):
+    # Source event and canonical receipt were observed at different times.
+    # A wrong media category is an integrity conflict, not an excuse to lose
+    # the message or retry the same contradiction forever.
+    wrong = media_event("bad-artifact-kind", "image")
+    monkeypatch.setattr(settings, "conversation_capture_enabled", False)
+    services.receive_normalized_inbound_event(capture, wrong)
+    source, _, _, _ = stage_synthetic_artifact(
+        capture, wrong, kind="DOCUMENT", understanding=False,
+    )
+    capture.commit()
+    monkeypatch.setattr(settings, "conversation_capture_enabled", True)
+    result = reconcile_live_capture_batch(capture)
+    capture.commit()
+    row = _by_source(capture, wrong.external_event_id)
+    assert result.archived == 1
+    assert result.failed >= 1
+    assert row is not None and row.message_type == "IMAGE"
+    assert row.metadata_json["source_inbound_event_id"] == source.id
+    assert row.metadata_json["attachment_state"] == "LINK_CONFLICT"
+    assert row.metadata_json["artifact_link_error_code"] == "ARTIFACT_KIND_OR_TENANT_CONFLICT"
+    assert "artifact_id" not in row.metadata_json
+    assert row.text is None
+    assert reconcile_live_capture_batch(capture).examined == 0
+
+    good = media_event("good-artifact-after-conflict", "image")
+    services.receive_normalized_inbound_event(capture, good)
+    _good_source, artifact, receipt, _ = stage_synthetic_artifact(
+        capture, good,
+    )
+    capture.commit()
+    response = reconcile_live_capture_batch(capture)
+    capture.commit()
+    assert response.linked_artifacts == 1
+    linked = _by_source(capture, good.external_event_id)
+    assert linked.metadata_json["attachment_state"] == "READY"
+    assert linked.metadata_json["artifact_id"] == artifact.id
+    assert linked.metadata_json["artifact_receipt_id"] == receipt.id
