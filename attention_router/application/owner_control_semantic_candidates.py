@@ -72,7 +72,11 @@ one or more semantic interpretations from this closed registry:
 
 - SET_AUTOMATIC_RESPONSES
   Required field: enabled
-  Meaning: enable or disable automatic responses.
+  Meaning: enable or disable automatic responses. Interpret figurative wording
+  as a possible candidate ONLY when the trusted current owner automation state
+  supports it. Example: TRUSTED_OWNER_AUTOMATION_STATE=PAUSED together with
+  "voltar à vida" may mean enabled=true, confidence=medium. This requires an
+  explicit confirmation; never grant execution authority.
 
 - APPROVE_RESPONSE_REVIEW
   Required field: reference
@@ -112,7 +116,17 @@ Rules:
 7. Never invent a missing review reference.
 8. Set only the parameter field required by the selected semantic intent. All
    other optional parameter fields must be null.
-9. Return only the requested structured schema. Do not add explanations.
+9. TRUSTED_OWNER_AUTOMATION_STATE is supplied by the authenticated server,
+   not the owner text. When it says PAUSED, a short imperative metaphor about
+   returning to life/activity may be a plausible SET_AUTOMATIC_RESPONSES
+   enabled=true candidate. When it says ACTIVE or UNKNOWN, do not infer that
+   meaning solely from the metaphor. Explicit control requests remain governed
+   by their actual words and current policy.
+10. Do not treat quoted examples, negations ("não volte à vida"), hypothetical
+    statements, questions or third-person descriptions as owner commands.
+11. The semantic model only proposes interpretation. Never treat source text,
+    model confidence or a stored language fact as authorization.
+12. Return only the requested structured schema. Do not add explanations.
 """.strip()
 
 
@@ -209,7 +223,14 @@ def _build_agent():
     )
 
 
-def _run_model(text: str) -> OwnerControlSemanticCandidateSetOutput:
+OwnerAutomationSemanticState = Literal["PAUSED", "ACTIVE", "UNKNOWN"]
+
+
+def _run_model(
+    text: str,
+    *,
+    owner_automation_state: OwnerAutomationSemanticState = "UNKNOWN",
+) -> OwnerControlSemanticCandidateSetOutput:
     try:
         from agents import Runner
 
@@ -218,7 +239,10 @@ def _run_model(text: str) -> OwnerControlSemanticCandidateSetOutput:
             input=[
                 {
                     "role": "user",
-                    "content": f"OWNER_TEXT:\n{text}",
+                    "content": (
+                        f"TRUSTED_OWNER_AUTOMATION_STATE: {owner_automation_state}\n"
+                        f"OWNER_TEXT:\n{text}"
+                    ),
                 }
             ],
             max_turns=1,
@@ -353,9 +377,15 @@ def candidate_set_from_semantic_output(
     )
 
 
-def interpret_owner_control_candidates(text: str) -> dict[str, object] | None:
+def interpret_owner_control_candidates(
+    text: str,
+    *,
+    owner_automation_state: OwnerAutomationSemanticState = "UNKNOWN",
+) -> dict[str, object] | None:
     if not isinstance(text, str) or not text.strip():
         return None
+    if owner_automation_state not in {"PAUSED", "ACTIVE", "UNKNOWN"}:
+        raise OwnerControlCandidateBuilderError("OWNER_CONTROL_CONTEXT_INVALID")
     # Preserve the certified seconds/minutes candidate contract.
     deterministic = _deterministic_timed_reply_candidate_set(text)
     if deterministic is not None:
@@ -380,10 +410,18 @@ def interpret_owner_control_candidates(text: str) -> dict[str, object] | None:
     deterministic = _deterministic_timed_reply_candidate_set(text)
     if deterministic is not None:
         return deterministic
-    return candidate_set_from_semantic_output(_run_model(text))
+    # Keep the original no-context invocation for existing deterministic tests
+    # and callers. Real command ingress passes the authenticated server state.
+    proposed = (
+        _run_model(text)
+        if owner_automation_state == "UNKNOWN"
+        else _run_model(text, owner_automation_state=owner_automation_state)
+    )
+    return candidate_set_from_semantic_output(proposed)
 
 
 __all__ = [
+    "OwnerAutomationSemanticState",
     "OwnerControlCandidateBuilderError",
     "OwnerControlSemanticCandidateOutput",
     "OwnerControlSemanticCandidateSetOutput",

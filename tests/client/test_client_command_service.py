@@ -47,6 +47,7 @@ from attention_router.infrastructure.models import (
     ClientCommandMessageRow,
     FactRow,
     OwnerAutomationControlChangeRow,
+    OwnerAutomationControlRow,
     OwnerOperationalControlRow,
     PendingIntentRow,
     TenantRow,
@@ -389,7 +390,7 @@ def test_not_control_candidate_requires_clarification_then_learns_idiolect(
     monkeypatch.setattr(
         client_command_module,
         "interpret_owner_control_candidates",
-        lambda text: _resume_candidate_set()
+        lambda text, **_kwargs: _resume_candidate_set()
         if text == "voltar a trabalhar"
         else None,
     )
@@ -501,7 +502,7 @@ def test_not_control_without_candidates_remains_general_task(
     monkeypatch.setattr(
         client_command_module,
         "interpret_owner_control_candidates",
-        lambda _text: None,
+        lambda _text, **_kwargs: None,
     )
 
     result = commands.submit_text(
@@ -518,7 +519,7 @@ def test_not_control_without_candidates_remains_general_task(
     assert "fluxo geral de tarefas" in (result.response_text or "")
 
 
-def test_free_language_semantic_resume_maps_to_canonical_action(session, monkeypatch):
+def test_free_language_semantic_resume_requires_confirmed_context(session, monkeypatch):
     sessions, issued = issue_owner_session(session)
     commands = service(sessions)
 
@@ -541,9 +542,9 @@ def test_free_language_semantic_resume_maps_to_canonical_action(session, monkeyp
     )
     session.commit()
 
-    assert result.state == "COMPLETED"
-    assert result.normalized_action == "SET_AUTOMATIC_RESPONSES_ENABLED"
-    assert "ativa" in (result.response_text or "").casefold()
+    assert result.state == "GENERAL_TASK_PENDING"
+    assert result.normalized_action is None
+    assert session.scalar(select(OwnerAutomationControlRow)) is None
 
 
 def test_android_client_clarification_roundtrip_learns_confirmed_idiolect(
