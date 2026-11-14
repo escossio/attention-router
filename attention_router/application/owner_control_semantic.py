@@ -81,7 +81,12 @@ Rules:
    are present, return AMBIGUOUS.
 9. Use confidence=high only when one allowed action and all required parameters are
    explicit or safely normalized from the text. Otherwise use medium/low.
-10. Return only the requested structured schema. Do not add explanations.
+10. Figurative, idiomatic expressions without explicit control terms (such as
+    "voltar à vida", "acordar", "voltar a funcionar") are NOT sufficient to
+    change automation directly. Return AMBIGUOUS instead of MATCHED high;
+    the clarification candidate builder can propose a meaning after checking
+    authenticated owner state.
+11. Return only the requested structured schema. Do not add explanations.
 """.strip()
 
 

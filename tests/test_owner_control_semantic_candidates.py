@@ -331,3 +331,42 @@ def test_blank_text_never_calls_candidate_model(monkeypatch):
         lambda _text: pytest.fail("blank text must not invoke model"),
     )
     assert interpret_owner_control_candidates("   ") is None
+
+
+def test_metaphor_candidate_builder_receives_only_trusted_paused_state(monkeypatch):
+    recorded = []
+
+    def simulated_llm(text, *, owner_automation_state="UNKNOWN"):
+        recorded.append((text, owner_automation_state))
+        return output(
+            raw_candidate(
+                "SET_AUTOMATIC_RESPONSES",
+                enabled=True,
+                confidence="medium",
+            )
+        )
+
+    monkeypatch.setattr(owner_control_semantic_candidates, "_run_model", simulated_llm)
+    result = interpret_owner_control_candidates(
+        "voltar à vida",
+        owner_automation_state="PAUSED",
+    )
+    assert recorded == [("voltar à vida", "PAUSED")]
+    assert result is not None
+    assert result["candidates"][0]["parameters"] == {"enabled": True}
+    assert result["candidates"][0]["semantic_intent_key"] == "SET_AUTOMATIC_RESPONSES"
+
+
+def test_invalid_automation_context_is_rejected_without_model(monkeypatch):
+    monkeypatch.setattr(
+        owner_control_semantic_candidates,
+        "_run_model",
+        lambda *_args, **_kw: pytest.fail("invalid trusted context"),
+    )
+    with pytest.raises(
+        OwnerControlCandidateBuilderError, match="OWNER_CONTROL_CONTEXT_INVALID"
+    ):
+        interpret_owner_control_candidates(
+            "voltar à vida",
+            owner_automation_state="FROM_OWNER_TEXT",
+        )

@@ -294,6 +294,33 @@ def retrieve_idiolect_context(
     return tuple(items[:limit])
 
 
+def select_unique_confirmed_mapping(
+    evidence: tuple[IdiolectInterpretationEvidence, ...],
+) -> IdiolectInterpretationEvidence | None:
+    """Select one exact, explicitly confirmed meaning without a fresh model call.
+
+    Evidence retrieval already enforces tenant, owner, channel, conversation,
+    normalized expression, validity window and supersession. This selector
+    still fails closed on disagreement rather than choosing the newest guess.
+    It supplies only *interpretation*, never authorization to execute.
+    """
+    certain = [
+        item for item in evidence
+        if item.evidence_confidence >= 1.0
+        and item.reuse_policy in {"INTERPRET_ONLY", "EXPLICIT_REUSE"}
+    ]
+    signatures = {
+        (
+            item.semantic_intent_key,
+            tuple(sorted(item.parameters.items())),
+        )
+        for item in certain
+    }
+    if len(signatures) != 1:
+        return None
+    return certain[0]
+
+
 def select_unique_confirmed_candidate(
     evidence: tuple[IdiolectInterpretationEvidence, ...],
     candidate_set: dict[str, object],
@@ -342,5 +369,6 @@ __all__ = [
     "normalize_user_expression",
     "retrieve_idiolect_context",
     "retrieve_idiolect_interpretation_evidence",
+    "select_unique_confirmed_mapping",
     "select_unique_confirmed_candidate",
 ]

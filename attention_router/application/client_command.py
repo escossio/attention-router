@@ -45,11 +45,14 @@ from attention_router.application.owner_control_semantic_candidates import (
 )
 from attention_router.application.owner_control_semantic_registry import (
     materialize_owner_control_candidate,
+    OWNER_CONTROL_SEMANTIC_REGISTRY_VERSION,
+    build_registered_semantic_candidate,
 )
 from attention_router.application.pending_intent import (
     PendingIntentError,
     cancel_pending_intent,
     create_pending_intent,
+    build_candidate_set,
     expire_due_pending_intents,
     find_active_pending_intent,
     resolve_pending_intent,
@@ -58,6 +61,7 @@ from attention_router.application.pending_intent import (
 from attention_router.application.user_idiolect import (
     retrieve_idiolect_interpretation_evidence,
     select_unique_confirmed_candidate,
+    select_unique_confirmed_mapping,
 )
 from attention_router.application.user_idiolect_projection import (
     IdiolectProjectionError,
@@ -79,7 +83,10 @@ from attention_router.core.client.bootstrap import TenantRole
 from attention_router.core.events import OperatorAuthority, OwnerCommandUnauthorized
 from attention_router.infrastructure import client_session_repository
 from attention_router.infrastructure.hashing import stable_hash
-from attention_router.infrastructure.models import ClientCommandMessageRow
+from attention_router.infrastructure.models import (
+    ClientCommandMessageRow,
+    OwnerAutomationControlRow,
+)
 from attention_router.infrastructure.repository import audit
 
 
@@ -165,6 +172,56 @@ def _client_fast_path(text: str) -> OwnerControlParseResult | None:
             AutomaticResponsesEnabledParameters(enabled=True),
         )
     return None
+
+
+def _automation_interpretation_state(
+    session: Session,
+    *,
+    tenant_id: str,
+    owner_actor_key: str,
+) -> str:
+    """Read only the authenticated owner's persisted automation control."""
+    enabled = session.scalar(
+        select(OwnerAutomationControlRow.automatic_responses_enabled).where(
+            OwnerAutomationControlRow.tenant_id == tenant_id,
+            OwnerAutomationControlRow.represented_owner_actor_key == owner_actor_key,
+        )
+    )
+    if enabled is False:
+        return "PAUSED"
+    if enabled is True:
+        return "ACTIVE"
+    return "UNKNOWN"
+
+
+_IMPLICIT_COMMAND_BLOCKERS = re.compile(
+    r"\b(?:nao|nunca|jamais|talvez|se|quando|imagine|"
+    r"exemplo|hipotese|suponha|simule)\b"
+)
+
+
+def _safe_implicit_command_text(text: str) -> bool:
+    """Fail closed on quoted, interrogative, hypothetical or negated text."""
+    if not isinstance(text, str) or not text.strip():
+        return False
+    if any(char in text for char in ('?', '"', "'", '“', '”', '«', '»', '\n')):
+        return False
+    decomposed = unicodedata.normalize("NFKD", text.strip().casefold())
+    ascii_text = "".join(
+        char for char in decomposed if not unicodedata.combining(char)
+    )
+    return _IMPLICIT_COMMAND_BLOCKERS.search(ascii_text) is None
+
+
+def _explicit_automation_command(text: str) -> bool:
+    fast = _client_fast_path(text)
+    if fast is not None and fast.status == OwnerControlParseStatus.MATCHED:
+        return True
+    direct = parse_owner_grace_control(text)
+    if direct.status == OwnerControlParseStatus.MATCHED:
+        return True
+    normalized = _normalized_phrase(text)
+    return "respostas automaticas" in normalized or "resposta automatica" in normalized
 
 
 class ClientCommandService:
@@ -493,7 +550,13 @@ class ClientCommandService:
                 )
             else:
                 explicit = self._interpret(text)
-                if explicit.status == OwnerControlParseStatus.MATCHED:
+                if (
+                    explicit.status == OwnerControlParseStatus.MATCHED
+                    and (
+                        explicit.action != OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED
+                        or _explicit_automation_command(text)
+                    )
+                ):
                     supersede_pending_intent(
                         session,
                         pending_intent_id=active_pending.id,
@@ -512,9 +575,123 @@ class ClientCommandService:
                     session.flush()
                     return self._view(row)
         else:
-            parsed = self._interpret(text)
+            parsed = None
+
+        confirmed_idiolect_used = False
+        owner_automation_state = _automation_interpretation_state(
+            session,
+            tenant_id=operational_tenant_id,
+            owner_actor_key=owner_actor_key,
+        )
+        if active_pending is None:
+            # A confirmed owner phrase can be interpreted without another model
+            # call. This does not bypass the authenticated owner dispatcher.
+            if (
+                self.settings.owner_control_semantic_enabled
+                and owner_automation_state == "PAUSED"
+                and _safe_implicit_command_text(text)
+                and not _explicit_automation_command(text)
+            ):
+                try:
+                    evidence = retrieve_idiolect_interpretation_evidence(
+                        session,
+                        tenant_id=operational_tenant_id,
+                        actor_key=owner_actor_key,
+                        utterance=text,
+                        source_channel=CLIENT_COMMAND_SOURCE_CHANNEL,
+                        conversation_key_hash=conversation_key_hash,
+                        now=current,
+                    )
+                    learned = select_unique_confirmed_mapping(evidence)
+                    if (
+                        learned is not None
+                        and learned.semantic_intent_key == "SET_AUTOMATIC_RESPONSES"
+                        and learned.parameters == {"enabled": True}
+                    ):
+                        mapped = materialize_owner_control_candidate(
+                            intent_key=learned.semantic_intent_key,
+                            parameters=learned.parameters,
+                        )
+                        if mapped is not None:
+                            parsed = OwnerControlParseResult(
+                                OwnerControlParseStatus.MATCHED,
+                                mapped[0],
+                                mapped[1],
+                            )
+                            confirmed_idiolect_used = True
+                            audit(
+                                session,
+                                None,
+                                "client_command.confirmed_idiolect_matched",
+                                {
+                                    "command_id": row.id,
+                                    "language_fact_id": learned.fact_id,
+                                    "owner_automation_state": owner_automation_state,
+                                },
+                                correlation_id=row.id,
+                                causation_id=row.id,
+                                origin="user_idiolect",
+                                tenant_id=row.tenant_id,
+                                created_at=current,
+                            )
+                except Exception:
+                    # A failed or conflicting language fact is not an authority
+                    # source. Continue through the normal semantic path.
+                    parsed = None
+            if parsed is None:
+                # Unknown metaphorical owner language enters clarification
+                # directly when automation is paused. This is one model
+                # candidate pass instead of speculative execution + a second
+                # LLM call, and never treats an idiom as canonical authority.
+                deterministic = (
+                    _client_fast_path(text) or parse_owner_grace_control(text)
+                )
+                if (
+                    self.settings.owner_control_semantic_enabled
+                    and owner_automation_state == "PAUSED"
+                    and deterministic.status == OwnerControlParseStatus.NOT_CONTROL_COMMAND
+                    and _safe_implicit_command_text(text)
+                    and not _explicit_automation_command(text)
+                ):
+                    parsed = deterministic
+                else:
+                    parsed = self._interpret(text)
 
         candidate_set: dict[str, object] | None = None
+        # Inferential phrases must not auto-toggle automation on first use.
+        # Canonical commands remain immediate. Only a plausible state-specific
+        # semantic inference may be offered as a confirmable candidate.
+        if (
+            active_pending is None
+            and parsed.status == OwnerControlParseStatus.MATCHED
+            and parsed.action == OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED
+            and isinstance(parsed.parameters, AutomaticResponsesEnabledParameters)
+            and not _explicit_automation_command(text)
+            and not confirmed_idiolect_used
+        ):
+            enabled = parsed.parameters.enabled
+            plausible = (
+                (owner_automation_state == "PAUSED" and enabled is True)
+                or (owner_automation_state == "ACTIVE" and enabled is False)
+            )
+            if plausible and _safe_implicit_command_text(text):
+                candidate = build_registered_semantic_candidate(
+                    intent_key="SET_AUTOMATIC_RESPONSES",
+                    parameters={"enabled": enabled},
+                    confidence="medium",
+                )
+                candidate_set = build_candidate_set(
+                    [candidate],
+                    semantic_registry_version=OWNER_CONTROL_SEMANTIC_REGISTRY_VERSION,
+                )
+                parsed = OwnerControlParseResult(
+                    OwnerControlParseStatus.REJECTED,
+                    reason_code="CONTROL_COMMAND_NEEDS_CLARIFICATION",
+                )
+            else:
+                parsed = OwnerControlParseResult(
+                    OwnerControlParseStatus.NOT_CONTROL_COMMAND,
+                )
         should_build_candidates = (
             (
                 parsed.status == OwnerControlParseStatus.REJECTED
@@ -525,11 +702,30 @@ class ClientCommandService:
                 and self.settings.owner_control_semantic_enabled
             )
         )
-        if should_build_candidates:
+        if (
+            should_build_candidates
+            and candidate_set is None
+            and _safe_implicit_command_text(text)
+        ):
             try:
-                candidate_set = interpret_owner_control_candidates(text)
+                candidate_set = interpret_owner_control_candidates(
+                    text, owner_automation_state=owner_automation_state
+                )
             except OwnerControlCandidateBuilderError:
                 candidate_set = None
+            # An unanchored metaphor is not a command when the automation
+            # status cannot support its proposed meaning.
+            if candidate_set is not None and not _explicit_automation_command(text):
+                suggested = candidate_set.get("candidates", [])
+                if (
+                    owner_automation_state != "PAUSED"
+                    and any(
+                        item.get("semantic_intent_key") == "SET_AUTOMATIC_RESPONSES"
+                        and (item.get("parameters") or {}).get("enabled") is True
+                        for item in suggested if isinstance(item, dict)
+                    )
+                ):
+                    candidate_set = None
             if candidate_set is not None:
                 try:
                     evidence = retrieve_idiolect_interpretation_evidence(
