@@ -1577,10 +1577,50 @@ def receive_inbound_event(
         raise
 
 
+def _capture_observed_whatsapp_message(
+    session: Session, event: NormalizedInboundEvent,
+) -> None:
+    """Store evidence only; archive failures cannot change delivery decisions."""
+    if not settings.conversation_capture_enabled:
+        return
+    from attention_router.application.conversation_live_capture import (
+        capture_live_receipt,
+    )
+
+    try:
+        with session.begin_nested():
+            receipt = session.scalar(
+                select(InboundEventRow).where(
+                    InboundEventRow.tenant_id == event.tenant_id,
+                    InboundEventRow.source == event.source,
+                    InboundEventRow.external_event_id == event.external_event_id,
+                )
+            )
+            if receipt is None:
+                return
+            captured = capture_live_receipt(session, receipt)
+        if captured.status == "ARCHIVED":
+            audit(
+                session, receipt.interaction_id,
+                "conversation_capture.message_archived",
+                {"source_event_id": receipt.id, "archive_state": captured.status},
+                event.correlation_id, receipt.id,
+                origin="conversation_capture", tenant_id=receipt.tenant_id,
+            )
+    except Exception as exc:
+        audit(
+            session, None, "conversation_capture.failed",
+            {"error_type": type(exc).__name__},
+            event.correlation_id, None,
+            origin="conversation_capture", tenant_id=event.tenant_id,
+        )
+
+
 @message_trace
 def receive_normalized_inbound_event(session: Session, event: NormalizedInboundEvent) -> dict:
     if event.event_origin in OWNER_OBSERVATION_TYPES:
         result = receive_owner_outbound_observation(session, event)
+        _capture_observed_whatsapp_message(session, event)
         if (
             event.event_origin == "ROUTER_AUTOMATED_OUTBOUND_OBSERVED"
             and event.metadata.get("authenticated_owner_self_chat_target") is True
@@ -1659,7 +1699,7 @@ def receive_normalized_inbound_event(session: Session, event: NormalizedInboundE
         origin="ingress",
         tenant_id=event.tenant_id,
     )
-    return receive_inbound_event(
+    result = receive_inbound_event(
         session,
         source=event.source,
         external_event_id=event.external_event_id,
@@ -1674,6 +1714,8 @@ def receive_normalized_inbound_event(session: Session, event: NormalizedInboundE
         received_at=event.received_at,
         actor_binding=binding,
     )
+    _capture_observed_whatsapp_message(session, event)
+    return result
 
 
 def _apply_structural_synthetic_binding_lineage(

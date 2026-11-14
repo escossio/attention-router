@@ -14,6 +14,9 @@ from attention_router.application.owner_reply_grace import (
     process_due_grace_windows,
 )
 from attention_router.application.memory import process_memory_ingestion_jobs
+from attention_router.application.conversation_live_capture import (
+    reconcile_live_capture_batch,
+)
 from attention_router.application.cognitive_runtime import (
     CognitiveRuntimeCycleResult,
     run_cognitive_runtime_cycle,
@@ -467,6 +470,7 @@ def run_forever() -> None:
     last_personal_context_run_monotonic: float | None = None
     last_personal_context_authority_run_monotonic: float | None = None
     last_personal_context_materialization_run_monotonic: float | None = None
+    last_conversation_capture_reconcile_monotonic: float | None = None
     logger.info("worker started worker_id=%s", identity)
     while True:
         transport_ready = probe_transport_ready()
@@ -531,6 +535,27 @@ def run_forever() -> None:
             else:
                 memory_count = 0
             session.commit()
+
+            # Separate, bounded evidence-only recovery path. No historical
+            # bootstrap, decision replay or outbound side effects.
+            if settings.conversation_capture_enabled:
+                capture_now = time.monotonic()
+                if (
+                    last_conversation_capture_reconcile_monotonic is None
+                    or capture_now - last_conversation_capture_reconcile_monotonic >= 60.0
+                ):
+                    try:
+                        recovered = reconcile_live_capture_batch(session, limit=25)
+                        session.commit()
+                        if recovered.failed:
+                            logger.warning(
+                                "conversation capture reconcile retryable failures=%d",
+                                recovered.failed,
+                            )
+                    except Exception:
+                        session.rollback()
+                        logger.exception("conversation capture reconciliation failed")
+                    last_conversation_capture_reconcile_monotonic = capture_now
 
             personal_context_bootstrap_result = None
             personal_context_bootstrap_now = time.monotonic()

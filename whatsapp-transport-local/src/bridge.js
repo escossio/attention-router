@@ -53,6 +53,7 @@ function createInboundBridge(config, logger = console, deps = {}) {
       source: config.inboundSource,
       channel: config.inboundChannel,
       sourceAccount: config.sourceAccount,
+      conversationCaptureOwnerTextEnabled: config.conversationCaptureOwnerTextEnabled === true,
       clientInfo: options.clientInfo,
       authenticatedSelfIdentity: options.authenticatedSelfIdentity,
       authenticatedSelfAuthorityCurrent: options.authenticatedSelfAuthorityCurrent === true,
@@ -82,9 +83,24 @@ function createInboundBridge(config, logger = console, deps = {}) {
     const isVoice = ['ptt', 'audio'].includes(
       String(normalized.message_type || '').toLowerCase(),
     );
-    const shouldCaptureMedia = !fromMe
-      && normalized.has_media
-      && (isVoice || config.whatsappArtifactIngestionEnabled === true);
+    // The owner observation still cannot authorize actions. This opt-in
+    // allows only proven manual direct-chat voice evidence to enter the same
+    // HMAC-protected media/STT path used for inbound voice.
+    const manualOwnerVoice = (
+      fromMe && isVoice && normalized.has_media
+      && config.conversationCaptureOwnerVoiceEnabled === true
+      && normalized.event_origin === 'OWNER_MANUAL_OUTBOUND_OBSERVED'
+      && normalized.owner_authenticated === false
+      && normalized.metadata?.from_me_classification === 'OWNER_MANUAL_OUTBOUND_OBSERVED'
+      && normalized.metadata?.final_from_me_classification === 'OWNER_MANUAL_OUTBOUND_OBSERVED'
+      && normalized.metadata?.conversation_state === 'READY'
+      && normalized.metadata?.is_group !== true
+    );
+    const shouldCaptureMedia = (
+      (!fromMe && normalized.has_media
+        && (isVoice || config.whatsappArtifactIngestionEnabled === true))
+      || manualOwnerVoice
+    );
     const mediaPromise = shouldCaptureMedia
       ? captureInboundMedia(config, message, normalized, logger, fetchImpl)
       : Promise.resolve(null);

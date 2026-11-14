@@ -46,6 +46,17 @@ function normalizeInboundMessage(message, options = {}) {
   const participantId = isGroup && !message?.fromMe
     ? String(message?.author?._serialized || message?.author || '') || null
     : null;
+  // Do not expose owner-side content by default. With explicit operator
+  // capture enabled, only a *resolved, manual, direct-chat* message can supply
+  // observation text. Unknown fromMe and automated echoes remain redacted.
+  const manualOwnerCapture = (
+    options.conversationCaptureOwnerTextEnabled === true
+    && isOwnerObservation && !isGroup
+    && conversation.state === 'READY'
+    && fromMeClassification === 'OWNER_MANUAL_OUTBOUND_OBSERVED'
+    && normalizedFinalFromMeClassification === 'OWNER_MANUAL_OUTBOUND_OBSERVED'
+    && type.toLowerCase() === 'chat'
+  );
   return {
     schema_version: '1',
     tenant_id: tenantId,
@@ -57,7 +68,7 @@ function normalizeInboundMessage(message, options = {}) {
     external_actor_id: isOwnerObservation ? (conversation.peer_id || externalActorId) : externalActorId,
     channel,
     message_type: type,
-    content: isOwnerObservation && !isGroup ? '' : text,
+    content: isOwnerObservation && !isGroup && !manualOwnerCapture ? '' : text,
     has_media: hasMedia,
     metadata: {
       provider: 'wwebjs',

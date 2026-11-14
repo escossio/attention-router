@@ -1,5 +1,6 @@
 import math
 import re
+from datetime import datetime
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -163,6 +164,11 @@ class Settings(BaseSettings):
     owner_control_clarification_ttl_seconds: int = 120
     andy_behavior_profile_path: str = "config/andy_behavior_profile.json"
     legacy_external_fallback_enabled: bool = False
+    # Observation-only WhatsApp archive; does not grant answer, action or
+    # memory-promotion authority and does not trigger historical imports.
+    conversation_capture_enabled: bool = False
+    conversation_capture_start_at: datetime | None = None
+    conversation_capture_tenant_id: str | None = Field(default=None, repr=False)
     persistent_memory_enabled: bool = False
     memory_ingestion_enabled: bool = False
     memory_context_enabled: bool = False
@@ -297,6 +303,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        # A new capture rollout cannot implicitly import pre-existing chats.
+        # Its bounded start time is an explicit operator-controlled watermark.
+        if self.conversation_capture_enabled:
+            start = self.conversation_capture_start_at
+            if start is None or start.tzinfo is None or start.utcoffset() is None:
+                raise ValueError("CONVERSATION_CAPTURE_START_AT_REQUIRED")
+            if self.conversation_capture_tenant_id is not None and not self.conversation_capture_tenant_id.strip():
+                raise ValueError("CONVERSATION_CAPTURE_TENANT_ID_INVALID")
         if self.first_contact_eligibility_mode not in {"INDIVIDUAL", "OPEN_INBOUND"}:
             raise ValueError("FIRST_CONTACT_ELIGIBILITY_MODE_INVALID")
         peer_hash = self.first_contact_canary_peer_sha256

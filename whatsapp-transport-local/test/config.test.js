@@ -58,3 +58,47 @@ test('startTransport blocks when browser debug url is unavailable', async () => 
   assert.equal(result.status.service_state, 'blocked');
   assert.equal(result.status.client_state, 'NO_BROWSER_DEBUG_URL');
 });
+
+test('owner text capture stays off by default and requires signed local ingress scope', () => {
+  const baseline = createConfig({});
+  assert.equal(baseline.conversationCaptureOwnerTextEnabled, false);
+  const missingTenant = createConfig({
+    CONVERSATION_CAPTURE_OWNER_TEXT_ENABLED: 'true',
+    INBOUND_FORWARD_ENABLED: 'true',
+  });
+  assert.equal(missingTenant.conversationCaptureOwnerTextEnabled, false);
+  const missingForward = createConfig({
+    CONVERSATION_CAPTURE_OWNER_TEXT_ENABLED: 'true',
+    LOCAL_TENANT_ID: 'tnt_synthetic',
+  });
+  assert.equal(missingForward.conversationCaptureOwnerTextEnabled, false);
+  const explicit = createConfig({
+    CONVERSATION_CAPTURE_OWNER_TEXT_ENABLED: 'true',
+    INBOUND_FORWARD_ENABLED: 'true',
+    LOCAL_TENANT_ID: 'tnt_synthetic',
+  });
+  assert.equal(explicit.conversationCaptureOwnerTextEnabled, true);
+  const disabled = createConfig({
+    CONVERSATION_CAPTURE_OWNER_TEXT_ENABLED: 'no',
+    INBOUND_FORWARD_ENABLED: 'true',
+    LOCAL_TENANT_ID: 'tnt_synthetic',
+  });
+  assert.equal(disabled.conversationCaptureOwnerTextEnabled, false);
+});
+
+test('outbound manual-voice media is separately opt-in, with tenant and ingress prerequisites', () => {
+  assert.equal(createConfig({}).conversationCaptureOwnerVoiceEnabled, false);
+  assert.equal(createConfig({
+    CONVERSATION_CAPTURE_OWNER_VOICE_ENABLED: 'true',
+    INBOUND_FORWARD_ENABLED: 'true',
+  }).conversationCaptureOwnerVoiceEnabled, false);
+  assert.equal(createConfig({
+    CONVERSATION_CAPTURE_OWNER_VOICE_ENABLED: 'true',
+    LOCAL_TENANT_ID: 'tnt_synthetic',
+  }).conversationCaptureOwnerVoiceEnabled, false);
+  assert.equal(createConfig({
+    CONVERSATION_CAPTURE_OWNER_VOICE_ENABLED: 'true',
+    INBOUND_FORWARD_ENABLED: 'true',
+    LOCAL_TENANT_ID: 'tnt_synthetic',
+  }).conversationCaptureOwnerVoiceEnabled, true);
+});

@@ -74,3 +74,83 @@ test('group normalization retains participant, quote and owner text without chan
   assert.equal(owner.metadata.is_group, true);
   assert.equal(owner.metadata.from_me, true);
 });
+
+test('manual owner direct text is redacted by default and opt-in is bounded', () => {
+  const observed = {
+    id: { _serialized: 'wamid.synthetic.owner.manual', remote: '5500000000029@c.us' },
+    from: '5500000000001@c.us',
+    to: '5500000000029@c.us',
+    type: 'chat',
+    body: 'Texto sintético do proprietário.',
+    timestamp: 1794643200,
+    fromMe: true,
+    hasMedia: false,
+    __fromMeClassification: 'OWNER_MANUAL_OUTBOUND_OBSERVED',
+    __finalFromMeClassification: 'OWNER_MANUAL_OUTBOUND_OBSERVED',
+  };
+  const normal = normalizeInboundMessage(observed);
+  const enabled = normalizeInboundMessage(observed, {
+    conversationCaptureOwnerTextEnabled: true,
+  });
+  assert.equal(normal.event_origin, 'OWNER_MANUAL_OUTBOUND_OBSERVED');
+  assert.equal(normal.content, '');
+  assert.equal(enabled.event_origin, normal.event_origin);
+  assert.equal(enabled.content, 'Texto sintético do proprietário.');
+  assert.equal(enabled.metadata.from_me, true);
+  assert.equal(enabled.metadata.conversation_state, 'READY');
+  assert.equal(enabled.external_actor_id, normal.external_actor_id);
+
+  // Unknown, automated, incomplete identity and nontext do not gain content
+  // merely because the operator enabled the capture of manual text.
+  const unknown = normalizeInboundMessage({
+    ...observed,
+    __fromMeClassification: 'UNKNOWN_FROM_ME',
+    __finalFromMeClassification: 'UNKNOWN_FROM_ME',
+  }, { conversationCaptureOwnerTextEnabled: true });
+  assert.equal(unknown.content, '');
+  const automated = normalizeInboundMessage({
+    ...observed,
+    __fromMeClassification: 'ROUTER_AUTOMATED_OUTBOUND_OBSERVED',
+    __finalFromMeClassification: 'ROUTER_AUTOMATED_OUTBOUND_OBSERVED',
+  }, { conversationCaptureOwnerTextEnabled: true });
+  assert.equal(automated.content, '');
+  const voice = normalizeInboundMessage({
+    ...observed, type: 'ptt', hasMedia: true,
+  }, { conversationCaptureOwnerTextEnabled: true });
+  assert.equal(voice.content, '');
+  const unresolved = normalizeInboundMessage({
+    ...observed,
+    __conversationIdentity: {
+      state: 'AMBIGUOUS',
+      conversation_key: null,
+      peer_id: null,
+      peer_identifiers: [],
+    },
+  }, { conversationCaptureOwnerTextEnabled: true });
+  assert.equal(unresolved.content, '');
+});
+
+
+test('capture flag never changes incoming text or preexisting group owner wording', () => {
+  const incoming = {
+    id: { _serialized: 'wamid.synthetic.capture.in' },
+    from: '5500000000029@c.us', type: 'chat',
+    body: 'Mensagem recebida sintética.', fromMe: false,
+  };
+  assert.equal(normalizeInboundMessage(incoming).content, 'Mensagem recebida sintética.');
+  assert.equal(normalizeInboundMessage(incoming, {
+    conversationCaptureOwnerTextEnabled: true,
+  }).content, 'Mensagem recebida sintética.');
+  const group = {
+    id: { _serialized: 'wamid.synthetic.capture.group', remote: '12345@g.us' },
+    from: 'owner@c.us', to: '12345@g.us',
+    type: 'chat', body: 'Texto sintético em grupo.',
+    fromMe: true,
+    __fromMeClassification: 'OWNER_MANUAL_OUTBOUND_OBSERVED',
+    __finalFromMeClassification: 'OWNER_MANUAL_OUTBOUND_OBSERVED',
+  };
+  assert.equal(normalizeInboundMessage(group).content, 'Texto sintético em grupo.');
+  assert.equal(normalizeInboundMessage(group, {
+    conversationCaptureOwnerTextEnabled: true,
+  }).content, 'Texto sintético em grupo.');
+});

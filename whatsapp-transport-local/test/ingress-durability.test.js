@@ -398,3 +398,100 @@ test('generic media is not downloaded while Artifact ingestion is disabled', asy
   assert.equal(mediaCalls, 0);
   assert.equal(result.media, null);
 });
+
+test('opted-in manual owner direct voice enters existing durable STT-media spool', async (t) => {
+  const { config } = tempConfig(t, { conversationCaptureOwnerVoiceEnabled: true });
+  const voiceBytes = Buffer.from('OggS synthetic owner manual voice sample');
+  const received = [];
+  const mediaReceipts = [];
+  let downloads = 0;
+  const bridge = createInboundBridge(config, logger, {
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(Buffer.from(options.body).toString('utf8'));
+      if (url === config.mediaNotificationUrl) mediaReceipts.push(body);
+      else received.push(body);
+      return response(202, { status: 'accepted' });
+    },
+  });
+  const ownerMessage = {
+    id: { _serialized: 'wamid.synthetic.owner-ptt', remote: '5500000000029@c.us' },
+    from: '5500000000001@c.us',
+    to: '5500000000029@c.us',
+    type: 'ptt',
+    body: '',
+    fromMe: true,
+    hasMedia: true,
+    timestamp: 1788652800,
+    __fromMeClassification: 'OWNER_MANUAL_OUTBOUND_OBSERVED',
+    __finalFromMeClassification: 'OWNER_MANUAL_OUTBOUND_OBSERVED',
+    downloadMedia: async () => {
+      downloads++;
+      return { mimetype: 'audio/ogg', data: voiceBytes.toString('base64') };
+    },
+  };
+  const output = await bridge.handleMessage(ownerMessage);
+  assert.equal(output.status, 'delivered');
+  assert.equal(downloads, 1);
+  assert.equal(received.length, 1);
+  assert.equal(received[0].event_origin, 'OWNER_MANUAL_OUTBOUND_OBSERVED');
+  assert.equal(received[0].owner_authenticated, false);
+  assert.equal(received[0].message_type, 'ptt');
+  assert.equal(received[0].content, '');
+  assert.equal(received[0].metadata.conversation_state, 'READY');
+  assert.equal(mediaReceipts.length, 1);
+  assert.equal(mediaReceipts[0].capture_status, 'READY');
+  assert.equal(mediaReceipts[0].external_event_id, received[0].external_event_id);
+  assert.equal(mediaReceipts[0].tenant_id, TENANT_ID);
+  assert.equal(mediaReceipts[0].content_sha256,
+    crypto.createHash('sha256').update(voiceBytes).digest('hex'));
+  assert.equal(listPending(config).length, 0);
+  assert.equal(listPending(mediaSpoolConfig(config)).length, 0);
+});
+
+
+test('default and non-manual fromMe classes never download owner voice', async (t) => {
+  const { config } = tempConfig(t);
+  const fetchImpl = async () => response(202, { status: 'accepted' });
+  const run = async (message, overrides = {}) => createInboundBridge(
+    { ...config, ...overrides }, logger, { fetchImpl },
+  ).handleMessage(message);
+  let downloads = 0;
+  const base = {
+    id: { _serialized: 'wamid.synthetic.owner-voice-safety', remote: '5500000000029@c.us' },
+    from: '5500000000001@c.us',
+    to: '5500000000029@c.us',
+    type: 'ptt', body: '',
+    fromMe: true, hasMedia: true, timestamp: 1788652800,
+    __fromMeClassification: 'OWNER_MANUAL_OUTBOUND_OBSERVED',
+    __finalFromMeClassification: 'OWNER_MANUAL_OUTBOUND_OBSERVED',
+    downloadMedia: async () => {
+      downloads++;
+      return { mimetype: 'audio/ogg', data: Buffer.from('OggS fixture').toString('base64') };
+    },
+  };
+  assert.equal((await run(base)).media, null);
+  assert.equal((await run({
+    ...base, id: { ...base.id, _serialized: 'wamid.synthetic.unknown' },
+    __fromMeClassification: 'UNKNOWN_FROM_ME',
+    __finalFromMeClassification: 'UNKNOWN_FROM_ME',
+  }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
+  assert.equal((await run({
+    ...base, id: { ...base.id, _serialized: 'wamid.synthetic.automated' },
+    __fromMeClassification: 'ROUTER_AUTOMATED_OUTBOUND_OBSERVED',
+    __finalFromMeClassification: 'ROUTER_AUTOMATED_OUTBOUND_OBSERVED',
+  }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
+  assert.equal((await run({
+    ...base,
+    id: { ...base.id, _serialized: 'wamid.synthetic.group', remote: '12345@g.us' },
+    to: '12345@g.us',
+  }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
+  assert.equal((await run({
+    ...base,
+    id: { ...base.id, _serialized: 'wamid.synthetic.ambiguous' },
+    __conversationIdentity: {
+      state: 'AMBIGUOUS', conversation_key: null, peer_id: null,
+      peer_identifiers: [],
+    },
+  }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
+  assert.equal(downloads, 0);
+});
