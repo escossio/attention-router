@@ -2595,7 +2595,7 @@ def process_outbox(session: Session, worker: str | None = None, limit: int = 10,
                 event = session.get(InboundEventRow, decision.event_id) if decision else None
                 if not settings.autonomous_execution_enabled:
                     gate, reason = "BLOCKED", "AUTONOMOUS_EXECUTION_DISABLED"
-                elif event is None or not _fresh(event):
+                elif event is None or not _fresh(event, session=session):
                     gate, reason = "BLOCKED", "STALE_OR_BEFORE_ACTIVATION"
                 elif decision.interaction_id != row.interaction_id:
                     gate, reason = "BLOCKED", "OUTBOX_INTERACTION_MISMATCH"

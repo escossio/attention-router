@@ -20,8 +20,13 @@ from attention_router.application.owner_operational_control import (
     resolve_global_owner_reply_grace_control,
 )
 from attention_router.domain.enums import InteractionState
+from attention_router.config import settings
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.hashing import stable_hash
+from attention_router.application.owner_temporal_duration import (
+    TEMPORAL_PERIOD_PROVENANCE_FIELD,
+    deadline_for_period,
+)
 from attention_router.infrastructure.models import (
     AgentDecisionRow,
     AgentExecutionIntentRow,
@@ -67,6 +72,7 @@ class GraceEligibility:
     control_revision: int | None = None
     control_source: str = CONTROL_SOURCE_POLICY_DEFAULT
     reason: str = "POLICY_NOT_CONFIGURED"
+    temporal_period: dict[str, object] | None = None
 
 
 def _utc(value: datetime) -> datetime:
@@ -202,6 +208,7 @@ def grace_eligibility(
         control_revision=control.control_revision,
         control_source=control.source,
         reason=control.reason_code,
+        temporal_period=control.temporal_period,
     )
 
 
@@ -300,6 +307,11 @@ def defer_decision_for_grace(
         query = query.with_for_update()
     window = session.scalar(query)
     stamp = _utc(event.received_at)
+    temporal_deadline = (
+        deadline_for_period(stamp, eligibility.temporal_period)
+        if eligibility.temporal_period is not None
+        else stamp + timedelta(seconds=eligibility.seconds)
+    )
     if window is None:
         window = ConversationResponseGraceWindowRow(
             id=new_id(),
@@ -322,7 +334,7 @@ def defer_decision_for_grace(
             generation=1,
             opened_at=stamp,
             last_inbound_at=stamp,
-            due_at=stamp + timedelta(seconds=eligibility.seconds),
+            due_at=temporal_deadline,
             anchor_event_id=event.id,
             anchor_interaction_id=interaction.id,
             provenance={
@@ -332,6 +344,8 @@ def defer_decision_for_grace(
                 "enabled": eligibility.enabled,
                 "control_source": eligibility.control_source,
                 "control_revision": eligibility.control_revision,
+                **({TEMPORAL_PERIOD_PROVENANCE_FIELD: eligibility.temporal_period}
+                   if eligibility.temporal_period is not None else {}),
                 "observability": {
                     "anchor_trace_context": dict(trace_carrier),
                     "member_trace_contexts": (
@@ -374,11 +388,17 @@ def defer_decision_for_grace(
         if becomes_anchor and trace_carrier:
             observability["anchor_trace_context"] = dict(trace_carrier)
         provenance["observability"] = observability
+        if eligibility.temporal_period is not None:
+            provenance[TEMPORAL_PERIOD_PROVENANCE_FIELD] = eligibility.temporal_period
+        else:
+            provenance.pop(TEMPORAL_PERIOD_PROVENANCE_FIELD, None)
         window.provenance = provenance
-        window.due_at = max(
-            _utc(window.due_at),
-            _utc(window.last_inbound_at) + timedelta(seconds=eligibility.seconds),
+        anchor_due_at = (
+            deadline_for_period(_utc(window.last_inbound_at), eligibility.temporal_period)
+            if eligibility.temporal_period is not None
+            else _utc(window.last_inbound_at) + timedelta(seconds=eligibility.seconds)
         )
+        window.due_at = max(_utc(window.due_at), anchor_due_at)
         window.policy_version_id = routing.policy_version.id
         window.represented_owner_actor_key = eligibility.represented_owner_actor_key
         window.operational_control_id = eligibility.control_id
@@ -447,6 +467,8 @@ def _routing_still_valid(
         and event.source == window.source
         and eligibility.control_revision == window.operational_control_revision
         and eligibility.seconds == window.effective_grace_seconds
+        and eligibility.temporal_period ==
+            (window.provenance or {}).get(TEMPORAL_PERIOD_PROVENANCE_FIELD)
         and routing.represented_subject
         and routing.represented_subject.entity_id == window.represented_owner_actor_key
     )
@@ -467,6 +489,19 @@ def release_grace_window(
         or window.generation != expected_generation
         or _utc(window.due_at) > stamp
     ):
+        return False
+    if ((window.provenance or {}).get(TEMPORAL_PERIOD_PROVENANCE_FIELD) is not None
+        and (stamp - _utc(window.due_at)).total_seconds() >
+            settings.autonomous_decision_max_age_seconds):
+        window.state = "CANCELED"
+        window.canceled_at = stamp
+        window.cancellation_reason = "TEMPORAL_WAIT_RELEASE_TOO_LATE"
+        window.updated_at = stamp
+        audit(
+            session, window.anchor_interaction_id, "grace.canceled",
+            {"grace_window_id": window.id, "reason": "TEMPORAL_WAIT_RELEASE_TOO_LATE"},
+            origin="owner_reply_grace", tenant_id=window.tenant_id,
+        )
         return False
     event = session.get(InboundEventRow, window.anchor_event_id)
     interaction = session.get(InteractionRow, window.anchor_interaction_id)

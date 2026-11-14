@@ -12,6 +12,13 @@ from attention_router.application.platform.context import resolve_represented_su
 from attention_router.core.events import OperatorAuthority, OwnerCommandUnauthorized
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.hashing import stable_hash
+from attention_router.application.owner_temporal_duration import (
+    TEMPORAL_PERIOD_PROVENANCE_FIELD,
+    TemporalValidationError,
+    deadline_for_period,
+    normalized_period,
+    period_legacy_seconds,
+)
 from attention_router.infrastructure.models import (
     ConversationResponseGraceWindowRow,
     OwnerOperationalControlChangeRow,
@@ -71,6 +78,7 @@ class EffectiveOwnerReplyGraceControl:
     control_revision: int | None
     policy_version_id: str | None
     reason_code: str
+    temporal_period: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +189,31 @@ def global_grace_authority() -> OwnerReplyGracePolicyAuthority:
         "GLOBAL_GRACE_CONTRACT")
 
 
+def _stored_temporal_period(provenance: dict | None) -> dict[str, object] | None:
+    raw = (provenance or {}).get(TEMPORAL_PERIOD_PROVENANCE_FIELD)
+    if raw is None or not isinstance(raw, dict):
+        return None
+    try:
+        return normalized_period(
+            raw["quantity"], raw["unit"], timezone_name=raw["timezone_name"]
+        )
+    except (KeyError, TemporalValidationError, TypeError, ValueError):
+        return None
+
+
+def _valid_stored_grace(row: OwnerOperationalControlRow) -> tuple[bool, dict[str, object] | None]:
+    provenance = row.provenance or {}
+    if TEMPORAL_PERIOD_PROVENANCE_FIELD in provenance:
+        period = _stored_temporal_period(provenance)
+        if period is None:
+            return False, None
+        try:
+            return row.integer_value == period_legacy_seconds(period), period
+        except TemporalValidationError:
+            return False, None
+    return GLOBAL_GRACE_MIN_SECONDS <= row.integer_value <= GLOBAL_GRACE_MAX_SECONDS, None
+
+
 def resolve_global_owner_reply_grace_control(
     session: Session, *, tenant_id: str, represented_owner_actor_key: str | None,
 ) -> EffectiveOwnerReplyGraceControl:
@@ -194,10 +227,14 @@ def resolve_global_owner_reply_grace_control(
     if row is None:
         return EffectiveOwnerReplyGraceControl(True, GLOBAL_GRACE_DEFAULT_SECONDS,
             CONTROL_SOURCE_GLOBAL_DEFAULT, None, None, None, "GLOBAL_DEFAULT_APPLIED")
-    valid = GLOBAL_GRACE_MIN_SECONDS <= row.integer_value <= GLOBAL_GRACE_MAX_SECONDS
+    valid, temporal_period = _valid_stored_grace(row)
+    if temporal_period is not None:
+        from attention_router.config import settings
+        valid = valid and settings.owner_temporal_wait_enabled
     return EffectiveOwnerReplyGraceControl(row.enabled and valid, row.integer_value,
         "OWNER_OVERRIDE", row.id, row.revision, None,
-        "OWNER_OVERRIDE_APPLIED" if valid else "OWNER_OVERRIDE_OUT_OF_GLOBAL_BOUNDS")
+        "OWNER_OVERRIDE_APPLIED" if valid else "OWNER_OVERRIDE_OUT_OF_GLOBAL_BOUNDS",
+        temporal_period=temporal_period if valid else None)
 
 
 def resolve_owner_reply_grace_control(
@@ -400,7 +437,18 @@ def _recalculate_open_windows(
         window.operational_control_source = CONTROL_SOURCE_OWNER_OVERRIDE
         window.auto_release_enabled = control.enabled
         window.effective_grace_seconds = control.integer_value
-        window.due_at = _utc(window.last_inbound_at) + timedelta(seconds=control.integer_value)
+        temporal_period = _stored_temporal_period(control.provenance)
+        window.due_at = (
+            deadline_for_period(_utc(window.last_inbound_at), temporal_period)
+            if temporal_period is not None
+            else _utc(window.last_inbound_at) + timedelta(seconds=control.integer_value)
+        )
+        window_provenance = dict(window.provenance or {})
+        if temporal_period is not None:
+            window_provenance[TEMPORAL_PERIOD_PROVENANCE_FIELD] = temporal_period
+        else:
+            window_provenance.pop(TEMPORAL_PERIOD_PROVENANCE_FIELD, None)
+        window.provenance = window_provenance
         window.claimed_at = None
         window.claimed_by = None
         window.claimed_generation = None
@@ -443,6 +491,7 @@ def _set_owner_reply_grace_control(
     expected_revision: int | None,
     provenance: dict[str, Any] | None,
     timestamp: datetime | None,
+    temporal_period: dict[str, object] | None = None,
 ) -> OwnerReplyGraceControlMutation:
     if not source_channel.strip():
         raise OperationalControlError("CONTROL_SOURCE_CHANNEL_REQUIRED")
@@ -464,7 +513,16 @@ def _set_owner_reply_grace_control(
                 represented_owner_actor_key=represented_owner_actor_key)
         return resolve_global_owner_reply_grace_control(session, tenant_id=tenant_id,
                 represented_owner_actor_key=represented_owner_actor_key)
-    if requested_integer_value is not None and not (
+    if temporal_period is not None:
+        from attention_router.config import settings
+        if not settings.owner_temporal_wait_enabled or policy_id is not None:
+            raise OperationalControlError("TEMPORAL_WAIT_DISABLED_OR_SCOPE_INVALID")
+        try:
+            if requested_integer_value != period_legacy_seconds(temporal_period):
+                raise OperationalControlError("TEMPORAL_PERIOD_INTEGER_MISMATCH")
+        except TemporalValidationError as exc:
+            raise OperationalControlError(str(exc)) from exc
+    elif requested_integer_value is not None and not (
         authority.min_seconds <= requested_integer_value <= authority.max_seconds
     ):
         raise OperationalControlError("GRACE_SECONDS_OUT_OF_POLICY_BOUNDS")
@@ -497,6 +555,10 @@ def _set_owner_reply_grace_control(
             requested_enabled=requested_enabled,
             requested_integer_value=requested_integer_value,
         )
+        if temporal_period is not None and (duplicate.provenance or {}).get(
+            TEMPORAL_PERIOD_PROVENANCE_FIELD
+        ) != temporal_period:
+            raise OperationalControlConflict("CONTROL_COMMAND_IDEMPOTENCY_CONFLICT")
         effective = effective_control()
         return OwnerReplyGraceControlMutation(effective, False, True, 0)
 
@@ -515,7 +577,17 @@ def _set_owner_reply_grace_control(
     previous_seconds = row.integer_value if row else authority.default_seconds
     new_enabled = previous_enabled if requested_enabled is None else requested_enabled
     new_seconds = previous_seconds if requested_integer_value is None else requested_integer_value
-    changed = row is None or new_enabled != previous_enabled or new_seconds != previous_seconds
+    previous_period = _stored_temporal_period(row.provenance) if row else None
+    new_period = (
+        temporal_period if temporal_period is not None
+        else previous_period if requested_integer_value is None
+        else None
+    )
+    changed = (row is None or new_enabled != previous_enabled
+               or new_seconds != previous_seconds or new_period != previous_period)
+    new_provenance = dict(provenance or {})
+    if new_period is not None:
+        new_provenance[TEMPORAL_PERIOD_PROVENANCE_FIELD] = new_period
     if row is None:
         row = OwnerOperationalControlRow(
             id=new_id(),
@@ -531,7 +603,7 @@ def _set_owner_reply_grace_control(
             authorization_source=authorization_source,
             source_channel=source_channel,
             source_event_id=source_event_id,
-            provenance=dict(provenance or {}),
+            provenance=dict(new_provenance),
             created_at=stamp,
             updated_at=stamp,
         )
@@ -546,7 +618,7 @@ def _set_owner_reply_grace_control(
         row.source_channel = source_channel
         row.source_event_id = source_event_id
         migration_provenance = row.provenance.get("global_grace_migration")
-        row.provenance = dict(provenance or {})
+        row.provenance = dict(new_provenance)
         if migration_provenance is not None:
             row.provenance["global_grace_migration"] = migration_provenance
         row.updated_at = stamp
@@ -578,7 +650,7 @@ def _set_owner_reply_grace_control(
         previous_revision=previous_revision,
         resulting_revision=row.revision,
         changed=changed,
-        provenance=dict(provenance or {}),
+        provenance=dict(new_provenance),
         created_at=stamp,
     )
     session.add(change)
@@ -680,6 +752,46 @@ def set_owner_reply_grace_seconds(
         expected_revision=expected_revision,
         provenance=provenance,
         timestamp=timestamp,
+    )
+
+
+def set_owner_reply_grace_period(
+    session: Session,
+    *,
+    tenant_id: str,
+    represented_owner_actor_key: str,
+    quantity: int,
+    unit: str,
+    timezone_name: str,
+    updated_by_actor_key: str,
+    authorization_source: str,
+    source_channel: str,
+    source_event_id: str,
+    expected_revision: int | None = None,
+    provenance: dict[str, Any] | None = None,
+    timestamp: datetime | None = None,
+) -> OwnerReplyGraceControlMutation:
+    """Authorized persistent calendar-aware grace, never a one-shot timer."""
+    try:
+        period = normalized_period(quantity, unit, timezone_name=timezone_name)
+        compatibility_seconds = period_legacy_seconds(period)
+    except TemporalValidationError as exc:
+        raise OperationalControlError(str(exc)) from exc
+    return _set_owner_reply_grace_control(
+        session,
+        tenant_id=tenant_id,
+        represented_owner_actor_key=represented_owner_actor_key,
+        policy_id=None,
+        updated_by_actor_key=updated_by_actor_key,
+        authorization_source=authorization_source,
+        source_channel=source_channel,
+        source_event_id=source_event_id,
+        requested_enabled=None,
+        requested_integer_value=compatibility_seconds,
+        expected_revision=expected_revision,
+        provenance=dict(provenance or {}),
+        timestamp=timestamp,
+        temporal_period=period,
     )
 
 

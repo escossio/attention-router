@@ -7,9 +7,13 @@ from typing import Any
 from attention_router.application.owner_control import (
     AutomaticResponsesEnabledParameters,
     GraceSecondsParameters,
+    GracePeriodParameters,
     OwnerControlAction,
     OwnerControlParameters,
     ReviewReferenceParameters,
+)
+from attention_router.application.owner_temporal_duration import (
+    TemporalValidationError, normalized_period,
 )
 from attention_router.application.pending_intent import CANDIDATE_CONFIDENCE
 from attention_router.infrastructure.hashing import stable_hash
@@ -24,6 +28,8 @@ class OwnerSemanticIntentKey(StrEnum):
     APPROVE_RESPONSE_REVIEW = "APPROVE_RESPONSE_REVIEW"
     REJECT_RESPONSE_REVIEW = "REJECT_RESPONSE_REVIEW"
     ONE_SHOT_REPLY_DELAY = "ONE_SHOT_REPLY_DELAY"
+    CONFIGURE_OWNER_REPLY_GRACE_PERIOD = "CONFIGURE_OWNER_REPLY_GRACE_PERIOD"
+    ONE_SHOT_REPLY_DELAY_PERIOD = "ONE_SHOT_REPLY_DELAY_PERIOD"
 
 
 class OwnerSemanticRegistryError(ValueError):
@@ -68,6 +74,20 @@ _DEFINITIONS: dict[OwnerSemanticIntentKey, OwnerSemanticIntentDefinition] = {
         owner_control_action=OwnerControlAction.REJECT_RESPONSE_REVIEW,
         parameter_kind="REFERENCE",
     ),
+    OwnerSemanticIntentKey.CONFIGURE_OWNER_REPLY_GRACE_PERIOD: OwnerSemanticIntentDefinition(
+        key=OwnerSemanticIntentKey.CONFIGURE_OWNER_REPLY_GRACE_PERIOD,
+        capability_status="AVAILABLE",
+        capability_key="owner_control:SET_OWNER_REPLY_GRACE_PERIOD",
+        owner_control_action=OwnerControlAction.SET_OWNER_REPLY_GRACE_PERIOD,
+        parameter_kind="PERIOD",
+    ),
+    OwnerSemanticIntentKey.ONE_SHOT_REPLY_DELAY_PERIOD: OwnerSemanticIntentDefinition(
+        key=OwnerSemanticIntentKey.ONE_SHOT_REPLY_DELAY_PERIOD,
+        capability_status="UNAVAILABLE",
+        capability_key=None,
+        owner_control_action=None,
+        parameter_kind="PERIOD",
+    ),
     OwnerSemanticIntentKey.ONE_SHOT_REPLY_DELAY: OwnerSemanticIntentDefinition(
         key=OwnerSemanticIntentKey.ONE_SHOT_REPLY_DELAY,
         capability_status="UNAVAILABLE",
@@ -111,6 +131,19 @@ def _normalize_seconds(parameters: dict[str, Any]) -> dict[str, Any]:
     return {"seconds": seconds}
 
 
+def _normalize_period(parameters: dict[str, Any]) -> dict[str, Any]:
+    _require_exact_keys(parameters, {"quantity", "unit"})
+    try:
+        p = normalized_period(
+            parameters["quantity"], parameters["unit"], timezone_name="UTC"
+        )
+    except (TemporalValidationError, TypeError, ValueError) as exc:
+        raise OwnerSemanticRegistryError(
+            "OWNER_SEMANTIC_TEMPORAL_PERIOD_INVALID"
+        ) from exc
+    return {"quantity": p["quantity"], "unit": p["unit"]}
+
+
 def _normalize_enabled(parameters: dict[str, Any]) -> dict[str, Any]:
     _require_exact_keys(parameters, {"enabled"})
     enabled = parameters.get("enabled")
@@ -142,6 +175,8 @@ def normalize_semantic_parameters(
     definition = semantic_intent_definition(intent_key)
     if definition.parameter_kind == "SECONDS":
         return _normalize_seconds(parameters)
+    if definition.parameter_kind == "PERIOD":
+        return _normalize_period(parameters)
     if definition.parameter_kind == "ENABLED":
         return _normalize_enabled(parameters)
     if definition.parameter_kind == "REFERENCE":
@@ -199,6 +234,10 @@ def materialize_owner_control_candidate(
     if action == OwnerControlAction.SET_OWNER_REPLY_GRACE_SECONDS:
         typed: OwnerControlParameters = GraceSecondsParameters(
             seconds=normalized["seconds"]
+        )
+    elif action == OwnerControlAction.SET_OWNER_REPLY_GRACE_PERIOD:
+        typed = GracePeriodParameters(
+            quantity=normalized["quantity"], unit=normalized["unit"]
         )
     elif action == OwnerControlAction.SET_AUTOMATIC_RESPONSES_ENABLED:
         typed = AutomaticResponsesEnabledParameters(enabled=normalized["enabled"])
