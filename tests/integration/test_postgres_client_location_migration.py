@@ -16,11 +16,12 @@ def test_client_location_snapshot_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0061_tts_outbox_constraint"]
+            ).scalars().all() == ["0062_location_context_v1"]
 
             schema = inspect(connection)
             tables = set(schema.get_table_names())
             assert "client_location_snapshots" in tables
+            assert "client_location_observations" in tables
             assert "client_location_history" not in tables
             assert "client_location_events" not in tables
 
