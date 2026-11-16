@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     client_session_challenge_ttl_seconds: int = 300
     client_session_ttl_seconds: int = 900
     client_location_enabled: bool = False
+    # Persist chronological device observations only after explicit opt-in.
+    client_location_history_enabled: bool = False
     client_approval_enabled: bool = False
     client_command_enabled: bool = False
     client_command_voice_enabled: bool = False
