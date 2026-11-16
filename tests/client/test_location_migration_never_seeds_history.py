@@ -10,3 +10,11 @@ def test_migration_does_not_backfill_without_explicit_optin():
     assert "INSERT INTO client_location_observations" not in content
     assert "SELECT 'clh_' || md5(id)" not in content
     assert "ROLLBACK_REQUIRES_EXPLICIT_EXPORT_OR_PURGE" in content
+
+def test_alembic_revision_fits_postgres_version_column():
+    import re
+
+    content=MIGRATION.read_text()
+    match=re.search(r'^revision = "([^"]+)"$',content,re.MULTILINE)
+    assert match
+    assert len(match.group(1)) <= 32

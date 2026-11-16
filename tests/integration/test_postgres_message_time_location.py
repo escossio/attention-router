@@ -79,7 +79,7 @@ def test_pg_location_history_schema_append_only_and_owner_evidence(Session):
         )}
         assert "uq_client_location_observation_device_time" in unique
         assert s.scalar(text("SELECT version_num FROM alembic_version"))==(
-            "0062_client_location_observations"
+            "0062_location_context_v1"
         )
 
 

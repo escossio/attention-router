@@ -21,7 +21,7 @@ def test_candidate_insight_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0062_client_location_observations"]
+            ).scalars().all() == ["0062_location_context_v1"]
 
             schema = inspect(connection)
             assert {
@@ -207,7 +207,7 @@ def test_candidate_insight_refuses_destructive_downgrade(
     with engine.connect() as connection:
         assert connection.scalar(
             text("SELECT version_num FROM alembic_version")
-        ) == "0062_client_location_observations"
+        ) == "0062_location_context_v1"
         assert connection.scalar(
             text("SELECT count(*) FROM candidate_insights")
         ) == 1

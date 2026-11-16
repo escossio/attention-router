@@ -1,13 +1,13 @@
 """Preserve owner device-location history instead of overwriting the only sample.
 
-Revision ID: 0062_client_location_observations
+Revision ID: 0062_location_context_v1
 Revises: 0061_tts_outbox_constraint
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0062_client_location_observations"
+revision = "0062_location_context_v1"
 down_revision = "0061_tts_outbox_constraint"
 branch_labels = None
 depends_on = None
