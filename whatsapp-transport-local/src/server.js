@@ -231,6 +231,10 @@ function createServer(config, status, client = null, deps = {}) {
             return;
           }
         }
+        if (hasFirstContact && require('./semantic-canary').blocksFirstContact(config, payload.first_contact)) {
+          respondJson(res, 403, { status: 'canary_first_contact_blocked' });
+          return;
+        }
         if (!outboundProvenance.available) {
           respondJson(res, 503, { status: 'outbound_provenance_unavailable' });
           return;

@@ -149,3 +149,24 @@ Live continuity remains scoped, signed and quarantined before commit. Historical
 acceleration is deliberately excluded from this first canary: no retrospective
 capture, cursor reset or old-source adoption. No new network flow, service,
 container, database, model or Android capability is introduced.
+
+
+## Selected First Contact isolation
+
+When First Contact remains enabled for unrelated conversations, the selected
+canary key must be a provider-resolved canonical LID. The Transport send endpoint
+compares the existing validated tenant/account/peer hash against that selection
+and rejects selected First Contact sends before reserving a ledger entry or calling
+WhatsApp. Phone aliases resolve through the existing provider identity check.
+Proof/reconciliation of earlier sends remains available. This guard remains active
+with the canary feature off as long as its private selection is retained.
+
+A phone-only selection cannot coexist with First Contact enabled. Resolve the
+canonical LID first, or arrange a separately approved global pause with its impact
+reviewed. Do not silently disable unrelated First Contact flows. Preflight must
+also establish that no other scheduled automation targets the selected conversation;
+this narrow guard does not cancel existing Outbox work or grant send authority.
+
+Live continuity is isolated only for the selected conversation. Historical
+acceleration remains excluded. No new listener, network path or infrastructure is
+introduced. Deployment and real scope selection still require explicit approval.
