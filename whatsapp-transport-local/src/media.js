@@ -72,7 +72,7 @@ async function notify(config, normalized, payload, logger, fetchImpl) {
   return deliverPendingFile(spoolConfig, pending.file, logger, fetchImpl);
 }
 
-async function captureMediaAttempt(config, message, normalized, logger = console, fetchImpl = fetch, checkpoint = () => {}) {
+async function captureMediaAttempt(config, message, normalized, logger = console, fetchImpl = fetch, checkpoint = () => {}, authorize = null) {
   if (!config.mediaRoot || !config.mediaNotificationUrl) return { status: 'media_capture_disabled' };
   const base = {
     tenant_id: normalized.tenant_id,
@@ -111,6 +111,8 @@ async function captureMediaAttempt(config, message, normalized, logger = console
       const download = async () => {
         for (;;) {
           if (!active) throw new Error('MEDIA_DOWNLOAD_TIMEOUT');
+          if (authorize && !await authorize()) throw new Error('CANARY_MEDIA_DENIED');
+          if (!active) throw new Error('MEDIA_DOWNLOAD_TIMEOUT');
           checkpoint();
           try { return await message.downloadMedia.call(compatReceiver); }
           catch (error) {
@@ -144,6 +146,7 @@ async function captureMediaAttempt(config, message, normalized, logger = console
       ? config.mediaMaxBytes
       : config.artifactMediaMaxBytes;
     const bytes = decodeBase64Strict(media?.data, maxBytes);
+    if (authorize && !await authorize()) throw new Error('CANARY_MEDIA_DENIED');
     const stored = atomicStore(config.mediaRoot, bytes);
     const filename = typeof media?.filename === 'string' && media.filename.trim()
       ? media.filename.trim().slice(0, 512)
@@ -160,8 +163,12 @@ async function captureMediaAttempt(config, message, normalized, logger = console
     checkpoint(payload);
     readyCheckpointed = true;
     const delivery = await notify(config, normalized, payload, logger, fetchImpl);
-    return { status: delivery.done ? 'media_ready_notified' : 'media_notification_pending', delivery };
+    return { status: config.semanticCanarySelected && delivery.status === 'canary_blocked'
+      ? 'media_notification_denied' : delivery.done ? 'media_ready_notified' : 'media_notification_pending', delivery };
   } catch (error) {
+    if (error?.message === 'CANARY_MEDIA_DENIED') {
+      return { status: 'media_capture_disabled', error_code: 'CANARY_MEDIA_DENIED' };
+    }
     // Notification/spool failure must not replace a durable READY receipt.
     // Replay retries notification using that same receipt, without downloading.
     if (readyCheckpointed) throw error;
@@ -178,7 +185,11 @@ async function captureMediaAttempt(config, message, normalized, logger = console
   }
 }
 
-async function captureInboundMedia(config, message, normalized, logger = console, fetchImpl = fetch) {
+async function captureInboundMedia(config, message, normalized, logger = console, fetchImpl = fetch, authorize = null) {
+  if (config.semanticCanarySelected === true && typeof authorize !== 'function') {
+    return { status: 'media_capture_disabled', error_code: 'CANARY_MEDIA_GUARD_REQUIRED' };
+  }
+  if (authorize && !await authorize()) return { status: 'media_capture_disabled', error_code: 'CANARY_MEDIA_DENIED' };
   if (!config.mediaRoot || !config.mediaNotificationUrl) return { status: 'media_capture_disabled' };
   const scope = JSON.stringify([normalized.tenant_id, normalized.source,
     normalized.metadata?.source_account, normalized.external_event_id]);
@@ -206,9 +217,10 @@ async function captureInboundMedia(config, message, normalized, logger = console
     };
     if (state.payload) {
       const delivery = await notify(config, normalized, state.payload, logger, fetchImpl);
-      return {status: 'media_receipt_replayed', delivery};
+      return {status: config.semanticCanarySelected && delivery.status === 'canary_blocked'
+        ? 'media_notification_denied' : 'media_receipt_replayed', delivery};
     }
-    return captureMediaAttempt(config, message, normalized, logger, fetchImpl, checkpoint);
+    return captureMediaAttempt(config, message, normalized, logger, fetchImpl, checkpoint, authorize);
   };
   const flight = run().finally(() => captureFlights.delete(file));
   captureFlights.set(file, flight);
@@ -223,6 +235,10 @@ async function drainMediaNotifications(config, logger = console, fetchImpl = fet
     const result = await deliverPendingFile(spoolConfig, file, logger, fetchImpl);
     if (result.done) delivered += 1;
     if (result.stop) break;
+  }
+  if (config.semanticCanaryEnabled === true && config.semanticCanarySelected !== true) {
+    const { canaryConfig } = require('./semantic-canary');
+    delivered += await drainMediaNotifications(canaryConfig(config), logger, fetchImpl);
   }
   return delivered;
 }

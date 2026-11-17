@@ -29,7 +29,7 @@ from attention_router.web.internal_security import verify_internal_signature
 from tests.test_owner_reply_grace import _install_canary
 
 
-@pytest.mark.parametrize('scenario', ['basic', 'natural'])
+@pytest.mark.parametrize('scenario', ['basic', 'natural', 'canary'])
 def test_bilateral_transport_to_context(session, monkeypatch, tmp_path, scenario):
     _install_canary(session)
     session.commit()
@@ -42,6 +42,22 @@ def test_bilateral_transport_to_context(session, monkeypatch, tmp_path, scenario
                              str(tmp_path), DEFAULT_TENANT_ID, scenario], check=True, capture_output=True, text=True)
     fixture = json.loads(result.stdout)
     assert fixture['downloads'] == (5 if scenario == 'natural' else 3)
+    canary = None
+    if scenario == 'canary':
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from attention_router.api.v1.semantic_canary_ingress import build_semantic_canary_ingress_router
+        from attention_router.infrastructure.models import ActorBindingRow
+        from tests.test_semantic_canary_scope import original_canary
+        owner = session.scalar(select(ActorBindingRow).where(ActorBindingRow.tenant_id == DEFAULT_TENANT_ID,
+            ActorBindingRow.actor_category == 'owner', ActorBindingRow.is_active.is_(True)))
+        first_payload = json.loads(fixture['packets'][0]['body'])
+        canary, canary_now, _ = original_canary(session, tmp_path, owner=owner.actor_key,
+            conversation=first_payload['metadata']['conversation_key'])
+        app = FastAPI()
+        app.include_router(build_semantic_canary_ingress_router(get_session=lambda: session,
+            service=canary, clock=lambda: canary_now))
+        ingress = TestClient(app)
     for kind in ('event', 'media'):
         for packet in fixture['packets']:
             if packet['kind'] != kind:
@@ -50,7 +66,13 @@ def test_bilateral_transport_to_context(session, monkeypatch, tmp_path, scenario
             assert verify_internal_signature(packet['body'].encode(), headers['X-Attention-Timestamp'],
                                              headers['X-Attention-Signature'])[0]
             payload = json.loads(packet['body'])
-            if kind == 'event':
+            if canary:
+                suffix = '/events' if kind == 'event' else '/media'
+                response = ingress.post('/api/v1/ingress/internal/semantic-canary'+suffix,
+                    content=packet['body'], headers=headers)
+                assert response.status_code == 202, response.text
+                assert response.json()['status'] in {'accepted', 'duplicate'}, response.text
+            elif kind == 'event':
                 services.receive_normalized_inbound_event(session, InternalIngressAdapter().normalize(payload))
             else:
                 if payload['media_kind'] in {'audio', 'ptt'}:
@@ -66,16 +88,20 @@ def test_bilateral_transport_to_context(session, monkeypatch, tmp_path, scenario
         return {'transcript': path.read_bytes().decode().removeprefix('OggS '),
                 'provider': 'synthetic', 'model': 'synthetic', 'request_id': 'synthetic-stt'}
     fake = SimpleNamespace(transcribe=transcribe)
-    assert process_voice_transcriptions(session, 'synthetic-worker', client=fake) == 2
+    if canary:
+        assert process_voice_transcriptions(session, 'ordinary-worker', client=fake) == 0
+    guarded = {'canary_guard':canary.processing_guard} if canary else {}
+    assert process_voice_transcriptions(session, 'synthetic-worker', client=fake, **guarded) == 2
     failed = session.scalar(select(VoiceTranscriptionRow).where(VoiceTranscriptionRow.error_code == 'STT_TIMEOUT'))
     assert retry_failed_transcription(session,tenant_id=DEFAULT_TENANT_ID,transcription_id=failed.id)=='PENDING'
     assert retry_failed_transcription(session,tenant_id=DEFAULT_TENANT_ID,transcription_id=failed.id)=='PENDING'
-    assert process_voice_transcriptions(session,'synthetic-retry',client=fake)==1
+    assert process_voice_transcriptions(session,'synthetic-retry',client=fake, **guarded)==1
     assert calls==3
     reconcile_live_capture_batch(session)
     session.commit()
-    view = preview_selected_conversation(session, tenant_id=DEFAULT_TENANT_ID,
-        source_account='synthetic', identifier=fixture['pn'])
+    view = (canary.conversation(session, session_token='synthetic-session', now=canary_now) if canary
+        else preview_selected_conversation(session, tenant_id=DEFAULT_TENANT_ID,
+            source_account='synthetic', identifier=fixture['pn']))
     assert len(view['messages']) == (8 if scenario == 'natural' else 6)
     by_id = {m['provider_id']: m for m in view['messages']}
     assert by_id['tx-voice']['origin'] == 'UNKNOWN_FROM_ME'
@@ -166,9 +192,75 @@ def test_bilateral_transport_to_context(session, monkeypatch, tmp_path, scenario
             {'conversation':view, 'events':event_view, 'answer':answer,
              'joao_before_review':before_review, 'reviewed':reviewed, 'joao_after_review':after_review,
              'governed_interpretation':governed, 'artifacts':artifact_demo}, ensure_ascii=False, indent=2, default=str))
+    if scenario == 'canary':
+        _canary_original_lifecycle(session, tmp_path, view, existing=(canary, canary_now))
     assert not session.new and not session.dirty
 
     (tmp_path/'synthetic-preview.json').write_text(json.dumps(view,ensure_ascii=False,indent=2))
+
+
+def _canary_original_lifecycle(session, tmp_path, view, existing=None):
+    """No mirrored archive: both real-pipeline fixture transcripts retain their IDs."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from attention_router.api.v1.semantic_review_preview import build_semantic_review_preview_router
+    from attention_router.application.memory import search_archive
+    from attention_router.infrastructure.models import ActorBindingRow
+    from tests.test_semantic_canary_scope import original_canary
+    session.commit()
+    owner = session.scalar(select(ActorBindingRow).where(ActorBindingRow.tenant_id == DEFAULT_TENANT_ID,
+        ActorBindingRow.actor_category == 'owner', ActorBindingRow.is_active.is_(True)))
+    if existing:
+        service, now = existing
+        grant = service.grant_type.model_validate(service.journal.read()['grant'])
+    else:
+        service, now, grant = original_canary(session, tmp_path, owner=owner.actor_key,
+                                             conversation=view['conversation_key'])
+    app = FastAPI()
+    app.include_router(build_semantic_review_preview_router(get_session=lambda: session,
+        service=service, clock=lambda: now, include_processing=True))
+    client = TestClient(app, headers={'Authorization':'Bearer synthetic-session'})
+    base = '/api/v1/client/semantic-preview'
+    receipts = {}
+    for message in view['messages']:
+        response = client.post(base+'/process', json={'message_id':message['message_id']})
+        assert response.status_code == 200, response.text
+        receipts[message['provider_id']] = response.json()
+    assert receipts['automatic']['status'] == 'AUTOMATED_EVIDENCE_ONLY'
+    assert receipts['missing']['status'] == 'SOURCE_INCOMPLETE'
+    inventory = client.get(base+'/candidates').json()
+    by_provider = {m['provider_id']:m for m in view['messages']}
+    for uid, origin in [('rx-voice','EXTERNAL_INBOUND'), ('tx-voice','UNKNOWN_FROM_ME')]:
+        cid = receipts[uid]['candidate_id']
+        candidate = next(c for c in inventory if c['candidate_id'] == cid)
+        assert candidate['interpretation']['source_message_ids'] == [by_provider[uid]['message_id']]
+        evidence = candidate['evidence'][0]
+        assert evidence['lineage'] == 'ORGANIC' and evidence['origin'] == origin
+        assert evidence['transcription_id'] == by_provider[uid]['evidence']['transcription_id']
+        assert evidence['modality'] == 'VOICE'
+        if uid == 'tx-voice':
+            assert evidence['author_basis'] == 'OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1'
+        assert client.post(base+'/review', json=dict(candidate_id=cid, action='ADMIT',
+            decision_ref='synthetic-review-'+uid)).status_code == 200
+    view = client.get(base+'/conversation').json()
+    before = client.post(base+'/context', json={'query':'viagem domingo'}).json()
+    evidence_ids = {item['source_id'] for item in before['graph_context']['items']}
+    assert {by_provider[uid]['message_id'] for uid in ('rx-voice','tx-voice')} <= evidence_ids
+    assert len(session.scalars(select(ConversationMessageRow)).all()) == len(view['messages'])
+    assert not search_archive(session, 'viagem domingo', tenant_id=grant.tenant_id)
+    assert not session.scalars(select(OutboxMessageRow)).all()
+    assert not session.scalars(select(MemoryClaimRow)).all()
+    paused = client.post(base+'/operations', json=dict(request_id='stop', operation='PAUSE_CAPTURE', source_ids=[]))
+    assert paused.status_code == 200
+    assert client.post(base+'/process', json={'message_id':by_provider['rx-voice']['message_id']}).status_code == 409
+    revoked = client.post(base+'/operations', json=dict(request_id='revoke', operation='REVOKE_CONSENT', source_ids=[]))
+    assert revoked.status_code == 200
+    assert client.post(base+'/context', json={'query':'domingo'}).status_code == 409
+    assert not service.cache_usable(session, session_token='synthetic-session', cached=before, query='viagem domingo', now=now)
+    (tmp_path/'minimal-canary-original-evidence.json').write_text(json.dumps(dict(
+        synthetic_content=True, original_archive_ids=True, conversation=view, processing=receipts,
+        candidates=inventory, before_revocation=before, after_revocation='ACCESS_BLOCKED',
+        new_outbox_rows=0, canonical_promotion=False, production_activation=False), indent=2, default=str))
 
 
 

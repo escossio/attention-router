@@ -887,6 +887,8 @@ def build_cognitive_graph_slice(
             message = session.get(ConversationMessageRow, row.member_ref)
             if message is None or message.tenant_id != tenant_id:
                 continue
+            if (message.metadata_json or {}).get('semantic_canary_id'):
+                continue  # Governed canary uses its authorized projection, never this legacy path.
             if not include_secret and message.sensitivity_class == "SECRET":
                 continue
             target_node_id = _message_node_id(message.id)

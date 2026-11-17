@@ -7,6 +7,8 @@ const {
   isAuthenticatedOwnerSelfChatMessage,
 } = require('./message-id');
 const { createNoopTransportTracing } = require('./observability');
+const { canaryConfig, selectedConversation, authorizeCanaryMedia } = require('./semantic-canary');
+const { directionalPeerId, identityFromAliases } = require('./conversation');
 
 function isLocalForwardTarget(url, allowedHosts = ['127.0.0.1', 'localhost', '::1']) {
   try {
@@ -85,6 +87,8 @@ function eligibleUnattributedOutboundMedia(config, message, normalized, options 
 }
 
 function createInboundBridge(config, logger = console, deps = {}) {
+  const selectedConfig = canaryConfig(config); // invalid opt-in fails closed at construction
+  if (selectedConfig && config.firstContactEnabled === true) throw new Error('CANARY_FIRST_CONTACT_MUST_BE_DISABLED');
   const fetchImpl = deps.fetchImpl || fetch;
   const onCounters = deps.onCounters || (() => {});
   const observability = deps.observability || createNoopTransportTracing();
@@ -109,13 +113,16 @@ function createInboundBridge(config, logger = console, deps = {}) {
       onCounters({ last_inbound_error_at: new Date().toISOString() });
       return { status: 'blocked_missing_tenant', normalized: null, forwarded: false };
     }
+    const peer = message?.__conversationIdentity || identityFromAliases([directionalPeerId(message)]);
+    const ownerCaptureScope = !selectedConfig || (config.semanticCanaryEnabled === true
+      && peer.conversation_key === config.semanticCanaryConversationKey);
     const normalized = normalizeInboundMessage(message, {
       tenantId: config.tenantId,
       source: config.inboundSource,
       channel: config.inboundChannel,
       sourceAccount: config.sourceAccount,
-      conversationCaptureOwnerVoiceEnabled: config.conversationCaptureOwnerVoiceEnabled === true,
-      conversationCaptureOwnerTextEnabled: config.conversationCaptureOwnerTextEnabled === true,
+      conversationCaptureOwnerVoiceEnabled: ownerCaptureScope && config.conversationCaptureOwnerVoiceEnabled === true,
+      conversationCaptureOwnerTextEnabled: ownerCaptureScope && config.conversationCaptureOwnerTextEnabled === true,
       clientInfo: options.clientInfo,
       authenticatedSelfIdentity: options.authenticatedSelfIdentity,
       authenticatedSelfAuthorityCurrent: options.authenticatedSelfAuthorityCurrent === true,
@@ -156,6 +163,11 @@ function createInboundBridge(config, logger = console, deps = {}) {
       && normalized.metadata?.conversation_state === 'READY'
       && normalized.metadata?.is_group !== true
     );
+    const selected = selectedConversation(config, normalized);
+    if (selected && config.semanticCanaryEnabled !== true) {
+      return { status: 'canary_disabled', normalized, forwarded: false };
+    }
+    const operationConfig = selected ? selectedConfig : config;
     const shouldCaptureMedia = (
       (!fromMe && normalized.has_media
         && (isVoice || config.whatsappArtifactIngestionEnabled === true))
@@ -163,7 +175,7 @@ function createInboundBridge(config, logger = console, deps = {}) {
       || unattributedAccountMedia
       || (fromMe && isVoice && normalized.has_media
         && normalized.metadata?.semantic_attribution?.basis === 'OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1')
-    );
+    ) && !(selectedConfig && fromMe && isVoice && !selected);
     if (isVoice) {
       normalized.metadata.media_capture_status = !normalized.has_media ? 'MEDIA_NOT_AVAILABLE'
         : !shouldCaptureMedia || !config.mediaRoot || !config.mediaNotificationUrl
@@ -172,16 +184,21 @@ function createInboundBridge(config, logger = console, deps = {}) {
     const wirePayload = Object.fromEntries(
       Object.entries(normalized).filter(([key]) => key !== 'identity'),
     );
-    const pending = enqueuePending(config, normalized, wirePayload);
+    const pending = enqueuePending(operationConfig, normalized, wirePayload);
     const deliveryPromise = deliverPendingFile(
-      config,
+      operationConfig,
       pending.file,
       logger,
       fetchImpl,
       { observability, parentContext: receiveSpan?.context || null },
     );
+    const authorize = selected ? () => authorizeCanaryMedia(operationConfig, wirePayload, fetchImpl) : null;
     const mediaPromise = shouldCaptureMedia
-      ? captureInboundMedia(config, message, normalized, logger, fetchImpl)
+      ? (selected ? deliveryPromise.then(delivery => (
+        delivery.response?.canary_media_allowed === true && delivery.response?.grants_authority === false
+          ? captureInboundMedia(operationConfig, message, normalized, logger, fetchImpl, authorize)
+          : { status: 'media_capture_disabled', error_code: 'CANARY_MEDIA_DENIED' }
+      )) : captureInboundMedia(config, message, normalized, logger, fetchImpl))
       : Promise.resolve(null);
     const [delivery, media] = await Promise.all([deliveryPromise, mediaPromise]);
     if (delivery.done && (delivery.status === 'accepted' || delivery.status === 'duplicate')) {

@@ -277,7 +277,7 @@ def process_media_notification(
         session.close()
 
 
-def create_internal_ingress_app() -> FastAPI:
+def create_internal_ingress_app(*, canary_service=None) -> FastAPI:
     app = FastAPI(
         title="Attention Router Internal Ingress",
         version="0.1.0",
@@ -330,6 +330,9 @@ def create_internal_ingress_app() -> FastAPI:
             x_attention_signature,
         )
 
+    if canary_service is not None:
+        from attention_router.api.v1.semantic_canary_ingress import build_semantic_canary_ingress_router
+        app.include_router(build_semantic_canary_ingress_router(get_session=get_session, service=canary_service))
     return app
 
 

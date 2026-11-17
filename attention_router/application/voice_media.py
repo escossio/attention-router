@@ -11,6 +11,7 @@ from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.media_store import ALLOWED_MIME_TYPES, MediaStore, MediaStoreError
 from attention_router.infrastructure.models import (
+    ConversationMessageRow,
     InboundEventRow,
     MediaArtifactRow,
     QueueRow,
@@ -51,7 +52,27 @@ class MediaReadyNotification(BaseModel):
         return self
 
 
-def record_media_notification(session, notification: MediaReadyNotification) -> MediaArtifactRow | None:
+def record_media_notification(session, notification: MediaReadyNotification, *, canary_guard=None) -> MediaArtifactRow | None:
+    event_id = session.scalar(select(InboundEventRow.id).join(ConversationMessageRow,
+        ConversationMessageRow.metadata_json['source_inbound_event_id'].as_string() == InboundEventRow.id).where(
+        InboundEventRow.tenant_id == notification.tenant_id,
+        InboundEventRow.source == notification.source,
+        InboundEventRow.external_event_id == notification.external_event_id,
+        ConversationMessageRow.tenant_id == notification.tenant_id,
+        ConversationMessageRow.metadata_json['semantic_canary_id'].as_string().is_not(None)))
+    if event_id:
+        if canary_guard is None:
+            raise ValueError('CANARY_MEDIA_GUARD_REQUIRED')
+        with canary_guard(session, event_id=event_id) as policy:
+            result = _record_media_notification(session, notification)
+            if result is not None:
+                result.expires_at = policy['media_expires_at']
+            session.commit()
+            return result
+    return _record_media_notification(session, notification)
+
+
+def _record_media_notification(session, notification: MediaReadyNotification) -> MediaArtifactRow | None:
     events = list(session.scalars(
         select(InboundEventRow).where(
             InboundEventRow.tenant_id == notification.tenant_id,

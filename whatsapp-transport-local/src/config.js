@@ -103,6 +103,9 @@ function createConfig(env = process.env) {
     throw new Error('FIRST_CONTACT_SCOPE_CONFIGURATION_INVALID');
   }
   return {
+    semanticCanaryEnabled: parseBoolean(env.SEMANTIC_CANARY_ENABLED, false),
+    semanticCanaryConversationKey: env.SEMANTIC_CANARY_CONVERSATION_KEY || null,
+    semanticCanaryIngressUrl: env.SEMANTIC_CANARY_INGRESS_URL || null,
     firstContactEnabled,
     firstContactEligibilityMode,
     firstContactTenantId,
