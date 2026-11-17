@@ -227,7 +227,7 @@ def original_canary(session, tmp_path, *, owner=None, now=None, conversation='sy
         canary_id='synthetic-canary', operational_decision_ref='SYNTHETIC_NOT_OWNER_APPROVAL',
         retention_decision_ref='SYNTHETIC_TTL', backup_decision_ref='SYNTHETIC_BACKUPS')
     service = GovernedSemanticCanary(journal=journal, client_sessions=authority, enabled=True)
-    service.initialize(session, session_token='synthetic-session', grant=grant, now=now)
+    service.initialize(session, session_token='synthetic-session', grant=grant, now=grant.canary.observe_from)
     session.commit()
     return service, now, grant
 
@@ -488,3 +488,132 @@ def test_can_ret_01_separate_retention_and_no_replay_extension(session, tmp_path
         service.context(session, session_token='synthetic-session', query='domingo', now=admitted)
     assert row.text and not row.searchable  # access fence, not a real purge
     assert not session.scalars(select(MemoryClaimRow)).all()
+
+
+def test_can01_consent_receipt_binds_scope_and_blocks_retroactive_source(session, tmp_path):
+    from attention_router.infrastructure.hashing import stable_hash
+    service, now, grant = original_canary(session, tmp_path)
+    state = service.journal.read()
+    receipt = state['consent_receipt']
+    assert receipt['grant_digest'] == stable_hash(grant.model_dump(mode='json'))
+    assert receipt['owner_id'] == grant.owner_id and receipt['grants_authority'] is False
+    assert 'token' not in str(receipt)
+    with pytest.raises(ValueError, match='POLICY_ALREADY_EXISTS'):
+        service.initialize(session, session_token='synthetic-session', grant=grant, now=now)
+    assert service.journal.read() == state
+    # Consent occurs after the proposed window begins: old source is still denied.
+    state['consent_receipt']['authorized_at'] = now.isoformat()
+    with service.journal.locked():
+        service.journal.write(state)
+    old = original_message(session, grant, now-timedelta(seconds=1), key='pre-consent')
+    with pytest.raises(ValueError, match='BEFORE_CONSENT'):
+        service.enroll(session, session_token='synthetic-session', message_id=old.id, now=now)
+    session.rollback()
+    assert old.searchable
+    state = service.journal.read()
+    state['grant']['canary']['max_messages'] = 11
+    with service.journal.locked():
+        service.journal.write(state)
+    with pytest.raises(ValueError, match='CONSENT_RECEIPT_INVALID'):
+        service.candidates(session, session_token='synthetic-session', now=now)
+
+
+@pytest.mark.parametrize('change', ['minutes', 'messages', 'audio'])
+def test_can01_scope_never_silently_expands(session, tmp_path, change):
+    from attention_router.application.semantic_canary import CanaryGrant
+    _, now, grant = original_canary(session, tmp_path)
+    value = grant.model_dump()
+    value['canary'].update({'minutes': {'observe_until': now+timedelta(minutes=56)},
+        'messages': {'max_messages': 21}, 'audio': {'max_audio_messages': 7}}[change])
+    with pytest.raises(ValueError, match='MAXIMUM_SCOPE_EXCEEDED'):
+        CanaryGrant.model_validate(value)
+
+
+def test_can01_actual_app_mounts_preserve_defaults_and_authentication(session, tmp_path, monkeypatch):
+    from attention_router.web import app as public
+    from attention_router.web.internal_ingress_app import create_internal_ingress_app
+    service, now, _ = original_canary(session, tmp_path)
+    prefix = '/api/v1/client/semantic-preview'
+    assert not any(getattr(r, 'path', '').startswith(prefix) for r in public.app.routes)
+    ordinary = create_internal_ingress_app()
+    assert not any('semantic-canary' in getattr(r, 'path', '') for r in ordinary.routes)
+    internal = create_internal_ingress_app(canary_service=service)
+    assert TestClient(internal).post('/api/v1/ingress/internal/semantic-canary/events', json={}).status_code == 401
+    preview = FastAPI()
+    with pytest.raises(ValueError, match='EXISTING_CLIENT_SESSION'):
+        public.mount_semantic_canary_review(preview, service=service)
+    monkeypatch.setattr(public, 'client_session_service', service.client_sessions)
+    public.mount_semantic_canary_review(preview, service=service)
+    preview.dependency_overrides[public.get_session] = lambda: session
+    client = TestClient(preview)
+    assert client.get(prefix+'/candidates').status_code == 401
+    client.headers['Authorization'] = 'Bearer synthetic-session'
+    assert client.get(prefix+'/candidates').status_code == 200
+    assert client.get(prefix+'/candidates').headers['cache-control'] == 'no-store'
+    assert prefix+'/process' in preview.openapi()['paths']
+    assert prefix+'/conversation' in preview.openapi()['paths']
+    with pytest.raises(ValueError, match='ALREADY_MOUNTED'):
+        public.mount_semantic_canary_review(preview, service=service)
+    service.enabled = False
+    assert client.get(prefix+'/candidates').status_code == 409
+    assert not session.scalars(select(OutboxMessageRow)).all()
+
+
+def test_can01_preconsent_ingress_creates_no_receipt(session, tmp_path):
+    from tests.test_conversation_live_capture import inbound, STAMP
+    from attention_router.infrastructure.models import InboundEventRow
+    event = inbound('synthetic-before-consent', 'Proponho viagem domingo.',
+        metadata={'source_account': 'synthetic', 'is_group': False, 'peer_id_kind': 'lid'})
+    service, now, _ = original_canary(session, tmp_path, now=STAMP,
+                                    conversation=event.metadata['conversation_key'])
+    state = service.journal.read()
+    state['consent_receipt']['authorized_at'] = (now+timedelta(seconds=1)).isoformat()
+    with service.journal.locked():
+        service.journal.write(state)
+    with pytest.raises(ValueError, match='OBSERVATION_SCOPE_DENIED'):
+        service.observe_trusted(session, event=event, now=now+timedelta(seconds=2))
+    assert not session.scalars(select(InboundEventRow)).all()
+
+
+@pytest.mark.parametrize('processing', [False, True])
+def test_can01_unprocessed_media_expiry_uses_existing_cleanup(session, tmp_path, monkeypatch, processing):
+    from tests.test_whatsapp_voice_flow import setup_direct, voice_event, attach_media
+    from attention_router.application import services
+    from attention_router.application.conversation_live_capture import expire_pending_capture
+    from attention_router.application.voice_media import cleanup_expired_media
+    from attention_router.infrastructure.media_store import MediaStore
+    from attention_router.infrastructure.models import ActorBindingRow, VoiceTranscriptionRow
+    from attention_router.config import settings
+    setup_direct(session, monkeypatch)
+    event = voice_event()
+    received = services.receive_normalized_inbound_event(session, event)
+    artifact = attach_media(session, monkeypatch, tmp_path/'synthetic-media', {
+        **received, 'external_event_id': event.external_event_id})
+    owner = session.scalar(select(ActorBindingRow).where(ActorBindingRow.actor_category == 'owner'))
+    service, now, grant = original_canary(session, tmp_path, owner=owner.actor_key)
+    row = original_message(session, grant, now, text='', voice=True)
+    service.enroll(session, session_token='synthetic-session', message_id=row.id, now=now)
+    row.metadata_json = {**row.metadata_json, 'capture_contract':'LIVE_CONVERSATION_ARCHIVE_V0',
+        'content_state':'PENDING_TRANSCRIPTION', 'source_received_at':now.isoformat(),
+        'source_inbound_event_id':artifact.inbound_event_id}
+    expiry = grant.deadlines['MEDIA']
+    artifact.expires_at = expiry
+    transcription = session.scalar(select(VoiceTranscriptionRow))
+    transcription.status = 'PROCESSING' if processing else 'PENDING'
+    session.commit()
+    monkeypatch.setattr(settings, 'conversation_capture_tenant_id', grant.tenant_id)
+    assert expire_pending_capture(session, now=grant.canary.observe_until) == (0 if processing else 1)
+    from attention_router.application.semantic_interpretation import _utc
+    assert _utc(artifact.expires_at) == expiry
+    if processing:
+        assert artifact.terminal_at is None
+        return
+    assert transcription.status == 'FAILED'
+    assert artifact.terminal_at is not None
+    media_path = MediaStore(tmp_path/'synthetic-media', settings.whatsapp_media_max_bytes).path_for_digest(artifact.content_sha256)
+    assert media_path.exists()
+    monkeypatch.setattr('attention_router.application.voice_media.now_utc', lambda: expiry)
+    assert cleanup_expired_media(session) == 1
+    assert not media_path.exists()
+    assert cleanup_expired_media(session) == 0
+    assert row.text == '' and not row.searchable

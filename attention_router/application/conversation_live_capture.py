@@ -31,6 +31,7 @@ from attention_router.infrastructure.models import (
     ConversationMessageRow,
     ConversationThreadRow,
     InboundEventRow,
+    MediaArtifactRow,
     VoiceTranscriptionRow,
 )
 
@@ -599,6 +600,18 @@ def expire_pending_capture(session: Session, *, now: datetime | None = None, lim
                 transcription.status = "FAILED"
                 transcription.error_code = "CANARY_PROCESSING_EXPIRED"
                 transcription.completed_at = transcription.updated_at = stamp
+            # An authorized download may never reach STT. Make its existing
+            # fixed expiry eligible for cleanup without renewing the TTL. Never
+            # touch other tenants/events or an in-flight transcription.
+            artifacts = session.scalars(select(MediaArtifactRow).where(
+                MediaArtifactRow.tenant_id == row.tenant_id,
+                MediaArtifactRow.inbound_event_id == meta["source_inbound_event_id"],
+                MediaArtifactRow.purpose == "VOICE_INPUT",
+                MediaArtifactRow.terminal_at.is_(None),
+                MediaArtifactRow.expires_at.is_not(None),
+            )).all()
+            for artifact in artifacts:
+                artifact.terminal_at = stamp
             meta["content_state"] = "CANARY_PROCESSING_EXPIRED"
             meta["recovery"] = "EXPLICIT_NEW_SCOPE_REQUIRED"
             row.metadata_json = meta

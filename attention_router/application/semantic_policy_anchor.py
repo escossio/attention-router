@@ -1,12 +1,16 @@
 """Rollback detection adapter for the existing synthetic PolicyJournal.
 
 Production must provide an independently protected CAS authority outside ALL
-restoration domains. The file adapter is exclusively a disposable lab double;
-it does not protect against administrator rollback of both directories.
+restoration domains. The synthetic adapter is a disposable lab double. The protected adapter requires
+operator evidence of independent storage; neither protects against administrator
+rollback of both directories. No operational storage is provisioned by this module.
 """
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+import stat
 import fcntl
 import json
 import os
@@ -34,8 +38,9 @@ def _sync_directory(path):
         os.close(fd)
 
 
-class SyntheticFileAuthority:
-    """Explicit synthetic bootstrap, never implicitly re-created after loss."""
+class FileRevisionAuthority:
+    """Existing atomic file CAS primitive; bootstrap is always explicit."""
+    format = 'SYNTHETIC_ANCHOR_V1'
     def __init__(self, path: Path):
         self.path = Path(path)
 
@@ -46,7 +51,7 @@ class SyntheticFileAuthority:
             fcntl.flock(stream, fcntl.LOCK_EX)
             yield
 
-    def initialize_synthetic(self):
+    def _initialize(self):
         with self._lock():
             if self.path.exists():
                 raise ValueError('ANCHOR_ALREADY_EXISTS')
@@ -56,7 +61,7 @@ class SyntheticFileAuthority:
         try:
             value = json.loads(self.path.read_text())
             stamp = value['stamp']
-            if (value['format'] != 'SYNTHETIC_ANCHOR_V1'
+            if (value['format'] != self.format
                     or value['checksum'] != stable_hash(stamp)
                     or type(stamp['revision']) is not int or stamp['revision'] < 0
                     or (stamp['revision'] > 0 and (not isinstance(stamp['digest'], str)
@@ -67,7 +72,7 @@ class SyntheticFileAuthority:
             raise ValueError('REVOCATION_AUTHORITY_UNAVAILABLE') from None
 
     def _write(self, stamp):
-        payload = json.dumps(dict(format='SYNTHETIC_ANCHOR_V1', stamp=stamp, checksum=stable_hash(stamp)))
+        payload = json.dumps(dict(format=self.format, stamp=stamp, checksum=stable_hash(stamp)))
         staging = self.path.with_suffix('.pending')
         fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, 'w') as stream:
@@ -84,6 +89,77 @@ class SyntheticFileAuthority:
             self._write(proposed)
 
 
+class SyntheticFileAuthority(FileRevisionAuthority):
+    """Disposable adapter, never proof of operational backup independence."""
+    def initialize_synthetic(self):
+        self._initialize()
+
+
+@dataclass(frozen=True)
+class RestoreBoundary:
+    """Operator evidence, NOT discovery or certification of backup exclusions.
+
+    Paths stay in private configuration. An independently reviewed inventory must
+    cover host snapshots, volume backups and external copies, not only pg_dump.
+    The adapter checks placement/expiry but cannot attest an administrator's claim.
+    """
+    authority_directory: Path
+    restored_roots: tuple[Path, ...]
+    evidence_ref: str
+    valid_until: datetime
+
+    def require(self, path, now):
+        root = self.authority_directory.resolve()
+        if (not self.evidence_ref.strip() or not self.restored_roots
+                or self.valid_until.utcoffset() is None or now >= self.valid_until
+                or path.parent.resolve() != root or path.is_symlink()
+                or self.authority_directory.is_symlink()):
+            raise ValueError('RESTORE_BOUNDARY_UNVERIFIED')
+        for restored in self.restored_roots:
+            restored = restored.resolve()
+            if root.is_relative_to(restored) or restored.is_relative_to(root):
+                raise ValueError('SEPARATE_RESTORE_DOMAIN_REQUIRED')
+        info = root.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise ValueError('AUTHORITY_DIRECTORY_NOT_PRIVATE')
+        if path.exists():
+            info = path.stat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+                raise ValueError('AUTHORITY_FILE_NOT_PRIVATE')
+
+
+class ProtectedFileAuthority(FileRevisionAuthority):
+    """Single-host backend using an already provisioned independent directory.
+
+    No directory, service, consent or backup exclusion is provisioned here.
+    Restore of the authority itself is outside this guarantee and remains an
+    operational gate. Loss/corruption/expired attestation always fails closed.
+    """
+    format = 'PROTECTED_REVISION_AUTHORITY_V1'
+
+    def __init__(self, path, *, boundary, clock=lambda: datetime.now(UTC)):
+        super().__init__(path)
+        self.boundary, self.clock = boundary, clock
+
+    def _require_boundary(self):
+        try:
+            self.boundary.require(self.path, self.clock())
+        except (OSError, ValueError):
+            raise ValueError('REVOCATION_AUTHORITY_BOUNDARY_UNAVAILABLE') from None
+
+    def initialize_after_operational_approval(self):
+        self._require_boundary()
+        self._initialize()
+
+    def read(self):
+        self._require_boundary()
+        return super().read()
+
+    def advance(self, expected, proposed):
+        self._require_boundary()
+        return super().advance(expected, proposed)
+
+
 class AnchoredPolicyJournal(PolicyJournal):
     """Uses the journal's existing lock and fsync implementation.
 
@@ -98,7 +174,7 @@ class AnchoredPolicyJournal(PolicyJournal):
         self.format = journal_type.format
         self.authority = authority
         self.staged = journal_type(self.path.with_suffix('.prepared'))
-        if isinstance(authority, SyntheticFileAuthority) and authority.path.parent.resolve() == self.path.parent.resolve():
+        if isinstance(authority, FileRevisionAuthority) and authority.path.parent.resolve() == self.path.parent.resolve():
             raise ValueError('SEPARATE_RESTORE_DOMAIN_REQUIRED')
 
     def read(self):

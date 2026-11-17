@@ -254,3 +254,94 @@ def test_cache_checks_events_authority_and_decisions_not_only_graph(session, tmp
         assert not lab.cache_usable(session, session_token='synthetic-session', cached=forged, query='domingo', now=stamp)
     for malformed in ({}, None, []):
         assert not lab.cache_usable(session, session_token='synthetic-session', cached=malformed, query='domingo', now=stamp)
+
+
+def protected_anchor(lab, stamp, tmp_path):
+    from attention_router.application.semantic_policy_anchor import ProtectedFileAuthority, RestoreBoundary
+    root = tmp_path/'private-independent-volume'
+    root.mkdir(mode=0o700)
+    boundary = RestoreBoundary(authority_directory=root, restored_roots=(tmp_path/'restored-db',),
+        evidence_ref='SYNTHETIC_BOUNDARY_NOT_OPERATIONAL_APPROVAL', valid_until=stamp+timedelta(hours=1))
+    authority = ProtectedFileAuthority(root/'revision.json', boundary=boundary, clock=lambda: stamp)
+    authority.initialize_after_operational_approval()
+    state = lab.journal.read()
+    state['revision'] = 0
+    lab.journal = AnchoredPolicyJournal(tmp_path/'protected-policy.json', authority,
+                                       journal_type=lab.journal.journal_type)
+    with lab.journal.locked():
+        lab.journal.write(state)
+    return authority, boundary
+
+
+def test_protected_authority_restart_restore_partial_failure_and_loss(session, tmp_path):
+    from attention_router.application.semantic_policy_anchor import ProtectedFileAuthority
+    from tests.test_semantic_canary_scope import original_canary, original_message
+    service, now, grant = original_canary(session, tmp_path)
+    authority, boundary = protected_anchor(service, now, tmp_path)
+    row = original_message(session, grant, now)
+    service.enroll(session, session_token='synthetic-session', message_id=row.id, now=now)
+    packet = service.context(session, session_token='synthetic-session', query='domingo', now=now)
+    before = service.journal.path.read_bytes()
+    service.operate(session, session_token='synthetic-session', request=LabOperation(
+        request_id='can01-revoke', operation='REVOKE_CONSENT', source_ids=()), now=now)
+    after = service.journal.path.read_bytes()
+    restarted = ProtectedFileAuthority(authority.path, boundary=boundary, clock=lambda: now)
+    service.journal.authority = restarted
+    assert service.journal.read()['revoked']
+    assert not service.cache_usable(session, session_token='synthetic-session', cached=packet, query='domingo', now=now)
+    service.journal.path.write_bytes(before)  # disposable old backup, never production
+    with pytest.raises(ValueError, match='ROLLBACK'):
+        service.context(session, session_token='synthetic-session', query='domingo', now=now)
+    service.journal.path.write_bytes(after)
+    with pytest.raises(ValueError, match='CONSENT_OR_RETENTION'):
+        service.context(session, session_token='synthetic-session', query='domingo', now=now)
+    authority.path.unlink()
+    with pytest.raises(ValueError, match='AUTHORITY_UNAVAILABLE'):
+        service.journal.read()
+    (tmp_path/'can01-authority-demo.json').write_text(json.dumps(dict(
+        synthetic=True, consent_receipt=service.journal.grant_type.__name__,
+        restart_preserved_revocation=True, old_backup_blocked=True,
+        old_cache_blocked=True, missing_authority_blocked=True,
+        physical_deletion_verified=False, operational_boundary_certified=False)))
+
+
+@pytest.mark.parametrize('failure', ['expired', 'overlap', 'permissions', 'missing', 'corrupt', 'symlink'])
+def test_protected_authority_fails_closed(session, tmp_path, failure):
+    from dataclasses import replace
+    lab, stamp, _ = anchored_lab(session, tmp_path)
+    authority, boundary = protected_anchor(lab, stamp, tmp_path)
+    if failure == 'expired':
+        authority.boundary = replace(boundary, valid_until=stamp)
+    elif failure == 'overlap':
+        authority.boundary = replace(boundary, restored_roots=(tmp_path,))
+    elif failure == 'permissions':
+        authority.path.chmod(0o644)
+    elif failure == 'missing':
+        authority.path.unlink()
+    elif failure == 'corrupt':
+        authority.path.write_text('{incomplete')
+    else:
+        other = authority.path.with_name('other.json')
+        authority.path.rename(other)
+        authority.path.symlink_to(other)
+    with pytest.raises(ValueError):
+        lab.journal.read()
+
+
+def test_protected_authority_concurrent_compare_and_swap(session, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from attention_router.application.semantic_policy_anchor import ProtectedFileAuthority
+    lab, stamp, _ = anchored_lab(session, tmp_path)
+    authority, boundary = protected_anchor(lab, stamp, tmp_path)
+    expected = authority.read()
+    def advance(number):
+        peer = ProtectedFileAuthority(authority.path, boundary=boundary, clock=lambda: stamp)
+        try:
+            peer.advance(expected, dict(revision=expected['revision']+1, digest=str(number)*64))
+            return 'advanced'
+        except ValueError as error:
+            return str(error)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(advance, (1, 2)))
+    assert sorted(results) == ['REVOCATION_AUTHORITY_CAS_CONFLICT', 'advanced']
+    assert authority.read()['revision'] == expected['revision']+1

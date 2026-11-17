@@ -158,7 +158,11 @@ class GovernedSemanticLab:
             if self.journal.path.exists():
                 raise ValueError('POLICY_ALREADY_EXISTS')
             self.journal.write(dict(format=self.journal.format, grant=grant.model_dump(mode='json'),
-                revision=0, revoked=False, paused=False, deleted=[], hidden=[], rejected=[], operations={}, reviews={}))
+                revision=0, revoked=False, paused=False, deleted=[], hidden=[], rejected=[], operations={}, reviews={},
+                **self._initial_metadata(grant, now)))
+
+    def _initial_metadata(self, grant, now):
+        return {}
 
     @contextmanager
     def _current(self, session, token, now):

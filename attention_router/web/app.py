@@ -79,6 +79,26 @@ from attention_router.platform.api import build_operations_router, read_operatio
 from attention_router.platform.governance_api import build_governance_router
 
 
+def mount_semantic_canary_review(application, *, service):
+    """Explicit deployment seam. Never called by default or controlled by a request.
+
+    Uses this listener's existing DB dependency and ClientSession service. Keep
+    routes mounted when disabled so policy/quarantine cannot fall back to legacy.
+    Does not initialize consent, enable capture, or deploy anything.
+    """
+    from attention_router.application.semantic_canary import GovernedSemanticCanary
+    from attention_router.api.v1.semantic_review_preview import build_semantic_review_preview_router
+    if (not isinstance(service, GovernedSemanticCanary)
+            or service.client_sessions is not client_session_service):
+        raise ValueError('CANARY_EXISTING_CLIENT_SESSION_REQUIRED')
+    if any(getattr(route, 'path', '').startswith('/api/v1/client/semantic-preview')
+           for route in application.routes):
+        raise ValueError('CANARY_REVIEW_ALREADY_MOUNTED')
+    application.include_router(build_semantic_review_preview_router(
+        get_session=get_session, service=service, include_processing=True))
+    application.openapi_schema = None
+
+
 app = FastAPI(title="Attention Router", version="0.1.0")
 app.mount("/static", StaticFiles(directory="attention_router/web/static"), name="static")
 templates = Jinja2Templates(directory="attention_router/web/templates")
