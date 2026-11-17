@@ -172,9 +172,7 @@ class GovernedSemanticLab:
             yield state, grant
 
     def _policy(self, state, grant, now, *, capture=False):
-        # Earliest relevant deadline is conservative; archive/media are independently inventoried.
-        deadline = min(grant.deadlines[k] for k in ('ARCHIVE', 'TRANSCRIPTION', 'INTERPRETATION',
-                                                   'CANDIDATE', 'EPISODE_RELATION', 'INDEX_CACHE_BACKUP'))
+        deadline = self._policy_deadline(grant)
         if state['revoked'] or _utc(now) < _utc(grant.starts_at) or _utc(now) >= _utc(deadline):
             raise ValueError('GOVERNANCE_CONSENT_OR_RETENTION_DENIED')
         if capture and state['paused']:
@@ -185,6 +183,13 @@ class GovernedSemanticLab:
         return self.policy_type(tenant_id=grant.tenant_id, source_account=grant.source_account,
             purpose=grant.purpose, consent=True, expires_at=deadline,
             tombstones=frozenset(state['deleted'] + state['hidden'] + state['rejected']))
+
+    def _policy_deadline(self, grant):
+        return min(grant.deadlines[k] for k in ('ARCHIVE', 'TRANSCRIPTION', 'INTERPRETATION',
+                                               'CANDIDATE', 'EPISODE_RELATION', 'INDEX_CACHE_BACKUP'))
+
+    def _after_admission(self, row, grant, decision_ref, now):
+        pass  # Laboratory admission never changes its original retention contract.
 
     def _sources(self, session, grant, ids):
         self._validate_source_scope(session, grant, ids)
@@ -338,6 +343,7 @@ class GovernedSemanticLab:
             try:
                 if action == 'ADMIT':
                     admit_candidate_insight(**kwargs)
+                    self._after_admission(row, grant, decision_ref, now)
                 elif action in {'SUPERSEDE', 'CORRECT'}:
                     supersede_candidate_insight(**kwargs, replacement_id=replacement_id)
                 else:

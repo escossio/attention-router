@@ -2,8 +2,8 @@
 
 Status: review candidate; disabled and unregistered by default. This contract narrows
 [the bilateral pilot](andy-whatsapp-semantic-conversation-pilot-v1.md), preserving
-D01–D05 and approved architectural directions D06-A/D08-A. Numerical retention,
-operational consent, backup controls and deployment need separate approval.
+D01–D05 and approved architectural directions D06-A/D08-A. CAN-RET-01 approves the numerical reference below for design/tests only.
+Operational consent, backup controls and deployment need separate approval.
 
 ## Existing components and boundary
 
@@ -91,3 +91,27 @@ the distributed workflow. The bilateral canary test emits a synthetic consultabl
 JSON with original evidence IDs, both transcripts, candidates, review, graph
 retrieval and revocation. Corpus reruns are regressions, not new independent
 quality certification. No test fixture constitutes real consent or a production TTL.
+
+
+## Approved canary reference: CAN-RET-01
+
+The optional `canary_reference_rules()` helper returns existing RetentionRule
+contracts: MEDIA 7 days; MESSAGE/TRANSCRIPTION 30 days; unreviewed CANDIDATE
+7 days; reviewed CANDIDATE derivative 30 days. RetentionSchedule calculates
+absolute deadlines from original creation times. No runtime default, consent,
+backup rule or durable-memory promotion is introduced. Unspecified classes still
+require explicit policy; fixtures for them do not constitute operational approval.
+
+Canary source/context access uses the authorized source/reviewed limits; proposal
+creation separately caps its original unreviewed deadline. Explicit owner ADMIT
+selects only the reviewed deadline recorded when the proposal was created and
+bounded by current source policy. It cannot admit an already expired proposal.
+Repeated admission, replay and restore never reset either anchor. An expired
+unreviewed proposal stops contributing to contextual retrieval, while original
+messages retain their independent authorized 30-day access. At day 30, reviewed
+context access fails closed. This is access expiry, not verified physical erasure.
+
+The laboratory's conservative deadline contract and existing non-canary data
+remain unchanged. Future authorized historical memory can span months/years;
+this short first-canary policy does not replace it. Neither numerical approval
+nor owner review authorizes operational activation or canonical promotion.

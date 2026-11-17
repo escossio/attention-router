@@ -20,3 +20,9 @@ def test_quarantine_before_commit_without_action_queue(Session, tmp_path, monkey
 def test_original_evidence_negative_boundaries(Session, tmp_path, case):
     with Session() as session:
         acceptance.test_original_canary_negative_boundaries(session, tmp_path, case)
+
+
+@pytest.mark.parametrize('reviewed', [False, True])
+def test_can_ret_01_absolute_deadlines(Session, tmp_path, reviewed):
+    with Session() as session:
+        acceptance.test_can_ret_01_separate_retention_and_no_replay_extension(session, tmp_path, reviewed)

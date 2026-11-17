@@ -3,7 +3,7 @@
 Bilateral conversation and governed semantic-memory review candidate. Draft review and CI only; no deployment or personal-data activation.
 
 - D01–D05 preserved. Account attribution never grants execution authority.
-- D06-A/D08-A architecture and data-minimization design profile approved; numerical retention, consent, operational backups and personal-data use remain blocked.
+- D06-A/D08-A architecture and data-minimization design profile approved; CAN-RET-01 numerical canary reference approved; historical retention, consent, operational backups and personal-data use remain blocked.
 - Reuses archive, STT, Artifact, V2A/C/D/E/F/J. Synthetic tests cover chronology, interpretation, review, revocation and restore.
 - Canonical promotion disabled. Legacy consumers and independent revocation storage remain operational gates.
 - Contacts SDK and future semantic-review SDK require their Android governance boundaries. No APK or GPS activation.
@@ -17,5 +17,11 @@ See docs/architecture/andy-precertification-operational-contract-v1.md for contr
 - Quarantine precedes commit; ordinary readers/workers cannot adopt selected evidence. No decision queue, Outbox or canonical promotion.
 - Feature-off retains quarantine and separate spool scope. Old-binary downgrade is unsafe while canary data remains.
 - Synthetic acceptance includes signed bilateral capture, original IDs/timestamps, owner session revocation, bounded media retries, processing expiry and review/context revocation.
-- Operational authority, numerical TTLs, consent, backup verification and deployment remain blocked. No personal data processed.
+- Operational authority, consent, backup verification and deployment remain blocked; canary reference TTLs are approved for design/tests only. No personal data processed.
 - See docs/architecture/andy-minimal-semantic-canary-v1.md. Formal results belong to the exact published SHA.
+
+## CAN-RET-01 reference profile
+
+- Reference rules: raw audio 7 days, messages/transcripts 30 days, unreviewed candidates 7 days, reviewed derivatives 30 days. Explicit opt-in helper; no runtime defaults or operational consent.
+- Unreviewed proposal expiry does not shorten independently authorized original-evidence access. Explicit owner ADMIT can select the pre-recorded reviewed deadline; replay/re-review never moves its original anchor.
+- Existing laboratory and non-canary policies remain unchanged. No purge or backup coverage implied. Synthetic tests exercise expiry, review, replay and absence of canonical promotion.

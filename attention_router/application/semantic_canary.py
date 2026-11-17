@@ -27,6 +27,22 @@ from attention_router.domain.cognitive_graph import (
 from attention_router.infrastructure.models import ConversationMessageRow
 
 
+def canary_reference_rules():
+    """CAN-RET-01 reference only. No consent, backup coverage or runtime default.
+
+    Callers anchor these rules to original creation times with RetentionSchedule;
+    replay and review cannot reset that anchor. Other classes remain explicit.
+    """
+    from attention_router.application.semantic_retention import RetentionRule
+    return tuple(RetentionRule(data_class=kind, purpose=purpose, ttl_seconds=days * 86400,
+        decision_ref='CAN-RET-01', expiry_action='BLOCK_AND_SCHEDULE_VERIFIED_DELETION')
+        for kind, purpose, days in (
+            ('MEDIA', 'SEMANTIC_CANARY', 7), ('MESSAGE', 'SEMANTIC_CANARY', 30),
+            ('TRANSCRIPTION', 'SEMANTIC_CANARY', 30),
+            ('CANDIDATE', 'SEMANTIC_CANARY_UNREVIEWED', 7),
+            ('CANDIDATE', 'SEMANTIC_CANARY_REVIEWED', 30)))
+
+
 class CanaryGrant(LabGrant):
     purpose: Literal['SEMANTIC_CANARY']
     lineage: Literal['ORGANIC']
@@ -79,6 +95,25 @@ class GovernedSemanticCanary(GovernedSemanticLab):
         from attention_router.config import settings
         if isinstance(self.journal.authority, SyntheticFileAuthority) and settings.app_env != 'test':
             raise ValueError('CANARY_SYNTHETIC_AUTHORITY_FORBIDDEN_OUTSIDE_TESTS')
+
+    def _policy_deadline(self, grant):
+        # Source/reviewed access outlives unreviewed proposals, not their evidence.
+        return min(grant.deadlines[k] for k in
+                   ('ARCHIVE', 'TRANSCRIPTION', 'EPISODE_RELATION', 'INDEX_CACHE_BACKUP'))
+
+    def _after_admission(self, row, grant, decision_ref, now):
+        # Only explicit owner ADMIT reaches this hook, under the current fence.
+        provenance = dict(row.provenance)
+        original = provenance['retention_expires_at']
+        reviewed = provenance.get('reviewed_retention_expires_at', original)
+        deadline = min(_utc(datetime.fromisoformat(reviewed)), _utc(self._policy_deadline(grant)))
+        if 'retention_review_decision_ref' in provenance:
+            deadline = min(deadline, _utc(datetime.fromisoformat(original)))
+        provenance.setdefault('unreviewed_retention_expires_at', original)
+        provenance.setdefault('retention_review_decision_ref', decision_ref)
+        provenance.setdefault('retention_reviewed_at', now.isoformat())
+        provenance['retention_expires_at'] = deadline.isoformat()
+        row.provenance = provenance
 
     def initialize(self, session, *, session_token, grant, now):
         self._enabled()
@@ -278,12 +313,15 @@ class GovernedSemanticCanary(GovernedSemanticLab):
 
     def propose(self, session, *, session_token, value, now):
         with self._current(session, session_token, now) as (state, grant):
-            policy = self._policy(state, grant, now, capture=True)
+            access = self._policy(state, grant, now, capture=True)
+            policy = access.model_copy(update={'expires_at': min(access.expires_at,
+                grant.deadlines['CANDIDATE'], grant.deadlines['INTERPRETATION'])})
             refs = set(value.source_message_ids) | set(value.references) | set(value.contradiction_refs)
             sources = self._sources(session, grant, refs)
             row, created = _propose_from_authorized_sources(session, value, sources=sources,
                 policy=policy, now=now, provenance={'semantic_canary_id':grant.canary_id,
-                    'operational_decision_ref':grant.operational_decision_ref})
+                    'operational_decision_ref':grant.operational_decision_ref,
+                    'reviewed_retention_expires_at':access.expires_at.isoformat()})
             session.commit()
             return row.id, created
 
