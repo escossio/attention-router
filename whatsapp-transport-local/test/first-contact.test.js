@@ -60,11 +60,12 @@ function request(port, body, { proof = false, headers = {}, timestamp, target } 
   });
 }
 
-async function fixture(t, { ready = true, client = null, enabled = true, mode = 'INDIVIDUAL' } = {}) {
+async function fixture(t, { ready = true, client = null, enabled = true, mode = 'INDIVIDUAL', canaryKey = '', canaryEnabled = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attention-first-contact-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const cfg = config({ LOCAL_OUTBOUND_PROVENANCE_DIR: dir, FIRST_CONTACT_ENABLED: String(enabled),
     FIRST_CONTACT_ELIGIBILITY_MODE: mode,
+    SEMANTIC_CANARY_CONVERSATION_KEY: canaryKey, SEMANTIC_CANARY_ENABLED: String(canaryEnabled),
     ...(mode === 'OPEN_INBOUND' ? { FIRST_CONTACT_CANARY_PEER_SHA256: '' } : {}) });
   const status = createStatus(cfg, ready ? { service_state: 'ready', browser_debug_reachable: true,
     wwebjs_connected: true, ready: true, client_state: 'CONNECTED' } : {});
@@ -345,4 +346,39 @@ test('operator-only recovery requires exact observed device ACK, canonical ident
   assert.equal(proof.body.ack,3);
   assert.throws(() => ledger.reconcileObservedFirstContact(scope.idempotency_key,observation),/RECONCILIATION_UNPROVEN/);
   assert.equal((await request(port,payload)).body.status,'already_sent');
+});
+
+
+for (const enabled of [true, false]) {
+  test(`selected canary denies First Contact before ledger/send, feature enabled=${enabled}`, async t => {
+    let sends = 0;
+    const client = { async sendMessage() { sends++; throw new Error('must not send'); },
+      async getContactLidAndPhone() { return [{lid, pn:phone}]; } };
+    const { port, ledger } = await fixture(t, {client, mode:'OPEN_INBOUND',
+      canaryKey:`wwebjs:${lid}`, canaryEnabled:enabled});
+    const denied = await request(port, payload);
+    assert.equal(denied.code, 403);
+    assert.equal(denied.body.status, 'canary_first_contact_blocked');
+    assert.equal(sends, 0);
+    assert.equal((await request(port, {...payload, external_actor_id:phone})).body.status, 'canary_first_contact_blocked');
+    assert.equal(ledger.statusForKey(scope.idempotency_key, {readOnly:true}), null);
+    // Read-only proof remains available; an uncertain historical send is not replayed.
+    const historical = ledger.begin({...payload, destination:lid}).record;
+    ledger.markSent(historical, 'synthetic-before-canary');
+    ledger.markAck('synthetic-before-canary', 2);
+    const proof = await request(port, scope, {proof:true});
+    assert.equal(proof.code, 200);
+    assert.equal(proof.body.ack, 2);
+    assert.equal(sends, 0);
+  });
+}
+
+test('another selected canary leaves unrelated First Contact behavior unchanged', async t => {
+  let sends = 0;
+  const client = { async sendMessage() { sends++; return {id:{_serialized:'synthetic-fc-sent'},ack:1}; } };
+  const {port} = await fixture(t, {client, mode:'OPEN_INBOUND',
+    canaryKey:'wwebjs:9999999990@lid', canaryEnabled:true});
+  const result = await request(port, payload);
+  assert.equal(result.code, 200);
+  assert.equal(sends, 1);
 });

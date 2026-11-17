@@ -88,7 +88,6 @@ function eligibleUnattributedOutboundMedia(config, message, normalized, options 
 
 function createInboundBridge(config, logger = console, deps = {}) {
   const selectedConfig = canaryConfig(config); // invalid opt-in fails closed at construction
-  if (selectedConfig && config.firstContactEnabled === true) throw new Error('CANARY_FIRST_CONTACT_MUST_BE_DISABLED');
   const fetchImpl = deps.fetchImpl || fetch;
   const onCounters = deps.onCounters || (() => {});
   const observability = deps.observability || createNoopTransportTracing();

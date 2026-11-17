@@ -94,13 +94,14 @@ test('revocation during download discards bytes before persistence and does not 
   assert.equal(downloads, 1);
 });
 
-test('invalid scope and independent auto-contact flow prevent opt-in', t => {
+test('invalid scope prevents opt-in; concurrent First Contact requires a canonical LID', t => {
   const config = fixture(t);
   for (const change of [{semanticCanaryConversationKey:'wwebjs:synthetic@g.us'},
-    {semanticCanaryIngressUrl:'http://example.com/canary'}, {sourceAccount:''}, {firstContactEnabled:true}]) {
+    {semanticCanaryIngressUrl:'http://example.com/canary'}, {sourceAccount:''}, {firstContactEnabled:true, semanticCanaryConversationKey:'wwebjs:5500000000002@c.us'}]) {
     assert.throws(() => createInboundBridge({...config,...change}, logger), /CANARY_/);
   }
   assert.equal(canaryConfig({}), null);
+  assert.doesNotThrow(() => createInboundBridge({...config, firstContactEnabled:true}, logger));
 });
 
 

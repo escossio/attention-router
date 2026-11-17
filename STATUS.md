@@ -34,3 +34,11 @@ See docs/architecture/andy-precertification-operational-contract-v1.md for contr
 - Expired, never-transcribed canary media receives terminal metadata for existing cleanup without renewing its fixed TTL. Only disposable fixtures exercise deletion.
 - Distributed validation: 223 targeted Python tests across two workers and 15 disposable PostgreSQL tests passed, including the media-expiry delta. Ruff, architecture guard and full-file privacy/secret scans passed. Formal certification belongs to the exact published SHA and is recorded separately.
 - Private consent, backup coverage, authority placement and deployment remain blocked. No personal processing, operational purge or service changes.
+
+
+## CAN-01 selected First Contact isolation
+
+- Selected canonical LID blocks First Contact sends before reservation/delivery, including phone aliases; unrelated conversations and earlier delivery-proof reconciliation remain unchanged.
+- The selected guard persists across feature-off. A phone-only selection with First Contact enabled fails startup rather than weakening isolation.
+- Operational backup independence, physical deletion coverage, personal consent and deployment remain separate gates. No runtime configuration changed.
+- Targeted Transport checks passed locally; distributed and exact-SHA checks are recorded in the private evidence package. Prior Python/PostgreSQL certification is reusable only where file/contract provenance is unchanged.
