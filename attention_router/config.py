@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     client_session_challenge_ttl_seconds: int = 300
     client_session_ttl_seconds: int = 900
     client_location_enabled: bool = False
+    # Persist chronological device observations only after explicit opt-in.
+    client_location_history_enabled: bool = False
     client_approval_enabled: bool = False
     client_command_enabled: bool = False
     client_command_voice_enabled: bool = False
@@ -63,6 +65,10 @@ class Settings(BaseSettings):
     artifact_store_max_bytes: int = 32 * 1024 * 1024
     whatsapp_artifact_ingestion_enabled: bool = False
     whatsapp_artifact_max_bytes: int = 32 * 1024 * 1024
+    # Review-only companion to Artifact understanding. OFF by default.
+    # Capture stays unchanged; no semantic memory or external action authority.
+    artifact_sensitive_review_enabled: bool = False
+    artifact_sensitive_review_start_at: datetime | None = None
     artifact_understanding_enabled: bool = False
     artifact_understanding_provider: str = "openai"
     artifact_understanding_model: str = "gpt-5.6-sol"
@@ -303,6 +309,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        if self.artifact_sensitive_review_enabled:
+            start = self.artifact_sensitive_review_start_at
+            if start is None or start.tzinfo is None or start.utcoffset() is None:
+                raise ValueError("ARTIFACT_SENSITIVE_REVIEW_START_AT_REQUIRED")
         # A new capture rollout cannot implicitly import pre-existing chats.
         # Its bounded start time is an explicit operator-controlled watermark.
         if self.conversation_capture_enabled:

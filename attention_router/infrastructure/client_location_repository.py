@@ -16,6 +16,9 @@ from attention_router.infrastructure.client_bootstrap_models import (
 from attention_router.infrastructure.client_location_models import (
     ClientLocationSnapshotRow,
 )
+from attention_router.infrastructure.client_location_history_models import (
+    ClientLocationObservationRow,
+)
 from attention_router.infrastructure.models import TenantRow
 
 
@@ -122,6 +125,64 @@ def lock_current_location(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+def append_location_observation(
+    session: Session,
+    *,
+    human_identity_id: str,
+    device_id: str,
+    tenant_id: str,
+    latitude: float,
+    longitude: float,
+    accuracy_m: float,
+    precision: str | None,
+    captured_at: datetime,
+    received_at: datetime,
+) -> ClientLocationObservationRow:
+    """Immutable, idempotent evidence of one device's measured position."""
+    def matching(row: ClientLocationObservationRow) -> bool:
+        return (
+            row.human_identity_id == human_identity_id
+            and row.latitude == latitude
+            and row.longitude == longitude
+            and row.accuracy_m == accuracy_m
+            and row.precision == precision
+        )
+
+    q = select(ClientLocationObservationRow).where(
+        ClientLocationObservationRow.tenant_id == tenant_id,
+        ClientLocationObservationRow.device_id == device_id,
+        ClientLocationObservationRow.captured_at == captured_at,
+    )
+    existing = session.scalar(q)
+    if existing is not None:
+        if not matching(existing):
+            raise LocationSnapshotConflict("LOCATION_HISTORY_TIMESTAMP_CONFLICT")
+        return existing
+
+    row = ClientLocationObservationRow(
+        id="clh_" + secrets.token_urlsafe(24),
+        human_identity_id=human_identity_id,
+        device_id=device_id,
+        tenant_id=tenant_id,
+        latitude=latitude,
+        longitude=longitude,
+        accuracy_m=accuracy_m,
+        precision=precision,
+        captured_at=captured_at,
+        received_at=received_at,
+    )
+    try:
+        with session.begin_nested():
+            session.add(row)
+            session.flush()
+        return row
+    except IntegrityError:
+        existing = session.scalar(q)
+        if existing is None or not matching(existing):
+            raise LocationSnapshotConflict("LOCATION_HISTORY_TIMESTAMP_CONFLICT")
+        return existing
+
+
 def upsert_current_location(
     session: Session,
     *,
@@ -134,6 +195,7 @@ def upsert_current_location(
     precision: str | None,
     captured_at: datetime,
     received_at: datetime,
+    store_history: bool = False,
 ) -> ClientLocationSnapshotRow:
     row = lock_current_location(
         session,
@@ -151,6 +213,13 @@ def upsert_current_location(
         row.captured_at = captured_at
         row.received_at = received_at
         session.flush()
+        if store_history:
+            append_location_observation(
+                session, human_identity_id=human_identity_id,
+                device_id=device_id, tenant_id=tenant_id, latitude=latitude,
+                longitude=longitude, accuracy_m=accuracy_m, precision=precision,
+                captured_at=captured_at, received_at=received_at,
+            )
         return row
 
     row = ClientLocationSnapshotRow(
@@ -169,6 +238,13 @@ def upsert_current_location(
         with session.begin_nested():
             session.add(row)
             session.flush()
+        if store_history:
+            append_location_observation(
+                session, human_identity_id=human_identity_id,
+                device_id=device_id, tenant_id=tenant_id, latitude=latitude,
+                longitude=longitude, accuracy_m=accuracy_m, precision=precision,
+                captured_at=captured_at, received_at=received_at,
+            )
         return row
     except IntegrityError:
         existing = lock_current_location(
@@ -188,4 +264,11 @@ def upsert_current_location(
         existing.captured_at = captured_at
         existing.received_at = received_at
         session.flush()
+        if store_history:
+            append_location_observation(
+                session, human_identity_id=human_identity_id,
+                device_id=device_id, tenant_id=tenant_id, latitude=latitude,
+                longitude=longitude, accuracy_m=accuracy_m, precision=precision,
+                captured_at=captured_at, received_at=received_at,
+            )
         return existing

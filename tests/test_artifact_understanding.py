@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from pydantic import ValidationError
 import pytest
 from sqlalchemy import select
@@ -10,6 +12,7 @@ from attention_router.application.artifact_understanding import (
     OpenAIArtifactUnderstandingProvider,
     artifact_decision_readiness,
     effective_artifact_text,
+    ArtifactUnderstandingError,
     process_artifact_understandings,
     register_artifact_understanding_notification,
 )
@@ -20,6 +23,7 @@ from attention_router.infrastructure import human_identity_models  # noqa: F401
 from attention_router.infrastructure.artifact_models import (
     ArtifactUnderstandingRow,
 )
+from attention_router.infrastructure.artifact_sensitive_review_models import ArtifactSensitiveReviewRow
 from attention_router.infrastructure.media_store import MediaStore
 from attention_router.infrastructure.models import InboundEventRow, QueueRow
 from test_internal_ingress import _post_media, client, payload, post
@@ -457,3 +461,69 @@ def test_failed_media_notification_cancels_existing_understanding_wait(
     assert row.error_code == "ARTIFACT_MEDIA_FAILED"
     assert queue.status == "CANCELED"
     assert queue.processed_at is not None
+
+class SensitiveImageProvider(FakeProvider):
+    def analyze(self, data, *, mime_type, filename):
+        self.calls += 1
+        return ArtifactUnderstandingProviderResult(
+            analysis=ArtifactUnderstandingResult(
+                summary="Cartão de visita fictício em foto.",
+                extracted_text="Contato da Empresa Sintética.",
+                visual_description="Uma foto do cartão de visita.",
+                key_facts=["contato fictício de teste"],
+                language="pt-BR",
+                text_truncated=False,
+            ),
+            provider=self.provider_name,
+            model=self.model,
+            request_reference="opaque-synthetic-image",
+        )
+
+
+def test_sensitive_photo_is_not_skipped_but_requires_separate_review(
+    session, monkeypatch, tmp_path,
+):
+    _enable(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "artifact_sensitive_review_enabled", True)
+    monkeypatch.setattr(
+        settings, "artifact_sensitive_review_start_at",
+        datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    c = client(session, monkeypatch)
+    event_id = "wamid.synthetic.sensitive-review"
+    incoming = payload(event_id, "")
+    incoming["message_type"] = "image"
+    incoming["has_media"] = True
+    incoming["metadata"] = {"source_account": "synthetic-test"}
+    assert post(c, incoming).status_code == 200
+    assert _post_artifact_media(
+        c, tmp_path, event_id=event_id,
+        data=b"synthetic image fixture", mime_type="image/png",
+        media_kind="image", filename="example.png",
+    ).status_code == 200
+
+    provider = SensitiveImageProvider()
+    assert process_artifact_understandings(
+        session, "review-test", provider=provider,
+    ) == 1
+    result = session.scalar(select(ArtifactUnderstandingRow))
+    assert result is not None and result.status == "READY"
+    assert result.summary_text == "Cartão de visita fictício em foto."
+    # Without a provisioned Android owner, the review stays unassigned.
+    review = session.scalar(select(ArtifactSensitiveReviewRow))
+    assert review is not None
+    assert review.category == "CONTACT_CARD"
+    assert review.state == "UNASSIGNED"
+    assert review.expected_owner_human_identity_id is None
+    event = session.scalar(select(InboundEventRow).where(
+        InboundEventRow.external_event_id == event_id,
+    ))
+    assert artifact_decision_readiness(session, event)[0] == "FAILED"
+    with pytest.raises(ArtifactUnderstandingError, match="RETRIEVAL_NOT_AUTHORIZED"):
+        effective_artifact_text(session, event, "")
+    assert provider.calls == 1
+    assert session.scalar(select(ArtifactSensitiveReviewRow.id)) == review.id
+
+
+def test_default_artifact_sensitivity_review_feature_is_off():
+    assert _settings().artifact_sensitive_review_enabled is False

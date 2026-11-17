@@ -1363,6 +1363,158 @@
           }
         }
       }
+    },
+    "/api/v1/client/location/message/{message_id}": {
+      "get": {
+        "operationId": "getLocationContextForMessage",
+        "tags": [
+          "client-location"
+        ],
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evidence of the authenticated owner's Android-device position near the original WhatsApp message time. This does not prove human presence.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientMessageLocationContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the active tenant owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Location capability disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/client/location/context/observations": {
+      "put": {
+        "operationId": "putClientLocationContextObservation",
+        "tags": [
+          "client-location"
+        ],
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientLocationContextWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted time-stamped Android GPS evidence under explicit location-context consent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid location evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the active tenant owner can retain GPS history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Location history disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLocationErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2046,6 +2198,7 @@
             "type": "string",
             "enum": [
               "CLIENT_LOCATION_DISABLED",
+              "CLIENT_LOCATION_HISTORY_DISABLED",
               "CLIENT_LOCATION_INVALID",
               "CLIENT_LOCATION_STALE",
               "CLIENT_LOCATION_FUTURE",
@@ -2483,6 +2636,148 @@
             "items": {
               "$ref": "#/components/schemas/ClientTenantDirectoryMembershipView"
             }
+          }
+        }
+      },
+      "ClientMessageLocationContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "message_id",
+          "status",
+          "evidence_basis",
+          "message_at"
+        ],
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "1"
+          },
+          "message_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DEVICE_POSITION_NEAR_MESSAGE",
+              "AUTHORSHIP_NOT_PROVEN",
+              "NO_ACTIVE_DEVICE",
+              "NO_TIME_MATCHED_LOCATION",
+              "AMBIGUOUS_DEVICES",
+              "LOCATION_TOO_IMPRECISE"
+            ]
+          },
+          "evidence_basis": {
+            "type": "string",
+            "const": "ANDROID_DEVICE_POSITION_NEAR_WHATSAPP_MESSAGE_TIME"
+          },
+          "message_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "location_observation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "location_device_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "latitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -180,
+            "maximum": 180
+          },
+          "accuracy_m": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0,
+            "maximum": 10000
+          },
+          "precision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "PRECISE",
+              "APPROXIMATE",
+              null
+            ]
+          },
+          "captured_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "delta_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -60,
+            "maximum": 60
+          }
+        }
+      },
+      "ClientLocationContextWriteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "latitude",
+          "longitude",
+          "accuracy_m",
+          "captured_at",
+          "context_history_opt_in"
+        ],
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "accuracy_m": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 10000
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/ClientLocationPrecision"
+          },
+          "context_history_opt_in": {
+            "type": "boolean",
+            "const": true
           }
         }
       }
