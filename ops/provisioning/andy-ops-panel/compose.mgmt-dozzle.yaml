@@ -1,0 +1,29 @@
+# Separate read-only Dozzle base-path instance during migration.
+# Uses the existing FILTERED Docker socket, never the host Docker socket.
+name: attention-router-mgmt-observability
+services:
+  mgmt-dozzle:
+    image: amir20/dozzle@sha256:7c4fb7f8124f5dea15ade881535cc19cc9a03e66639fd28154ff43a93b78944b
+    container_name: andy-mgmt-dozzle-base-candidate
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    pids_limit: 110
+    mem_limit: 256m
+    cpus: 0.35
+    environment:
+      DOZZLE_BASE: /observability/dozzle
+      DOCKER_HOST: unix:///run/andy-dozzle-view/docker.sock
+      DOZZLE_NO_ANALYTICS: "true"
+    volumes:
+      - type: volume
+        source: filtered_docker_socket
+        target: /run/andy-dozzle-view
+        read_only: true
+    ports:
+      - "127.0.0.1:18081:8080"
+volumes:
+  filtered_docker_socket:
+    external: true
+    name: attention-router-dozzle-v1_dozzle_filtered_socket
