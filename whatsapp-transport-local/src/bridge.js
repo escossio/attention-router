@@ -114,6 +114,7 @@ function createInboundBridge(config, logger = console, deps = {}) {
       source: config.inboundSource,
       channel: config.inboundChannel,
       sourceAccount: config.sourceAccount,
+      conversationCaptureOwnerVoiceEnabled: config.conversationCaptureOwnerVoiceEnabled === true,
       conversationCaptureOwnerTextEnabled: config.conversationCaptureOwnerTextEnabled === true,
       clientInfo: options.clientInfo,
       authenticatedSelfIdentity: options.authenticatedSelfIdentity,
@@ -139,17 +140,6 @@ function createInboundBridge(config, logger = console, deps = {}) {
       normalized.metadata.account_outbound_media_capture_basis =
         'VERIFIED_ACCOUNT_UNATTRIBUTED';
     }
-    const wirePayload = Object.fromEntries(
-      Object.entries(normalized).filter(([key]) => key !== 'identity'),
-    );
-    const pending = enqueuePending(config, normalized, wirePayload);
-    const deliveryPromise = deliverPendingFile(
-      config,
-      pending.file,
-      logger,
-      fetchImpl,
-      { observability, parentContext: receiveSpan?.context || null },
-    );
     const isVoice = ['ptt', 'audio'].includes(
       String(normalized.message_type || '').toLowerCase(),
     );
@@ -171,6 +161,24 @@ function createInboundBridge(config, logger = console, deps = {}) {
         && (isVoice || config.whatsappArtifactIngestionEnabled === true))
       || manualOwnerVoice
       || unattributedAccountMedia
+      || (fromMe && isVoice && normalized.has_media
+        && normalized.metadata?.semantic_attribution?.basis === 'OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1')
+    );
+    if (isVoice) {
+      normalized.metadata.media_capture_status = !normalized.has_media ? 'MEDIA_NOT_AVAILABLE'
+        : !shouldCaptureMedia || !config.mediaRoot || !config.mediaNotificationUrl
+          ? 'MEDIA_CAPTURE_DISABLED' : 'TRANSCRIPTION_PENDING';
+    }
+    const wirePayload = Object.fromEntries(
+      Object.entries(normalized).filter(([key]) => key !== 'identity'),
+    );
+    const pending = enqueuePending(config, normalized, wirePayload);
+    const deliveryPromise = deliverPendingFile(
+      config,
+      pending.file,
+      logger,
+      fetchImpl,
+      { observability, parentContext: receiveSpan?.context || null },
     );
     const mediaPromise = shouldCaptureMedia
       ? captureInboundMedia(config, message, normalized, logger, fetchImpl)

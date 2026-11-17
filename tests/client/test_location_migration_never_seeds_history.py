@@ -2,7 +2,7 @@
 from pathlib import Path
 
 BASE=Path(__file__).resolve().parents[2]
-MIGRATION=BASE/"alembic/versions/0062_client_location_observations_v1.py"
+MIGRATION=BASE/"alembic/versions/0063_client_location_observations_v1.py"
 
 
 def test_migration_does_not_backfill_without_explicit_optin():

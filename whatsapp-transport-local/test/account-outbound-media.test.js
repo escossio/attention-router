@@ -227,22 +227,30 @@ test('opt-in defaults off and requires tenant, signed forwarding, Artifact plane
   assert.equal(createConfig({ ...settings, LOCAL_INBOUND_CHANNEL: 'telegram' }).conversationCaptureUnattributedOutboundMediaEnabled, false);
 });
 
-test('notification failure remains durable and keeps the unknown attribution', async (t) => {
-  const cfg = fixture(t);
-  const events = [];
-  const failure = await createInboundBridge(cfg, logger, { fetchImpl: responder(events) })
-    .handleMessage(imageMessage({
-      downloadMedia: async () => { throw new Error('DOWNLOAD_EMPTY'); },
-    }), options);
-  assert.equal(failure.status, 'delivered');
-  assert.equal(failure.media.status, 'media_capture_failed');
-  assert.equal(events.length, 2);
-  const event = events.find(x => x.url === cfg.inboundForwardUrl).payload;
-  const media = events.find(x => x.url === cfg.mediaNotificationUrl).payload;
-  assert.equal(event.event_origin, 'UNKNOWN_FROM_ME');
-  assert.equal(event.owner_authenticated, false);
-  assert.equal(event.content, '');
-  assert.equal(media.capture_status, 'FAILED');
-  assert.equal(media.media_ref, undefined);
-  assert.equal(media.content_sha256, undefined);
-});
+for (const [errorCode, captureStatus] of [['DOWNLOAD_EMPTY', 'MISSING'], ['DOWNLOAD_REJECTED', 'FAILED']]) {
+  test(`terminal ${captureStatus} receipt remains durable without human attribution`, async (t) => {
+    const cfg = fixture(t);
+    const events = [];
+    let downloads = 0;
+    const message = imageMessage({
+      downloadMedia: async () => { downloads++; throw new Error(errorCode); },
+    });
+    const deps = { fetchImpl: responder(events) };
+    const failure = await createInboundBridge(cfg, logger, deps).handleMessage(message, options);
+    assert.equal(failure.status, 'delivered');
+    assert.equal(failure.media.status, 'media_capture_failed');
+    assert.equal(downloads, 1);
+    assert.equal(events.length, 2);
+    const event = events.find(x => x.url === cfg.inboundForwardUrl).payload;
+    const media = events.find(x => x.url === cfg.mediaNotificationUrl).payload;
+    assert.equal(event.event_origin, 'UNKNOWN_FROM_ME');
+    assert.equal(event.owner_authenticated, false);
+    assert.equal(event.content, '');
+    assert.equal(media.capture_status, captureStatus);
+    assert.equal(media.media_ref, undefined);
+    assert.equal(media.content_sha256, undefined);
+    const restarted = await createInboundBridge(cfg, logger, deps).handleMessage(message, options);
+    assert.equal(restarted.media.status, 'media_receipt_replayed');
+    assert.equal(downloads, 1);
+  });
+}

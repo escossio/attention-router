@@ -535,6 +535,7 @@ def test_reconciliation_ignores_unfinished_voice_transcription(capture):
     event = inbound(
         "synthetic-stt-still-working",
         "",
+        at=now_utc(),  # This test covers in-flight STT before the capture deadline.
         metadata={"message_type": "ptt", "has_media": True},
     )
     services.receive_normalized_inbound_event(capture, event)
@@ -552,3 +553,390 @@ def test_reconciliation_ignores_unfinished_voice_transcription(capture):
     result = reconcile_live_capture_batch(capture, limit=10)
     assert result.examined == 0
     assert messages(capture)[0].metadata_json["content_state"] == "PENDING_TRANSCRIPTION"
+
+
+def test_policy_voice_transcript_preserves_raw_origin_and_preview(capture):
+    from attention_router.application.conversation_preview import preview_conversation
+    event = outgoing("policy-voice", "", origin="UNKNOWN_FROM_ME")
+    event = event.model_copy(update={"metadata": {
+        **event.metadata, "message_type": "ptt", "has_media": True,
+        "final_from_me_classification": "UNKNOWN_FROM_ME",
+        "from_me_classification_reason": "UNMATCHED_MEDIA_FROM_ME",
+        "semantic_attribution": {"basis": "OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1",
+                                 "tenant_id": event.tenant_id,
+                                 "source_account": event.metadata["source_account"],
+                                 "account_verified": True},
+    }})
+    services.receive_normalized_inbound_event(capture, event)
+    capture.commit()
+    row = messages(capture)[0]
+    original_id = row.id
+    assert row.metadata_json["event_origin"] == "UNKNOWN_FROM_ME"
+    record, transcript = _transcription(capture, event, text="Encontro sintético amanhã.")
+    capture_voice_transcription(capture, record, transcript)
+    capture_voice_transcription(capture, record, transcript)
+    assert messages(capture)[0].id == original_id
+    assert row.metadata_json["speaker_basis"] == "OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1"
+    assert row.metadata_json["transcription_id"] == transcript.id
+    assert row.sent_at.replace(tzinfo=UTC) == STAMP
+    preview = preview_conversation(capture, tenant_id=event.tenant_id,
+        source_account=event.metadata["source_account"],
+        conversation_key=event.metadata["conversation_key"])
+    assert preview["status"] == "PREVIEW_ONLY"
+    assert preview["messages"][0]["text"] == "Encontro sintético amanhã."
+    assert preview["durable_claims"] == []
+    assert preview_conversation(capture, tenant_id="other-tenant",
+        source_account=event.metadata["source_account"],
+        conversation_key=event.metadata["conversation_key"])["status"] == "NOT_FOUND"
+
+
+def test_proved_alias_resolves_lid_and_phone_without_cross_tenant(capture):
+    from attention_router.application.conversation_preview import resolve_conversation_alias
+    phone = "5500000000025@c.us"
+    event = inbound("alias-proof", "Mensagem sintética", metadata={
+        "peer_identifiers": [PEER_LID, phone], "alias_provenance": "PROVIDER_LID_PN_MAPPING",
+    })
+    services.receive_normalized_inbound_event(capture, event)
+    capture.commit()
+    args = dict(tenant_id=event.tenant_id, source_account=event.metadata["source_account"])
+    a = resolve_conversation_alias(capture, **args, identifier=phone)
+    b = resolve_conversation_alias(capture, **args, identifier=PEER_LID)
+    assert a == b and a["status"] == "MATCH"
+    assert resolve_conversation_alias(capture, tenant_id="other",
+        source_account=args["source_account"], identifier=phone)["status"] == "NOT_FOUND"
+
+
+def test_synthetic_bilateral_preview_incomplete_and_no_claims(capture):
+    from attention_router.application.conversation_preview import preview_selected_conversation
+    first = inbound("demo-in", "O encontro sintético será amanhã.")
+    second = outgoing("demo-out", "Confirmo o encontro sintético.", at=STAMP+timedelta(seconds=2))
+    third = outgoing("demo-audio", "", at=STAMP+timedelta(seconds=3), origin="UNKNOWN_FROM_ME")
+    third = third.model_copy(update={"metadata": {**third.metadata, "message_type": "ptt"}})
+    for event in (first, second, third):
+        services.receive_normalized_inbound_event(capture, event)
+    capture.commit()
+    result = preview_selected_conversation(capture, tenant_id=first.tenant_id,
+        source_account=first.metadata["source_account"], identifier=PEER_LID)
+    assert [m["provider_id"] for m in result["messages"]] == [e.external_event_id for e in (first, second, third)]
+    assert result["context_incomplete"] is True
+    assert result["messages"][2]["text"] is None
+    assert result["messages"][2]["author_basis"] == "UNRESOLVED"
+    assert len(result["episodes"]) == 1
+    assert len(result["episodes"][0]["message_ids"]) == 3
+    assert capture.scalar(select(func.count()).select_from(MemoryIngestionJobRow)) == 0
+
+
+@pytest.mark.parametrize("capture_state", [None, "TRANSCRIPTION_PENDING"])
+def test_deadline_preserves_message_and_late_transcription_recovers(capture, capture_state):
+    from attention_router.application.conversation_live_capture import expire_pending_capture
+    event = inbound('deadline-voice', '', metadata={'message_type':'ptt', 'has_media':True,
+                                                  'media_capture_status':capture_state})
+    services.receive_normalized_inbound_event(capture, event)
+    capture.commit()
+    row = messages(capture)[0]
+    assert expire_pending_capture(capture, now=STAMP+timedelta(minutes=16)) == 1
+    assert row.metadata_json['content_state'] == 'MEDIA_CAPTURE_TIMEOUT'
+    assert row.text is None
+    receipt, transcription = _transcription(capture, event, text='Recuperação sintética')
+    capture_voice_transcription(capture, receipt, transcription)
+    assert row.metadata_json['content_state'] == 'TRANSCRIBED'
+
+
+def test_alias_review_keeps_provider_evidence_and_is_reversible(capture):
+    from attention_router.application.conversation_preview import resolve_conversation_alias, set_alias_validity
+    phone = '5500000000025@c.us'
+    event = inbound('alias-review', 'Texto sintético', metadata={
+        'peer_identifiers':[PEER_LID,phone], 'alias_provenance':'PROVIDER_LID_PN_MAPPING'})
+    services.receive_normalized_inbound_event(capture,event)
+    capture.commit()
+    row=messages(capture)[0]
+    scope={'tenant_id':event.tenant_id,'source_account':event.metadata['source_account']}
+    set_alias_validity(capture,**scope,message_id=row.id,active=False,decision_ref='synthetic-revoke')
+    assert resolve_conversation_alias(capture,**scope,identifier=phone)['status']=='NOT_FOUND'
+    assert row.metadata_json['provider_peer_aliases']==[PEER_LID,phone]
+    set_alias_validity(capture,**scope,message_id=row.id,active=True,decision_ref='synthetic-restore')
+    assert resolve_conversation_alias(capture,**scope,identifier=phone)['status']=='MATCH'
+    assert len(row.metadata_json['alias_decisions'])==2
+
+
+@pytest.mark.parametrize('mutation', [
+    {'from_me_classification_reason':'MEDIA_REFERENCE_PENDING'},
+    {'is_group':True}, {'owner_self_chat':True},
+    {'outbound_provenance':{'outbox_id':'synthetic'}},
+    {'semantic_attribution':{'basis':'OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1','account_verified':True,
+                             'tenant_id':'different-tenant','source_account':'default'}},
+])
+def test_policy_voice_denies_ambiguous_or_cross_scope_author(capture, mutation):
+    event=outgoing('policy-denied','',origin='UNKNOWN_FROM_ME')
+    meta={**event.metadata,'message_type':'ptt','has_media':True,
+          'final_from_me_classification':'UNKNOWN_FROM_ME',
+          'from_me_classification_reason':'UNMATCHED_MEDIA_FROM_ME',
+          'semantic_attribution':{'basis':'OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1','account_verified':True,
+                                  'tenant_id':event.tenant_id,'source_account':event.metadata['source_account']}}
+    meta.update(mutation)
+    event=event.model_copy(update={'metadata':meta})
+    services.receive_normalized_inbound_event(capture,event)
+    capture.commit()
+    row=messages(capture)[0]
+    assert row.metadata_json['speaker_basis']=='UNRESOLVED'
+    assert row.metadata_json['event_origin']=='UNKNOWN_FROM_ME'
+
+
+def synthetic_event_messages():
+    rows = [
+        ('m10', 'Maria', 'maria', '2026-11-10T12:00:00+00:00', 'Proponho viagem sábado [evento:aurora].'),
+        ('o12', 'OWNER', 'maria', '2026-11-12T12:00:00+00:00', 'Remarco a viagem para domingo às 09:00 [evento:aurora].'),
+        ('m13', 'Maria', 'maria', '2026-11-13T12:00:00+00:00', 'Confirmo domingo às 09:00 [evento:aurora].'),
+        ('j13', 'Joao', 'joao', '2026-11-13T13:00:00+00:00', 'Estou ciente da mudança [evento:aurora].'),
+        ('p13', 'Pedro', 'pedro', '2026-11-13T14:00:00+00:00', 'Menciono a viagem [evento:aurora].'),
+        ('other', 'Pedro', 'pedro', '2026-11-13T15:00:00+00:00', 'Proponho viagem domingo [evento:outra].'),
+        ('uncertain', 'Joao', 'joao', '2026-11-13T16:00:00+00:00', 'Proponho passeio amanhã.'),
+    ]
+    return [dict(message_id=mid, author=author, conversation_key=conversation,
+                 sent_at=sent, text=text, tenant_id='synthetic', source_account='account',
+                 author_basis='OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1' if author == 'OWNER' else 'EXTERNAL_SENDER',
+                 origin='UNKNOWN_FROM_ME' if author == 'OWNER' else 'EXTERNAL_INBOUND',
+                 kind='VOICE' if mid in {'m10', 'o12'} else 'TEXT',
+                 evidence={'transcription_id': 'synthetic-stt-' + mid} if mid in {'m10', 'o12'} else {})
+            for mid, author, conversation, sent, text in rows]
+
+
+def test_multiday_cross_conversation_event_preview(tmp_path):
+    import json
+    from attention_router.application.conversation_preview import correlate_preview_events, query_preview_events
+    scope = dict(tenant_id='synthetic', source_account='account')
+    messages = synthetic_event_messages()
+    view = correlate_preview_events(messages[::-1], **scope)
+    event = view['events'][0]
+    assert event['event_id'] == 'aurora'
+    assert event['current']['event_time']['date'] == '2026-11-15'
+    assert event['current']['author'] == 'Maria'
+    assert event['history'][0]['event_time']['date'] == '2026-11-14'
+    assert event['history'][1]['action'] == 'CHANGES'
+    assert event['current']['state'] == 'CONFIRMED_DECLARATION'
+    assert len(view['events']) == 3
+    assert view['durable_claims'] == []
+    queries = {
+        'planning': dict(event_id='aurora'),
+        'who_confirmed': dict(event_id='aurora', action='CONFIRMS'),
+        'when_changed': dict(event_id='aurora', action='CHANGES'),
+        'maria_history': dict(person='Maria'),
+        'joao_knows': dict(person='Joao', event_id='aurora', action='ACKNOWLEDGES'),
+        'pedro_knows': dict(person='Pedro', event_id='aurora', action='ACKNOWLEDGES'),
+        'meaning': dict(topic='excursão'),
+        'original': dict(evidence_id='m10'),
+    }
+    answers = {k: query_preview_events(view, **scope, **q) for k, q in queries.items()}
+    assert answers['pedro_knows']['status'] == 'NO_EVIDENCE'
+    assert answers['who_confirmed']['results'][0]['matches'][0]['author'] == 'Maria'
+    assert answers['joao_knows']['results'][0]['matches'][0]['message_id'] == 'j13'
+    assert len(answers['meaning']['results']) == 3
+    (tmp_path / 'events-demo.json').write_text(json.dumps({'preview': view, 'queries': answers}, ensure_ascii=False, indent=2))
+
+
+@pytest.mark.parametrize('text,stamp,zone,date,basis', [
+    ('amanhã', '2026-11-12T01:00:00+00:00', 'America/Sao_Paulo', '2026-11-12', 'RELATIVE_TO_PROVIDER_TIME'),
+    ('amanhã', '2026-11-12T01:00:00+00:00', 'UTC', '2026-11-13', 'RELATIVE_TO_PROVIDER_TIME'),
+    ('domingo', '2026-11-13T12:00:00+00:00', 'UTC', '2026-11-15', 'NEXT_WEEKDAY_HYPOTHESIS'),
+    ('2026-11-22 às 15:30', '2026-11-13T12:00:00+00:00', 'UTC', '2026-11-22', 'EXPLICIT_DATE'),
+])
+def test_event_time_uses_provider_clock(text, stamp, zone, date, basis):
+    from attention_router.application.conversation_preview import preview_event_time
+    result = preview_event_time(text, stamp, zone)
+    assert result['date'] == date and result['basis'] == basis
+    assert result['occurred'] is False
+
+
+def test_event_scope_reviews_conflicts_and_no_automated_claims():
+    from attention_router.application.conversation_preview import correlate_preview_events, query_preview_events
+    scope = dict(tenant_id='synthetic', source_account='account')
+    messages = synthetic_event_messages()
+    with pytest.raises(ValueError, match='SCOPE'):
+        correlate_preview_events(messages, tenant_id='other', source_account='account')
+    review = dict(**scope, decision_ref='r1', message_id='m13', action='REVOKE')
+    view = correlate_preview_events(messages, **scope, reviews=[review, review])
+    assert view['events'][0]['current']['state'] == 'PROPOSED'
+    assert 'm13' in view['evidence']  # original archive is never rewritten
+    restored = {**review, 'decision_ref': 'r2', 'action': 'RESTORE'}
+    assert correlate_preview_events(messages, **scope, reviews=[review, restored])['events'][0]['current']['state'] == 'CONFIRMED_DECLARATION'
+    messages.append({**messages[2], 'message_id': 'contradiction', 'sent_at': '2026-11-14T12:00:00+00:00',
+                     'text': 'Confirmo 2026-11-16 [evento:aurora].'})
+    assert correlate_preview_events(messages, **scope)['events'][0]['current']['state'] == 'CONFLICT'
+    messages[-1]['origin'] = 'ROUTER_AUTOMATED_OUTBOUND_OBSERVED'
+    view = correlate_preview_events(messages, **scope)
+    assert view['events'][0]['current']['state'] == 'CONFIRMED_DECLARATION'
+    assert view['context_incomplete']
+    with pytest.raises(ValueError, match='SCOPE'):
+        query_preview_events(view, tenant_id='other', source_account='account')
+
+
+def test_event_ambiguous_dates_and_quote_continuity():
+    from attention_router.application.conversation_preview import correlate_preview_events, preview_event_time
+    assert preview_event_time('sábado ou domingo', STAMP.isoformat(), 'UTC')['status'] == 'AMBIGUOUS'
+    assert preview_event_time('2026-02-30', STAMP.isoformat(), 'UTC')['status'] == 'INVALID_DATE'
+    rows = synthetic_event_messages()[:2]
+    rows[1]['text'] = 'Remarco para domingo.'
+    rows[1]['reply_message_id'] = 'm10'
+    view = correlate_preview_events(rows, tenant_id='synthetic', source_account='account')
+    assert len(view['events']) == 1
+    assert view['events'][0]['current']['event_time']['date'] == '2026-11-15'
+
+
+def test_event_search_interval_and_unconfirmed_mentions():
+    from attention_router.application.conversation_preview import correlate_preview_events, query_preview_events
+    scope = dict(tenant_id='synthetic', source_account='account')
+    rows = synthetic_event_messages()
+    rows.append({**rows[2], 'message_id': 'reported', 'sent_at': '2026-11-14T12:00:00+00:00',
+                 'text': 'Pedro disse confirmo segunda [evento:aurora].'})
+    view = correlate_preview_events(rows, **scope)
+    assert view['events'][0]['current']['message_id'] == 'm13'
+    result = query_preview_events(view, **scope, event_id='aurora',
+                                 since='2026-11-12T00:00:00', until='2026-11-12T23:59:59+00:00')
+    assert [h['message_id'] for h in result['results'][0]['matches']] == ['o12']
+    rows.append({**rows[2], 'message_id': 'hour', 'sent_at': '2026-11-14T13:00:00+00:00',
+                 'text': 'Confirmo domingo às 10:00 [evento:aurora].'})
+    assert correlate_preview_events(rows, **scope)['events'][0]['current']['state'] == 'CONFLICT'
+
+
+def test_contestation_without_date_does_not_silently_confirm():
+    from attention_router.application.conversation_preview import correlate_preview_events
+    rows = synthetic_event_messages()
+    rows.append({**rows[2], 'message_id': 'contested', 'sent_at': '2026-11-14T12:00:00+00:00',
+                 'text': 'Discordo [evento:aurora].'})
+    result = correlate_preview_events(rows, tenant_id='synthetic', source_account='account')
+    assert result['events'][0]['current']['state'] == 'CONTESTED'
+    assert result['events'][0]['relations'][-1]['type'] == 'CONTESTS'
+
+
+def natural_event_messages():
+    rows = synthetic_event_messages()
+    texts = [
+        'Proponho viagem para Serra Azul sábado.',
+        'Sábado não será possível; proponho domingo às 09:00.',
+        'Combinado domingo às 09:00.',
+        'Estou ciente da viagem para Serra Azul domingo.',
+        'Proponho passeio para Serra Azul domingo.',
+        'Proponho viagem para Vale Verde domingo.',
+        'Talvez confirme domingo.',
+    ]
+    for row, text in zip(rows, texts, strict=True):
+        row['text'] = text
+    rows[1]['reply_message_id'] = 'm10'
+    rows[2]['reply_message_id'] = 'o12'
+    rows[6]['reply_message_id'] = 'm13'
+    return rows
+
+
+def test_natural_event_evolution_and_queries(tmp_path):
+    import json
+    from attention_router.application.conversation_preview import correlate_preview_events, answer_preview_question
+    scope = dict(tenant_id='synthetic', source_account='account')
+    rows = natural_event_messages()
+    view = correlate_preview_events(rows[::-1], **scope)
+    event = next(e for e in view['events'] if e['history'][0]['message_id'] == 'm10')
+    assert event['current']['event_time']['date'] == '2026-11-15'
+    assert event['current']['author'] == 'Maria'
+    assert event['history'][0]['superseded_by'] == 'o12'
+    assert event['history'][0]['event_time']['date'] == '2026-11-14'
+    assert len(view['hypotheses']) == 3  # Serra Azul candidates; Vale Verde never joins
+    assert all('other' not in h['evidence_ids'] for h in view['hypotheses'])
+    assert all(h['status'] == 'HYPOTHESIS' for h in view['hypotheses'])
+    questions = ['O que ficou combinado sobre a viagem?', 'Quem confirmou a mudança?',
+                 'Quando a data foi alterada?', 'O que Maria falou anteriormente?',
+                 'João estava sabendo da mudança?', 'Qual é o estado mais recente do planejamento?',
+                 'Quais mensagens sustentam essa resposta?']
+    answers = [answer_preview_question(view, **scope, question=q, event_id=event['event_id'],
+               person='Joao' if q.startswith('João') else 'Maria' if 'anteriormente' in q else None)
+               for q in questions]
+    assert answers[1]['answers'][0]['declarations'][0]['author'] == 'Maria'
+    assert answers[4]['status'] == 'NO_EVIDENCE'  # João's other conversation is only a hypothesis
+    review = dict(**scope, decision_ref='synthetic-link', action='LINK', message_id='j13', target_message_id='m13')
+    linked = correlate_preview_events(rows, **scope, reviews=[review])
+    confirmed = answer_preview_question(linked, **scope, question=questions[4], event_id=event['event_id'], person='Joao')
+    assert confirmed['status'] == 'SUPPORTED'
+    assert confirmed['answers'][0]['declarations'][0]['association_basis'] == 'OWNER_REVIEW'
+    assert view['durable_claims'] == linked['durable_claims'] == []
+    (tmp_path / 'natural-events-demo.json').write_text(json.dumps(
+        {'before_review': view, 'questions': dict(zip(questions, answers, strict=True)),
+         'after_review': linked, 'joao_after_review': confirmed}, ensure_ascii=False, indent=2))
+
+
+def test_event_reviews_redaction_replay_and_no_false_confirmation():
+    from attention_router.application.conversation_preview import correlate_preview_events, answer_preview_question
+    from attention_router.application.memory import preview_event_candidate
+    scope = dict(tenant_id='synthetic', source_account='account')
+    for text in ['Confirmo domingo?', 'Talvez confirmo domingo.', 'Maria disse confirmo domingo.', 'Não confirmo domingo.']:
+        assert preview_event_candidate(text)['action'] != 'CONFIRMS'
+    rows = natural_event_messages()
+    review = dict(**scope, decision_ref='exclude', action='EXCLUDE', message_id='m13')
+    view = correlate_preview_events(rows, **scope, reviews=[review, review])
+    assert 'm13' not in view['evidence']
+    assert 'm13' in view['excluded_evidence_ids']
+    assert view['events'][0]['current']['state'] == 'PROPOSED'
+    assert answer_preview_question(view, **scope, question='Qual é a senha?')['status'] == 'UNSUPPORTED_QUESTION'
+    with pytest.raises(ValueError, match='REPLAY_CONFLICT'):
+        correlate_preview_events(rows, **scope, reviews=[review, {**review, 'action':'RESTORE'}])
+    link = dict(**scope, decision_ref='link', action='LINK', message_id='j13', target_message_id='m13')
+    unlink = dict(**scope, decision_ref='unlink', action='UNLINK', message_id='j13')
+    assert correlate_preview_events(rows, **scope, reviews=[link, unlink])['events'] == correlate_preview_events(rows, **scope)['events']
+
+
+@pytest.mark.parametrize('text,status,date', [
+    ('depois de amanhã', 'INTERPRETED', '2026-11-16'),
+    ('ontem', 'INTERPRETED', '2026-11-13'),
+    ('amanhã ou domingo', 'AMBIGUOUS', None),
+    ('domingo passado', 'UNRESOLVED', None),
+])
+def test_relative_time_no_silent_wrong_day(text, status, date):
+    from attention_router.application.conversation_preview import preview_event_time
+    value = preview_event_time(text, STAMP.isoformat(), 'UTC')
+    assert value['status'] == status
+    assert value.get('date') == date
+
+
+def test_review_link_rejects_future_and_revoked_evidence():
+    from attention_router.application.conversation_preview import correlate_preview_events
+    scope = dict(tenant_id='synthetic', source_account='account')
+    review = dict(**scope, decision_ref='bad-link', action='LINK', message_id='m10', target_message_id='m13')
+    with pytest.raises(ValueError, match='TARGET_UNAVAILABLE'):
+        correlate_preview_events(natural_event_messages(), **scope, reviews=[review])
+
+
+def test_mentioned_person_is_not_speaker_or_knowing_participant():
+    from attention_router.application.conversation_preview import correlate_preview_events, query_preview_events
+    scope = dict(tenant_id='synthetic', source_account='account')
+    rows = natural_event_messages()
+    rows[4]['text'] = 'Proponho passeio para Serra Azul com Maria domingo.'
+    alias = dict(**scope, label='Maria', actor_id='Maria', basis='OWNER_REVIEWED_ALIAS', evidence_ref='synthetic-alias-review')
+    view = correlate_preview_events(rows, **scope, person_aliases=[alias])
+    result = query_preview_events(view, **scope, person='Maria', person_role='MENTIONED')
+    assert result['results'][0]['matches'][0]['author'] == 'Pedro'
+    assert result['results'][0]['matches'][0]['message_id'] == 'p13'
+    assert query_preview_events(view, **scope, person='Maria', action='ACKNOWLEDGES')['status'] == 'NO_EVIDENCE'
+    ambiguous = correlate_preview_events(rows, **scope, person_aliases=[alias, {**alias, 'actor_id':'another-Maria'}])
+    assert query_preview_events(ambiguous, **scope, person='Maria', person_role='MENTIONED')['status'] == 'NO_EVIDENCE'
+    with pytest.raises(ValueError, match='SCOPE'):
+        correlate_preview_events(rows, **scope, person_aliases=[{**alias, 'tenant_id':'other'}])
+
+def test_capture_deadline_respects_configured_tenant(session, monkeypatch):
+    from attention_router.application.conversation_live_capture import expire_pending_capture
+    from tests.integration.test_postgres_conversation_live_capture import receipt
+    from tests.test_whatsapp_artifacts import _second_tenant
+    monkeypatch.setattr(settings, 'conversation_capture_enabled', True)
+    monkeypatch.setattr(settings, 'conversation_capture_start_at', STAMP-timedelta(minutes=1))
+    monkeypatch.setattr(settings, 'conversation_capture_tenant_id', None)
+    other_tenant = _second_tenant(session)
+    first = receipt('synthetic-deadline-scope-a', voice=True)
+    other = receipt('synthetic-deadline-scope-b', voice=True)
+    other.tenant_id = other_tenant
+    session.add_all([first, other])
+    session.flush()
+    for item in (first, other):
+        assert capture_live_receipt(session, item).status == 'ARCHIVED'
+    session.commit()
+    monkeypatch.setattr(settings, 'conversation_capture_tenant_id', DEFAULT_TENANT_ID)
+    assert expire_pending_capture(session, now=STAMP+timedelta(minutes=16)) == 1
+    rows = {r.tenant_id:r for r in messages(session)}
+    assert rows[DEFAULT_TENANT_ID].metadata_json['content_state'] == 'MEDIA_CAPTURE_TIMEOUT'
+    assert rows[other_tenant].metadata_json['content_state'] == 'PENDING_TRANSCRIPTION'
+    assert all(r.text is None for r in rows.values())

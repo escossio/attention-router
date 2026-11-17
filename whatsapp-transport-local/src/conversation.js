@@ -27,7 +27,10 @@ function identityFromAliases(aliases) {
   const normalized = normalizeAliases(aliases);
   const lid = normalized.find((value) => identifierKind(value) === 'lid');
   const phone = normalized.find((value) => identifierKind(value) === 'c.us');
-  const primary = lid || phone || (normalized.length === 1 ? normalized[0] : null);
+  const conflicting = normalized.filter(value => identifierKind(value) === 'lid').length > 1
+    || normalized.filter(value => identifierKind(value) === 'c.us').length > 1
+    || (normalized.length > 1 && normalized.some(value => identifierKind(value) === 'other'));
+  const primary = conflicting ? null : lid || phone || (normalized.length === 1 ? normalized[0] : null);
   if (!primary) {
     return {
       state: 'AMBIGUOUS',
@@ -85,6 +88,12 @@ async function resolveConversationIdentity(message, client = null, options = {})
   if (typeof client?.getContactLidAndPhone === 'function') {
     try {
       const mappings = await client.getContactLidAndPhone([peer]);
+      if (!Array.isArray(mappings) || mappings.some(mapping =>
+        !mapping || (mapping.lid !== peer && mapping.pn !== peer)
+        || identifierKind(mapping.lid) !== 'lid'
+        || (mapping.pn != null && identifierKind(mapping.pn) !== 'c.us'))) {
+        return { ...identityFromAliases([]), reason: 'PROVIDER_MAPPING_CONFLICT' };
+      }
       firstContactMappings = mappings;
       for (const mapping of mappings || []) {
         aliases.push(mapping?.lid, mapping?.pn);
@@ -95,6 +104,9 @@ async function resolveConversationIdentity(message, client = null, options = {})
     }
   }
   const identity = identityFromAliases(aliases);
+  if (identity.state === 'READY' && firstContactMappings?.length) {
+    identity.alias_provenance = 'PROVIDER_LID_PN_MAPPING';
+  }
   if (options.firstContactEnabled === true) {
     const verified = firstContactIdentity(peer, firstContactMappings);
     if (verified) identity.first_contact_identity = verified;

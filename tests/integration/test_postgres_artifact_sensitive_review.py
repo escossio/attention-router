@@ -51,7 +51,7 @@ def test_postgres_sensitive_review_schema_is_private_and_separate(Session):
         assert "uq_artifact_sensitive_review_source" in uniques
         assert "ck_artifact_sensitive_review_state" in checks
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0062_artifact_sensitive_review"
+            "0063_location_context_v1"
         )
 
 

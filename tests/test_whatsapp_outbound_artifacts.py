@@ -319,3 +319,44 @@ def test_outbound_document_pdf_uses_existing_canonical_artifact(
     assert result.registration.receipt.external_receipt_id == (
         f"whatsapp:{event.external_event_id}:media"
     )
+
+@pytest.mark.parametrize('mutation', [None, 'tenant', 'account', 'automation', 'reason', 'unverified', 'capture_disabled', 'historical'])
+def test_d01_voice_canonical_artifact_reuses_capture_policy(session, monkeypatch, tmp_path, mutation):
+    from datetime import timedelta
+    _enable(monkeypatch, tmp_path)
+    event = _outbound(session, kind='ptt')
+    # Provider-live classification in a wholly fictional test DB; no real data.
+    event.lineage_classification = 'HISTORICAL_UNKNOWN' if mutation == 'historical' else 'ORGANIC'
+    monkeypatch.setattr(settings, 'conversation_capture_enabled', mutation != 'capture_disabled')
+    monkeypatch.setattr(settings, 'conversation_capture_tenant_id', event.tenant_id)
+    monkeypatch.setattr(settings, 'conversation_capture_start_at', event.received_at-timedelta(seconds=1))
+    payload = deepcopy(event.payload)
+    metadata = payload['metadata']
+    metadata.pop('account_outbound_media_capture_basis')
+    attribution = {'basis':'OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1', 'account_verified':True,
+                   'tenant_id':event.tenant_id, 'source_account':metadata['source_account']}
+    metadata['semantic_attribution'] = attribution
+    if mutation == 'tenant':
+        attribution['tenant_id'] = 'another-synthetic-tenant'
+    elif mutation == 'account':
+        attribution['source_account'] = 'another-synthetic-account'
+    elif mutation == 'automation':
+        metadata['outbound_provenance'] = {'outbox_id':'synthetic-conflict'}
+    elif mutation == 'reason':
+        metadata['from_me_classification_reason'] = 'OUTBOUND_PROVENANCE_UNAVAILABLE'
+    elif mutation == 'unverified':
+        attribution['account_verified'] = False
+    event.payload = payload
+    session.flush()
+    notification, staging = _ready_notification(session, tmp_path,
+        mime_type='audio/ogg', media_kind='ptt')
+    if mutation:
+        with pytest.raises(ValueError, match='OUTBOUND_NOT_AUTHORIZED'):
+            stage_whatsapp_artifact_notification(session, notification, media_store=staging)
+        assert session.scalar(select(ArtifactRow)) is None
+    else:
+        result = stage_whatsapp_artifact_notification(session, notification, media_store=staging)
+        assert result.registration.artifact.artifact_kind == 'AUDIO'
+        assert result.registration.receipt.sender_actor_id is None
+        assert event.payload['event_origin'] == 'UNKNOWN_FROM_ME'
+        assert event.payload['owner_authenticated'] is False

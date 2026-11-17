@@ -1,0 +1,274 @@
+{
+  "$defs": {
+    "EvidenceSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "title": "Message Id",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "EvidenceSpan",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "source_account": {
+      "title": "Source Account",
+      "type": "string"
+    },
+    "event_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Event Id"
+    },
+    "actor_ref": {
+      "title": "Actor Ref",
+      "type": "string"
+    },
+    "participants": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Participants",
+      "type": "array"
+    },
+    "action": {
+      "enum": [
+        "PROPOSES",
+        "COUNTERPROPOSES",
+        "CHANGES",
+        "CONFIRMS",
+        "CANCELS",
+        "AGREES",
+        "DISAGREES",
+        "DENIES",
+        "QUESTIONS",
+        "ANSWERS",
+        "REPORTS",
+        "ACKNOWLEDGES",
+        "MENTIONS",
+        "UNKNOWN"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "topic": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Topic"
+    },
+    "message_time": {
+      "format": "date-time",
+      "title": "Message Time",
+      "type": "string"
+    },
+    "event_date": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Event Date"
+    },
+    "event_end_date": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Event End Date"
+    },
+    "event_local_time": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Event Local Time"
+    },
+    "timezone": {
+      "default": "UTC",
+      "title": "Timezone",
+      "type": "string"
+    },
+    "uncertain_time": {
+      "default": true,
+      "title": "Uncertain Time",
+      "type": "boolean"
+    },
+    "polarity": {
+      "enum": [
+        "POSITIVE",
+        "NEGATIVE",
+        "UNCERTAIN",
+        "INTERROGATIVE"
+      ],
+      "title": "Polarity",
+      "type": "string"
+    },
+    "negation_scope": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Negation Scope"
+    },
+    "quoted_speech": {
+      "default": false,
+      "title": "Quoted Speech",
+      "type": "boolean"
+    },
+    "references": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "References",
+      "type": "array"
+    },
+    "source_message_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Source Message Ids",
+      "type": "array"
+    },
+    "evidence_spans": {
+      "items": {
+        "$ref": "#/$defs/EvidenceSpan"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Evidence Spans",
+      "type": "array"
+    },
+    "contradiction_refs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Contradiction Refs",
+      "type": "array"
+    },
+    "confidence": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "certainty_basis": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Certainty Basis",
+      "type": "string"
+    },
+    "state": {
+      "enum": [
+        "PROPOSED_INTERPRETATION",
+        "UNRESOLVED"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "parser_version": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Parser Version",
+      "type": "string"
+    },
+    "source_engine": {
+      "default": "RULE",
+      "enum": [
+        "RULE",
+        "LLM",
+        "EMBEDDING"
+      ],
+      "title": "Source Engine",
+      "type": "string"
+    },
+    "language": {
+      "const": "pt-BR",
+      "default": "pt-BR",
+      "title": "Language",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tenant_id",
+    "source_account",
+    "event_id",
+    "actor_ref",
+    "action",
+    "message_time",
+    "polarity",
+    "source_message_ids",
+    "evidence_spans",
+    "confidence",
+    "certainty_basis",
+    "state",
+    "parser_version"
+  ],
+  "title": "Interpretation",
+  "type": "object"
+}

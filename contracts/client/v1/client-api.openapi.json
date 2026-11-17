@@ -1364,6 +1364,256 @@
         }
       }
     },
+    "/api/v1/integrations/contacts": {
+      "post": {
+        "tags": [
+          "contacts-preview"
+        ],
+        "summary": "Connect",
+        "operationId": "connectContactsPreview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectContacts"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactsConnectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "contacts-preview"
+        ],
+        "summary": "Revoke",
+        "operationId": "revokeContactsPreview",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactsConnectionResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ]
+      }
+    },
+    "/api/v1/integrations/contacts/lookup": {
+      "post": {
+        "tags": [
+          "contacts-preview"
+        ],
+        "summary": "Lookup",
+        "operationId": "lookupContactsPreview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupContact"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactsLookupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ]
+      }
+    },
+    "/api/v1/integrations/contacts/conversation": {
+      "post": {
+        "tags": [
+          "contacts-preview"
+        ],
+        "summary": "Conversation",
+        "operationId": "getBilateralConversationPreview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BilateralPreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ]
+      }
+    },
+    "/api/v1/integrations/contacts/aliases/review": {
+      "post": {
+        "tags": [
+          "contacts-preview"
+        ],
+        "summary": "Review Alias",
+        "operationId": "reviewBilateralAlias",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AliasReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ]
+      }
+    },
+    "/api/v1/integrations/contacts/conversation/retry-transcription": {
+      "post": {
+        "tags": [
+          "contacts-preview"
+        ],
+        "summary": "Retry Transcription",
+        "operationId": "retryBilateralTranscription",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryTranscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ClientSession": []
+          }
+        ]
+      }
+    },
     "/api/v1/client/location/message/{message_id}": {
       "get": {
         "operationId": "getLocationContextForMessage",
@@ -2638,6 +2888,332 @@
             }
           }
         }
+      },
+      "AliasReviewRequest": {
+        "properties": {
+          "source_account": {
+            "type": "string",
+            "maxLength": 180,
+            "minLength": 1,
+            "title": "Source Account"
+          },
+          "message_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Message Id"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "decision_ref": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Decision Ref"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_account",
+          "message_id",
+          "active",
+          "decision_ref"
+        ],
+        "title": "AliasReviewRequest"
+      },
+      "BilateralPreviewResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "PREVIEW_ONLY",
+              "NOT_FOUND",
+              "AMBIGUOUS",
+              "LOOKUP_LIMIT"
+            ],
+            "title": "Status"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "conversation_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Key"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "participants": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "associations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Associations"
+          },
+          "episodes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "relations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Relations"
+          },
+          "context_incomplete": {
+            "type": "boolean",
+            "title": "Context Incomplete",
+            "default": true
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "durable_claims": {
+            "items": {},
+            "type": "array",
+            "maxItems": 0,
+            "title": "Durable Claims"
+          },
+          "inferences": {
+            "items": {},
+            "type": "array",
+            "maxItems": 0,
+            "title": "Inferences"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "BilateralPreviewResponse"
+      },
+      "ConnectContacts": {
+        "properties": {
+          "authorization_code": {
+            "type": "string",
+            "maxLength": 8192,
+            "minLength": 8,
+            "title": "Authorization Code"
+          },
+          "consent": {
+            "type": "boolean",
+            "title": "Consent"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "authorization_code",
+          "consent"
+        ],
+        "title": "ConnectContacts"
+      },
+      "ContactsConnectionResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "CONNECTED_EPHEMERAL",
+              "DISCONNECTED"
+            ],
+            "title": "Status"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ContactsConnectionResponse"
+      },
+      "ContactsLookupResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "MATCH",
+              "NOT_FOUND",
+              "AMBIGUOUS",
+              "INCOMPLETE",
+              "INVALID_PHONE"
+            ],
+            "title": "Status"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource"
+          },
+          "saved_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved As"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "GOOGLE_CONTACTS"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "identity_verified": {
+            "type": "boolean",
+            "title": "Identity Verified",
+            "default": false
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ContactsLookupResponse"
+      },
+      "ConversationPreviewRequest": {
+        "properties": {
+          "source_account": {
+            "type": "string",
+            "maxLength": 180,
+            "minLength": 1,
+            "title": "Source Account"
+          },
+          "identifier": {
+            "type": "string",
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Identifier"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_account",
+          "identifier"
+        ],
+        "title": "ConversationPreviewRequest"
+      },
+      "LookupContact": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 8,
+            "title": "Phone"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phone"
+        ],
+        "title": "LookupContact"
+      },
+      "RetryTranscriptionRequest": {
+        "properties": {
+          "transcription_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Transcription Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "transcription_id"
+        ],
+        "title": "RetryTranscriptionRequest"
       },
       "ClientMessageLocationContext": {
         "type": "object",

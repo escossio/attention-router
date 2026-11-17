@@ -211,3 +211,34 @@ def test_candidate_insight_refuses_destructive_downgrade(
         assert connection.scalar(
             text("SELECT count(*) FROM candidate_insights")
         ) == 1
+
+
+def test_language_candidate_lifecycle_on_disposable_postgres(Session,tmp_path):
+    from tests.test_candidate_insights import (
+        test_language_v2e_review_graph_and_deletion,
+        test_structured_event_evolution_multiple_authors_and_contradictions,
+    )
+    with Session() as session:
+        test_language_v2e_review_graph_and_deletion(session,tmp_path)
+        session.rollback()
+    with Session() as session:
+        test_structured_event_evolution_multiple_authors_and_contradictions(session,tmp_path)
+        session.rollback()
+
+
+def test_governed_memory_restore_on_disposable_postgres(Session, tmp_path):
+    from tests.test_candidate_insights import test_governed_lifecycle_restore_and_export
+    with Session() as session:
+        test_governed_lifecycle_restore_and_export(session,tmp_path)
+
+
+def test_governed_revocation_race_on_disposable_postgres(Session, tmp_path, monkeypatch):
+    from tests.test_candidate_insights import test_governed_concurrent_revocation_linearizes_after_commit
+    with Session() as session:
+        test_governed_concurrent_revocation_linearizes_after_commit(session, tmp_path, monkeypatch)
+
+
+def test_governed_capture_pause_on_disposable_postgres(Session, tmp_path):
+    from tests.test_candidate_insights import test_governed_pause_prevents_archive_capture_and_replay
+    with Session() as session:
+        test_governed_pause_prevents_archive_capture_and_replay(session, tmp_path)

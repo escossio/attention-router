@@ -1,5 +1,7 @@
 # Status
 
-Draft dependency reconciliation only. Existing PR commits are preserved as ancestry; no PR or main branch is merged.
+Draft bilateral and governed-memory pilot. Builds on the dependency reconciliation branch; original Artifact/GPS/contract PR commits are preserved in ancestry.
 
-Artifact review remains independent of execution and semantic admission. GPS remains off by default; migration chain is 0061 TTS -> 0062 Artifact -> 0063 location. No existing data is renumbered or backfilled. Consent, retention, backups, publication of images/APK and deployment remain separate gates.
+D01 keeps technical origin and execution authority separate. Contacts OAuth is independent and opt-in. Semantic interpretation uses synthetic fixtures and existing V2E/V2F review and graph contracts. Canonical promotion and personal-data activation remain disabled.
+
+D06-A/D08-A architecture and minimization profile approved. Numerical retention, operational backups, legacy consumers, consent, Android frontiers and deployment remain blocked. Formal checks must be read for this exact SHA; laboratory results are not formal certification.

@@ -113,3 +113,40 @@ def test_postgres_live_archive_same_thread_stt_and_reconciliation(
         assert session.scalar(select(func.count()).select_from(MemoryIngestionJobRow))==0
         assert session.scalar(select(func.count()).select_from(MemoryCandidateRow))==0
         assert reconcile_live_capture_batch(session).examined==0
+
+
+def test_postgres_policy_voice_new_pending_state_reconciles(Session, monkeypatch):
+    monkeypatch.setattr(settings, "conversation_capture_enabled", True)
+    monkeypatch.setattr(settings, "conversation_capture_start_at", STAMP - timedelta(minutes=1))
+    monkeypatch.setattr(settings, "conversation_capture_tenant_id", DEFAULT_TENANT_ID)
+    with Session() as session:
+        event = receipt("pg-policy-voice", from_me=True, voice=True)
+        event.payload["event_origin"] = "UNKNOWN_FROM_ME"
+        meta = event.payload["metadata"]
+        meta.update({"from_me_classification": "UNKNOWN_FROM_ME",
+                     "final_from_me_classification": "UNKNOWN_FROM_ME",
+                     "from_me_classification_reason": "UNMATCHED_MEDIA_FROM_ME",
+                     "media_capture_status": "TRANSCRIPTION_PENDING",
+                     "semantic_attribution": {
+                         "basis": "OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1",
+                         "tenant_id": DEFAULT_TENANT_ID, "source_account": "synthetic",
+                         "account_verified": True}})
+        event.payload_hash = stable_hash(event.payload)
+        session.add(event)
+        session.flush()
+        capture_live_receipt(session, event)
+        session.add(VoiceTranscriptionRow(
+            id=new_id(), tenant_id=DEFAULT_TENANT_ID, inbound_event_id=event.id,
+            media_artifact_id=None, status="READY", transcript_text="Declaração sintética",
+            provider="synthetic", model="synthetic", provider_request_reference=None,
+            error_code=None, attempt_count=1, claimed_at=None, claimed_by=None,
+            created_at=STAMP, updated_at=STAMP, completed_at=STAMP,
+        ))
+        session.commit()
+        assert reconcile_live_capture_batch(session, limit=10).attached_transcripts == 1
+        assert reconcile_live_capture_batch(session, limit=10).attached_transcripts == 0
+
+def test_postgres_capture_deadline_respects_configured_tenant(Session, monkeypatch):
+    from tests.test_conversation_live_capture import test_capture_deadline_respects_configured_tenant
+    with Session() as session:
+        test_capture_deadline_respects_configured_tenant(session, monkeypatch)
