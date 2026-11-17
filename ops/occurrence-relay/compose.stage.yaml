@@ -1,0 +1,36 @@
+# Stage only: localhost ingress, no Zabbix actions, no MAESTRO endpoint.
+services:
+  occurrence-relay:
+    image: ${OCCURRENCE_RELAY_IMAGE:?pin an image tag built from exact Git SHA}
+    container_name: andy-occurrence-relay-stage
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.50
+    restart: "unless-stopped"
+    network_mode: bridge
+    ports:
+      - "127.0.0.1:${OCCURRENCE_RELAY_LOCAL_PORT:-18123}:8080"
+    environment:
+      RELAY_TENANT: synthetic-tenant
+      RELAY_SOURCE: zabbix
+      RELAY_DB_PATH: /data/relay.sqlite3
+      ZABBIX_INGRESS_TOKEN_FILE: /run/secrets/ingress_token
+      RELAY_BIND: 0.0.0.0
+      RELAY_PORT: "8080"
+    volumes:
+      - ${OCCURRENCE_RELAY_STAGE_DATA:?staging state directory required}:/data:rw
+      - ${OCCURRENCE_RELAY_INGRESS_TOKEN:?private scoped token path required}:/run/secrets/ingress_token:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; assert urlopen('http://127.0.0.1:8080/health',timeout=2).status==200"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "2"
