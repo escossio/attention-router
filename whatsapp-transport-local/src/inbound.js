@@ -1,3 +1,4 @@
+const { authenticatedSelfAliasSet } = require('./message-id');
 const { extractMessageId, hashIdentityParts, isAuthenticatedOwnerSelfChatMessage, kindForId } = require('./message-id');
 const { directionalPeerId, identityFromAliases } = require('./conversation');
 
@@ -57,6 +58,21 @@ function normalizeInboundMessage(message, options = {}) {
     && normalizedFinalFromMeClassification === 'OWNER_MANUAL_OUTBOUND_OBSERVED'
     && type.toLowerCase() === 'chat'
   );
+  const selfAliases = authenticatedSelfAliasSet(options.authenticatedSelfIdentity);
+  const policyAttributed = Boolean(
+    options.conversationCaptureOwnerVoiceEnabled === true
+    && tenantId && options.sourceAccount && source === 'wwebjs' && channel === 'whatsapp'
+    && options.authenticatedSelfAuthorityCurrent === true && selfAliases
+    && selfAliases.has(typeof message?.from === 'string' ? message.from : message?.from?._serialized)
+    && message?.fromMe === true && externalEventId && !ownerSelfChat && !isGroup
+    && conversation.state === 'READY' && /@(?:lid|c\.us)$/.test(conversation.peer_id || '')
+    && !selfAliases.has(conversation.peer_id)
+    && !message?.__outboundProvenance
+    && fromMeClassification === 'UNKNOWN_FROM_ME'
+    && normalizedFinalFromMeClassification === 'UNKNOWN_FROM_ME'
+    && message?.__fromMeClassificationReason === 'UNMATCHED_MEDIA_FROM_ME'
+    && ['ptt', 'audio'].includes(type.toLowerCase())
+  );
   return {
     schema_version: '1',
     tenant_id: tenantId,
@@ -83,6 +99,7 @@ function normalizeInboundMessage(message, options = {}) {
         quoted_message_id: message?._data?.quotedStanzaID || null,
         quoted_participant_id: message?._data?.quotedParticipant || null,
       } : {}),
+      quoted_message_id: message?._data?.quotedStanzaID || null,
       owner_self_chat: ownerSelfChat,
       authenticated_owner_self_chat_target: authenticatedSelfChatTarget,
       authenticated_owner: ownerSelfChat ? authenticatedWid : null,
@@ -91,6 +108,7 @@ function normalizeInboundMessage(message, options = {}) {
       conversation_state: conversation.state,
       conversation_reason: conversation.reason,
       peer_identifiers: conversation.peer_identifiers,
+      alias_provenance: conversation.alias_provenance || null,
       peer_id_kind: kindForId(conversation.peer_id),
       ...(!message?.fromMe && !isGroup && conversation.first_contact_identity
         ? { first_contact_identity: conversation.first_contact_identity } : {}),
@@ -101,6 +119,11 @@ function normalizeInboundMessage(message, options = {}) {
           ? message.__fromMeClassificationReason.slice(0, 80)
           : null
       ),
+      ...(policyAttributed ? { semantic_attribution: {
+        basis: 'OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1',
+        tenant_id: tenantId, source_account: options.sourceAccount,
+        account_verified: true,
+      } } : {}),
       outbound_provenance: message?.__outboundProvenance || null,
       has_media: hasMedia,
       input_modality: ['ptt', 'audio'].includes(type.toLowerCase()) ? 'voice' : 'text',

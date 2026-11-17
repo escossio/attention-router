@@ -3,6 +3,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { deliverPendingFile, enqueuePending, listPending } = require('./spool');
+const { stableHash } = require('./hmac');
+const captureFlights = new Map();
+
 const { resolveMessageLookupId } = require('./message-id');
 
 const ALLOWED_MIME_TYPES = new Set(['audio/ogg', 'audio/mpeg', 'audio/mp4']);
@@ -69,7 +72,7 @@ async function notify(config, normalized, payload, logger, fetchImpl) {
   return deliverPendingFile(spoolConfig, pending.file, logger, fetchImpl);
 }
 
-async function captureInboundMedia(config, message, normalized, logger = console, fetchImpl = fetch) {
+async function captureMediaAttempt(config, message, normalized, logger = console, fetchImpl = fetch, checkpoint = () => {}) {
   if (!config.mediaRoot || !config.mediaNotificationUrl) return { status: 'media_capture_disabled' };
   const base = {
     tenant_id: normalized.tenant_id,
@@ -79,6 +82,7 @@ async function captureInboundMedia(config, message, normalized, logger = console
   };
   const resolvedId = resolveMessageLookupId(message?.id);
   let downloadPhase = true;
+  let readyCheckpointed = false;
   const failureClass = (error) => {
     if (resolvedId.strategy === 'UNAVAILABLE') return 'MESSAGE_ID_UNAVAILABLE';
     if (error?.message === 'MEDIA_DOWNLOAD_TIMEOUT') return 'DOWNLOAD_TIMEOUT';
@@ -100,9 +104,23 @@ async function captureInboundMedia(config, message, normalized, logger = console
       timeout = setTimeout(() => reject(new Error('MEDIA_DOWNLOAD_TIMEOUT')), config.mediaDownloadTimeoutMs);
     });
     let media;
+    let active = true;
     try {
-      media = await Promise.race([message.downloadMedia.call(compatReceiver), timeoutPromise]);
+      // Retry only rejected downloads. A timed-out provider call cannot be
+      // canceled safely, so never overlap it with another download.
+      const download = async () => {
+        for (;;) {
+          if (!active) throw new Error('MEDIA_DOWNLOAD_TIMEOUT');
+          checkpoint();
+          try { return await message.downloadMedia.call(compatReceiver); }
+          catch (error) {
+            if (!['ECONNRESET', 'EAI_AGAIN', 'ETIMEDOUT', 'MEDIA_TEMPORARILY_UNAVAILABLE'].includes(error?.code)) throw error;
+          }
+        }
+      };
+      media = await Promise.race([download(), timeoutPromise]);
     } finally {
+      active = false;
       if (timeout) clearTimeout(timeout);
     }
     if (!media) throw new Error('DOWNLOAD_EMPTY');
@@ -139,19 +157,62 @@ async function captureInboundMedia(config, message, normalized, logger = console
       original_filename: filename,
       capture_status: 'READY',
     };
+    checkpoint(payload);
+    readyCheckpointed = true;
     const delivery = await notify(config, normalized, payload, logger, fetchImpl);
     return { status: delivery.done ? 'media_ready_notified' : 'media_notification_pending', delivery };
   } catch (error) {
+    // Notification/spool failure must not replace a durable READY receipt.
+    // Replay retries notification using that same receipt, without downloading.
+    if (readyCheckpointed) throw error;
     logger.warn?.('voice_media_download_failed', {
       media_kind: normalized.message_type,
       id_strategy: resolvedId.strategy,
       failure_class: error?.message === 'MESSAGE_ID_UNAVAILABLE'
         ? 'MESSAGE_ID_UNAVAILABLE' : failureClass(error),
     });
-    const payload = { ...base, capture_status: 'FAILED' };
+    const payload = { ...base, capture_status: error?.message === 'DOWNLOAD_EMPTY' ? 'MISSING' : 'FAILED' };
+    checkpoint(payload);
     const delivery = await notify(config, normalized, payload, logger, fetchImpl);
     return { status: 'media_capture_failed', error_code: error?.message || 'MEDIA_CAPTURE_FAILED', delivery };
   }
+}
+
+async function captureInboundMedia(config, message, normalized, logger = console, fetchImpl = fetch) {
+  if (!config.mediaRoot || !config.mediaNotificationUrl) return { status: 'media_capture_disabled' };
+  const scope = JSON.stringify([normalized.tenant_id, normalized.source,
+    normalized.metadata?.source_account, normalized.external_event_id]);
+  const directory = path.join(config.mediaRoot, '.capture-receipts');
+  fs.mkdirSync(directory, {recursive: true, mode: 0o700});
+  const file = path.join(directory, stableHash(scope) + '.json');
+  if (captureFlights.has(file)) return captureFlights.get(file);
+  const run = async () => {
+    const fingerprint = stableHash(JSON.stringify([scope, normalized.message_type,
+      normalized.occurred_at, normalized.metadata?.conversation_key]));
+    let state = {fingerprint, attempts: 0, payload: null};
+    if (fs.existsSync(file)) {
+      state = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (state.fingerprint !== fingerprint) throw new Error('MEDIA_CAPTURE_SCOPE_CONFLICT');
+    }
+    const checkpoint = payload => {
+      if (payload) state.payload = payload;
+      else {
+        if (state.attempts >= 3) throw new Error('MEDIA_ATTEMPTS_EXHAUSTED');
+        state.attempts++;
+      }
+      const tmp = file + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(state), {mode: 0o600});
+      fs.renameSync(tmp, file);
+    };
+    if (state.payload) {
+      const delivery = await notify(config, normalized, state.payload, logger, fetchImpl);
+      return {status: 'media_receipt_replayed', delivery};
+    }
+    return captureMediaAttempt(config, message, normalized, logger, fetchImpl, checkpoint);
+  };
+  const flight = run().finally(() => captureFlights.delete(file));
+  captureFlights.set(file, flight);
+  return flight;
 }
 
 async function drainMediaNotifications(config, logger = console, fetchImpl = fetch) {

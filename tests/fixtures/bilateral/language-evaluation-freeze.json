@@ -1,0 +1,5 @@
+{
+  "final_sha256": "ddc6e781d5d1d8f1b1be2e68b3bf5d02ed2fb90d24242ac256fd1671b7dd31fe",
+  "interpreter_sha256": "dcc226df83ffcb92156f4dc12a63c7fd727b86338d94661426a6aa052207f624",
+  "rule": "Freeze before first execution; do not tune interpreter on FINAL. Existing 26-case corpus is DEVELOPMENT."
+}

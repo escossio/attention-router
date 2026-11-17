@@ -495,3 +495,78 @@ test('default and non-manual fromMe classes never download owner voice', async (
   }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
   assert.equal(downloads, 0);
 });
+
+
+test('verified owner policy captures unknown voice without granting authority', async (t) => {
+  const { config } = tempConfig(t, { conversationCaptureOwnerVoiceEnabled: true,
+    sourceAccount: 'synthetic-account' });
+  let downloads = 0;
+  const bridge = createInboundBridge(config, logger, {
+    fetchImpl: async () => response(202, { status: 'accepted' }),
+  });
+  const message = {
+    id: { _serialized: 'wamid.synthetic.policy', remote: '5500000000029@c.us' },
+    from: '5500000000001@c.us', to: '5500000000029@c.us', type: 'ptt',
+    fromMe: true, hasMedia: true, timestamp: 1788652800,
+    __fromMeClassification: 'UNKNOWN_FROM_ME', __finalFromMeClassification: 'UNKNOWN_FROM_ME',
+    __fromMeClassificationReason: 'UNMATCHED_MEDIA_FROM_ME',
+    downloadMedia: async () => { downloads++; return {
+      mimetype: 'audio/ogg', data: Buffer.from('OggS synthetic policy').toString('base64'),
+    }; },
+  };
+  const options = { authenticatedSelfAuthorityCurrent: true, authenticatedSelfIdentity: {
+    ownerVerified: true, pn: message.from, wid: message.from, aliases: [message.from],
+  } };
+  for (const reason of ['MEDIA_REFERENCE_PENDING', 'UNMATCHED_MEDIA_REFERENCE', 'OUTBOUND_PROVENANCE_UNAVAILABLE']) {
+    const r = await bridge.handleMessage({...message, __fromMeClassificationReason: reason}, options);
+    assert.equal(r.normalized.metadata.semantic_attribution, undefined);
+  }
+  await bridge.handleMessage(message, {...options, authenticatedSelfAuthorityCurrent: false});
+  await bridge.handleMessage({...message, from: '5500000000099@c.us'}, options);
+  assert.equal(downloads, 0);
+  const result = await bridge.handleMessage(message, options);
+  assert.equal(downloads, 1);
+  assert.equal(result.normalized.event_origin, 'UNKNOWN_FROM_ME');
+  assert.equal(result.normalized.owner_authenticated, false);
+  assert.equal(result.normalized.metadata.semantic_attribution.basis, 'OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1');
+});
+
+test('media retry is bounded and durable replay never downloads again', async t => {
+ const {config}=tempConfig(t); let calls=0;
+ const bridge=createInboundBridge(config,logger,{fetchImpl:async()=>response(202,{status:'accepted'})});
+ const message={id:{_serialized:'synthetic-retry',remote:'1000000000002@lid'},from:'1000000000002@lid',
+ fromMe:false,type:'ptt',hasMedia:true,timestamp:1788652800,
+ downloadMedia:async()=>{calls++;if(calls<3)throw Object.assign(new Error('transient'), {code:'ECONNRESET'});return {mimetype:'audio/ogg',data:Buffer.from('OggS synthetic').toString('base64')};}};
+ await bridge.handleMessage(message); assert.equal(calls,3);
+ const restarted=createInboundBridge(config,logger,{fetchImpl:async()=>response(202,{status:'accepted'})});
+ await restarted.handleMessage(message); assert.equal(calls,3);
+ await assert.rejects(()=>restarted.handleMessage({...message,timestamp:1788652801}),/MEDIA_CAPTURE_SCOPE_CONFLICT/);
+});
+
+test('exhausted media download is terminal across restarts', async t => {
+ const {config}=tempConfig(t);let calls=0;
+ const make=()=>createInboundBridge(config,logger,{fetchImpl:async()=>response(202,{status:'accepted'})});
+ const message={id:{_serialized:'synthetic-exhausted',remote:'1000000000002@lid'},from:'1000000000002@lid',
+ fromMe:false,type:'ptt',hasMedia:true,timestamp:1788652800,downloadMedia:async()=>{calls++;throw Object.assign(new Error('transient'), {code:'ECONNRESET'});}};
+ await make().handleMessage(message);await make().handleMessage(message);assert.equal(calls,3);
+});
+
+
+test('spool failure preserves READY receipt for replay without download', async t => {
+  const {config, root} = tempConfig(t);
+  const obstacle = path.join(root, 'not-a-directory');
+  fs.writeFileSync(obstacle, 'synthetic obstacle');
+  const broken = {...config, mediaNotificationPendingDir: path.join(obstacle, 'pending')};
+  let calls = 0;
+  const message = voiceMessage(async () => {
+    calls++;
+    return {mimetype: 'audio/ogg', data: Buffer.from('OggS synthetic').toString('base64')};
+  }, 'synthetic-notification-failure');
+  const fetchImpl = async () => response(202, {status: 'accepted'});
+  await assert.rejects(() => createInboundBridge(broken, logger, {fetchImpl}).handleMessage(message));
+  const receipts = path.join(config.mediaRoot, '.capture-receipts');
+  const receipt = JSON.parse(fs.readFileSync(path.join(receipts, fs.readdirSync(receipts)[0]), 'utf8'));
+  assert.equal(receipt.payload.capture_status, 'READY');
+  await createInboundBridge(config, logger, {fetchImpl}).handleMessage(message);
+  assert.equal(calls, 1);
+});

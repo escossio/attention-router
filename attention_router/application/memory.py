@@ -426,12 +426,9 @@ def _message_lineage(message: ConversationMessageRow) -> EventLineage:
     )
 
 
-def extract_candidates(session: Session, message: ConversationMessageRow, run: MemoryExtractionRunRow) -> list[MemoryCandidateRow]:
-    text = message.text or ""
-    if not text or not message.searchable:
-        return []
+def preview_statement_candidates(text: str, sender_actor_id: str | None = None) -> list:
     candidates: list[tuple[str, dict[str, Any], float, str]] = []
-    sender = {"actor_id": message.sender_actor_id}
+    sender = {"actor_id": sender_actor_id}
     if match := NAME_RE.search(text):
         candidates.append(("identity.self_reported_name", {"text": match.group(1)}, .97, "SELF_REPORTED"))
     if match := PREFERRED_NAME_RE.search(text):
@@ -442,6 +439,15 @@ def extract_candidates(session: Session, message: ConversationMessageRow, run: M
         candidates.append(("relationship.sister_of", {"unresolved_name": match.group(1), "actor": sender}, .72, "DIRECT_MESSAGE_STATEMENT"))
     if not candidates and re.search(r"(?i)\b(?:maria|ana|joão|joao)\s+(?:trabalha|é|e)\b", text):
         candidates.append(("professional.works_at", {"third_party_text": text}, .58, "THIRD_PARTY_STATEMENT"))
+    return candidates
+
+
+def extract_candidates(session: Session, message: ConversationMessageRow, run: MemoryExtractionRunRow) -> list[MemoryCandidateRow]:
+    text = message.text or ""
+    if not text or not message.searchable:
+        return []
+    sender = {"actor_id": message.sender_actor_id}
+    candidates = preview_statement_candidates(text, message.sender_actor_id)
     if not message.from_me and message.direction == "INBOUND":
         candidates.extend(detect_passive_idiolect_observations(text))
     rows = []
@@ -694,3 +700,39 @@ def process_memory_ingestion_jobs(session: Session, limit: int = 10) -> int:
             job.last_error = str(exc)[:500]
             session.flush()
     return processed
+
+
+def preview_event_candidate(text: str) -> dict:
+    """Pure, bounded extension of preview extraction; never admits a claim.
+
+    Only first-person planning grammar is recognized. Reported speech, questions
+    and uncertain plans cannot be silently converted into confirmations.
+    """
+    from attention_router.application.context_retrieval import _normalize
+    value = _normalize(text.strip())
+    # Preserve both clauses in the source, while interpreting the proposed replacement.
+    change = re.fullmatch(r'.{1,160}?nao (?:sera|vai ser|e) possivel[;, .]+(?:eu )?proponho (.+)', value)
+    action = 'MENTIONS'
+    temporal_text = change[1] if change else text
+    if change:
+        action = 'CHANGES'
+    else:
+        for pattern, candidate in (
+            (r'^(?:nao confirmo|discordo|cancelo)\b', 'CONTESTS'),
+            (r'^(?:eu )?(?:confirmo|confirmado|combinado|fechado)\b', 'CONFIRMS'),
+            (r'^(?:eu )?(?:altero|remarco|mudo)\b', 'CHANGES'),
+            (r'^(?:estou ciente|fiquei sabendo|ciente|soube)\b', 'ACKNOWLEDGES'),
+            (r'^(?:eu )?(?:proponho|vamos|sugiro)\b', 'PROPOSES'),
+        ):
+            if re.search(pattern, value):
+                action = candidate
+                break
+    uncertain = bool(re.search(r'\b(talvez|possivelmente|se der|acho que)\b', value) or '?' in value)
+    if uncertain:
+        action = 'MENTIONS'
+    destinations = re.findall(
+        r'\b(?:viagem|passeio|excursao) (?:para|a|ao) ([a-z][a-z ]{1,60}?)(?=\s+(?:com|no|na|sabado|domingo|amanha|dia|em|as)\b|[.,;!?\[]|$)', value)
+    return {'action': action, 'temporal_text': temporal_text,
+            'topic': 'travel' if re.search(r'\b(viagem|passeio|excursao)\b', value) else None,
+            'destination': destinations[0].strip() if len(set(destinations)) == 1 else None,
+            'uncertain': uncertain, 'method': 'BOUNDED_PLANNING_GRAMMAR_V1'}

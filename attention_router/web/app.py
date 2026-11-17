@@ -20,6 +20,10 @@ from attention_router.application.client_location import ClientLocationService
 from attention_router.application.client_approval import ClientApprovalService
 from attention_router.application.client_command import ClientCommandService
 from attention_router.application.gmail_connection import GmailConnectionService
+from attention_router.api.v1.contacts_preview import build_contacts_preview_router
+from attention_router.application.google_contacts_preview import (
+    ContactsPreviewService, GoogleContactsOAuthClient, GooglePeopleReadOnlyClient,
+)
 from attention_router.application.personal_context_bootstrap_product import (
     PersonalContextBootstrapProductService,
 )
@@ -107,6 +111,12 @@ client_approval_service = ClientApprovalService(
 client_command_service = ClientCommandService(
     settings=settings,
     client_sessions=client_session_service,
+)
+contacts_preview_service = ContactsPreviewService(
+    client_sessions=client_session_service,
+    oauth=GoogleContactsOAuthClient(client_id=settings.contacts_oauth_client_id or "",
+                                   client_secret=settings.contacts_oauth_client_secret or ""),
+    people=GooglePeopleReadOnlyClient(), enabled=settings.contacts_preview_enabled,
 )
 gmail_connection_service = GmailConnectionService(
     settings=settings,
@@ -240,6 +250,9 @@ app.include_router(build_client_approval_router(
 app.include_router(build_client_command_router(
     get_session=get_session,
     service=client_command_service,
+))
+app.include_router(build_contacts_preview_router(
+    get_session=get_session, service=contacts_preview_service,
 ))
 app.include_router(build_gmail_connection_router(
     get_session=get_session,

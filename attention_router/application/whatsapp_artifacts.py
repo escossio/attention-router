@@ -70,6 +70,13 @@ def _validate_outbound_media_origin(event: InboundEventRow) -> None:
     if origin == "OWNER_MANUAL_OUTBOUND_OBSERVED":
         # Preserve the previously certified manual owner voice path.
         return
+    if origin == "UNKNOWN_FROM_ME":
+        from attention_router.application.conversation_live_capture import (
+            is_policy_attributed_owner_voice,
+        )
+        if is_policy_attributed_owner_voice(event):
+            # Same D01 receipt as STT/archive. Keep raw origin and sender unset.
+            return
     if origin != "UNKNOWN_FROM_ME" or (
         metadata.get("message_type") not in _ACCOUNT_MEDIA_KINDS
         or metadata.get("peer_id_kind") not in {"lid", "c.us"}

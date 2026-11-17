@@ -1,0 +1,27 @@
+{
+  "version": "G6_VALIDATION_V1",
+  "split": "VALIDATION",
+  "lineage": "SYNTHETIC",
+  "cases": [
+    {
+      "id": "validation-1",
+      "text": "Não confirmo terça.",
+      "expected_action": "DENIES"
+    },
+    {
+      "id": "validation-2",
+      "text": "Fechou, quarta-feira.",
+      "expected_action": "AGREES"
+    },
+    {
+      "id": "validation-3",
+      "text": "Ela disse que vem quinta.",
+      "expected_action": "REPORTS"
+    },
+    {
+      "id": "validation-4",
+      "text": "Talvez eu viaje no feriado.",
+      "expected_action": "UNKNOWN"
+    }
+  ]
+}

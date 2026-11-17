@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -273,3 +273,33 @@ def process_voice_transcriptions(session, worker: str, limit: int = 10, client=N
         session.commit()
         completed += 1
     return completed
+
+
+def retry_failed_transcription(session, *, tenant_id: str, transcription_id: str) -> str:
+    """Explicit owner-authorized bounded retry using the existing artifact/worker."""
+    row = session.scalar(select(VoiceTranscriptionRow).where(
+        VoiceTranscriptionRow.id == transcription_id,
+        VoiceTranscriptionRow.tenant_id == tenant_id,
+    ).with_for_update())
+    if row is None:
+        raise VoiceTranscriptionError("TRANSCRIPTION_NOT_FOUND")
+    if row.status == "PENDING":
+        return "PENDING"
+    if (row.status != "FAILED" or row.attempt_count >= 3
+            or row.error_code not in {"STT_TIMEOUT", "STT_NETWORK_ERROR", "STT_HTTP_429", "STT_HTTP_503"}):
+        raise VoiceTranscriptionError("TRANSCRIPTION_NOT_RETRYABLE")
+    artifact = session.get(MediaArtifactRow, row.media_artifact_id)
+    if artifact is None or artifact.tenant_id != tenant_id or artifact.status != "READY":
+        raise VoiceTranscriptionError("VOICE_ARTIFACT_NOT_READY")
+    expiry = artifact.expires_at
+    if expiry is not None and expiry.replace(tzinfo=expiry.tzinfo or UTC) <= now_utc():
+        raise VoiceTranscriptionError("VOICE_ARTIFACT_EXPIRED")
+    MediaStore(settings.whatsapp_media_root, settings.whatsapp_media_max_bytes).validate(
+        media_ref(artifact.content_sha256), expected_sha256=artifact.content_sha256,
+        expected_size=artifact.size_bytes, mime_type=artifact.mime_type,
+    )
+    row.status = "PENDING"
+    row.claimed_at = row.claimed_by = row.completed_at = None
+    row.updated_at = now_utc()
+    session.flush()
+    return "PENDING"

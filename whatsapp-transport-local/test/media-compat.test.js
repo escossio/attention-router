@@ -147,3 +147,29 @@ test('generic document capture rejects malformed MIME without fabricating READY'
   assert.equal(bodies[0].media_ref, undefined);
   assert.equal(bodies[0].content_sha256, undefined);
 });
+
+
+test('only explicit transient errors retry, bounded and replay-safe', async t => {
+  for (const [code, expected] of [['ECONNRESET', 3], ['EACCES', 1], ['MEDIA_EXPIRED', 1]]) {
+    const config = fixture(t); let calls = 0;
+    const msg = message({_serialized: 'synthetic'}, async () => {
+      calls++; throw Object.assign(new Error('synthetic'), {code});
+    });
+    await captureVoiceMedia(config, msg, normalized(), {info(){},warn(){}}, okFetch());
+    await captureVoiceMedia(config, msg, normalized(), {info(){},warn(){}}, okFetch());
+    assert.equal(calls, expected);
+  }
+});
+
+test('timed out uncancelable download never retries after late rejection', async t => {
+  const config = fixture(t, {mediaDownloadTimeoutMs: 5}); let calls = 0; let reject;
+  const msg = message({_serialized:'late-synthetic'}, () => {
+    calls++; return new Promise((_resolve, fail) => { reject = fail; });
+  });
+  const logger = {info(){},warn(){}};
+  await captureVoiceMedia(config, msg, normalized(), logger, okFetch());
+  reject(Object.assign(new Error('late'), {code:'ECONNRESET'}));
+  await new Promise(resolve => setImmediate(resolve));
+  await captureVoiceMedia(config, msg, normalized(), logger, okFetch());
+  assert.equal(calls, 1);
+});

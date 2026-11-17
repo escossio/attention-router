@@ -212,3 +212,12 @@ test('unmatched media fromMe is UNKNOWN_FROM_ME, never manual', async (t) => {
   assert.equal(result.classification, 'UNKNOWN_FROM_ME');
   assert.equal(result.reason, 'UNMATCHED_MEDIA_FROM_ME');
 });
+
+test('unreadable ledger never proves manual account authorship', t => {
+  const {directory, ledger} = ledgerFixture(t);
+  fs.writeFileSync(path.join(directory, 'broken.json'), '{');
+  const result = ledger.classify({fromMe: true, type: 'ptt', hasMedia: true},
+    identityFromAliases(['peer@lid']));
+  assert.equal(result.classification, 'UNKNOWN_FROM_ME');
+  assert.equal(result.reason, 'OUTBOUND_PROVENANCE_UNREADABLE');
+});

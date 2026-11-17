@@ -225,6 +225,10 @@ function createOutboundProvenanceLedger(config, deps = {}) {
     const aliases = new Set(conversationIdentity.peer_identifiers || []);
     const textHash = stableHash(String(message?.body || ''));
     const records = all();
+    // An unreadable ledger cannot establish the absence of competing automation.
+    if (io.readdirSync(directory).filter(name => name.endsWith('.json')).length !== records.length) {
+      return { classification: 'UNKNOWN_FROM_ME', reason: 'OUTBOUND_PROVENANCE_UNREADABLE', provenance: null };
+    }
     const exact = messageId
       ? records.filter((record) => record.message_reference === messageId || (record.observed_message_ids || []).includes(messageId))
       : [];
@@ -261,8 +265,8 @@ function createOutboundProvenanceLedger(config, deps = {}) {
       const mediaRecords = records.filter((record) => (
         record.message_type === 'ptt'
         && record.peer_identifiers.some((identifier) => aliases.has(identifier))
-        && Number.isFinite(Date.parse(record.updated_at || record.started_at))
-        && nowMs - Date.parse(record.updated_at || record.started_at) <= correlationMs
+        && (!record.message_reference || (Number.isFinite(Date.parse(record.updated_at || record.started_at))
+          && nowMs - Date.parse(record.updated_at || record.started_at) <= correlationMs))
       ));
       return {
         classification: 'UNKNOWN_FROM_ME',

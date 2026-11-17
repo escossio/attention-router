@@ -8,11 +8,11 @@ authority, disclosure permission, execution permission, or truth promotion.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 import json
 import math
-from typing import Any, Final, Iterable
+from typing import Any, Callable, Final, Iterable
 
 from sqlalchemy.orm import Session
 
@@ -577,6 +577,8 @@ def compile_graph_context(
     lexical_candidate_limit: int = 200,
     relation_filters: Iterable[CognitiveRelationKind | str] | None = None,
     now: datetime | None = None,
+    node_authorizer: Callable[[CognitiveNode], bool] | None = None,
+    authorized_source_text: dict[str, str] | None = None,
 ) -> CompiledContextPacket:
     """Compile bounded graph context, falling back to lexical V0 without authority."""
     if max_hops < 0 or max_hops > MAX_HOPS:
@@ -599,6 +601,8 @@ def compile_graph_context(
         raise ContextCompilerError("CONTEXT_COMPILER_QUERY_TOO_LONG")
 
     stamp = _utc(now or datetime.now(UTC))
+    if authorized_source_text is not None and node_authorizer is None:
+        raise ContextCompilerError('SOURCE_TEXT_REQUIRES_AUTHORIZED_SUBGRAPH')
     normalized_filters = _normalize_relation_filters(relation_filters)
 
     graph = build_cognitive_graph_slice(
@@ -608,9 +612,30 @@ def compile_graph_context(
         include_secret=False,
         now=stamp,
     )
+    # Optional restrictive application boundary, applied BEFORE seeds/traversal.
+    # It cannot admit SECRET nodes or enable an unscoped lexical fallback.
+    if node_authorizer is not None:
+        from attention_router.application.semantic_sensitivity import translate_sensitivity
+        normalized = []
+        for node in graph.nodes:
+            if not node_authorizer(node):
+                continue
+            if 'sensitivity_class' in node.attributes:
+                original = node.attributes['sensitivity_class']
+                node = replace(node, attributes={**node.attributes,
+                    'source_sensitivity': original,
+                    'sensitivity_class': translate_sensitivity(original).candidate_class})
+            if not _node_secret(node):
+                if node.source_type == 'CONVERSATION_MESSAGE' and authorized_source_text is not None:
+                    node = replace(node, label=authorized_source_text.get(node.source_id))
+                normalized.append(node)
+        nodes = tuple(normalized)
+        allowed = {n.node_id for n in nodes}
+        graph = replace(graph, nodes=nodes, edges=tuple(e for e in graph.edges
+            if e.source_node_id in allowed and e.target_node_id in allowed))
     visible_nodes, visible_edges = _visible_subgraph(graph)
     seeds = _seed_candidates(graph, query, max_seeds=max_seeds)
-    if not seeds:
+    if not seeds and node_authorizer is None:
         return _compile_lexical_fallback(
             session,
             tenant_id,

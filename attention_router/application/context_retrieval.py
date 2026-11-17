@@ -263,3 +263,23 @@ def retrieve_personal_context(
         raise ValueError("CONTEXT_RETRIEVAL_CANDIDATE_LIMIT_OUT_OF_RANGE")
     snapshot = build_personal_context(session, tenant_id, limit=candidate_limit)
     return rank_personal_context(snapshot, query, limit=limit)
+
+
+def preview_question_intent(question: str) -> str | None:
+    """Finite PT-BR intent mapping for evidence-backed event previews.
+
+    This is a query adapter, not answer generation or an identity resolver.
+    Unsupported questions remain unsupported instead of retrieving a vague match.
+    """
+    text = _normalize(question)
+    if len(text) > 500:
+        return None
+    patterns = (
+        (r'quem .*(?:confirmou|aceitou|concordou)', 'CONFIRMS'),
+        (r'quando .*(?:alterad|mud|remarc)', 'CHANGES'),
+        (r'(?:sabia|sabendo|ciente|soube)', 'ACKNOWLEDGES'),
+        (r'(?:anteriormente|historico|antes)', 'HISTORY'),
+        (r'(?:evidencias|sustentam|fontes)', 'EVIDENCE'),
+        (r'(?:combinado|planejamento|estado.*recente|decidido)', 'CURRENT'),
+    )
+    return next((intent for pattern, intent in patterns if re.search(pattern, text)), None)

@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     integration_ingress_audience: str = "andy-integration-ingress"
     integration_dispatch_enabled: bool = False
     integration_dispatch_batch_size: int = 20
+    contacts_preview_enabled: bool = False
+    contacts_oauth_client_id: str | None = None
+    contacts_oauth_client_secret: str | None = Field(default=None, repr=False)
     gmail_connect_enabled: bool = False
     gmail_product_runner_enabled: bool = False
     gmail_product_runner_ingress_url: str = (

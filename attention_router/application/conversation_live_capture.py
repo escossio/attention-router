@@ -7,7 +7,7 @@ dependency, network I/O, execution capability or history-import logic.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, literal, or_, select
@@ -182,9 +182,32 @@ def _fields(receipt: InboundEventRow) -> dict[str, Any] | None:
         state = "CAPTION_AVAILABLE" if text else "CAPTION_UNAVAILABLE"
     else:
         state = "TEXT_AVAILABLE" if text else "TEXT_UNAVAILABLE"
+    capture_state = metadata.get("media_capture_status")
+    if message_kind == "VOICE" and capture_state in {
+        "MEDIA_NOT_AVAILABLE", "MEDIA_CAPTURE_DISABLED", "TRANSCRIPTION_PENDING",
+    }:
+        state = capture_state
     raw_quote = metadata.get("quoted_message_id")
     quote = raw_quote if isinstance(raw_quote, str) and len(raw_quote) <= 240 else None
+    attribution = metadata.get("semantic_attribution")
+    policy_owner = (
+        origin == "UNKNOWN_FROM_ME"
+        and metadata.get("final_from_me_classification") == origin
+        and metadata.get("from_me_classification_reason") == "UNMATCHED_MEDIA_FROM_ME"
+        and not metadata.get("outbound_provenance")
+        and metadata.get("is_group") is not True
+        and metadata.get("owner_self_chat") is not True
+        and kind in _VOICE_TYPES
+        and isinstance(attribution, dict)
+        and attribution.get("basis") == "OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1"
+        and attribution.get("account_verified") is True
+        and attribution.get("tenant_id") == receipt.tenant_id
+        and attribution.get("source_account") == account
+    )
     return {
+        "policy_owner": policy_owner,
+        "peer_aliases": metadata.get("peer_identifiers", [])
+            if metadata.get("alias_provenance") == "PROVIDER_LID_PN_MAPPING" else [],
         "origin": origin,
         "from_me": from_me,
         "source_account": account,
@@ -203,6 +226,12 @@ def _fields(receipt: InboundEventRow) -> dict[str, Any] | None:
     }
 
 
+def is_policy_attributed_owner_voice(receipt: InboundEventRow) -> bool:
+    """Reuse signed live-capture D01 checks; attribution grants no authority."""
+    details = _fields(receipt)
+    return details is not None and details["policy_owner"] is True
+
+
 def capture_live_receipt(
     session: Session,
     receipt: InboundEventRow,
@@ -216,11 +245,14 @@ def capture_live_receipt(
     if details is None:
         return ConversationCaptureResult("SKIPPED", reason="NOT_ELIGIBLE")
     sender_key = details["sender_key"]
-    if details["origin"] == "OWNER_MANUAL_OUTBOUND_OBSERVED":
+    if details["origin"] == "OWNER_MANUAL_OUTBOUND_OBSERVED" or details["policy_owner"]:
         represented = resolve_represented_subject(session, receipt.tenant_id)
         if represented is not None:
             sender_key = represented.entity_id
-            details["speaker_basis"] = "REPRESENTED_OWNER"
+            details["speaker_basis"] = (
+                "OWNER_ACCOUNT_ATTRIBUTED_BY_POLICY_V1" if details["policy_owner"]
+                else "REPRESENTED_OWNER"
+            )
     metadata = {
         "capture_contract": "LIVE_CONVERSATION_ARCHIVE_V0",
         "source_inbound_event_id": receipt.id,
@@ -230,6 +262,7 @@ def capture_live_receipt(
         "timestamp_basis": details["timestamp_basis"],
         "content_state": details["content_state"],
         "reply_reference": details["reply_reference"],
+        "provider_peer_aliases": details["peer_aliases"],
     }
     if details["message_kind"] in _STORED_MEDIA_KINDS:
         # The arrival of a WhatsApp message never proves the media bytes
@@ -495,8 +528,14 @@ def capture_voice_transcription(
     else:
         if row.text is not None:
             raise ConversationCaptureConflict("TRANSCRIPTION_STATUS_CONFLICT")
-        metadata["content_state"] = "TRANSCRIPTION_FAILED"
+        metadata["content_state"] = {
+            "VOICE_MEDIA_FAILED": "MEDIA_CAPTURE_FAILED",
+            "VOICE_MEDIA_MISSING": "MEDIA_NOT_AVAILABLE",
+        }.get(transcription.error_code, "TRANSCRIPTION_FAILED")
         metadata["transcription_status"] = "FAILED"
+    metadata["transcription_id"] = transcription.id
+    metadata["media_artifact_id"] = transcription.media_artifact_id
+    metadata["transcription_error_code"] = transcription.error_code
     if transcription.completed_at:
         metadata["transcription_completed_at"] = _utc(transcription.completed_at).isoformat()
     row.metadata_json = metadata
@@ -512,6 +551,48 @@ class ConversationCaptureReconciliationResult:
     linked_artifacts: int = 0
     skipped: int = 0
     failed: int = 0
+
+
+def expire_pending_capture(session: Session, *, now: datetime | None = None, limit: int = 25) -> int:
+    """Bounded archive deadline; late signed receipts can still enrich the original.
+
+    This does not cancel decisions or invent a failed provider call. It reports
+    that the observable pipeline missed its deadline and preserves recovery.
+    """
+    stamp = _utc(now or datetime.now(UTC))
+    query = select(ConversationMessageRow).where(
+        ConversationMessageRow.source == "wwebjs",
+        ConversationMessageRow.metadata_json["capture_contract"].as_string() == "LIVE_CONVERSATION_ARCHIVE_V0",
+        ConversationMessageRow.metadata_json["content_state"].as_string().in_(
+            ("PENDING_TRANSCRIPTION", "TRANSCRIPTION_PENDING")
+        ),
+    ).limit(limit)
+    if settings.conversation_capture_tenant_id:
+        query = query.where(
+            ConversationMessageRow.tenant_id == settings.conversation_capture_tenant_id
+        )
+    changed = 0
+    for row in session.scalars(query):
+        meta = dict(row.metadata_json)
+        try:
+            received = _utc(datetime.fromisoformat(meta["source_received_at"]))
+        except (KeyError, ValueError, TypeError):
+            continue
+        if stamp - received < timedelta(minutes=15):
+            continue
+        transcription = session.scalar(select(VoiceTranscriptionRow).where(
+            VoiceTranscriptionRow.tenant_id == row.tenant_id,
+            VoiceTranscriptionRow.inbound_event_id == meta["source_inbound_event_id"],
+        ))
+        if transcription and transcription.status in {"READY", "FAILED"}:
+            continue
+        meta["content_state"] = "TRANSCRIPTION_TIMEOUT" if transcription else "MEDIA_CAPTURE_TIMEOUT"
+        meta["recovery"] = "LATE_SIGNED_RECEIPT_OR_EXISTING_STT_RESULT"
+        meta["deadline_at"] = (received + timedelta(minutes=15)).isoformat()
+        row.metadata_json = meta
+        changed += 1
+    session.flush()
+    return changed
 
 
 def reconcile_live_capture_batch(
@@ -534,6 +615,7 @@ def reconcile_live_capture_batch(
     if start is None or start.tzinfo is None or start.utcoffset() is None:
         return ConversationCaptureReconciliationResult()
 
+    expire_pending_capture(session, limit=limit)
     source_account = InboundEventRow.payload["metadata"]["source_account"].as_string()
     existing = (
         select(ConversationMessageRow.id)
@@ -640,8 +722,9 @@ def reconcile_live_capture_batch(
             ConversationMessageRow.message_type == "VOICE",
             ConversationMessageRow.metadata_json["capture_contract"].as_string()
             == "LIVE_CONVERSATION_ARCHIVE_V0",
-            ConversationMessageRow.metadata_json["content_state"].as_string()
-            == "PENDING_TRANSCRIPTION",
+            ConversationMessageRow.metadata_json["content_state"].as_string().in_(
+                ("PENDING_TRANSCRIPTION", "TRANSCRIPTION_PENDING", "MEDIA_CAPTURE_TIMEOUT", "TRANSCRIPTION_TIMEOUT")
+            ),
             ConversationMessageRow.tenant_id == VoiceTranscriptionRow.tenant_id,
             VoiceTranscriptionRow.tenant_id == InboundEventRow.tenant_id,
             VoiceTranscriptionRow.status.in_(("READY", "FAILED")),

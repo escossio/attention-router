@@ -44,3 +44,13 @@ test('self-chat remains identifiable without treating owner as a peer alias', as
   );
   assert.equal(identity.conversation_key, 'wwebjs:owner@c.us');
 });
+
+
+test('conflicting provider aliases never choose an arbitrary person', async () => {
+  assert.equal(identityFromAliases(['one@lid', 'two@lid']).state, 'AMBIGUOUS');
+  assert.equal(identityFromAliases(['one@lid', 'one@c.us', 'two@c.us']).state, 'AMBIGUOUS');
+  const result = await resolveConversationIdentity({from: 'one@lid'}, {
+    getContactLidAndPhone: async () => [{lid: 'two@lid', pn: 'two@c.us'}],
+  });
+  assert.equal(result.state, 'AMBIGUOUS');
+});

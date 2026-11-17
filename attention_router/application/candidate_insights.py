@@ -15,6 +15,7 @@ from attention_router.infrastructure.candidate_insight_models import (
     CandidateInsightRow,
 )
 from attention_router.infrastructure.hashing import stable_hash
+from attention_router.application.semantic_sensitivity import translate_sensitivity
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     ConversationMessageRow,
@@ -213,7 +214,7 @@ def _source_evidence(
             raise CandidateInsightError("CANDIDATE_INSIGHT_MESSAGE_NOT_FOUND")
         if row.tenant_id != tenant_id:
             raise CandidateInsightError("CANDIDATE_INSIGHT_TENANT_MISMATCH")
-        return _utc(row.sent_at), _sensitivity(row.sensitivity_class)
+        return _utc(row.sent_at), translate_sensitivity(row.sensitivity_class).candidate_class
 
     raise CandidateInsightError("CANDIDATE_INSIGHT_EVIDENCE_TYPE_UNSUPPORTED")
 
@@ -289,7 +290,10 @@ def _normalize_evidence(
                 "confidence": confidence,
                 "sensitivity_class": source_sensitivity,
                 "observed_at": observed_at,
-                "provenance": item.provenance or {},
+                "provenance": {**(item.provenance or {}), **({
+                    "source_sensitivity": session.get(ConversationMessageRow, source_ref).sensitivity_class,
+                    "sensitivity_mapping": "ARCHIVE_TO_V2_V1",
+                } if evidence_type == "CONVERSATION_MESSAGE" else {})},
             }
         )
 
