@@ -116,6 +116,7 @@ def build_personal_context(
     *,
     limit: int = 100,
     now: datetime | None = None,
+    source_authorizer=None,
 ) -> PersonalContextSnapshot:
     """Build the represented owner's bounded Personal Context.
 
@@ -155,6 +156,8 @@ def build_personal_context(
             ).all()
         )
         for row in rows:
+            if source_authorizer is not None and not source_authorizer('MEMORY_CLAIM', row.id):
+                continue
             if not _active_at(row.valid_from, row.valid_until, stamp):
                 continue
             if row.predicate == CONTEXT_CONTROL_PREDICATE:
@@ -207,6 +210,7 @@ def build_personal_context(
         )
         for row in fact_rows
         if _active_at(row.valid_from, row.valid_until, stamp)
+        and (source_authorizer is None or source_authorizer('FACT', row.id))
     )
 
     return PersonalContextSnapshot(

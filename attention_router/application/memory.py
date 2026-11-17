@@ -583,6 +583,7 @@ def search_archive(
     query: str,
     limit: int = 20,
     tenant_id: str = DEFAULT_TENANT_ID,
+    *, source_authorizer=None,
 ) -> list[dict[str, Any]]:
     terms = [term for term in query.casefold().split() if term]
     rows = session.scalars(
@@ -597,6 +598,8 @@ def search_archive(
     ).all()
     result = []
     for row in rows:
+        if source_authorizer is not None and not source_authorizer('CONVERSATION_MESSAGE', row.id):
+            continue
         haystack = (row.normalized_text or "")
         score = sum(1 for term in terms if term in haystack) / max(len(terms), 1)
         if score == 0 and terms:
@@ -611,6 +614,7 @@ def search_memory(
     query: str,
     limit: int = 20,
     tenant_id: str = DEFAULT_TENANT_ID,
+    *, source_authorizer=None,
 ) -> list[dict[str, Any]]:
     needle = query.casefold()
     rows = session.scalars(
@@ -619,13 +623,16 @@ def search_memory(
         .where(MemoryActorRow.tenant_id == tenant_id)
         .order_by(MemoryClaimRow.updated_at.desc())
     ).all()
-    return [{"source_type": "MEMORY", "claim_id": r.id, "actor_id": r.subject_actor_id, "predicate": r.predicate, "value": r.object_text, "status": r.status, "confidence": r.confidence} for r in rows if needle in f"{r.predicate} {r.object_text or ''}".casefold()][:limit]
+    return [{"source_type": "MEMORY", "claim_id": r.id, "actor_id": r.subject_actor_id, "predicate": r.predicate, "value": r.object_text, "status": r.status, "confidence": r.confidence} for r in rows
+            if (source_authorizer is None or source_authorizer('MEMORY_CLAIM', r.id))
+            and needle in f"{r.predicate} {r.object_text or ''}".casefold()][:limit]
 
 
 def get_memory_evidence(
     session: Session,
     claim_id: str,
     tenant_id: str = DEFAULT_TENANT_ID,
+    *, source_authorizer=None,
 ) -> list[dict[str, Any]]:
     claim = session.scalar(
         select(MemoryClaimRow)
@@ -634,6 +641,8 @@ def get_memory_evidence(
     )
     if claim is None:
         raise TenantScopeError("MEMORY_CLAIM_NOT_IN_TENANT")
+    if source_authorizer is not None and not source_authorizer('MEMORY_CLAIM', claim.id):
+        return []
     rows = session.scalars(select(MemoryEvidenceRow).where(MemoryEvidenceRow.claim_id == claim_id)).all()
     return [{"claim_id": r.claim_id, "message_id": r.conversation_message_id, "extraction_run_id": r.extraction_run_id, "evidence_type": r.evidence_type, "confidence": r.confidence, "created_at": r.created_at} for r in rows]
 
@@ -642,11 +651,14 @@ def memory_context(
     session: Session,
     actor_id: str,
     tenant_id: str = DEFAULT_TENANT_ID,
+    *, source_authorizer=None,
 ) -> dict[str, Any]:
     actor = session.get(MemoryActorRow, actor_id)
     if actor is not None and actor.tenant_id != tenant_id:
         raise TenantScopeError("TENANT_SCOPE_MISMATCH:memory_actor")
     rows = session.scalars(select(MemoryClaimRow).where(MemoryClaimRow.subject_actor_id == actor_id, MemoryClaimRow.status == "ACTIVE")).all()
+    if source_authorizer is not None:
+        rows = [row for row in rows if source_authorizer('MEMORY_CLAIM', row.id)]
     preferred = next((r.object_text for r in rows if r.predicate == "identity.preferred_name"), None)
     self_reported = next((r.object_text for r in rows if r.predicate == "identity.self_reported_name"), None)
     return {"preferred_name": preferred, "self_reported_name": self_reported, "known_company": next((r.object_text for r in rows if r.predicate == "professional.works_at"), None), "relevant_current_facts": [{"predicate": r.predicate, "value": r.object_text} for r in rows[:20] if r.sensitivity_class != "SECRET"]}
