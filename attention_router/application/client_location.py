@@ -20,6 +20,12 @@ from attention_router.core.client.location import (
     require_current_location_observation,
 )
 from attention_router.infrastructure import client_location_repository as repository
+from attention_router.application.message_location_context import (
+    MessageLocationAccessDenied,
+    MessageLocationContext,
+    MessageLocationNotFound,
+    correlate_message_with_owner_device_location,
+)
 
 
 class ClientLocationError(Exception):
@@ -28,6 +34,10 @@ class ClientLocationError(Exception):
 
 class ClientLocationDisabled(ClientLocationError):
     code = "CLIENT_LOCATION_DISABLED"
+
+
+class ClientLocationHistoryDisabled(ClientLocationError):
+    code = "CLIENT_LOCATION_HISTORY_DISABLED"
 
 
 class ClientLocationInvalid(ClientLocationError):
@@ -116,8 +126,11 @@ class ClientLocationService:
         session_token: str | None,
         observation: CurrentLocationObservation,
         now: datetime | None = None,
+        retain_context_history: bool = False,
     ) -> ClientLocationSnapshotResult:
         self._require_enabled()
+        if retain_context_history and not self.settings.client_location_history_enabled:
+            raise ClientLocationHistoryDisabled()
         current = now if now is not None else datetime.now(UTC)
         authority = self._authority(
             session,
@@ -132,6 +145,21 @@ class ClientLocationService:
             if error.reason_code == "LOCATION_FUTURE":
                 raise ClientLocationFuture() from error
             raise ClientLocationInvalid() from error
+        if retain_context_history:
+            # A user who only has MEMBER or ADMIN authority can share a
+            # current location, but not opt into the owner's private
+            # historical context.
+            from sqlalchemy import select
+            from attention_router.infrastructure.client_bootstrap_models import (
+                ClientTenantMembershipRow,
+            )
+            owners = session.scalars(select(ClientTenantMembershipRow).where(
+                ClientTenantMembershipRow.tenant_id == authority.active_tenant_id,
+                ClientTenantMembershipRow.role == "OWNER",
+                ClientTenantMembershipRow.status == "ACTIVE",
+            )).all()
+            if len(owners) != 1 or owners[0].human_identity_id != authority.human_identity_id:
+                raise ClientLocationAuthorityRejected()
         try:
             row = repository.upsert_current_location(
                 session,
@@ -148,12 +176,51 @@ class ClientLocationService:
                 ),
                 captured_at=observation.captured_at,
                 received_at=current,
+                store_history=retain_context_history,
             )
         except repository.LocationSnapshotStale as error:
             raise ClientLocationStale() from error
         except repository.LocationSnapshotConflict as error:
             raise ClientLocationUnavailable() from error
         return self._result(row, reference=current)
+
+    def put_context_observation(
+        self,
+        session: Session,
+        *,
+        session_token: str | None,
+        observation: CurrentLocationObservation,
+        now: datetime | None = None,
+    ) -> ClientLocationSnapshotResult:
+        """An explicit consented location sample, separate from PUT current."""
+        return self.put_current(
+            session, session_token=session_token,
+            observation=observation, now=now, retain_context_history=True,
+        )
+
+    def get_message_context(
+        self,
+        session: Session,
+        *,
+        session_token: str | None,
+        message_id: str,
+        now: datetime | None = None,
+    ) -> MessageLocationContext:
+        """Authenticated read-only correlation, owner-scoped and not a GPS fact."""
+        self._require_enabled()
+        current = now if now is not None else datetime.now(UTC)
+        authority = self._authority(session, session_token=session_token, now=current)
+        try:
+            return correlate_message_with_owner_device_location(
+                session,
+                tenant_id=authority.active_tenant_id,
+                authenticated_human_identity_id=authority.human_identity_id,
+                message_id=message_id,
+            )
+        except MessageLocationAccessDenied as exc:
+            raise ClientLocationAuthorityRejected() from exc
+        except MessageLocationNotFound as exc:
+            raise ClientLocationNotFound() from exc
 
     def get_current(
         self,

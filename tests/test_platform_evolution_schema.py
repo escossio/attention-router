@@ -195,7 +195,7 @@ def test_attention_salience_table_is_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0061_tts_outbox_constraint"]
+    assert scripts.get_heads() == ["0063_location_context_v1"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -257,6 +257,12 @@ def test_platform_evolution_migration_waves_form_one_chain():
     )
     assert revisions["0061_tts_outbox_constraint"].down_revision == (
         "0060_first_contact_v1"
+    )
+    assert revisions["0062_artifact_sensitive_review"].down_revision == (
+        "0061_tts_outbox_constraint"
+    )
+    assert revisions["0063_location_context_v1"].down_revision == (
+        "0062_artifact_sensitive_review"
     )
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"

@@ -15,6 +15,7 @@ from attention_router.application.client_location import (
     ClientLocationAuthorityRejected,
     ClientLocationDisabled,
     ClientLocationFuture,
+    ClientLocationHistoryDisabled,
     ClientLocationInvalid,
     ClientLocationNotFound,
     ClientLocationService,
@@ -38,6 +39,12 @@ class ClientLocationWriteRequest(BaseModel):
     precision: Literal["PRECISE", "APPROXIMATE"] | None = None
 
 
+class ClientLocationContextWriteRequest(ClientLocationWriteRequest):
+    """Explicit opt-in for chronological Android GPS evidence."""
+
+    context_history_opt_in: Literal[True]
+
+
 class ClientLocationSnapshot(BaseModel):
     contract_version: Literal["1"]
     location_snapshot_id: str
@@ -55,6 +62,7 @@ class ClientLocationSnapshot(BaseModel):
 class ClientLocationErrorResponse(BaseModel):
     code: Literal[
         "CLIENT_LOCATION_DISABLED",
+        "CLIENT_LOCATION_HISTORY_DISABLED",
         "CLIENT_LOCATION_INVALID",
         "CLIENT_LOCATION_STALE",
         "CLIENT_LOCATION_FUTURE",
@@ -76,6 +84,7 @@ _BEARER = HTTPBearer(
 
 _ERROR_STATUS = {
     ClientLocationDisabled: status.HTTP_503_SERVICE_UNAVAILABLE,
+    ClientLocationHistoryDisabled: status.HTTP_503_SERVICE_UNAVAILABLE,
     ClientLocationInvalid: status.HTTP_400_BAD_REQUEST,
     ClientLocationStale: status.HTTP_400_BAD_REQUEST,
     ClientLocationFuture: status.HTTP_400_BAD_REQUEST,
@@ -107,6 +116,31 @@ def _snapshot(result) -> ClientLocationSnapshot:
         captured_at=result.captured_at,
         received_at=result.received_at,
     )
+
+
+class ClientMessageLocationContextResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["1"] = "1"
+    message_id: str
+    status: Literal[
+        "DEVICE_POSITION_NEAR_MESSAGE",
+        "AUTHORSHIP_NOT_PROVEN",
+        "NO_ACTIVE_DEVICE",
+        "NO_TIME_MATCHED_LOCATION",
+        "AMBIGUOUS_DEVICES",
+        "LOCATION_TOO_IMPRECISE",
+    ]
+    evidence_basis: Literal["ANDROID_DEVICE_POSITION_NEAR_WHATSAPP_MESSAGE_TIME"]
+    message_at: datetime
+    location_observation_id: str | None = None
+    location_device_id: str | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    longitude: float | None = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+    accuracy_m: float | None = Field(default=None, gt=0, le=10_000, allow_inf_nan=False)
+    precision: Literal["PRECISE", "APPROXIMATE"] | None = None
+    captured_at: datetime | None = None
+    delta_seconds: float | None = Field(default=None, ge=-60, le=60)
 
 
 def build_client_location_router(
@@ -158,6 +192,47 @@ def build_client_location_router(
             return _error_response(error)
         return _snapshot(result)
 
+    @router.put(
+        "/api/v1/client/location/context/observations",
+        response_model=ClientLocationSnapshot,
+        responses={
+            400: {"model": ClientLocationErrorResponse},
+            401: {"model": ClientLocationErrorResponse},
+            403: {"model": ClientLocationErrorResponse},
+            503: {"model": ClientLocationErrorResponse},
+        },
+        operation_id="putClientLocationContextObservation",
+    )
+    def put_context_location_observation(
+        payload: ClientLocationContextWriteRequest,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Security(_BEARER),
+        ],
+        session: Session = Depends(get_session),
+    ) -> ClientLocationSnapshot | JSONResponse:
+        if payload.context_history_opt_in is not True:
+            return _error_response(ClientLocationInvalid())
+        token = credentials.credentials if credentials is not None else None
+        observation = CurrentLocationObservation(
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy_m=payload.accuracy_m,
+            captured_at=payload.captured_at,
+            precision=(
+                ClientLocationPrecision(payload.precision)
+                if payload.precision is not None else None
+            ),
+        )
+        try:
+            with session.begin_nested():
+                result = service.put_context_observation(
+                    session, session_token=token, observation=observation,
+                )
+        except tuple(_ERROR_STATUS) as error:
+            return _error_response(error)
+        return _snapshot(result)
+
     @router.get(
         "/api/v1/client/location/current",
         response_model=ClientLocationSnapshot,
@@ -185,5 +260,39 @@ def build_client_location_router(
         except tuple(_ERROR_STATUS) as error:
             return _error_response(error)
         return _snapshot(result)
+
+    @router.get(
+        "/api/v1/client/location/message/{message_id}",
+        response_model=ClientMessageLocationContextResponse,
+        response_model_exclude_none=True,
+        responses={
+            401: {"model": ClientLocationErrorResponse},
+            403: {"model": ClientLocationErrorResponse},
+            404: {"model": ClientLocationErrorResponse},
+            503: {"model": ClientLocationErrorResponse},
+        },
+        operation_id="getLocationContextForMessage",
+    )
+    def get_message_location_context(
+        message_id: str,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Security(_BEARER),
+        ],
+        session: Session = Depends(get_session),
+    ) -> ClientMessageLocationContextResponse | JSONResponse:
+        token = credentials.credentials if credentials is not None else None
+        if not (1 <= len(message_id) <= 64):
+            return _error_response(ClientLocationNotFound())
+        try:
+            result = service.get_message_context(
+                session, session_token=token, message_id=message_id,
+            )
+        except tuple(_ERROR_STATUS) as error:
+            return _error_response(error)
+        return ClientMessageLocationContextResponse(**{
+            field: getattr(result, field)
+            for field in result.__dataclass_fields__
+        })
 
     return router

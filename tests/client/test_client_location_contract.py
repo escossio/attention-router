@@ -128,6 +128,7 @@ def test_error_vocabulary_is_bounded():
     error = load_contract()["components"]["schemas"]["ClientLocationErrorResponse"]
     assert set(error["properties"]["code"]["enum"]) == {
         "CLIENT_LOCATION_DISABLED",
+        "CLIENT_LOCATION_HISTORY_DISABLED",
         "CLIENT_LOCATION_INVALID",
         "CLIENT_LOCATION_STALE",
         "CLIENT_LOCATION_FUTURE",
