@@ -182,7 +182,7 @@ def test_no_implicit_canary_window_or_budget(change):
         CanaryScope(**values)
 
 
-def original_canary(session, tmp_path, *, owner=None, now=None, conversation='synthetic-original-direct'):
+def original_canary(session, tmp_path, *, owner=None, now=None, conversation='synthetic-original-direct', deadlines=None):
     """Synthetic test content exercises ORGANIC wire lineage without reclassification."""
     from attention_router.application.semantic_canary import CanaryGrant, CanaryJournal, GovernedSemanticCanary
     from attention_router.application.semantic_policy_anchor import AnchoredPolicyJournal, SyntheticFileAuthority
@@ -223,7 +223,7 @@ def original_canary(session, tmp_path, *, owner=None, now=None, conversation='sy
         consent=True, policy_version='SYNTHETIC_TEST_POLICY', starts_at=now-timedelta(minutes=5),
         canary=CanaryScope(conversation_key=conversation, observe_from=now-timedelta(minutes=5),
             observe_until=now+timedelta(minutes=5), max_messages=10, max_audio_messages=5),
-        deadlines={layer:now+timedelta(hours=1) for layer in Layer.__args__},
+        deadlines=deadlines or {layer:now+timedelta(hours=1) for layer in Layer.__args__},
         canary_id='synthetic-canary', operational_decision_ref='SYNTHETIC_NOT_OWNER_APPROVAL',
         retention_decision_ref='SYNTHETIC_TTL', backup_decision_ref='SYNTHETIC_BACKUPS')
     service = GovernedSemanticCanary(journal=journal, client_sessions=authority, enabled=True)
@@ -430,3 +430,61 @@ def test_canary_expired_pending_capture_has_terminal_state(session, tmp_path):
     assert row.metadata_json['content_state'] == 'CANARY_PROCESSING_EXPIRED'
     assert row.text == '' and not row.searchable
     assert expire_pending_capture(session, now=grant.canary.observe_until) == 0
+
+
+@pytest.mark.parametrize('reviewed', [False, True])
+def test_can_ret_01_separate_retention_and_no_replay_extension(session, tmp_path, reviewed):
+    from datetime import UTC, datetime
+    from attention_router.application.semantic_canary import canary_reference_rules
+    from attention_router.application.semantic_governance import Layer
+    from attention_router.application.semantic_retention import RetentionSchedule
+    from attention_router.infrastructure.candidate_insight_models import CandidateInsightRow
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    schedule = RetentionSchedule(tenant_id='synthetic', source_account='synthetic', owner_id='synthetic',
+        version='CAN-RET-01', lineage='SYNTHETIC', effective_at=now, expires_at=now+timedelta(days=40),
+        rules=canary_reference_rules())
+    def deadline(kind, purpose='SEMANTIC_CANARY', at=now):
+        return schedule.deadline(tenant_id='synthetic', source_account='synthetic', owner_id='synthetic',
+            data_class=kind, purpose=purpose, created_at=now, now=at, consent=True)
+    assert deadline('MEDIA') == now+timedelta(days=7)
+    assert deadline('TRANSCRIPTION') == deadline('MESSAGE') == now+timedelta(days=30)
+    pending = deadline('CANDIDATE', 'SEMANTIC_CANARY_UNREVIEWED')
+    admitted = deadline('CANDIDATE', 'SEMANTIC_CANARY_REVIEWED')
+    assert pending == now+timedelta(days=7) and admitted == now+timedelta(days=30)
+    assert deadline('MESSAGE', at=now+timedelta(days=10)) == deadline('MESSAGE')
+    with pytest.raises(ValueError, match='RULE_MISSING'):
+        deadline('BACKUP')  # Reference policy does not presume backup coverage.
+    # All other class deadlines below are explicit synthetic fixture values.
+    deadlines = {layer:admitted for layer in Layer.__args__}
+    deadlines.update(MEDIA=deadline('MEDIA'), CANDIDATE=pending, INTERPRETATION=pending)
+    service, _, grant = original_canary(session, tmp_path, now=now, deadlines=deadlines)
+    row = original_message(session, grant, now)
+    result = service.process_message(session, session_token='synthetic-session', message_id=row.id, now=now)
+    candidate = session.get(CandidateInsightRow, result['candidate_id'])
+    original = candidate.provenance['retention_expires_at']
+    assert datetime.fromisoformat(original) == pending
+    assert not service.process_message(session, session_token='synthetic-session', message_id=row.id,
+                                       now=now+timedelta(minutes=1))['created']
+    assert candidate.provenance['retention_expires_at'] == original
+    if reviewed:
+        for decision, at in [('synthetic-admit', now), ('synthetic-admit', now+timedelta(days=2)),
+                             ('synthetic-repeat', now+timedelta(days=8))]:
+            service.review(session, session_token='synthetic-session', candidate_id=candidate.id,
+                action='ADMIT', decision_ref=decision, now=at)
+            assert datetime.fromisoformat(candidate.provenance['retention_expires_at']) == admitted
+        assert candidate.provenance['unreviewed_retention_expires_at'] == original
+    at = now+timedelta(days=8)
+    candidates = service.candidates(session, session_token='synthetic-session', now=at)
+    assert bool(candidates) is reviewed
+    context = service.context(session, session_token='synthetic-session', query='domingo', now=at)
+    assert bool(context['candidate_insights']) is reviewed
+    # The original evidence has its independent 30-day access even if a proposal expires.
+    assert service.conversation(session, session_token='synthetic-session', now=at)['messages'][0]['text']
+    if not reviewed:
+        with pytest.raises(ValueError, match='CANDIDATE_EXPIRED'):
+            service.review(session, session_token='synthetic-session', candidate_id=candidate.id,
+                action='ADMIT', decision_ref='too-late', now=at)
+    with pytest.raises(ValueError, match='RETENTION_DENIED'):
+        service.context(session, session_token='synthetic-session', query='domingo', now=admitted)
+    assert row.text and not row.searchable  # access fence, not a real purge
+    assert not session.scalars(select(MemoryClaimRow)).all()
