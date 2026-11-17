@@ -242,3 +242,19 @@ def test_governed_capture_pause_on_disposable_postgres(Session, tmp_path):
     from tests.test_candidate_insights import test_governed_pause_prevents_archive_capture_and_replay
     with Session() as session:
         test_governed_pause_prevents_archive_capture_and_replay(session, tmp_path)
+
+
+def test_precert_review_and_anchor_on_disposable_postgres(Session, tmp_path, monkeypatch):
+    from tests.test_semantic_precertification import (
+        test_anchor_recovers_only_exact_prepared_payload,
+        test_preview_api_review_and_export_synthetic,
+    )
+    for index, test in enumerate((test_anchor_recovers_only_exact_prepared_payload,
+                                test_preview_api_review_and_export_synthetic)):
+        work = tmp_path/str(index)
+        work.mkdir()
+        with Session() as session:
+            if index == 0:
+                test(session, work, monkeypatch)
+            else:
+                test(session, work)

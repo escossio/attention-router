@@ -257,11 +257,13 @@ def retrieve_personal_context(
     *,
     limit: int = 8,
     candidate_limit: int = 200,
+    source_authorizer=None,
 ) -> PersonalContextRetrievalResult:
     """Build tenant-scoped Personal Context and return its relevant subset."""
     if candidate_limit < limit or candidate_limit > 500:
         raise ValueError("CONTEXT_RETRIEVAL_CANDIDATE_LIMIT_OUT_OF_RANGE")
-    snapshot = build_personal_context(session, tenant_id, limit=candidate_limit)
+    snapshot = build_personal_context(session, tenant_id, limit=candidate_limit,
+                                      source_authorizer=source_authorizer)
     return rank_personal_context(snapshot, query, limit=limit)
 
 

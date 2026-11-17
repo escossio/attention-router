@@ -164,6 +164,7 @@ def build_cognitive_graph_slice(
     include_secret: bool = False,
     timeline_lineage: str | None = None,
     now: datetime | None = None,
+    node_authorizer=None,
 ) -> CognitiveGraphSlice:
     """Project one bounded tenant graph without mutating source-of-truth rows."""
     if session.get(TenantRow, tenant_id) is None:
@@ -1196,6 +1197,10 @@ def build_cognitive_graph_slice(
             )
         )
 
+    if node_authorizer is not None:
+        nodes = {key: node for key, node in nodes.items() if node_authorizer(node)}
+        edges = {key: edge for key, edge in edges.items()
+                 if edge.source_node_id in nodes and edge.target_node_id in nodes}
     result = CognitiveGraphSlice(
         tenant_id=tenant_id,
         nodes=tuple(sorted(nodes.values(), key=lambda item: item.node_id)),

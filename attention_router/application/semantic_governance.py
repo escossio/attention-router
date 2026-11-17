@@ -403,88 +403,135 @@ class GovernedSemanticLab:
             return result
 
     def context(self, session, *, session_token, query, now):
+        with self._current(session, session_token, now) as (state, grant):
+            return self._compile_context(session, state, grant, query, now)
+
+    def _compile_context(self, session, state, grant, query, now):
         from attention_router.application.context_compiler import compile_graph_context
         from attention_router.infrastructure.models import ConversationMessageRow
         from attention_router.infrastructure.semantic_episode_models import SemanticEpisodeMembershipRow, SemanticEpisodeRow
-        with self._current(session, session_token, now) as (state, grant):
-            policy = self._policy(state, grant, now)
-            denied = set(policy.tombstones)
-            for decision in state['reviews'].values():
-                if decision['status'] != 'COMPLETE':
-                    denied.update(decision['source_ids'])
-            rows = session.scalars(select(CandidateInsightRow).where(CandidateInsightRow.tenant_id == grant.tenant_id)).all()
-            scoped = [r for r in rows if r.proposed_value.get('source_account') == grant.source_account
-                      and r.provenance.get('lineage_classification') == 'SYNTHETIC']
-            for row in scoped:
-                if (row.state in {'REJECTED', 'SUPERSEDED'} or translate_sensitivity(row.sensitivity_class).candidate_class == 'SECRET'
-                        or not row.provenance.get('retention_expires_at')
-                        or _utc(now) >= _utc(datetime.fromisoformat(row.provenance['retention_expires_at']))):
-                    denied |= self._refs(row)
-            safe = set()
-            safe_text = {}
-            messages = session.scalars(select(ConversationMessageRow).where(
-                ConversationMessageRow.tenant_id == grant.tenant_id,
-                ConversationMessageRow.source_account == grant.source_account).limit(501)).all()
-            if len(messages) > 500:
-                raise ValueError('GOVERNANCE_SOURCE_LIMIT')
-            for row in messages:
-                if row.id not in denied:
-                    try:
-                        self._sources(session, grant, [row.id])
-                        safe.add(row.id)
-                        safe_text[row.id] = row.text or ''
-                    except ValueError:
-                        pass
-            # Episode label/metadata are derived: exclude the whole episode if ANY
-            # member is unauthorized, ambiguous, from another account, or expired.
-            episodes = set()
-            for ep in session.scalars(select(SemanticEpisodeRow).where(SemanticEpisodeRow.tenant_id == grant.tenant_id).limit(201)):
-                members = session.scalars(select(SemanticEpisodeMembershipRow).where(
-                    SemanticEpisodeMembershipRow.tenant_id == grant.tenant_id,
-                    SemanticEpisodeMembershipRow.episode_id == ep.id)).all()
-                if (members and ep.state in {'ACTIVE', 'CLOSED'}
-                        and translate_sensitivity(ep.sensitivity_class).candidate_class != 'SECRET'
-                        and all(m.member_type == 'CONVERSATION_MESSAGE' and not m.ambiguous and m.member_ref in safe for m in members)):
-                    episodes.add(ep.id)
-            def authorize(node):
-                return (node.source_type == 'CONVERSATION_MESSAGE' and node.source_id in safe
-                        or node.source_type == 'SEMANTIC_EPISODE' and node.source_id in episodes)
-            packet = compile_graph_context(session, grant.tenant_id, query, now=now,
-                                           node_authorizer=authorize, authorized_source_text=safe_text,
-                                           token_budget=8000, item_budget=50)
-            found = {i.source_id for i in packet.items if i.source_type == 'CONVERSATION_MESSAGE'}
-            candidates = []
-            for row in scoped:
-                refs = self._refs(row)
-                if refs and refs <= safe and refs & found and row.state in {'PROPOSED', 'NEEDS_REVIEW', 'ADMITTED'}:
-                    candidates.append(dict(candidate_id=row.id, state=row.state, canonical_truth=False,
-                        interpretation=row.proposed_value, evidence_ids=sorted(refs), decision_ref=row.decision_ref))
-            from attention_router.application.semantic_interpretation import Interpretation, project_interpretations
-            evidence_ids = {mid for candidate in candidates for mid in candidate['evidence_ids']}
-            sources = self._sources(session, grant, evidence_ids)
-            events = project_interpretations(
-                [Interpretation.model_validate(c['interpretation']) for c in candidates], sources)
-            result = dict(graph_context=packet.internal_payload(), candidate_insights=candidates,
-                          event_context=events, context_incomplete=bool(denied or safe - found),
-                          tenant_id=grant.tenant_id, source_account=grant.source_account,
-                          grants_authority=False, policy_revision=state['revision'],
-                          cache_expires_at=policy.expires_at.isoformat(),
-                          decisions=list(state['reviews'].values()))
-            result = json.loads(json.dumps(result, default=str))
-            result['context_fingerprint'] = stable_hash(result)
-            return result
+        policy = self._policy(state, grant, now)
+        denied = set(policy.tombstones)
+        for decision in state['reviews'].values():
+            if decision['status'] != 'COMPLETE':
+                denied.update(decision['source_ids'])
+        rows = session.scalars(select(CandidateInsightRow).where(CandidateInsightRow.tenant_id == grant.tenant_id)).all()
+        scoped = [r for r in rows if r.proposed_value.get('source_account') == grant.source_account
+                  and r.provenance.get('lineage_classification') == 'SYNTHETIC']
+        for row in scoped:
+            if (row.state in {'REJECTED', 'SUPERSEDED'} or translate_sensitivity(row.sensitivity_class).candidate_class == 'SECRET'
+                    or not row.provenance.get('retention_expires_at')
+                    or _utc(now) >= _utc(datetime.fromisoformat(row.provenance['retention_expires_at']))):
+                denied |= self._refs(row)
+        safe = set()
+        safe_text = {}
+        messages = session.scalars(select(ConversationMessageRow).where(
+            ConversationMessageRow.tenant_id == grant.tenant_id,
+            ConversationMessageRow.source_account == grant.source_account).limit(501)).all()
+        if len(messages) > 500:
+            raise ValueError('GOVERNANCE_SOURCE_LIMIT')
+        for row in messages:
+            if row.id not in denied:
+                try:
+                    self._sources(session, grant, [row.id])
+                    safe.add(row.id)
+                    safe_text[row.id] = row.text or ''
+                except ValueError:
+                    pass
+        # Episode label/metadata are derived: exclude the whole episode if ANY
+        # member is unauthorized, ambiguous, from another account, or expired.
+        episodes = set()
+        for ep in session.scalars(select(SemanticEpisodeRow).where(SemanticEpisodeRow.tenant_id == grant.tenant_id).limit(201)):
+            members = session.scalars(select(SemanticEpisodeMembershipRow).where(
+                SemanticEpisodeMembershipRow.tenant_id == grant.tenant_id,
+                SemanticEpisodeMembershipRow.episode_id == ep.id)).all()
+            if (members and ep.state in {'ACTIVE', 'CLOSED'}
+                    and translate_sensitivity(ep.sensitivity_class).candidate_class != 'SECRET'
+                    and all(m.member_type == 'CONVERSATION_MESSAGE' and not m.ambiguous and m.member_ref in safe for m in members)):
+                episodes.add(ep.id)
+        def authorize(node):
+            return (node.source_type == 'CONVERSATION_MESSAGE' and node.source_id in safe
+                    or node.source_type == 'SEMANTIC_EPISODE' and node.source_id in episodes)
+        packet = compile_graph_context(session, grant.tenant_id, query, now=now,
+                                       node_authorizer=authorize, authorized_source_text=safe_text,
+                                       token_budget=8000, item_budget=50)
+        found = {i.source_id for i in packet.items if i.source_type == 'CONVERSATION_MESSAGE'}
+        candidates = []
+        for row in scoped:
+            refs = self._refs(row)
+            if refs and refs <= safe and refs & found and row.state in {'PROPOSED', 'NEEDS_REVIEW', 'ADMITTED'}:
+                candidates.append(dict(candidate_id=row.id, state=row.state, canonical_truth=False,
+                    interpretation=row.proposed_value, evidence_ids=sorted(refs), decision_ref=row.decision_ref))
+        from attention_router.application.semantic_interpretation import Interpretation, project_interpretations
+        evidence_ids = {mid for candidate in candidates for mid in candidate['evidence_ids']}
+        sources = self._sources(session, grant, evidence_ids)
+        events = project_interpretations(
+            [Interpretation.model_validate(c['interpretation']) for c in candidates], sources)
+        result = dict(graph_context=packet.internal_payload(), candidate_insights=candidates,
+                      event_context=events, context_incomplete=bool(denied or safe - found),
+                      tenant_id=grant.tenant_id, source_account=grant.source_account,
+                      grants_authority=False, policy_revision=state['revision'],
+                      cache_expires_at=policy.expires_at.isoformat(),
+                      decisions=list(state['reviews'].values()))
+        result = json.loads(json.dumps(result, default=str))
+        result['context_fingerprint'] = stable_hash(result)
+        return result
 
     def cache_usable(self, session, *, session_token, cached, query, now):
-        # Recompile, do not trust cached graph paths, status, classification or policy.
+        # Validate the WHOLE packet, including events, decisions and authority.
+        # Until an operational cache contract is approved, even changed ranking
+        # timestamps require the freshly compiled packet rather than stale data.
         try:
+            checksum = cached['context_fingerprint']
+            if checksum != stable_hash({k: v for k, v in cached.items() if k != 'context_fingerprint'}):
+                return False
             fresh = self.context(session, session_token=session_token, query=query, now=now)
-        except (ValueError, RuntimeError):
+            return checksum == fresh['context_fingerprint']
+        except (ValueError, RuntimeError, KeyError, TypeError, AttributeError):
             return False
-        # generated_at and recency scores change; compare content/state and revision.
-        def identity(packet):
-            return stable_hash([packet['tenant_id'], packet['source_account'], packet['policy_revision'], packet['candidate_insights'],
-                [(i['source_id'], i['label'], i['attributes'], i['path']) for i in packet['graph_context']['items']]])
-        return identity(fresh) == identity(cached)
+
+    def consumer_read(self, session, *, session_token, consumer, query, now, subject_id=None):
+        """Revalidate each legacy read under the same lock as revocation.
+
+        No cached capability escapes the transaction. Canonical claims/facts
+        without governed source closure are excluded, not implicitly trusted.
+        The live runtime is intentionally not registered as a consumer here.
+        """
+        from dataclasses import asdict
+        from attention_router.application.memory import search_archive, search_memory, memory_context, get_memory_evidence
+        from attention_router.application.context_retrieval import retrieve_personal_context
+        from attention_router.application.personal_context import build_personal_context
+        from attention_router.application.cognitive_graph import build_cognitive_graph_slice
+        if consumer not in {'ARCHIVE', 'LEXICAL', 'PERSONAL_CONTEXT', 'GRAPH', 'MEMORY_CLAIMS', 'ENTITY_MEMORY', 'MEMORY_EVIDENCE'}:
+            raise ValueError('GOVERNANCE_CONSUMER_NOT_REGISTERED')
+        if consumer in {'ENTITY_MEMORY', 'MEMORY_EVIDENCE'} and not subject_id:
+            raise ValueError('GOVERNANCE_SUBJECT_REQUIRED')
+        with self._current(session, session_token, now) as (state, grant):
+            packet = self._compile_context(session, state, grant, query, now)
+            allowed = {(i['source_type'], i['source_id']) for i in packet['graph_context']['items']}
+            def authorize(kind, key):
+                return (kind, key) in allowed
+            if consumer == 'ARCHIVE':
+                result = search_archive(session, query, tenant_id=grant.tenant_id,
+                                        source_authorizer=authorize)
+            elif consumer == 'MEMORY_CLAIMS':
+                result = search_memory(session, query, tenant_id=grant.tenant_id, source_authorizer=authorize)
+            elif consumer == 'ENTITY_MEMORY':
+                result = memory_context(session, subject_id, tenant_id=grant.tenant_id, source_authorizer=authorize)
+            elif consumer == 'MEMORY_EVIDENCE':
+                result = get_memory_evidence(session, subject_id, tenant_id=grant.tenant_id, source_authorizer=authorize)
+            elif consumer == 'LEXICAL':
+                result = asdict(retrieve_personal_context(session, grant.tenant_id, query,
+                                                         source_authorizer=authorize))
+            elif consumer == 'PERSONAL_CONTEXT':
+                result = asdict(build_personal_context(session, grant.tenant_id, now=now,
+                                                      source_authorizer=authorize))
+            else:
+                result = asdict(build_cognitive_graph_slice(session, grant.tenant_id, now=now,
+                    node_authorizer=lambda node: authorize(node.source_type, node.source_id)))
+            return dict(consumer=consumer, result=result, policy_revision=state['revision'],
+                        grants_authority=False, canonical_truth=False,
+                        evidence_context=packet)
 
     def history(self, session, *, session_token, now):
         with self._current(session, session_token, now) as (state, grant):
