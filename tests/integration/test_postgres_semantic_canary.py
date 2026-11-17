@@ -26,3 +26,20 @@ def test_original_evidence_negative_boundaries(Session, tmp_path, case):
 def test_can_ret_01_absolute_deadlines(Session, tmp_path, reviewed):
     with Session() as session:
         acceptance.test_can_ret_01_separate_retention_and_no_replay_extension(session, tmp_path, reviewed)
+
+
+def test_can01_owner_receipt_and_no_retroactive_capture(Session, tmp_path):
+    with Session() as session:
+        acceptance.test_can01_consent_receipt_binds_scope_and_blocks_retroactive_source(session, tmp_path)
+
+
+def test_can01_independent_authority_restore(Session, tmp_path):
+    from tests.test_semantic_precertification import test_protected_authority_restart_restore_partial_failure_and_loss
+    with Session() as session:
+        test_protected_authority_restart_restore_partial_failure_and_loss(session, tmp_path)
+
+
+@pytest.mark.parametrize('processing', [False, True])
+def test_can01_pending_media_fixed_expiry(Session, tmp_path, monkeypatch, processing):
+    with Session() as session:
+        acceptance.test_can01_unprocessed_media_expiry_uses_existing_cleanup(session, tmp_path, monkeypatch, processing)

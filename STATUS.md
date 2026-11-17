@@ -25,3 +25,12 @@ See docs/architecture/andy-precertification-operational-contract-v1.md for contr
 - Reference rules: raw audio 7 days, messages/transcripts 30 days, unreviewed candidates 7 days, reviewed derivatives 30 days. Explicit opt-in helper; no runtime defaults or operational consent.
 - Unreviewed proposal expiry does not shorten independently authorized original-evidence access. Explicit owner ADMIT can select the pre-recorded reviewed deadline; replay/re-review never moves its original anchor.
 - Existing laboratory and non-canary policies remain unchanged. No purge or backup coverage implied. Synthetic tests exercise expiry, review, replay and absence of canonical promotion.
+
+## CAN-01 operational-control preparation
+
+- Owner-authenticated consent receipt binds the complete scope/policy digest; pre-consent evidence and scope changes fail closed. Proposed maximum: 60 minutes, 20 messages, six audio messages; no operational approval implied.
+- Protected file CAS adapter reuses the existing journal protocol. It requires independently verified restore-boundary evidence; no directory or infrastructure is provisioned. Backup independence remains unverified operationally.
+- Explicit Client API mount reuses ClientSession and existing review/processing routes; default applications remain unchanged.
+- Expired, never-transcribed canary media receives terminal metadata for existing cleanup without renewing its fixed TTL. Only disposable fixtures exercise deletion.
+- Distributed validation: 223 targeted Python tests across two workers and 15 disposable PostgreSQL tests passed, including the media-expiry delta. Ruff, architecture guard and full-file privacy/secret scans passed. Formal certification belongs to the exact published SHA and is recorded separately.
+- Private consent, backup coverage, authority placement and deployment remain blocked. No personal processing, operational purge or service changes.

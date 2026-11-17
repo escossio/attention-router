@@ -5,7 +5,7 @@ Not registered in web.app or any worker. Activation, TTLs, capture permission an
 backup handling require a separate operational decision. No provider calls.
 """
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -25,6 +25,7 @@ from attention_router.domain.cognitive_graph import (
     CognitiveNodeKind, CognitiveRelationKind,
 )
 from attention_router.infrastructure.models import ConversationMessageRow
+from attention_router.infrastructure.hashing import stable_hash
 
 
 def canary_reference_rules():
@@ -59,6 +60,9 @@ class CanaryGrant(LabGrant):
                 or self.canary.observe_from < self.starts_at
                 or any(t < self.canary.observe_until for t in self.deadlines.values())):
             raise ValueError('CANARY_WINDOW_EXCEEDS_GRANT')
+        if (self.canary.observe_until - self.canary.observe_from > timedelta(minutes=60)
+                or self.canary.max_messages > 20 or self.canary.max_audio_messages > 6):
+            raise ValueError('CAN01_MAXIMUM_SCOPE_EXCEEDED')
         return self
 
 
@@ -91,10 +95,42 @@ class GovernedSemanticCanary(GovernedSemanticLab):
             raise ValueError('SEMANTIC_CANARY_DISABLED')
         if not isinstance(self.journal, AnchoredPolicyJournal):
             raise ValueError('CANARY_REQUIRES_CURRENT_REVOCATION_AUTHORITY')
-        from attention_router.application.semantic_policy_anchor import SyntheticFileAuthority
+        from attention_router.application.semantic_policy_anchor import SyntheticFileAuthority, ProtectedFileAuthority
         from attention_router.config import settings
         if isinstance(self.journal.authority, SyntheticFileAuthority) and settings.app_env != 'test':
             raise ValueError('CANARY_SYNTHETIC_AUTHORITY_FORBIDDEN_OUTSIDE_TESTS')
+        if settings.app_env != 'test' and not isinstance(self.journal.authority, ProtectedFileAuthority):
+            raise ValueError('CANARY_OPERATIONAL_AUTHORITY_REQUIRED')
+
+    def _initial_metadata(self, grant, now):
+        # Called only after the existing ClientSession + owner-binding checks.
+        if now.utcoffset() is None or not grant.starts_at <= now < grant.canary.observe_until:
+            raise ValueError('CANARY_CONSENT_TIME_INVALID')
+        return {'consent_receipt': dict(version='CAN01_OWNER_CONSENT_V1',
+            grant_digest=stable_hash(grant.model_dump(mode='json')), owner_id=grant.owner_id,
+            tenant_id=grant.tenant_id, authorized_at=now.isoformat(),
+            decision_ref=grant.operational_decision_ref, grants_authority=False)}
+
+    def _consent_time(self, state, grant):
+        receipt = state.get('consent_receipt', {})
+        try:
+            stamp = datetime.fromisoformat(receipt['authorized_at'])
+            if (receipt['version'] != 'CAN01_OWNER_CONSENT_V1'
+                    or receipt['grant_digest'] != stable_hash(grant.model_dump(mode='json'))
+                    or receipt['owner_id'] != grant.owner_id or receipt['tenant_id'] != grant.tenant_id
+                    or receipt['decision_ref'] != grant.operational_decision_ref
+                    or receipt['grants_authority'] is not False or stamp.utcoffset() is None
+                    or not grant.starts_at <= stamp < grant.canary.observe_until):
+                raise ValueError()
+            return stamp
+        except (ValueError, KeyError, TypeError):
+            raise ValueError('CANARY_OWNER_CONSENT_RECEIPT_INVALID') from None
+
+    def _policy(self, state, grant, now, *, capture=False):
+        consent_at = self._consent_time(state, grant)
+        if now < consent_at:
+            raise ValueError('CANARY_BEFORE_CONSENT')
+        return super()._policy(state, grant, now, capture=capture)
 
     def _policy_deadline(self, grant):
         # Source/reviewed access outlives unreviewed proposals, not their evidence.
@@ -123,6 +159,7 @@ class GovernedSemanticCanary(GovernedSemanticLab):
     def _current(self, session, token, now):
         self._enabled()
         with super()._current(session, token, now) as current:
+            self._consent_time(*current)
             yield current
 
     def capture_evidence(self, *args, **kwargs):
@@ -174,7 +211,8 @@ class GovernedSemanticCanary(GovernedSemanticLab):
                     or (meta.get('is_group') is not None and meta.get('is_group') is not False)
                     or meta.get('peer_id_kind') not in {'lid', 'c.us'}
                     or meta.get('owner_self_chat') is True or event.owner_authenticated
-                    or not grant.canary.observe_from <= _utc(event.received_at) <= _utc(now)):
+                    or not max(grant.canary.observe_from, self._consent_time(state, grant))
+                    <= _utc(event.received_at) <= _utc(now)):
                 raise ValueError('CANARY_OBSERVATION_SCOPE_DENIED')
             receipt = session.scalar(select(InboundEventRow).where(
                 InboundEventRow.tenant_id == grant.tenant_id, InboundEventRow.source == event.source,
@@ -252,6 +290,8 @@ class GovernedSemanticCanary(GovernedSemanticLab):
         existing = metadata.get('semantic_canary_id')
         if existing not in {None, grant.canary_id}:
             raise ValueError('CANARY_ENROLLMENT_CONFLICT')
+        if _utc(row.sent_at) < self._consent_time(self.journal.read(), grant):
+            raise ValueError('CANARY_SOURCE_BEFORE_CONSENT')
         if _utc(row.sent_at) > _utc(now):
             raise ValueError('CANARY_SOURCE_FROM_FUTURE')
         if existing is None:

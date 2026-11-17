@@ -115,3 +115,37 @@ The laboratory's conservative deadline contract and existing non-canary data
 remain unchanged. Future authorized historical memory can span months/years;
 this short first-canary policy does not replace it. Neither numerical approval
 nor owner review authorizes operational activation or canonical promotion.
+
+## CAN-01 control preparation
+
+`CanaryGrant` now enforces the proposed upper bound of 60 minutes, 20 messages and
+six audio messages. These bounds are not consent. Initialization still requires
+existing ClientSession ownership and actor binding. The journal stores a
+`CAN01_OWNER_CONSENT_V1` receipt with authorization time, owner/tenant, operational
+decision reference and the digest of the complete grant. Every owner operation and
+capture revalidates it; changing scope or retention requires a separately approved
+new grant, never silent modification. Original provider times before consent are
+rejected. Tokens are never recorded. Earlier canary journals without this receipt
+fail closed; there is no automatic migration or fabricated approval.
+
+`ProtectedFileAuthority` reuses the existing atomic file CAS and fsync protocol.
+It creates no infrastructure. A private directory with restricted ownership/mode,
+explicit restore-boundary evidence and a validity deadline must be supplied.
+Placement checks do not establish independence from host snapshots or external
+backups: that evidence remains a deployment gate. Loss, corruption, expiry or
+rollback blocks access. Bootstrap is an explicit, separately authorized operation;
+never initialize an absent authority to recover a failed reader. Do not restore
+both the authority and the data from an older snapshot.
+
+`web.app.mount_semantic_canary_review` mounts the existing router only when called
+explicitly, with the existing ClientSession service. The internal application
+factory already accepts the same service. Neither initializes consent or enables
+capture. Keep routes and quarantine guards when disabling the feature. A pending
+canary media artifact that never reaches STT becomes terminal at processing expiry,
+without changing its original media deadline; existing reference-aware cleanup can
+then handle it. No organic purge is added or run by this change.
+
+Live continuity remains scoped, signed and quarantined before commit. Historical
+acceleration is deliberately excluded from this first canary: no retrospective
+capture, cursor reset or old-source adoption. No new network flow, service,
+container, database, model or Android capability is introduced.
