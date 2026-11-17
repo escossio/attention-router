@@ -579,6 +579,7 @@ def compile_graph_context(
     now: datetime | None = None,
     node_authorizer: Callable[[CognitiveNode], bool] | None = None,
     authorized_source_text: dict[str, str] | None = None,
+    authorized_graph: CognitiveGraphSlice | None = None,
 ) -> CompiledContextPacket:
     """Compile bounded graph context, falling back to lexical V0 without authority."""
     if max_hops < 0 or max_hops > MAX_HOPS:
@@ -605,7 +606,13 @@ def compile_graph_context(
         raise ContextCompilerError('SOURCE_TEXT_REQUIRES_AUTHORIZED_SUBGRAPH')
     normalized_filters = _normalize_relation_filters(relation_filters)
 
-    graph = build_cognitive_graph_slice(
+    if authorized_graph is not None:
+        if node_authorizer is None or authorized_graph.tenant_id != tenant_id:
+            raise ContextCompilerError('PROJECTION_REQUIRES_AUTHORIZED_TENANT')
+        authorized_graph.validate()
+        if len(authorized_graph.nodes) > 500 or len(authorized_graph.edges) > 1000:
+            raise ContextCompilerError('AUTHORIZED_PROJECTION_LIMIT')
+    graph = authorized_graph if authorized_graph is not None else build_cognitive_graph_slice(
         session,
         tenant_id,
         limit_per_kind=graph_limit_per_kind,

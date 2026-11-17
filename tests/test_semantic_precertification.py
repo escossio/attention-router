@@ -179,7 +179,8 @@ def test_legacy_claims_cannot_leak_through_governed_lexical_or_graph(session, tm
         lab.consumer_read(session, session_token='synthetic-session', consumer='COGNITIVE_RUNTIME', query='domingo', now=stamp)
 
 
-def test_preview_api_real_client_session_revocation(session, tmp_path):
+@pytest.mark.parametrize('canary', [False, True])
+def test_preview_api_real_client_session_revocation(session, tmp_path, canary):
     from tests.client.test_client_session_service import seed, keypair, sign, settings, NOW, HUMAN_ID, TENANT_ID
     from tests.test_candidate_insights import _owner
     from attention_router.application.client_session import ClientSessionService
@@ -203,6 +204,16 @@ def test_preview_api_real_client_session_revocation(session, tmp_path):
     grant = LabGrant(tenant_id=TENANT_ID, source_account='synthetic', owner_id=HUMAN_ID,
         owner_actor_key=owner.actor_key, purpose='SYNTHETIC_EVALUATION', lineage='SYNTHETIC', consent=True,
         policy_version='fixture', starts_at=NOW, deadlines={k:NOW+timedelta(hours=1) for k in Layer.__args__})
+    if canary:
+        from attention_router.application.semantic_canary import CanaryGrant, CanaryJournal, GovernedSemanticCanary
+        from attention_router.application.semantic_governance import CanaryScope
+        lab = GovernedSemanticCanary(journal=AnchoredPolicyJournal(tmp_path/'canary-policy.json',
+            authority, journal_type=CanaryJournal), client_sessions=sessions, enabled=True)
+        grant = CanaryGrant(**(grant.model_dump() | dict(purpose='SEMANTIC_CANARY', lineage='ORGANIC',
+            canary=CanaryScope(conversation_key='synthetic-direct', observe_from=NOW,
+                observe_until=NOW+timedelta(minutes=5), max_messages=10, max_audio_messages=2),
+            canary_id='synthetic-canary', operational_decision_ref='fixture',
+            retention_decision_ref='fixture', backup_decision_ref='fixture')))
     lab.initialize(session, session_token=issued.session_token, grant=grant, now=stamp)
     app = FastAPI()
     app.include_router(build_semantic_review_preview_router(get_session=lambda: session, service=lab, clock=lambda: stamp))

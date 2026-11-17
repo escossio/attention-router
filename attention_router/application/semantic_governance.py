@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from sqlalchemy import select
 
 from attention_router.application.semantic_interpretation import (
@@ -32,6 +32,27 @@ Operation = Literal['PAUSE_CAPTURE', 'REVOKE_CONSENT', 'HIDE_CONTEXT', 'REJECT_I
                     'DELETE_DERIVATIVES', 'EXPORT_CONTEXT', 'VERIFY_DELETION']
 
 
+class CanaryScope(Contract):
+    """One explicitly selected direct conversation; no default scope or budget.
+
+    This restricts the existing synthetic coordinator. It is not an operational
+    consent, a Transport permit or permission to relabel personal data synthetic.
+    """
+    conversation_key: str = Field(min_length=1, max_length=240)
+    observe_from: datetime
+    observe_until: datetime
+    max_messages: int = Field(strict=True, gt=0, le=500)
+    max_audio_messages: int = Field(strict=True, ge=0, le=500)
+
+    @model_validator(mode='after')
+    def bounded(self):
+        if (self.observe_from.utcoffset() is None or self.observe_until.utcoffset() is None
+                or self.observe_from >= self.observe_until
+                or self.max_audio_messages > self.max_messages):
+            raise ValueError('CANARY_EXPLICIT_WINDOW_AND_BUDGET_REQUIRED')
+        return self
+
+
 class LabGrant(Contract):
     tenant_id: str
     source_account: str
@@ -44,6 +65,7 @@ class LabGrant(Contract):
     starts_at: datetime
     # No productive period defaults. Each layer has an explicit fixture deadline.
     deadlines: dict[Layer, datetime]
+    canary: CanaryScope | None = None
 
 
 class LabOperation(Contract):
@@ -59,6 +81,9 @@ class PolicyJournal:
     files OUTSIDE the database backup domain. Does not defend against a host
     administrator rolling back both journal and data: deployment gate remains.
     """
+    grant_type = LabGrant
+    format = 'SYNTHETIC_GOVERNANCE_V1'
+
     def __init__(self, path: Path):
         self.path = Path(path)
 
@@ -76,9 +101,9 @@ class PolicyJournal:
         try:
             envelope = json.loads(self.path.read_text())
             state = envelope['state']
-            if stable_hash(state) != envelope['checksum'] or state['format'] != 'SYNTHETIC_GOVERNANCE_V1':
+            if stable_hash(state) != envelope['checksum'] or state['format'] != self.format:
                 raise ValueError()
-            LabGrant.model_validate(state['grant'])
+            self.grant_type.model_validate(state['grant'])
             for key in ('deleted', 'hidden', 'rejected', 'operations', 'reviews', 'revision'):
                 if key not in state:
                     raise ValueError()
@@ -105,6 +130,9 @@ class PolicyJournal:
 
 class GovernedSemanticLab:
     """Authenticated owner-only facade. Never registered in API or worker."""
+    grant_type = LabGrant
+    policy_type = SyntheticRetention
+    audit_origin = 'SYNTHETIC_GOVERNANCE'
     def __init__(self, *, journal: PolicyJournal, client_sessions):
         self.journal = journal
         self.client_sessions = client_sessions
@@ -120,14 +148,16 @@ class GovernedSemanticLab:
         _require_owner_decision(session, tenant_id=grant.tenant_id, decision_actor_key=grant.owner_actor_key)
 
     def initialize(self, session, *, session_token, grant: LabGrant, now):
-        grant = LabGrant.model_validate(grant.model_dump())
+        grant = self.grant_type.model_validate(grant.model_dump())
+        if self.journal.grant_type is not self.grant_type:
+            raise ValueError('GOVERNANCE_JOURNAL_CONTRACT_MISMATCH')
         self._owner(session, session_token, grant, now)
         if set(grant.deadlines) != set(Layer.__args__) or any(_utc(t) <= _utc(grant.starts_at) for t in grant.deadlines.values()):
             raise ValueError('EXPLICIT_LAYER_DEADLINES_REQUIRED')
         with self.journal.locked():
             if self.journal.path.exists():
                 raise ValueError('POLICY_ALREADY_EXISTS')
-            self.journal.write(dict(format='SYNTHETIC_GOVERNANCE_V1', grant=grant.model_dump(mode='json'),
+            self.journal.write(dict(format=self.journal.format, grant=grant.model_dump(mode='json'),
                 revision=0, revoked=False, paused=False, deleted=[], hidden=[], rejected=[], operations={}, reviews={}))
 
     @contextmanager
@@ -137,7 +167,7 @@ class GovernedSemanticLab:
                 raise ValueError('GOVERNANCE_REQUIRES_CLEAN_UNIT_OF_WORK')
             session.expire_all()  # classification/session changes cannot hide in an identity-map cache
             state = self.journal.read()
-            grant = LabGrant.model_validate(state['grant'])
+            grant = self.grant_type.model_validate(state['grant'])
             self._owner(session, token, grant, now)
             yield state, grant
 
@@ -149,26 +179,41 @@ class GovernedSemanticLab:
             raise ValueError('GOVERNANCE_CONSENT_OR_RETENTION_DENIED')
         if capture and state['paused']:
             raise ValueError('GOVERNANCE_CAPTURE_PAUSED')
-        return SyntheticRetention(tenant_id=grant.tenant_id, source_account=grant.source_account,
+        if capture and grant.canary and not (
+                grant.canary.observe_from <= _utc(now) < grant.canary.observe_until):
+            raise ValueError('CANARY_OBSERVATION_WINDOW_CLOSED')
+        return self.policy_type(tenant_id=grant.tenant_id, source_account=grant.source_account,
             purpose=grant.purpose, consent=True, expires_at=deadline,
             tombstones=frozenset(state['deleted'] + state['hidden'] + state['rejected']))
 
     def _sources(self, session, grant, ids):
+        self._validate_source_scope(session, grant, ids)
         return {mid: archived_source(session, tenant_id=grant.tenant_id,
                     source_account=grant.source_account, message_id=mid) for mid in ids}
 
     def _validate_source_scope(self, session, grant, ids):
-        from attention_router.infrastructure.models import ConversationMessageRow
+        from attention_router.infrastructure.models import ConversationMessageRow, ConversationThreadRow
         for mid in ids:
             row = session.get(ConversationMessageRow, mid, populate_existing=True)
             if row is None or (row.tenant_id, row.source_account) != (grant.tenant_id, grant.source_account):
                 raise ValueError('INTERPRETATION_ARCHIVE_SCOPE')
-            if (row.metadata_json or {}).get('platform_lineage', {}).get('classification') != 'SYNTHETIC':
+            if (row.metadata_json or {}).get('platform_lineage', {}).get('classification') != grant.lineage:
                 raise ValueError('INTERPRETATION_SYNTHETIC_ONLY')
+            if grant.canary:
+                thread = session.get(ConversationThreadRow, row.conversation_id)
+                if (thread is None or thread.tenant_id != grant.tenant_id
+                        or row.source != 'wwebjs' or thread.source != 'wwebjs'
+                        or thread.source_account != grant.source_account
+                        or thread.external_thread_key != grant.canary.conversation_key
+                        or thread.thread_type != 'DIRECT'
+                        or not grant.canary.observe_from <= _utc(row.sent_at) < grant.canary.observe_until):
+                    raise ValueError('CANARY_SOURCE_OUTSIDE_SELECTION')
 
     def propose(self, session, *, session_token, value, now):
         with self._current(session, session_token, now) as (state, grant):
             policy = self._policy(state, grant, now, capture=True)
+            self._sources(session, grant, set(value.source_message_ids) | set(value.references)
+                          | set(value.contradiction_refs))
             row, created = propose_interpretation(session, value, policy=policy, now=now)
             session.commit()  # lock held through commit; revocation linearizes after this write
             return row.id, created
@@ -182,9 +227,34 @@ class GovernedSemanticLab:
         from attention_router.application.semantic_interpretation import SourceEvidence
         from attention_router.application.memory import archive_incremental_message
         source = SourceEvidence.model_validate(source.model_dump())
+        if source.lineage != 'SYNTHETIC':
+            raise ValueError('INTERPRETATION_SYNTHETIC_ONLY')
         with self._current(session, session_token, now) as (state, grant):
             policy = self._policy(state, grant, now, capture=True)
             policy.require([source.message_id], source.tenant_id, source.source_account, now)
+            if grant.canary:
+                scope = grant.canary
+                if (conversation_key != scope.conversation_key
+                        or not scope.observe_from <= _utc(source.sent_at) <= _utc(now)
+                        or _utc(source.sent_at) >= scope.observe_until):
+                    raise ValueError('CANARY_SOURCE_OUTSIDE_SELECTION')
+                from attention_router.infrastructure.models import ConversationMessageRow, ConversationThreadRow
+                captured = session.scalars(select(ConversationMessageRow).join(ConversationThreadRow,
+                    ConversationThreadRow.id == ConversationMessageRow.conversation_id).where(
+                    ConversationMessageRow.tenant_id == grant.tenant_id,
+                    ConversationMessageRow.source == 'wwebjs',
+                    ConversationMessageRow.source_account == grant.source_account,
+                    ConversationThreadRow.tenant_id == grant.tenant_id,
+                    ConversationThreadRow.source == 'wwebjs',
+                    ConversationThreadRow.source_account == grant.source_account,
+                    ConversationThreadRow.external_thread_key == scope.conversation_key,
+                    ConversationMessageRow.sent_at >= scope.observe_from,
+                    ConversationMessageRow.sent_at < scope.observe_until).limit(scope.max_messages + 1)).all()
+                replay = any(row.source_message_id == source.message_id for row in captured)
+                if not replay and (len(captured) >= scope.max_messages or
+                        source.modality == 'VOICE' and sum(row.message_type in {'VOICE', 'AUDIO'}
+                            for row in captured) >= scope.max_audio_messages):
+                    raise ValueError('CANARY_CAPTURE_BUDGET_EXHAUSTED')
             fingerprint = stable_hash(source.model_dump(mode='json'))
             row, created = archive_incremental_message(session, source='wwebjs',
                 source_account=source.source_account, thread_key=conversation_key, thread_type='DIRECT',
@@ -213,11 +283,15 @@ class GovernedSemanticLab:
 
     def _candidate(self, session, grant, candidate_id):
         row = session.get(CandidateInsightRow, candidate_id, populate_existing=True)
-        if (row is None or row.tenant_id != grant.tenant_id
-                or row.provenance.get('lineage_classification') != 'SYNTHETIC'
-                or row.proposed_value.get('source_account') != grant.source_account):
+        if row is None or not self._candidate_belongs(row, grant):
             raise ValueError('GOVERNANCE_CANDIDATE_SCOPE')
+        self._validate_source_scope(session, grant, self._refs(row))
         return row
+
+    def _candidate_belongs(self, row, grant):
+        return (row.tenant_id == grant.tenant_id
+                and row.provenance.get('lineage_classification') == grant.lineage
+                and row.proposed_value.get('source_account') == grant.source_account)
 
     @staticmethod
     def _refs(row):
@@ -270,7 +344,7 @@ class GovernedSemanticLab:
                     reject_candidate_insight(**kwargs)
                 audit(session, None, 'semantic_lab.owner_review',
                       {'decision_ref': decision_ref, 'action': action, 'candidate_id': candidate_id},
-                      tenant_id=grant.tenant_id, origin='SYNTHETIC_GOVERNANCE', created_at=now)
+                      tenant_id=grant.tenant_id, origin=self.audit_origin, created_at=now)
                 session.commit()
             except Exception:
                 session.rollback()
@@ -308,10 +382,10 @@ class GovernedSemanticLab:
             state['operations'][request.request_id] = record
             self.journal.write(state)
             if request.operation == 'DELETE_DERIVATIVES':
-                policy = SyntheticRetention(tenant_id=grant.tenant_id, source_account=grant.source_account,
+                policy = self.policy_type(tenant_id=grant.tenant_id, source_account=grant.source_account,
                     purpose=grant.purpose, consent=False, expires_at=now, tombstones=frozenset(request.source_ids))
                 try:
-                    record['candidate_rows_purged'] = purge_synthetic_derivatives(session, policy=policy)
+                    record['candidate_rows_purged'] = self._purge_candidates(session, policy=policy)
                     record['episodes_purged'] = self._purge_episodes(session, grant, request.source_ids)
                 except Exception:
                     session.rollback()
@@ -319,18 +393,21 @@ class GovernedSemanticLab:
             audit(session, None, 'semantic_lab.policy_operation',
                   {'request_id': request.request_id, 'operation': request.operation,
                    'source_count': len(request.source_ids)}, tenant_id=grant.tenant_id,
-                  origin='SYNTHETIC_GOVERNANCE', created_at=now)
+                  origin=self.audit_origin, created_at=now)
             session.commit()
             record['status'] = 'COMPLETE'
             self.journal.write(state)
             if request.operation == 'EXPORT_CONTEXT':
-                return dict(record, lineage='SYNTHETIC', canonical_truth=False,
+                return dict(record, lineage=grant.lineage, canonical_truth=False,
                             sources=[s.model_dump(mode='json') for s in sources.values()],
                             export_hash=stable_hash([s.model_dump(mode='json') for s in sources.values()]),
                             omissions=['MEDIA_BYTES', 'BACKUPS', 'CANONICAL_MEMORY'])
             if request.operation == 'VERIFY_DELETION':
                 return self._verify(session, state, grant, request.source_ids)
             return record
+
+    def _purge_candidates(self, session, *, policy):
+        return purge_synthetic_derivatives(session, policy=policy)
 
     def _purge_episodes(self, session, grant, ids):
         """Only whole synthetic episodes; mixed/lineage/shared structures stay fenced."""
@@ -386,7 +463,7 @@ class GovernedSemanticLab:
                 raise ValueError('GOVERNANCE_CANDIDATE_LIMIT')
             result = []
             for row in rows:
-                if row.proposed_value.get('source_account') != grant.source_account or row.provenance.get('lineage_classification') != 'SYNTHETIC':
+                if not self._candidate_belongs(row, grant):
                     continue
                 refs = self._refs(row)
                 if refs & set(state['deleted'] + state['hidden']) or translate_sensitivity(row.sensitivity_class).candidate_class == 'SECRET':
@@ -416,8 +493,7 @@ class GovernedSemanticLab:
             if decision['status'] != 'COMPLETE':
                 denied.update(decision['source_ids'])
         rows = session.scalars(select(CandidateInsightRow).where(CandidateInsightRow.tenant_id == grant.tenant_id)).all()
-        scoped = [r for r in rows if r.proposed_value.get('source_account') == grant.source_account
-                  and r.provenance.get('lineage_classification') == 'SYNTHETIC']
+        scoped = [r for r in rows if self._candidate_belongs(r, grant)]
         for row in scoped:
             if (row.state in {'REJECTED', 'SUPERSEDED'} or translate_sensitivity(row.sensitivity_class).candidate_class == 'SECRET'
                     or not row.provenance.get('retention_expires_at')
@@ -454,6 +530,7 @@ class GovernedSemanticLab:
                     or node.source_type == 'SEMANTIC_EPISODE' and node.source_id in episodes)
         packet = compile_graph_context(session, grant.tenant_id, query, now=now,
                                        node_authorizer=authorize, authorized_source_text=safe_text,
+                                       authorized_graph=self._context_projection(session, grant, safe, now),
                                        token_budget=8000, item_budget=50)
         found = {i.source_id for i in packet.items if i.source_type == 'CONVERSATION_MESSAGE'}
         candidates = []
@@ -476,6 +553,9 @@ class GovernedSemanticLab:
         result = json.loads(json.dumps(result, default=str))
         result['context_fingerprint'] = stable_hash(result)
         return result
+
+    def _context_projection(self, session, grant, safe, now):
+        return None  # Existing V2A projection remains the laboratory default.
 
     def cache_usable(self, session, *, session_token, cached, query, now):
         # Validate the WHOLE packet, including events, decisions and authority.

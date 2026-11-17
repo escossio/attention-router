@@ -11,7 +11,7 @@ from attention_router.infrastructure.models import ConversationMessageRow, Conve
 
 
 def preview_conversation(session, *, tenant_id: str, source_account: str, conversation_key: str,
-                         limit: int = 100) -> dict:
+                         limit: int = 100, source_authorizer=None) -> dict:
     if not tenant_id or not source_account or not 1 <= limit <= 200:
         raise ValueError("INVALID_PREVIEW_SCOPE")
     thread = session.scalar(select(ConversationThreadRow).where(
@@ -33,7 +33,8 @@ def preview_conversation(session, *, tenant_id: str, source_account: str, conver
     for row in rows[:limit]:
         meta = row.metadata_json or {}
         automated = meta.get("event_origin") == "ROUTER_AUTOMATED_OUTBOUND_OBSERVED"
-        text = row.text if row.sensitivity_class != "SECRET" and row.searchable else None
+        permitted = (source_authorizer(row.id) if source_authorizer is not None else row.searchable)
+        text = row.text if row.sensitivity_class != "SECRET" and permitted else None
         items.append({
             "message_id": row.id, "provider_id": row.source_message_id,
             "sent_at": row.sent_at.isoformat(), "direction": row.direction,

@@ -522,7 +522,7 @@ def capture_voice_transcription(
         row.normalized_text = _normalize(safe_text)
         row.content_hash = stable_hash(safe_text)
         row.sensitivity_class = sensitivity
-        row.searchable = sensitivity != "SECRET"
+        row.searchable = sensitivity != "SECRET" and not metadata.get("semantic_canary_id")
         metadata["content_state"] = "TRANSCRIBED"
         metadata["transcription_status"] = "READY"
     else:
@@ -564,7 +564,7 @@ def expire_pending_capture(session: Session, *, now: datetime | None = None, lim
         ConversationMessageRow.source == "wwebjs",
         ConversationMessageRow.metadata_json["capture_contract"].as_string() == "LIVE_CONVERSATION_ARCHIVE_V0",
         ConversationMessageRow.metadata_json["content_state"].as_string().in_(
-            ("PENDING_TRANSCRIPTION", "TRANSCRIPTION_PENDING")
+            ("PENDING_TRANSCRIPTION", "TRANSCRIPTION_PENDING", "TRANSCRIPTION_TIMEOUT", "MEDIA_CAPTURE_TIMEOUT")
         ),
     ).limit(limit)
     if settings.conversation_capture_tenant_id:
@@ -578,13 +578,33 @@ def expire_pending_capture(session: Session, *, now: datetime | None = None, lim
             received = _utc(datetime.fromisoformat(meta["source_received_at"]))
         except (KeyError, ValueError, TypeError):
             continue
-        if stamp - received < timedelta(minutes=15):
+        canary_expired = False
+        if meta.get("semantic_canary_id"):
+            try:
+                canary_expired = stamp >= _utc(datetime.fromisoformat(meta["semantic_canary_until"]))
+            except (KeyError, TypeError, ValueError):
+                canary_expired = True  # Missing policy deadline cannot authorize recovery.
+        if not canary_expired and stamp - received < timedelta(minutes=15):
             continue
         transcription = session.scalar(select(VoiceTranscriptionRow).where(
             VoiceTranscriptionRow.tenant_id == row.tenant_id,
             VoiceTranscriptionRow.inbound_event_id == meta["source_inbound_event_id"],
         ))
         if transcription and transcription.status in {"READY", "FAILED"}:
+            continue
+        if canary_expired:
+            if transcription and transcription.status == "PROCESSING":
+                continue  # The guarded in-flight worker validates its own deadline.
+            if transcription:
+                transcription.status = "FAILED"
+                transcription.error_code = "CANARY_PROCESSING_EXPIRED"
+                transcription.completed_at = transcription.updated_at = stamp
+            meta["content_state"] = "CANARY_PROCESSING_EXPIRED"
+            meta["recovery"] = "EXPLICIT_NEW_SCOPE_REQUIRED"
+            row.metadata_json = meta
+            changed += 1
+            continue
+        if meta.get("content_state") in {"TRANSCRIPTION_TIMEOUT", "MEDIA_CAPTURE_TIMEOUT"}:
             continue
         meta["content_state"] = "TRANSCRIPTION_TIMEOUT" if transcription else "MEDIA_CAPTURE_TIMEOUT"
         meta["recovery"] = "LATE_SIGNED_RECEIPT_OR_EXISTING_STT_RESULT"

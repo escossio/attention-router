@@ -1080,6 +1080,11 @@ def test_governed_independent_language_evaluation(tmp_path):
     manifest=json.loads((root/'language-evaluation-freeze.json').read_text())
     assert hashlib.sha256((root/'language-final-v1.json').read_bytes()).hexdigest()==manifest['final_sha256']
     assert hashlib.sha256((root.parent.parent.parent/'attention_router/application/semantic_interpretation.py').read_bytes()).hexdigest()==manifest['interpreter_sha256']
+    import ast
+    source = (root.parent.parent.parent/'attention_router/application/semantic_interpretation.py').read_text()
+    rules = '\n'.join(ast.get_source_segment(source, n) for n in ast.parse(source).body
+        if isinstance(n, ast.FunctionDef) and n.name in {'_language_features', 'interpret_offline', 'validate_interpretation'})
+    assert hashlib.sha256(rules.encode()).hexdigest() == manifest['unchanged_language_rules_sha256']
     reports=[]
     cpu_start=process_time_ns()
     for name in ['language-validation-v1.json','language-final-v1.json']:

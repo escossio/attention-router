@@ -201,7 +201,16 @@ async function drainInboundPendingOnce(config, logger, fetchImpl, options = {}) 
 async function drainInboundPending(config, logger = console, fetchImpl = fetch, options = {}) {
   const active = inboundDrainFlights.get(config);
   if (active) return active;
-  const flight = drainInboundPendingOnce(config, logger, fetchImpl, options);
+  const flight = (async () => {
+    const normal = await drainInboundPendingOnce(config, logger, fetchImpl, options);
+    if (config.semanticCanaryEnabled === true && config.semanticCanarySelected !== true) {
+      const { canaryConfig } = require('./semantic-canary');
+      const canary = await drainInboundPendingOnce(canaryConfig(config), logger, fetchImpl, options);
+      return { ...normal, attempted: normal.attempted + canary.attempted,
+        delivered: normal.delivered + canary.delivered, canary_status: canary.status };
+    }
+    return normal;
+  })();
   inboundDrainFlights.set(config, flight);
   try {
     return await flight;

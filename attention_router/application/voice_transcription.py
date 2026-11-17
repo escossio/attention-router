@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from attention_router.domain.enums import InteractionState
 from attention_router.domain.models import now_utc
 from attention_router.infrastructure.media_store import MediaStore, MediaStoreError, media_ref
 from attention_router.infrastructure.models import (
+    ConversationMessageRow,
     InboundEventRow,
     InteractionRow,
     MediaArtifactRow,
@@ -155,7 +157,8 @@ def _finish_waiting_queue(session, transcription: VoiceTranscriptionRow) -> None
         queue.processed_at = None
 
 
-def process_voice_transcriptions(session, worker: str, limit: int = 10, client=None) -> int:
+def process_voice_transcriptions(session, worker: str, limit: int = 10, client=None,
+                                 *, canary_guard=None, event_ids=None) -> int:
     stamp = now_utc()
     stale_query = select(VoiceTranscriptionRow).where(
         VoiceTranscriptionRow.status == "PROCESSING",
@@ -163,6 +166,13 @@ def process_voice_transcriptions(session, worker: str, limit: int = 10, client=N
             seconds=settings.stt_processing_lease_seconds
         ),
     ).limit(limit)
+    canary_events = select(ConversationMessageRow.metadata_json["source_inbound_event_id"].as_string()).where(
+        ConversationMessageRow.metadata_json["semantic_canary_id"].as_string().is_not(None),
+        ConversationMessageRow.metadata_json["source_inbound_event_id"].as_string().is_not(None))
+    if event_ids is not None:
+        stale_query = stale_query.where(VoiceTranscriptionRow.inbound_event_id.in_(event_ids))
+    if canary_guard is None:
+        stale_query = stale_query.where(VoiceTranscriptionRow.inbound_event_id.not_in(canary_events))
     if session.bind and session.bind.dialect.name == "postgresql":
         stale_query = stale_query.with_for_update(skip_locked=True)
     stale_rows = list(session.scalars(stale_query).all())
@@ -182,6 +192,10 @@ def process_voice_transcriptions(session, worker: str, limit: int = 10, client=N
         .order_by(VoiceTranscriptionRow.created_at)
         .limit(limit)
     )
+    if event_ids is not None:
+        query = query.where(VoiceTranscriptionRow.inbound_event_id.in_(event_ids))
+    if canary_guard is None:
+        query = query.where(VoiceTranscriptionRow.inbound_event_id.not_in(canary_events))
     if session.bind and session.bind.dialect.name == "postgresql":
         query = query.with_for_update(skip_locked=True)
     rows = list(session.scalars(query).all())
@@ -198,80 +212,103 @@ def process_voice_transcriptions(session, worker: str, limit: int = 10, client=N
     for claimed in rows:
         row = session.get(VoiceTranscriptionRow, claimed.id)
         artifact = session.get(MediaArtifactRow, row.media_artifact_id) if row else None
+        governed = bool(row and session.scalar(select(ConversationMessageRow.id).where(
+            ConversationMessageRow.tenant_id == row.tenant_id,
+            ConversationMessageRow.metadata_json["source_inbound_event_id"].as_string() == row.inbound_event_id,
+            ConversationMessageRow.metadata_json["semantic_canary_id"].as_string().is_not(None))))
         try:
-            if row is None or artifact is None or artifact.status != "READY":
-                raise VoiceTranscriptionError("VOICE_ARTIFACT_NOT_READY")
-            reference = media_ref(artifact.content_sha256)
-            path = store.validate(
-                reference,
-                expected_sha256=artifact.content_sha256,
-                expected_size=artifact.size_bytes,
-                mime_type=artifact.mime_type,
-            )
-            # attempt_count records provider calls that actually started. A
-            # crash after claim but before this boundary does not consume one.
-            row.attempt_count += 1
-            row.updated_at = now_utc()
-            session.commit()
-            result = stt_client.transcribe(path, artifact.mime_type)
-            row.status = "READY"
-            row.transcript_text = result["transcript"]
-            row.provider = result["provider"]
-            row.model = result["model"]
-            row.provider_request_reference = result["request_id"] or None
-            row.error_code = None
-        except (VoiceTranscriptionError, MediaStoreError) as exc:
-            if row is None:
-                continue
-            row.status = "FAILED"
-            row.transcript_text = None
-            row.error_code = str(exc)[:120]
-        row.claimed_at = None
-        row.claimed_by = None
-        row.updated_at = now_utc()
-        row.completed_at = row.updated_at
-        if artifact:
-            artifact.terminal_at = row.updated_at
-            artifact.expires_at = row.updated_at + timedelta(hours=settings.media_retention_hours)
-        _finish_waiting_queue(session, row)
-        if settings.conversation_capture_enabled and row is not None:
-            from attention_router.application.conversation_live_capture import (
-                capture_voice_transcription,
-            )
-
-            try:
-                with session.begin_nested():
-                    source_event = session.get(InboundEventRow, row.inbound_event_id)
-                    if source_event is not None:
-                        captured = capture_voice_transcription(
-                            session, source_event, row,
-                        )
-                    else:
-                        captured = None
-                if captured is not None and captured.status == "TRANSCRIPTION_ATTACHED":
-                    audit(
-                        session, None, "conversation_capture.voice_transcribed",
-                        {"archive_state": captured.status},
-                        origin="conversation_capture", tenant_id=row.tenant_id,
+            guard = canary_guard(session, event_id=row.inbound_event_id) if governed else nullcontext()
+            with guard as processing_policy:
+                try:
+                    if row is None or artifact is None or artifact.status != "READY":
+                        raise VoiceTranscriptionError("VOICE_ARTIFACT_NOT_READY")
+                    reference = media_ref(artifact.content_sha256)
+                    path = store.validate(
+                        reference,
+                        expected_sha256=artifact.content_sha256,
+                        expected_size=artifact.size_bytes,
+                        mime_type=artifact.mime_type,
                     )
-            except Exception as exc:
-                audit(
-                    session, None, "conversation_capture.voice_attach_failed",
-                    {"error_type": type(exc).__name__},
-                    origin="conversation_capture", tenant_id=row.tenant_id,
-                )
-        if artifact:
-            event = session.get(InboundEventRow, row.inbound_event_id)
-            audit(
-                session,
-                event.interaction_id if event else None,
-                "voice.transcription_completed",
-                {"status": row.status, "error_code": row.error_code},
-                origin="voice_transcription",
-                tenant_id=row.tenant_id,
-            )
-        session.commit()
-        completed += 1
+                    # attempt_count records provider calls that actually started. A
+                    # crash after claim but before this boundary does not consume one.
+                    if governed and now_utc() >= processing_policy['processing_until']:
+                        raise VoiceTranscriptionError("CANARY_PROCESSING_EXPIRED")
+                    row.attempt_count += 1
+                    row.updated_at = now_utc()
+                    session.commit()
+                    result = stt_client.transcribe(path, artifact.mime_type)
+                    if governed and now_utc() >= processing_policy['processing_until']:
+                        raise VoiceTranscriptionError("CANARY_PROCESSING_EXPIRED")
+                    row.status = "READY"
+                    row.transcript_text = result["transcript"]
+                    row.provider = result["provider"]
+                    row.model = result["model"]
+                    row.provider_request_reference = result["request_id"] or None
+                    row.error_code = None
+                except (VoiceTranscriptionError, MediaStoreError) as exc:
+                    if row is None:
+                        continue
+                    row.status = "FAILED"
+                    row.transcript_text = None
+                    row.error_code = str(exc)[:120]
+                row.claimed_at = None
+                row.claimed_by = None
+                row.updated_at = now_utc()
+                row.completed_at = row.updated_at
+                if artifact:
+                    artifact.terminal_at = row.updated_at
+                    artifact.expires_at = (processing_policy['media_expires_at'] if governed else
+                        row.updated_at + timedelta(hours=settings.media_retention_hours))
+                _finish_waiting_queue(session, row)
+                if settings.conversation_capture_enabled and row is not None:
+                    from attention_router.application.conversation_live_capture import (
+                        capture_voice_transcription,
+                    )
+
+                    try:
+                        with session.begin_nested():
+                            source_event = session.get(InboundEventRow, row.inbound_event_id)
+                            if source_event is not None:
+                                captured = capture_voice_transcription(
+                                    session, source_event, row,
+                                )
+                            else:
+                                captured = None
+                        if captured is not None and captured.status == "TRANSCRIPTION_ATTACHED":
+                            audit(
+                                session, None, "conversation_capture.voice_transcribed",
+                                {"archive_state": captured.status},
+                                origin="conversation_capture", tenant_id=row.tenant_id,
+                            )
+                    except Exception as exc:
+                        audit(
+                            session, None, "conversation_capture.voice_attach_failed",
+                            {"error_type": type(exc).__name__},
+                            origin="conversation_capture", tenant_id=row.tenant_id,
+                        )
+                if artifact:
+                    event = session.get(InboundEventRow, row.inbound_event_id)
+                    audit(
+                        session,
+                        event.interaction_id if event else None,
+                        "voice.transcription_completed",
+                        {"status": row.status, "error_code": row.error_code},
+                        origin="voice_transcription",
+                        tenant_id=row.tenant_id,
+                    )
+                session.commit()
+                completed += 1
+        except ValueError:
+            if not governed:
+                raise
+            session.rollback()
+            row = session.get(VoiceTranscriptionRow, claimed.id)
+            row.status = "FAILED"
+            row.error_code = "CANARY_PROCESSING_DENIED"
+            row.claimed_at = row.claimed_by = None
+            row.completed_at = row.updated_at = now_utc()
+            session.commit()
+
     return completed
 
 

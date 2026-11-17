@@ -91,16 +91,19 @@ class AnchoredPolicyJournal(PolicyJournal):
     after advance is closed, with roll-forward only from the exact prepared
     digest. Missing anchor is never initialized by a reader or writer.
     """
-    def __init__(self, path: Path, authority: RevisionAuthority):
+    def __init__(self, path: Path, authority: RevisionAuthority, *, journal_type=PolicyJournal):
         super().__init__(path)
+        self.journal_type = journal_type
+        self.grant_type = journal_type.grant_type
+        self.format = journal_type.format
         self.authority = authority
-        self.staged = PolicyJournal(self.path.with_suffix('.prepared'))
+        self.staged = journal_type(self.path.with_suffix('.prepared'))
         if isinstance(authority, SyntheticFileAuthority) and authority.path.parent.resolve() == self.path.parent.resolve():
             raise ValueError('SEPARATE_RESTORE_DOMAIN_REQUIRED')
 
     def read(self):
         expected = self.authority.read()
-        for journal in (PolicyJournal(self.path), self.staged):
+        for journal in (self.journal_type(self.path), self.staged):
             try:
                 state = journal.read()
             except ValueError:

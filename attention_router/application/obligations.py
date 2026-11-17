@@ -301,6 +301,7 @@ def create_recurring_obligation_definition(
             or candidate.state != "ADMITTED"
             or candidate.subject_type != subject_kind
             or candidate.subject_id != subject
+            or candidate.provenance.get('purpose') == 'SEMANTIC_CANARY'
         ):
             raise ObligationError("OBLIGATION_CANDIDATE_NOT_ADMITTED")
         score = min(score, candidate.confidence)

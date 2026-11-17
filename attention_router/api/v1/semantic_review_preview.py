@@ -27,6 +27,10 @@ class ContextRequest(Contract):
     query: str = Field(min_length=1, max_length=2000, repr=False)
 
 
+class ProcessMessageRequest(Contract):
+    message_id: str = Field(min_length=1, max_length=120)
+
+
 class CandidatePreview(Contract):
     candidate_id: str
     state: Literal['PROPOSED', 'NEEDS_REVIEW', 'ADMITTED', 'REJECTED', 'SUPERSEDED']
@@ -61,7 +65,8 @@ class ContextPreview(Contract):
     context_fingerprint: str
 
 
-def build_semantic_review_preview_router(*, get_session, service, clock=lambda: datetime.now(UTC)):
+def build_semantic_review_preview_router(*, get_session, service, clock=lambda: datetime.now(UTC),
+                                        include_processing=False):
     router = APIRouter(prefix='/api/v1/client/semantic-preview', tags=['semantic-review-preview'])
     bearer = HTTPBearer(scheme_name='ClientSession', auto_error=False)
 
@@ -102,5 +107,14 @@ def build_semantic_review_preview_router(*, get_session, service, clock=lambda: 
     @router.post('/context', operation_id='getSemanticPreviewContext', response_model=ContextPreview)
     def context(body: ContextRequest, credentials: Annotated[HTTPAuthorizationCredentials | None, Security(bearer)], session=Depends(get_session)):
         return call(service.context, session, credentials, response_contract=ContextPreview, query=body.query)
+
+    if include_processing:
+        @router.get('/conversation', operation_id='getSemanticCanaryConversation')
+        def conversation(credentials: Annotated[HTTPAuthorizationCredentials | None, Security(bearer)], session=Depends(get_session)):
+            return call(service.conversation, session, credentials)
+
+        @router.post('/process', operation_id='processSemanticCanaryMessage')
+        def process(body: ProcessMessageRequest, credentials: Annotated[HTTPAuthorizationCredentials | None, Security(bearer)], session=Depends(get_session)):
+            return call(service.process_message, session, credentials, message_id=body.message_id)
 
     return router

@@ -15,10 +15,12 @@ const {resolveConversationIdentity} = require('../../../whatsapp-transport-local
  conversationCaptureOwnerTextEnabled:true,whatsappArtifactIngestionEnabled:true,
  conversationCaptureUnattributedOutboundMediaEnabled:true,outboundProvenanceDir:path.join(root,'ledger')};
  for(const [key,dir] of Object.entries({inboundSpoolDir:'spool',inboundPendingDir:'pending',inboundSendingDir:'sending',inboundSentDir:'sent',inboundQuarantineDir:'quarantine',mediaNotificationPendingDir:'mpending',mediaNotificationSendingDir:'msending',mediaNotificationSentDir:'msent',mediaNotificationQuarantineDir:'mquarantine'})) config[key]=path.join(root,dir);
+ if(process.argv[4]==='canary') Object.assign(config, {semanticCanaryEnabled:true,
+  semanticCanaryConversationKey:`wwebjs:${lid}`,semanticCanaryIngressUrl:'http://localhost/api/v1/ingress/internal/semantic-canary'});
  const packets=[]; let downloads=0;
  const bridge=createInboundBridge(config,{info(){},warn(){}},{fetchImpl:async(url,options)=>{
  packets.push({kind:url.endsWith('/media')?'media':'event',body:options.body.toString(),headers:options.headers});
- return {status:202,text:async()=>'{"status":"accepted"}'};}});
+ return {status:202,text:async()=>'{"status":"accepted","canary_media_allowed":true,"grants_authority":false}'};}});
  const ledger=createOutboundProvenanceLedger(config);
  let activeLid=lid, activePn=pn;
  const client={getContactLidAndPhone:async()=>[{lid:activeLid,pn:activePn}]};
@@ -26,6 +28,12 @@ const {resolveConversationIdentity} = require('../../../whatsapp-transport-local
  const natural=process.argv[4]==='natural';
  const stamp=natural?Date.parse('2026-11-10T12:00:00Z')/1000:Math.floor(Date.now()/1000)-60;
  const specs=[['rx-voice',false,'ptt','Trabalho na Oficina Aurora.'],['tx-voice',true,'ptt','Trabalho na Oficina Aurora.'],['rx-text',false,'chat','Minha irmã Clara chegou.'],['tx-text',true,'chat','Minha irmã Lia chegou.'],['automatic',true,'chat','Saída automática sintética.'],['missing',false,'ptt',null]];
+ if(process.argv[4]==='canary') {
+  specs[0][3]='Proponho viagem domingo.';
+  specs[1][3]='Confirmo viagem domingo.';
+  specs[2][3]='Podemos sair domingo às oito?';
+  specs[3][3]='Confirmo domingo às oito.';
+ }
  if(natural) {
   specs[0][3]='Proponho viagem para Serra Azul sábado.';
   specs[1][3]='Sábado não será possível; proponho domingo às 09:00.';

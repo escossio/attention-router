@@ -41,7 +41,9 @@ class SourceEvidence(Contract):
     modality: Literal['TEXT', 'VOICE'] = 'TEXT'
     transcription_id: str | None = None
     sensitivity: Literal['NORMAL', 'PRIVATE', 'SECRET'] = 'PRIVATE'
-    lineage: Literal['SYNTHETIC'] = 'SYNTHETIC'
+    # A typed source is not a processing permit. The laboratory loader below
+    # still rejects ORGANIC; a governed, explicitly scoped adapter must admit it.
+    lineage: Literal['SYNTHETIC', 'ORGANIC'] = 'SYNTHETIC'
     stt_ambiguous: bool = False
 
 
@@ -245,13 +247,29 @@ def archived_source(session, *, tenant_id, source_account, message_id):
 
 
 def propose_interpretation(session, value: Interpretation, *, policy: SyntheticRetention, now: datetime):
-    from attention_router.application.candidate_insights import CandidateEvidenceInput, propose_candidate_insight
-    from attention_router.infrastructure.candidate_insight_models import CandidateInsightRow
     refs = set(value.source_message_ids) | set(value.references) | set(value.contradiction_refs)
     policy.require(refs,value.tenant_id,value.source_account,now)
     sources = {mid:archived_source(session,tenant_id=value.tenant_id,
                 source_account=value.source_account,message_id=mid) for mid in refs}
+    return _propose_from_authorized_sources(session, value, sources=sources, policy=policy, now=now)
+
+
+def _propose_from_authorized_sources(session, value, *, sources, policy, now, provenance=None):
+    """Internal adapter seam; caller must authorize ALL sources under its fence.
+
+    Reuses V2E, never creates another proposal store or canonical memory.
+    """
+    from attention_router.application.candidate_insights import CandidateEvidenceInput, propose_candidate_insight
+    from attention_router.infrastructure.candidate_insight_models import CandidateInsightRow
+    refs = set(value.source_message_ids) | set(value.references) | set(value.contradiction_refs)
+    policy.require(refs, value.tenant_id, value.source_account, now)
     validate_interpretation(value,sources)
+    lineages = {source.lineage for source in sources.values()}
+    if len(lineages) != 1:
+        raise ValueError('INTERPRETATION_MIXED_LINEAGE')
+    lineage = next(iter(lineages))
+    if lineage != 'SYNTHETIC' and policy.purpose != 'SEMANTIC_CANARY':
+        raise ValueError('INTERPRETATION_SYNTHETIC_ONLY')
     if value.state != 'PROPOSED_INTERPRETATION' or value.action in {'UNKNOWN','QUESTIONS','ANSWERS','REPORTS'}:
         raise ValueError('INTERPRETATION_NOT_ADMISSIBLE_AS_CANDIDATE')
     predicate = 'context.language_event.' + stable_hash([value.source_account, value.event_id or value.source_message_ids[0]])[:24]
@@ -263,13 +281,14 @@ def propose_interpretation(session, value: Interpretation, *, policy: SyntheticR
             raise ValueError('INTERPRETATION_REJECTED_EVIDENCE_REPLAY')
     evidence = [CandidateEvidenceInput('CONVERSATION_MESSAGE',mid,mid,value.confidence,
         'CONTRADICTION' if mid in value.contradiction_refs else 'SUPPORT',
-        {'lineage_classification':'SYNTHETIC'}) for mid in sorted(refs)]
+        {'lineage_classification':lineage}) for mid in sorted(refs)]
     return propose_candidate_insight(session,tenant_id=value.tenant_id,insight_type='STATE_PROPOSAL',
         subject_type='ACTOR',subject_id=value.actor_ref,predicate=predicate,
         proposed_value=value.model_dump(mode='json'),source_engine=value.source_engine,confidence=value.confidence,
         evidence=evidence,sensitivity_class='PRIVATE',provenance={
             'parser_version':value.parser_version,'source_message_ids':list(value.source_message_ids),
-            'lineage_classification':'SYNTHETIC','purpose':policy.purpose,
+            **(provenance or {}),
+            'lineage_classification':lineage,'purpose':policy.purpose,
             'retention_expires_at':policy.expires_at.isoformat()},now=now)
 
 

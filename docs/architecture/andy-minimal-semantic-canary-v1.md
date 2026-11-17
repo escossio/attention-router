@@ -1,0 +1,93 @@
+# Minimal supervised semantic canary
+
+Status: review candidate; disabled and unregistered by default. This contract narrows
+[the bilateral pilot](andy-whatsapp-semantic-conversation-pilot-v1.md), preserving
+D01–D05 and approved architectural directions D06-A/D08-A. Numerical retention,
+operational consent, backup controls and deployment need separate approval.
+
+## Existing components and boundary
+
+One authenticated owner, tenant, WhatsApp account and exact canonical direct
+conversation key; explicit observation start/end and message/audio budgets.
+`CanaryGrant` has no default TTLs. Each retention layer and the operational,
+retention and backup decision references must be supplied explicitly.
+A reference string is configuration, not proof that approval occurred.
+
+Transport's optional `SEMANTIC_CANARY_ENABLED`, `SEMANTIC_CANARY_CONVERSATION_KEY`
+and `SEMANTIC_CANARY_INGRESS_URL` select a route inside the existing internal
+listener, using its existing HMAC and host allowlist. No new listener, service,
+container, address or network is required. Transport initiates HTTP to that
+listener and uses the existing media store. Network reachability grants no
+application authority. Client API review uses existing ClientSession ownership.
+
+The ingress adapter reuses receipt creation and live archive capture. It marks
+original rows non-searchable before commit, preserves provider ID/time, technical
+origin and semantic attribution, and creates no Interaction, decision queue or
+Outbox. D01 attribution grants no command authority. Concurrent automation proof
+retains existing classification precedence. First-contact automation must be off
+for this selected path. Owner command/self-chat traffic is not adopted.
+
+Media authorization is rechecked before download, retries and storage. Existing
+capture receipts prevent duplicate downloads. Separate subdirectories of the
+existing spool prevent fallback to ordinary ingress when the flag is off.
+The existing STT worker excludes quarantined rows by default; an authenticated
+owner processes one selected message using the guarded existing STT implementation.
+Policy expiry before or during STT produces a terminal failure without retaining
+its late transcript. Capture reconciliation closes expired pending jobs. An
+in-flight provider call cannot be cancelled by this adapter: effective revocation
+is serialized after that bounded unit of work; no later processing is permitted.
+
+Original archive evidence feeds the existing interpretation/V2E candidate code;
+there is no synthetic mirror or second cognitive engine. Owner review, history,
+rejection, correction and context reuse the existing governance facade and graph
+compiler. The compiler receives only the authorized projection of selected
+original messages and provider reply references. Shared legacy materializations
+are excluded. ADMITTED means review eligibility, never canonical truth. Automated
+and incomplete messages remain explicit evidence states, not human assertions.
+
+## Activation preparation and stop
+
+Deployment wiring remains explicit: construct `GovernedSemanticCanary` with a
+current anchored policy journal and ClientSession service, pass it to the existing
+internal app factory, and mount the existing review router with
+`include_processing=True` on the authenticated Client API. Neither production app
+registers these routes automatically. Initialize the grant through the existing
+owner-authenticated application method after approval. `enabled=False` is default.
+`SyntheticFileAuthority` is rejected outside test environments. A reviewed
+operational authority outside the backup restore domain remains a blocker.
+
+Approve one scope, bounded observation, per-class retention and backup disposition
+before enabling anything. Verify signed ingress, owner session, stop and revocation
+with synthetic fixtures first. Monitor accepted/blocked receipts, media status,
+STT status/error, original-message linkage and review/context decisions. Stop on
+scope mismatch, unexpected outbound action, duplicate archive, lost provenance,
+policy uncertainty or regression in ordinary delivery. Revoke consent and disable
+both feature switches while retaining the configured scope and quarantine guards.
+Never replay selected spool files through ordinary ingress. Preserve operational
+rows and evidence; no purge is implied. Restart only with valid current policy.
+
+Rollback is feature-off with isolation retained. Downgrade to binaries that ignore
+quarantine metadata is blocked while canary data exists. Physical deletion is not
+claimed: DELETE_DERIVATIVES fences access; VERIFY_DELETION reports remaining rows
+and unverified media/backups. Existing synthetic purge tests stay synthetic.
+
+## Priority and acceptance
+
+P0 before activation: exact-SHA review/CI; explicit personal-data consent and TTLs;
+operational revocation authority/backup verification; approved deployment and scope.
+P1 before wider use: supervised throughput, expiry cleanup verification and provider
+latency monitoring. P2: broader language quality, richer review UI and legacy
+consumer adoption. P3: GPS, new channels and general historical import.
+
+Live continuity is covered by the isolated selected route. Historical acceleration
+is deliberately deferred: no cursor reset, retrospective download or adoption of
+already-derived archive rows. Missing audio is context incomplete.
+
+Reproduce acceptance with `pytest -q tests/test_bilateral_integrated.py
+ tests/test_semantic_canary_scope.py tests/test_semantic_precertification.py`,
+Transport tests via `node --test whatsapp-transport-local/test/*.test.js`, and
+`tests/integration/test_postgres_semantic_canary.py` on disposable PostgreSQL using
+the distributed workflow. The bilateral canary test emits a synthetic consultable
+JSON with original evidence IDs, both transcripts, candidates, review, graph
+retrieval and revocation. Corpus reruns are regressions, not new independent
+quality certification. No test fixture constitutes real consent or a production TTL.
