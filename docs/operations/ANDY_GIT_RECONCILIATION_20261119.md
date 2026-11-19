@@ -87,6 +87,48 @@ opção pública, sem copiar os arquivos privados de configuração.
 Os novos áudios continuam elegíveis ao STT; nenhuma captura orgânica
 posterior ao cutover foi necessária para comprovar os gates de configuração.
 
+## Fechamento dos gates distribuídos e do aplicativo (19/11 UTC)
+
+- Android: PR de governança #100 e PR de produto #101 foram integrados
+  à main de escossio/andy-android. Commit final da main:
+  e1326aaef977c42a55afe9987a633a591ae4cfd7.
+  Nenhum APK foi instalado ou distribuído por essa reconciliação.
+- PR backend #417 continua independente, sem merge prematuro.
+- A falha do CI distribuído em 4e96890 revelou que o CI03 estava
+  utilizando postgres:16-alpine sem a extensão pgvector. Foi preparada
+  seleção de uma imagem PostgreSQL 16 com pgvector 0.8.7 fixada por digest
+  e verificada em contêiner de teste. Para código antigo, a imagem original
+  continua a ser utilizada.
+- O CI03 ficou inacessível pela rede durante os testes. A governança da rede
+  identifica CI01 como postgres-worker elegível. O failover deve usar o
+  controle da capacidade existente; não publicar checks verdes sem executar
+  o conjunto de testes sobre o SHA exato e registrar a evidência.
+- A suíte antiga do banco incluía comparações com 0061 como último head.
+  Os casos de teste passam agora a determinar e exigir a cabeça única
+  real do Alembic, sem alterar nem contornar as migrações.
+- A fixture de identidade limpa explicitamente as tabelas derivadas,
+  sem adicionar TRUNCATE CASCADE genérico.
+- Dependências locais de embeddings foram declaradas como extra
+  opcional de desenvolvimento e verificadas por digest/model manifest.
+  Nenhum texto privado precisa ser transmitido para criar vetores.
+
+## Certificação adicional da candidata (19/11 UTC)
+
+- No CI01 isolado, a sequência completa de migrações até a cabeça
+  `0068_google_contacts_cache` terminou com sucesso. A execução integral
+  dos testes marcados `postgres` aprovou **675**, com **3.277 não selecionados**
+  e oito avisos; não representa aprovação dos testes não selecionados.
+- Os 21 arquivos de testes alterados ou adicionados conferidos nessa
+  execução coincidem por SHA-256 com a árvore local de reconciliação.
+  Ruff no fonte completo da candidata e checagens de sintaxe passaram.
+- A imagem PostgreSQL 16 com pgvector foi pré-carregada por digest e o
+  manifesto do modelo ONNX local foi confirmado por SHA-256.
+- O check GitHub `distributed-postgres` na cabeça anterior reprovou ao usar
+  imagem sem `pgvector` no CI03. A aprovação local do CI01 não deve ser
+  publicada como check oficial; este depende de execução do SHA final.
+- CI03 encontra-se inacessível no momento desta checagem; a troca
+  controlada de worker deve manter rollback e registrar a execução real.
+
 ## Critério de publicação e cutover
 
 PRs de reconciliação devem começar em modo draft. Merge, publicação

@@ -39,7 +39,12 @@ def repository_sessions():
         connect_args={"options": "-c statement_timeout=15000 -c lock_timeout=10000"},
     )
     reset = text(
-        "TRUNCATE TABLE personal_context_bootstrap_selections, "
+        # New owner/device evidence tables must be explicitly cleared with
+        # their identity parents, without blanket CASCADE on the shared CI DB.
+        "TRUNCATE TABLE conversation_context_owner_scopes, "
+        "conversation_message_context, conversation_identity_link_history, "
+        "conversation_identity_links, client_location_observations, "
+        "personal_context_bootstrap_selections, "
         "personal_context_bootstrap_batches, "
         "personal_context_bootstrap_runs, provider_authorizations, "
         "client_location_snapshots, client_sessions, client_session_challenges, "

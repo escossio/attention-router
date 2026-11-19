@@ -11,6 +11,7 @@ import sys
 from uuid import uuid4
 
 import pytest
+from tests.integration.migration_head import current_schema_head
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
@@ -108,7 +109,7 @@ def test_0027_to_head_blocks_all_inflight_shapes_atomically_then_upgrades(pg_url
         _alembic(url, "head")
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-                "0061_tts_outbox_constraint"
+                current_schema_head()
             )
             indexes = set(
                 connection.scalars(

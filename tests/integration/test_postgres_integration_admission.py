@@ -9,6 +9,7 @@ import threading
 import time
 
 import pytest
+from tests.integration.migration_head import current_schema_head
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError, DBAPIError
@@ -460,7 +461,7 @@ def test_populated_downgrade_refuses_to_drop_receipts(Session, world, pg_url):
     assert count(Session) == 1
     with Session() as session:
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0061_tts_outbox_constraint"
+            current_schema_head()
         )
 
 
@@ -1117,4 +1118,4 @@ def test_processed_dispatch_state_blocks_downgrade_without_export(
     with Session() as session:
         assert session.scalar(
             text("SELECT version_num FROM alembic_version")
-        ) == "0061_tts_outbox_constraint"
+        ) == current_schema_head()

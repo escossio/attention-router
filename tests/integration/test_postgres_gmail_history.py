@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import json
 
 import pytest
+from tests.integration.migration_head import current_schema_head
 from sqlalchemy import select
 
 from attention_router.application.gmail_history import GmailProductHistoryBusy
@@ -201,6 +202,6 @@ def test_migration_roundtrip_and_populated_downgrade_guard(Session, monkeypatch,
     assert "GMAIL_HISTORY_DOWNGRADE_REQUIRES_DATA_EXPORT" in result.stderr
     with Session() as session:
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0061_tts_outbox_constraint"
+            current_schema_head()
         )
         assert session.get(ProviderAuthorizationRow, installation).gmail_history_id == "10"
