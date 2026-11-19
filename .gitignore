@@ -60,3 +60,6 @@ screenshots/
 browser-profiles/
 playwright-report/
 test-results/
+
+# Offline, pinned embedding model is a local build input, never commit weights.
+ops/reconciliation/model/

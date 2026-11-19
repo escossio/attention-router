@@ -16,12 +16,18 @@ EOF
   exit 78
 fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PG_IMAGE="${POSTGRES_TEST_IMAGE:-postgres:16-alpine}"
+# Use the exact pgvector-capable PG16 image only when the schema requires it.
+DEFAULT_POSTGRES_TEST_IMAGE="postgres:16-alpine"
+if [[ -f "$ROOT_DIR/alembic/versions/0065_conversation_vectors.py" ]]; then
+  DEFAULT_POSTGRES_TEST_IMAGE="pgvector/pgvector@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f"
+fi
+PG_IMAGE="${POSTGRES_TEST_IMAGE:-$DEFAULT_POSTGRES_TEST_IMAGE}"
 RUNNER_IMAGE="${POSTGRES_TEST_RUNNER_IMAGE:-attention-router-test-runner:public-local}"
 PG="attention-router-pg-test-${RANDOM}-${RANDOM}"; RUNNER="attention-router-test-runner-${RANDOM}-${RANDOM}"; NETWORK="attention-router-test-net-${RANDOM}-${RANDOM}"
 USER_NAME="ar_test"; DB_NAME="attention_router_test"; PASSWORD="$(openssl rand -hex 24)"; TARGET="${POSTGRES_TEST_TARGET:-head}"
 cleanup() { docker rm -f "$RUNNER" "$PG" >/dev/null 2>&1 || true; docker network rm "$NETWORK" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
+docker image inspect "$PG_IMAGE" >/dev/null 2>&1 || docker pull "$PG_IMAGE" >/dev/null
 docker network create "$NETWORK" >/dev/null
 BUILD_SHA="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
 docker build --quiet --build-arg ATTENTION_ROUTER_BUILD_SHA="$BUILD_SHA" -t "$RUNNER_IMAGE" "$ROOT_DIR" >/dev/null

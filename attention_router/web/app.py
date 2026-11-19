@@ -36,6 +36,7 @@ from attention_router.api.v1.human_identity import build_human_identity_router
 from attention_router.api.v1.client_bootstrap import build_client_bootstrap_router
 from attention_router.api.v1.client_session import build_client_session_router
 from attention_router.api.v1.client_location import build_client_location_router
+from attention_router.api.v1.location_history import install_location_history
 from attention_router.api.v1.client_approval import build_client_approval_router
 from attention_router.api.v1.client_command import build_client_command_router
 from attention_router.api.v1.gmail_connection import build_gmail_connection_router
@@ -974,3 +975,11 @@ def sim_policy_update(
         },
     )
     return RedirectResponse("/", status_code=303)
+
+
+# Contacts reuses the authenticated Client API and existing Google OAuth client.
+from attention_router.infrastructure.google_contacts_runtime import install_google_contacts  # noqa: E402
+
+install_google_contacts(app, settings, client_session_service, get_session)
+
+install_location_history(app, settings, client_session_service, get_session)

@@ -1,0 +1,13 @@
+# Rebuild the passive-only local semantic index from an integrated Attention Router image.
+# The model assets must be downloaded separately and hash-checked using
+# ops/reconciliation/download_model.py; they are deliberately excluded from Git.
+ARG APP_IMAGE=attention-router:reconciled-app-local
+FROM ${APP_IMAGE}
+RUN python -m pip install --no-cache-dir \
+    onnxruntime==1.23.2 tokenizers==0.22.1 numpy==2.3.5
+COPY ops/reconciliation/model/ /opt/andy-embedding-model/
+ENV CONVERSATION_VECTOR_MODEL_ROOT=/opt/andy-embedding-model \
+    HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 TOKENIZERS_PARALLELISM=false
+RUN python -c "import hashlib,json,pathlib; r=pathlib.Path('/opt/andy-embedding-model'); m=json.loads((r/'manifest.json').read_text()); assert m['model']=='intfloat/multilingual-e5-small'; assert m['dimensions']==384; assert all(hashlib.sha256((r/name).read_bytes()).hexdigest()==spec['sha256'] and (r/name).stat().st_size==spec['bytes'] for name,spec in m['files'].items())"
+CMD ["uvicorn","attention_router.web.passive_vector_app:app","--host","127.0.0.1","--port","18109","--no-access-log"]

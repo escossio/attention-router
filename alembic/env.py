@@ -8,6 +8,8 @@ from attention_router.infrastructure.db import Base
 from attention_router.infrastructure import artifact_models  # noqa: F401
 from attention_router.infrastructure import human_identity_models  # noqa: F401
 from attention_router.infrastructure import client_location_models  # noqa: F401
+from attention_router.infrastructure import location_history_models  # noqa: F401
+from attention_router.infrastructure import google_contacts_models  # noqa: F401
 from attention_router.infrastructure import models  # noqa: F401
 from attention_router.infrastructure import provider_authorization_models  # noqa: F401
 from attention_router.infrastructure import personal_context_bootstrap_models  # noqa: F401

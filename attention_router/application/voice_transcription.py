@@ -155,10 +155,14 @@ def _finish_waiting_queue(session, transcription: VoiceTranscriptionRow) -> None
         queue.processed_at = None
 
 
-def process_voice_transcriptions(session, worker: str, limit: int = 10, client=None) -> int:
+def process_voice_transcriptions(session, worker: str, limit: int = 10, client=None, event_id: str | None = None) -> int:
+    history_job = select(QueueRow.id).where(
+        QueueRow.id == "voice-history:" + VoiceTranscriptionRow.inbound_event_id,
+    ).exists()
+    scope = (VoiceTranscriptionRow.inbound_event_id == event_id) if event_id else ~history_job
     stamp = now_utc()
     stale_query = select(VoiceTranscriptionRow).where(
-        VoiceTranscriptionRow.status == "PROCESSING",
+        VoiceTranscriptionRow.status == "PROCESSING", scope,
         VoiceTranscriptionRow.claimed_at < stamp - timedelta(
             seconds=settings.stt_processing_lease_seconds
         ),
@@ -178,7 +182,7 @@ def process_voice_transcriptions(session, worker: str, limit: int = 10, client=N
         return 0
     query = (
         select(VoiceTranscriptionRow)
-        .where(VoiceTranscriptionRow.status == "PENDING")
+        .where(VoiceTranscriptionRow.status == "PENDING", scope)
         .order_by(VoiceTranscriptionRow.created_at)
         .limit(limit)
     )
@@ -233,7 +237,8 @@ def process_voice_transcriptions(session, worker: str, limit: int = 10, client=N
         if artifact:
             artifact.terminal_at = row.updated_at
             artifact.expires_at = row.updated_at + timedelta(hours=settings.media_retention_hours)
-        _finish_waiting_queue(session, row)
+        if event_id is None:
+            _finish_waiting_queue(session, row)
         if settings.conversation_capture_enabled and row is not None:
             from attention_router.application.conversation_live_capture import (
                 capture_voice_transcription,

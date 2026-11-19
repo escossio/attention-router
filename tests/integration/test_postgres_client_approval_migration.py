@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from tests.integration.migration_head import current_schema_head
 from sqlalchemy import String, create_engine, inspect, text
 
 
@@ -16,7 +17,7 @@ def test_client_approval_decision_evidence_migration_schema():
         with engine.connect() as connection:
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalars().all() == ["0061_tts_outbox_constraint"]
+            ).scalars().all() == [current_schema_head()]
 
             schema = inspect(connection)
             tables = set(schema.get_table_names())

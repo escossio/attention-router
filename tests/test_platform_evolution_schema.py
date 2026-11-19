@@ -195,7 +195,7 @@ def test_attention_salience_table_is_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0061_tts_outbox_constraint"]
+    assert scripts.get_heads() == ["0068_google_contacts_cache"]
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -258,6 +258,19 @@ def test_platform_evolution_migration_waves_form_one_chain():
     assert revisions["0061_tts_outbox_constraint"].down_revision == (
         "0060_first_contact_v1"
     )
+    # Reconciled operational migration chain must remain a single linear head.
+    operational_parents = {
+        "0062_location_history": "0061_tts_outbox_constraint",
+        "0063_conversation_context": "0062_location_history",
+        "0064_context_owner_scope": "0063_conversation_context",
+        "0065_conversation_vectors": "0064_context_owner_scope",
+        "0066_vector_owner_scope": "0065_conversation_vectors",
+        "0067_vector_lock_order": "0066_vector_owner_scope",
+        "0068_google_contacts_cache": "0067_vector_lock_order",
+    }
+    for revision, expected_parent in operational_parents.items():
+        assert revisions[revision].down_revision == expected_parent
+
     assert revisions["0016_platform_evolution_wave_a"].down_revision == (
         "0015_capability_pack_v1"
     )

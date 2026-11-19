@@ -1,0 +1,56 @@
+{
+  "captured_utc": "2026-11-19T00:23:57.134886+00:00",
+  "base_git_main": "ceadb677225efe6fe7633705b9c5bab162154fca",
+  "scope": "Andy/Attention Router core operational services only; other 46 AGT containers not reconciled",
+  "deployment_status": "evidence_only; no production cutover",
+  "services": [
+    {
+      "service": "attention-router-v03b-live-api-api-1",
+      "role": "client-api; contacts and location",
+      "image": "attention-router:conversation-context-final-20261118",
+      "image_id": "sha256:022b450683fb1dd60bff7075b6b4767a6c34d576c073e7e4bae5362a2d4af9b7",
+      "health": "healthy"
+    },
+    {
+      "service": "attention-router-live-flow-stage4-worker-1",
+      "role": "live ingress voice and passive history code",
+      "image": "attention-router:voice-history-stt-consensus-v1-20261118",
+      "image_id": "sha256:a74f9d2b9b474c72cbb4ecdd1c01b47192e3bd20cba576120ff197a1bab64a55",
+      "health": "healthy"
+    },
+    {
+      "service": "andy-conversation-vector",
+      "role": "passive hybrid embedding index",
+      "image": "attention-router:passive-hybrid-v1-20261118",
+      "image_id": "sha256:f7a3420605705781315bf5e89266147458ca3db6af74d7f263e8e08d42aeae43",
+      "health": "healthy"
+    },
+    {
+      "service": "andy-whatsapp-transport",
+      "role": "account-scoped WhatsApp transport",
+      "image": "attention-whatsapp-transport:voice-history-identity-v3.1-20261118",
+      "image_id": "sha256:a4717cf51e2bfbd2594bcd75ba9ff6d7f8ac173a3374aa4389556ffe64b6edd1",
+      "health": "healthy"
+    },
+    {
+      "service": "attention-router-understanding-internal-ingress-5aed",
+      "role": "signed internal ingress",
+      "image": "attention-router:voice-history-ingress-20261117",
+      "image_id": "sha256:f0eca73600e7e4927893cea3c1c568c88027ed181f532612924755a5e98c7880",
+      "health": "healthy"
+    },
+    {
+      "service": "attention-router-live-flow-stage4-db-1",
+      "role": "PostgreSQL data store; no data in Git",
+      "image": "postgres:16-alpine",
+      "image_id": "sha256:75f5a96988cdf694a215073c3e9c001b706b371e2f94df3967f2efdec2787f6b",
+      "health": "healthy"
+    }
+  ],
+  "embedding_model_manifest_sha256": "68813095bf97d2fcc424cc31f606114da63e0e74ec04fe56e8a7626db7bb3bbd",
+  "notes": [
+    "Image ID is a local Docker content digest, not a proof of source reproducibility.",
+    "Runtime Compose/env files, credentials, contacts, conversations, private storage and media excluded.",
+    "No production service recreated for this manifest."
+  ]
+}
