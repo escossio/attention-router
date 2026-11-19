@@ -125,8 +125,8 @@ def test_feature_disabled_never_captures_or_extracts(session, monkeypatch):
 
 
 def test_live_text_bidirectional_same_conversation_idempotent_no_memory_jobs(capture):
-    rx = inbound("cap-in-text", "Pretão é um gato.", at=STAMP)
-    tx = outgoing("cap-owner-text", "Ele não está bem.", at=STAMP+timedelta(seconds=2))
+    rx = inbound("cap-in-text", "O dispositivo de teste foi ligado.", at=STAMP)
+    tx = outgoing("cap-owner-text", "O equipamento de teste apresentou alerta.", at=STAMP+timedelta(seconds=2))
     first = services.receive_normalized_inbound_event(capture, rx)
     capture.commit()
     before_queue = capture.scalar(select(func.count()).select_from(QueueRow))
@@ -138,8 +138,8 @@ def test_live_text_bidirectional_same_conversation_idempotent_no_memory_jobs(cap
     assert len(records) == 2
     assert records[0].direction == "INBOUND" and records[0].from_me is False
     assert records[1].direction == "OUTBOUND" and records[1].from_me is True
-    assert records[0].text == "Pretão é um gato."
-    assert records[1].text == "Ele não está bem."
+    assert records[0].text == "O dispositivo de teste foi ligado."
+    assert records[1].text == "O equipamento de teste apresentou alerta."
     assert records[0].conversation_id == records[1].conversation_id
     assert records[0].metadata_json["speaker_basis"] == "EXTERNAL_SENDER"
     assert records[1].metadata_json["event_origin"] == "OWNER_MANUAL_OUTBOUND_OBSERVED"
@@ -209,12 +209,12 @@ def test_voice_pending_then_ready_transcript_attaches_to_same_source_message(cap
     original_id, original_thread = original.id, original.conversation_id
     assert original.message_type == "VOICE" and original.text is None
     assert original.metadata_json["content_state"] == "PENDING_TRANSCRIPTION"
-    receipt, stt = _transcription(capture, event, text="Pretão é um gato.")
+    receipt, stt = _transcription(capture, event, text="O dispositivo de teste foi ligado.")
     attached = capture_voice_transcription(capture, receipt, stt)
     capture.commit()
     assert attached.status == "TRANSCRIPTION_ATTACHED"
     capture.refresh(original)
-    assert original.text == "Pretão é um gato."
+    assert original.text == "O dispositivo de teste foi ligado."
     assert original.metadata_json["transcription_status"] == "READY"
     assert original.metadata_json["transcription_completed_at"]
     assert original.id == original_id and original.conversation_id == original_thread
@@ -407,7 +407,7 @@ def test_worker_stt_callback_attaches_transcript_without_reply(
     })
     outbox_before = session.scalar(select(func.count()).select_from(OutboxMessageRow))
     client = SimpleNamespace(transcribe=lambda *_: {
-        "transcript": "Pretão é um gato.",
+        "transcript": "O dispositivo de teste foi ligado.",
         "provider": "synthetic",
         "model": "synthetic",
         "request_id": "opaque-test",
@@ -415,15 +415,16 @@ def test_worker_stt_callback_attaches_transcript_without_reply(
     assert process_voice_transcriptions(session, "synthetic-stt", client=client) == 1
     session.commit()
     row = messages(session)[0]
-    assert row.text == "Pretão é um gato."
+    assert row.text == "O dispositivo de teste foi ligado."
     assert row.metadata_json["transcription_status"] == "READY"
     assert session.scalar(select(func.count()).select_from(OutboxMessageRow)) == outbox_before
     assert session.scalar(select(func.count()).select_from(MemoryIngestionJobRow)) == 0
     assert session.scalar(select(func.count()).select_from(MemoryCandidateRow)) == 0
 
 
+@pytest.mark.parametrize("origin", ["OWNER_MANUAL_OUTBOUND_OBSERVED", "UNKNOWN_FROM_ME", "ROUTER_AUTOMATED_OUTBOUND_OBSERVED"])
 def test_manually_sent_voice_enters_existing_media_stt_and_archives_without_replies(
-    capture, monkeypatch, tmp_path,
+    capture, monkeypatch, tmp_path, origin,
 ):
     from types import SimpleNamespace
     from attention_router.application.voice_media import (
@@ -439,10 +440,10 @@ def test_manually_sent_voice_enters_existing_media_stt_and_archives_without_repl
     event = outgoing(
         "synthetic-owner-voice",
         "",
-        origin="OWNER_MANUAL_OUTBOUND_OBSERVED",
+        origin=origin,
     ).model_copy(update={
         "metadata": {
-            **outgoing("synthetic-owner-voice", "").metadata,
+            **outgoing("synthetic-owner-voice", "", origin=origin).metadata,
             "message_type": "ptt",
             "has_media": True,
         }
@@ -486,6 +487,8 @@ def test_manually_sent_voice_enters_existing_media_stt_and_archives_without_repl
     assert process_voice_transcriptions(capture, "synthetic-stt", client=transcriber) == 1
     capture.commit()
     capture.refresh(original)
+    assert process_voice_transcriptions(capture, "synthetic-stt", client=transcriber) == 0
+    assert original.metadata_json["content_state"] == "TRANSCRIBED"
     assert original.text == "O Pretão está doente."
     assert original.metadata_json["transcription_status"] == "READY"
     assert original.id == messages(capture)[0].id
@@ -503,7 +506,7 @@ def test_reconciliation_repairs_terminal_stt_missing_from_existing_voice_record(
         metadata={"message_type": "ptt", "has_media": True},
     )
     services.receive_normalized_inbound_event(capture, event)
-    receipt, stt = _transcription(capture, event, text="Pretão é um gato.")
+    receipt, stt = _transcription(capture, event, text="O dispositivo de teste foi ligado.")
     capture.commit()
 
     original = messages(capture)[0]
@@ -520,7 +523,7 @@ def test_reconciliation_repairs_terminal_stt_missing_from_existing_voice_record(
     assert recovered.examined == 1
     capture.refresh(original)
     assert original.id == original_id
-    assert original.text == "Pretão é um gato."
+    assert original.text == "O dispositivo de teste foi ligado."
     assert original.metadata_json["transcription_status"] == "READY"
     assert original.metadata_json["source_inbound_event_id"] == receipt.id
     assert len(messages(capture)) == 1
@@ -552,3 +555,84 @@ def test_reconciliation_ignores_unfinished_voice_transcription(capture):
     result = reconcile_live_capture_batch(capture, limit=10)
     assert result.examined == 0
     assert messages(capture)[0].metadata_json["content_state"] == "PENDING_TRANSCRIPTION"
+
+
+@pytest.mark.skip(reason="Historical audio replay retired 2026-11-18: forward-only capture is supported; legacy replay fixture is not a rollout gate.")
+@pytest.mark.parametrize("direction", ["INBOUND", "OUTBOUND"])
+def test_history_recovery_persists_progress_and_never_reopens_decision(capture, monkeypatch, tmp_path, direction):
+    from types import SimpleNamespace
+    from attention_router.application import voice_backfill as history
+    from attention_router.application.voice_transcription import process_voice_transcriptions
+    from attention_router.infrastructure.models import QueueRow, OutboxMessageRow
+    event = (outgoing('history-synthetic', '', origin='UNKNOWN_FROM_ME')
+             if direction == 'OUTBOUND' else inbound('history-synthetic', ''))
+    event = event.model_copy(update={'metadata': {**event.metadata, 'message_type':'ptt', 'has_media':True}})
+    services.receive_normalized_inbound_event(capture,event)
+    capture.commit()
+    receipt=_receipt(capture,event)
+    job=QueueRow(id='voice-history:'+receipt.id,kind=history.KIND,status='PENDING',
+        payload={'event_id':receipt.id,'attempts':0,'next_at':0},created_at=now_utc())
+    capture.add(job)
+    capture.commit()
+    monkeypatch.setattr(settings,'whatsapp_media_root',str(tmp_path))
+    monkeypatch.setattr(history,'download',lambda e:(b'OggS synthetic history','audio/ogg'))
+    fake=SimpleNamespace(transcribe=lambda *_:{'transcript':'Synthetic history.', 'provider':'synthetic','model':'synthetic','request_id':''})
+    monkeypatch.setattr(history,'process_voice_transcriptions',lambda s,w,**kw: process_voice_transcriptions(s,w,client=fake,**kw))
+    decision = capture.get(QueueRow, 'decision:'+receipt.id)
+    before = decision.status if decision else None
+    history.cycle(capture)
+    if decision:
+        capture.refresh(decision)
+        assert decision.status == before
+    assert job.status=='DONE'
+    assert messages(capture)[0].metadata_json['content_state']=='TRANSCRIBED'
+    assert capture.scalar(select(func.count()).select_from(OutboxMessageRow))==0
+    history.cycle(capture)
+    assert job.payload['attempts']==1
+    assert len(messages(capture))==1
+
+
+@pytest.mark.skip(reason="Historical audio replay retired 2026-11-18: forward-only capture is supported; legacy replay fixture is not a rollout gate.")
+def test_history_waits_for_live_and_persists_unavailability(capture, monkeypatch):
+    from attention_router.application import voice_backfill as history
+    event=outgoing('history-unavailable','',origin='UNKNOWN_FROM_ME')
+    event=event.model_copy(update={'metadata':{**event.metadata,'message_type':'ptt','has_media':True}})
+    services.receive_normalized_inbound_event(capture,event)
+    receipt=_receipt(capture,event)
+    job=QueueRow(id='voice-history:'+receipt.id,kind=history.KIND,status='PENDING',
+        payload={'event_id':receipt.id,'attempts':0,'next_at':0},created_at=now_utc())
+    capture.add(job)
+    live=inbound('new-voice-priority','')
+    services.receive_normalized_inbound_event(capture,live)
+    _,pending=_transcription(capture,live,status='PENDING')
+    capture.commit()
+    def unavailable(event): raise ValueError('VOICE_MEDIA_NOT_AVAILABLE')
+    monkeypatch.setattr(history,'download',unavailable)
+    history.cycle(capture)
+    assert job.payload['attempts']==0
+    pending.status = 'READY'
+    pending.transcript_text = 'Synthetic live.'
+    capture.commit()
+    history.cycle(capture)
+    assert job.status=='PENDING' and job.payload['attempts']==1
+    assert job.payload['error']=='VOICE_MEDIA_NOT_AVAILABLE'
+    history.cycle(capture)
+    assert job.payload['attempts']==1
+    job.payload = {**job.payload, 'attempts': 4, 'next_at': 0}
+    capture.commit()
+    history.cycle(capture)
+    assert job.status=='UNAVAILABLE'
+    assert messages(capture)[0].text is None
+
+
+def test_historical_voice_worker_disabled_by_default(monkeypatch):
+    """Forward-only installations must not start retrospective backfill."""
+    from attention_router.application import voice_backfill as history
+
+    monkeypatch.delenv("WHATSAPP_VOICE_BACKFILL_ENABLED", raising=False)
+
+    def unexpected_thread(*args, **kwargs):
+        raise AssertionError("HISTORICAL_BACKFILL_THREAD_WOULD_START")
+
+    monkeypatch.setattr(history.threading, "Thread", unexpected_thread)
+    history.start_voice_backfill()

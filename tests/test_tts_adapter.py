@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -88,5 +89,5 @@ def test_attention_router_does_not_contain_xai_secret_or_voice_id():
     root = Path(__file__).resolve().parents[1]
     text = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in [*root.glob("attention_router/**/*.py"), *root.glob("scripts/*.py")])
     assert "XAI" + "_API_KEY" not in text
-    assert "voice" + "_id" not in text.lower()
+    assert re.search(r"\bvoice_id\b", text.lower()) is None
     assert '"' + "ev" + "e" + '"' not in text

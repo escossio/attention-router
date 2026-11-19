@@ -471,6 +471,8 @@ def run_forever() -> None:
     last_personal_context_authority_run_monotonic: float | None = None
     last_personal_context_materialization_run_monotonic: float | None = None
     last_conversation_capture_reconcile_monotonic: float | None = None
+    from attention_router.application.voice_backfill import start_voice_backfill
+    start_voice_backfill()
     logger.info("worker started worker_id=%s", identity)
     while True:
         transport_ready = probe_transport_ready()

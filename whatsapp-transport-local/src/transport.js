@@ -1173,6 +1173,7 @@ async function startTransport(config, logger = console, deps = {}) {
       );
       message.__finalFromMeClassification = currentResult.classification;
       message.__fromMeClassification = currentResult.classification;
+      message.__fromMeClassificationReason = currentResult.reason;
       message.__ownerSelfChat = currentResult.classification === 'OWNER_COMMAND';
       message.__authenticatedOwnerSelfChatTarget = currentResult.authenticatedOwnerSelfChat;
       message.__outboundProvenance = currentResult.provenance;
@@ -1201,6 +1202,7 @@ async function startTransport(config, logger = console, deps = {}) {
       if (bridgeResult !== result) {
         message.__finalFromMeClassification = bridgeResult.classification;
         message.__fromMeClassification = bridgeResult.classification;
+        message.__fromMeClassificationReason = bridgeResult.reason;
         message.__ownerSelfChat = false;
         message.__authenticatedOwnerSelfChatTarget = false;
         message.__outboundProvenance = bridgeResult.provenance;

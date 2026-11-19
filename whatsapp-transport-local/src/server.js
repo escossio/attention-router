@@ -83,6 +83,7 @@ function respondJson(res, code, body, extraHeaders = {}) {
 }
 
 function createServer(config, status, client = null, deps = {}) {
+  let voiceHistoryBusy = false;
   const deliveries = deps.deliveries || new Map();
   const now = deps.now || (() => Date.now());
   const outboundProvenance = deps.outboundProvenance || createOutboundProvenanceLedger(config);
@@ -335,6 +336,22 @@ function createServer(config, status, client = null, deps = {}) {
         delivery_confirmed: Number.isInteger(record.ack) && record.ack >= 2,
         message_reference_present: Boolean(record.message_reference),
       });
+      return;
+    }
+    if (url.pathname.startsWith('/internal/history/voice-media/')) {
+      if (!config.historyReadOnlyEnabled || !verifyHistoryHmac(req, config) || !client || !isReady(status)) {
+        respondJson(res, 503, {status:'unavailable',code:'TRANSPORT_NOT_READY'}); return;
+      }
+      let id;
+      try { id=decodeURIComponent(url.pathname.slice('/internal/history/voice-media/'.length)); }
+      catch { respondJson(res,400,{status:'unavailable',code:'INVALID_ID'}); return; }
+      if (!id || id.length>240) { respondJson(res,400,{status:'unavailable',code:'INVALID_ID'}); return; }
+      if (voiceHistoryBusy) { respondJson(res,503,{status:'unavailable',code:'VOICE_RECOVERY_BUSY'}); return; }
+      voiceHistoryBusy = true;
+      (async()=>{
+        const result = await require('./history-voice').recoverVoice(client,id,config);
+        respondJson(res,200,result);
+      })().catch(()=>respondJson(res,503,{status:'unavailable',code:'VOICE_DOWNLOAD_FAILED'})).finally(()=>{voiceHistoryBusy=false;});
       return;
     }
     if (config.historyReadOnlyEnabled && url.pathname === config.historyPath) {

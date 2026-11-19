@@ -449,7 +449,7 @@ test('opted-in manual owner direct voice enters existing durable STT-media spool
 });
 
 
-test('default and non-manual fromMe classes never download owner voice', async (t) => {
+test('owner voice defaults off, global opt-in captures account evidence without authorizing action', async (t) => {
   const { config } = tempConfig(t);
   const fetchImpl = async () => response(202, { status: 'accepted' });
   const run = async (message, overrides = {}) => createInboundBridge(
@@ -474,17 +474,17 @@ test('default and non-manual fromMe classes never download owner voice', async (
     ...base, id: { ...base.id, _serialized: 'wamid.synthetic.unknown' },
     __fromMeClassification: 'UNKNOWN_FROM_ME',
     __finalFromMeClassification: 'UNKNOWN_FROM_ME',
-  }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
+  }, { conversationCaptureOwnerVoiceEnabled: true })).media?.status, 'media_ready_notified');
   assert.equal((await run({
     ...base, id: { ...base.id, _serialized: 'wamid.synthetic.automated' },
     __fromMeClassification: 'ROUTER_AUTOMATED_OUTBOUND_OBSERVED',
     __finalFromMeClassification: 'ROUTER_AUTOMATED_OUTBOUND_OBSERVED',
-  }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
+  }, { conversationCaptureOwnerVoiceEnabled: true })).media?.status, 'media_ready_notified');
   assert.equal((await run({
     ...base,
     id: { ...base.id, _serialized: 'wamid.synthetic.group', remote: '12345@g.us' },
     to: '12345@g.us',
-  }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
+  }, { conversationCaptureOwnerVoiceEnabled: true })).media?.status, 'media_ready_notified');
   assert.equal((await run({
     ...base,
     id: { ...base.id, _serialized: 'wamid.synthetic.ambiguous' },
@@ -493,5 +493,5 @@ test('default and non-manual fromMe classes never download owner voice', async (
       peer_identifiers: [],
     },
   }, { conversationCaptureOwnerVoiceEnabled: true })).media, null);
-  assert.equal(downloads, 0);
+  assert.equal(downloads, 3);
 });
