@@ -1,5 +1,11 @@
 # Contributor automation instructions
 
+## Andy founding purpose: required decision reference
+- Before proposing or implementing Andy features, product behavior, client UX, cognitive/context systems, channel interactions, policy changes or architecture, read [Andy: propósito e princípios fundadores](docs/vision/ANDY-PROPOSITO-E-PRINCIPIOS.md) alongside the applicable technical contracts.
+- The owner's foundational directive is **semantic handling of every assigned request**. Context, identity, evidence and authority determine an appropriate outcome; that outcome need not be generated text. WhatsApp auto-replies are an optional interface/feature, not the product definition. The Android app is intended as the owner's cockpit.
+- In proposals/PRs, briefly state how the change serves this purpose and distinguish product vision from capabilities actually implemented and certified. If a technical plan conflicts with the founding principles, flag the conflict for explicit review instead of silently redefining the product.
+- The manifesto does **not** override permission, privacy, consent, security or execution gates and never authorizes production activation, disclosure or autonomous effects by itself.
+
 Read README.md and the relevant architecture documentation before changing contracts.
 Keep changes small and preserve tenant/contact isolation, delivery proof and fail-closed authority.
 Use synthetic fixtures. Never place credentials, real conversations or environment inventories in Git.

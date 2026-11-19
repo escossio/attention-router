@@ -1,12 +1,14 @@
 # Attention Router / Andy
 
+> **Purpose comes first.** Andy is not a WhatsApp auto-reply bot. It is an owner-governed, persistent contextual intelligence intended to connect people, evidence, events, resources and services across time. **Every assigned request must be handled semantically, considering context, identity, evidence and authorization.** The appropriate outcome may be a verified answer, a request for approval, a bounded authorized action or an explicit statement of uncertainty. Automatic messaging is only one optional feature, not the product's definition. Read the [founding purpose and principles (PT-BR)](docs/vision/ANDY-PROPOSITO-E-PRINCIPIOS.md). This is a product vision, not a claim of deployed capabilities.
+
 [![Public CI](https://github.com/escossio/attention-router/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/escossio/attention-router/actions/workflows/ci.yml?query=branch%3Amain)
 [![CodeQL](https://github.com/escossio/attention-router/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/escossio/attention-router/security/code-scanning)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 **Agents propose. Policy authorizes. Evidence confirms.**
 
-Attention Router is an open-source, policy-aware agent runtime that separates what an AI model proposes from what the system may execute. Independent policy and human-control boundaries govern external effects; execution and confirmed delivery are recorded as different states. Andy is its principal conversational agent.
+Attention Router is an open-source, policy-aware agent runtime that separates what an AI model proposes from what the system may execute. Independent policy and human-control boundaries govern external effects; execution and confirmed delivery are recorded as different states. Andy is the owner-facing contextual intelligence built on this runtime; conversation is one possible interface, not its defining purpose.
 
 **Explore:** [Project website](https://escossio.github.io/attention-router/) · [Illustrated 90-second demo](docs/demo.md) · [Architecture and trust boundaries](docs/architecture/overview.md) · [Local quick start](#quick-start-local-core-no-providers)
 

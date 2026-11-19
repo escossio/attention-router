@@ -1,5 +1,7 @@
 # Contributing
 
+Before planning new features or changing product behavior, read the [Andy founding purpose and principles (PT-BR)](docs/vision/ANDY-PROPOSITO-E-PRINCIPIOS.md). Use them as a product decision reference: explain the intended contextual value, semantic behavior, identity/evidence requirements and owner-authority boundary. Distinguish envisioned capabilities from code that is implemented and validated; the manifesto never grants operational permission.
+
 This is a public prerelease baseline. Keep changes focused and explain which contract they preserve or change. Do not import private deployment material or use real identities in fixtures.
 
 ## Development and checks
