@@ -1,0 +1,7 @@
+# Overlay mínimo; acrescente após todos os arquivos Compose originais.
+# Esta configuração desativa SOMENTE a recuperação retroativa de voz.
+# Não substitui credenciais privadas nem os demais campos do Worker.
+services:
+  worker:
+    environment:
+      WHATSAPP_VOICE_BACKFILL_ENABLED: "false"

@@ -75,9 +75,17 @@ aplicativo. O replay histórico é opcional, desabilitado por padrão e
 Os três testes antigos exclusivamente de replay ficam marcados como SKIP,
 não contados como PASS. O STT prospectivo permanece funcional.
 
-No momento da coleta, o worker operacional do AGT ainda possuía uma flag
-de backfill histórico habilitada. Desativá-la exige mudança pontual de
-configuração validada, preservando a captura de novos áudios.
+Atualização operacional em 19/11/2026, 00h40 UTC: foi aplicada no AGT
+uma sobreposição Compose que desabilita somente o backfill histórico
+(WHATSAPP_VOICE_BACKFILL_ENABLED=false). O worker reiniciou na MESMA
+imagem e voltou ao estado healthy com zero reinicializações automáticas.
+STT_ENABLED=true e CONVERSATION_CAPTURE_ENABLED=true foram preservados,
+assim como os IDs dos cinco serviços correlatos conferidos. Nenhum
+trabalho histórico estava em processamento antes da operação.
+O arquivo worker.forward-only.compose.example.yml reproduz apenas a
+opção pública, sem copiar os arquivos privados de configuração.
+Os novos áudios continuam elegíveis ao STT; nenhuma captura orgânica
+posterior ao cutover foi necessária para comprovar os gates de configuração.
 
 ## Critério de publicação e cutover
 
