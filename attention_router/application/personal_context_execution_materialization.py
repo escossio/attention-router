@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from attention_router.application.personal_context_execution_authority import (
     EXECUTION_SCOPE_VERSION,
+    RecommendationAuthorityError,
     evaluate_accepted_recommendation_authority,
 )
 from attention_router.application.platform.capability_pack import (
@@ -381,13 +382,35 @@ def materialize_prepared_recommendation_execution(
             materialized_at=None,
         )
 
-    assessment = evaluate_accepted_recommendation_authority(
-        session,
-        tenant_id=tenant_id,
-        actor_key=actor_key,
-        recommendation_id=recommendation_id,
-        now=stamp,
-    )
+    try:
+        assessment = evaluate_accepted_recommendation_authority(
+            session,
+            tenant_id=tenant_id,
+            actor_key=actor_key,
+            recommendation_id=recommendation_id,
+            now=stamp,
+        )
+    except RecommendationAuthorityError as exc:
+        reason_code = str(exc)
+        _retire_intent(
+            session,
+            intent,
+            timestamp=stamp,
+            reason_code=reason_code,
+            tenant_id=tenant_id,
+            recommendation_id=recommendation_id,
+        )
+        return RecommendationMaterializationOutcome(
+            tenant_id=tenant_id,
+            actor_id=actor_key,
+            recommendation_id=recommendation_id,
+            execution_intent_id=intent.id,
+            status="AUTHORITY_REVALIDATION_BLOCKED",
+            reason_code=reason_code,
+            reminder_id=None,
+            authority_assessment_status=None,
+            materialized_at=None,
+        )
     if (
         assessment.assessment_status != "INTENT_PREPARED"
         or assessment.execution_intent_id != intent.id

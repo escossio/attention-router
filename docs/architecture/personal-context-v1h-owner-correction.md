@@ -1,102 +1,134 @@
-# Personal Context V1H — Governed Owner Correction
+# Personal Context V1H — Owner Correction and Hypothesis Invalidation
 
 Status: implementation candidate
 
 Related:
 - #84 Personal Context V1
-- V1A–V1G
+- Personal Context V1A–V1G
+- `docs/architecture/personal-context-v1b-hypothesis-persistence.md`
+- `docs/architecture/personal-context-v1d-recommendation-lifecycle.md`
+- `docs/architecture/personal-context-v1g-runtime-orchestration.md`
 
 ## Purpose
 
-Allow an authenticated owner correction to invalidate an inferred temporal
-recurrence without promoting the correction into execution or disclosure
-authority.
+V1H gives an authenticated owner a governed way to reject an inferred Personal Context pattern.
 
-## Contract
+The correction is knowledge, not execution authority. It does not delete historical evidence and does not promote any inference to fact.
 
-An owner correction is accepted only from an authenticated `OWNER_COMMAND`
-bound to the same tenant and actor.
+Target transition:
 
-The correction:
+`ACTIVE inferred hypothesis -> explicit owner correction -> hypothesis suppressed -> optional relearning only from sufficient post-correction evidence`
 
-- supersedes the current `DERIVED_PATTERN` hypothesis snapshot;
-- is persisted in the existing `MemoryClaimRow` model;
-- uses predicate `context.pattern.owner_correction`;
-- uses source quality `USER_DECLARED`;
-- preserves the exact inbound correction event as provenance;
-- remains private, perishable and bounded to at most 30 days;
-- never grants authority and never marks a recommendation executable.
+## Authority boundary
 
-## Anti-resurrection
+A correction is accepted only from an `InboundEventRow` that:
 
-The recurrence detector may continue to observe the same historical evidence,
-but persistence fails closed while an active correction exists for the stable
-`hypothesis_id`.
+- belongs to the same tenant;
+- is `OWNER_COMMAND`;
+- has `owner_authenticated=true`;
+- is a self-chat/from-me owner command;
+- resolves through an active binding to the same canonical owner actor.
 
-This prevents a runtime cycle from silently recreating an inference the owner
-has explicitly corrected.
+The same inbound event cannot correct two different hypotheses.
 
-Suppression is bounded. It ends when either:
+A correction never grants capability, policy, approval, disclosure, or execution authority.
 
-- the correction validity window expires; or
-- the detector presents at least three evidence events whose occurrence times
-  are strictly later than the correction timestamp.
+## Persistence model
 
-The second rule permits deterministic relearning from genuinely fresh evidence
-without letting pre-correction history overrule the owner's correction. When
-that threshold is met, the correction claim is superseded and the new inferred
-snapshot may be persisted.
+No parallel profile store is introduced.
+
+The inferred source remains a `MemoryClaimRow` with:
+
+- predicate `context.pattern.temporal_recurrence`;
+- source quality `DERIVED_PATTERN`;
+- evidence class `INFERRED`.
+
+The explicit correction is another `MemoryClaimRow` with:
+
+- predicate `context.pattern.owner_correction`;
+- source quality `EXPLICITLY_CONFIRMED`;
+- evidence class `EXPLICITLY_CONFIRMED`;
+- `grants_authority=false`;
+- `recommendation_ready=false`;
+- exact correction inbound-event provenance;
+- `supersedes_claim_id` pointing to the corrected inferred claim.
+
+The corrected inferred claim becomes `SUPERSEDED`; its history remains intact.
 
 ## Derived-chain invalidation
 
-Recommendation acceptance does not detach a recommendation from its source
-hypothesis.
+A correction invalidates still-live work derived from the corrected pattern:
 
-Before V1E prepares authority, the exact `source_claim_id` must still be:
+1. active Personal Context recommendations sourced from that exact claim become `SUPERSEDED`;
+2. pending/retry proactive recommendation outbox rows are canceled only when both recommendation ID and recommendation-claim ID match;
+3. same-tenant `PREPARED` or `FROZEN` recommendation execution intents are moved to `RETIRED`.
 
-- present;
-- owned by the same actor;
-- `DERIVED_PATTERN`;
-- `ACTIVE`;
-- `INFERRED`;
-- `HYPOTHESIS`;
-- non-authoritative;
-- unexpired.
+Already materialized effects are historical reality and are not silently undone by V1H.
 
-If the source was corrected or otherwise invalidated, an existing
-`PROPOSED` recommendation cannot be accepted. V1E returns
-`SOURCE_INVALIDATED` for an already accepted recommendation and creates no
-`ExecutionIntentRow`.
+## Relearning rule
 
-V1F reuses that fresh V1E assessment. Therefore a previously PREPARED/FROZEN
-intent is retired before provider execution if its source hypothesis is no
-longer current.
+The correction does not disappear merely because a timer elapsed.
 
-## Boundaries
+The same stable hypothesis identity stays suppressed until the deterministic recurrence detector produces a valid recurrence chain containing at least **three qualifying timeline observations that occurred after the correction**.
+
+Before that threshold, persistence fails closed with:
+
+`PATTERN_HYPOTHESIS_OWNER_CORRECTED`
+
+Once the threshold is met:
+
+1. the explicit correction claim becomes `SUPERSEDED`;
+2. a new inferred pattern snapshot may become `ACTIVE`;
+3. the new claim links back to the correction through `supersedes_claim_id`;
+4. the correction remains preserved in history.
+
+Historical evidence is not erased. New evidence is required before the system may trust the same pattern again.
+
+## Defense in depth
+
+V1E now revalidates that an accepted recommendation still points to an active, inferred, non-authoritative source pattern.
+
+If the source is missing, superseded, invalid, or expired, no new execution intent is prepared.
+
+V1F catches that failed source-authority revalidation and retires an existing inert `PREPARED`/`FROZEN` intent instead of allowing materialization.
+
+This makes correction safety independent of the cascade path alone.
+
+## Idempotency and isolation
+
+- exact replay of the same correction event is idempotent;
+- one correction event cannot be reused for another hypothesis;
+- correction lookup is tenant/person scoped through the canonical memory actor and owner binding;
+- intent retirement additionally verifies the tenant embedded in the immutable execution scope;
+- outbox cancellation requires exact derived recommendation identity;
+- one owner's correction cannot modify another owner's evidence.
+
+## Explicit non-goals
 
 V1H does not:
 
-- parse arbitrary natural-language corrections;
-- create a new profile store;
-- create `FactRow`;
-- create recommendations;
-- create reminders;
-- call providers;
+- parse arbitrary natural-language corrections into hypothesis IDs;
+- add an Android/UI correction surface;
 - enable Personal Context runtime flags;
-- deploy runtime changes.
+- deploy V1G/V1H;
+- create facts;
+- create reminders;
+- grant execution authority;
+- revoke already-materialized external effects.
+
+Those are separate boundaries.
 
 ## Proof
 
 Tests cover:
 
-- authenticated correction supersedes an inferred hypothesis;
-- exact correction replay is idempotent;
-- an unbound actor fails closed;
-- the same hypothesis cannot be recreated from only pre-correction evidence;
-- correction expiry permits bounded relearning;
-- three fresh post-correction occurrences can deterministically requalify the
-  same stable pattern before expiry;
-- a proposed recommendation cannot be accepted after source invalidation;
-- an invalidated source cannot prepare an execution intent;
-- PREPARED and FROZEN intents are retired before reminder materialization after
-  source invalidation.
+- authenticated owner correction superseding the inferred hypothesis;
+- proactive recommendation invalidation;
+- pending delivery cancellation;
+- no `FactRow` creation;
+- exact replay idempotency;
+- unauthenticated correction fail-closed behavior;
+- continued suppression with only historical evidence;
+- deterministic relearning after three post-correction recurrence observations;
+- execution-intent retirement isolated to the same tenant;
+- V1F retirement when a prepared intent's source hypothesis becomes inactive.
