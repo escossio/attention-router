@@ -46,8 +46,6 @@ def build_channel_sync_registry(settings: Settings) -> dict[str, RegisteredAdapt
 
     # Revalidate even Settings instances changed by an embedding caller.
     configured = Settings(_env_file=None, **settings.model_dump())
-    if configured.gmail_attachment_ingestion_enabled:
-        raise ValueError("CHANNEL_SYNC_ATTACHMENTS_UNSUPPORTED")
     database = make_url(configured.database_url)
     if configured.gmail_product_scheduler_enabled:
         if database.drivername != "postgresql+psycopg" or not database.database:

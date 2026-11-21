@@ -57,6 +57,7 @@ def test_public_package_has_no_address_allocation_or_secret_values():
         "GMAIL_PRODUCT_RUNNER_ENABLED": "false",
         "GMAIL_PRODUCT_SCHEDULER_ENABLED": "false",
         "GMAIL_BODY_INGESTION_ENABLED": "false",
+        "ARTIFACT_STORE_ENABLED": "false",
         "GMAIL_ATTACHMENT_INGESTION_ENABLED": "false",
     }
     assert not any(
