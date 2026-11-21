@@ -575,3 +575,55 @@ def test_target_drift_after_db_start_prevents_worker_recreate(scenario, monkeypa
     with pytest.raises(lifecycle.InvariantError, match="TARGET_CHANGED_BEFORE_UP"):
         lifecycle.reconcile(*target)
     assert not any("up" in args for args in calls)
+
+
+def test_distinct_worker_and_transport_image_provenance_is_pinned(scenario, monkeypatch):
+    """A live Transport and Worker can originate from separate certified SHAs."""
+    transport_env = configure_first_contact_pair(scenario, monkeypatch, "OPEN_INBOUND")
+    manifest, _, _, _, _ = scenario
+    transport_sha = "d" * 40
+    manifest["first_contact_transport"]["source_sha"] = transport_sha
+    repin(scenario, monkeypatch)
+    worker_id = manifest["image_id"]
+    transport_id = manifest["first_contact_transport"]["image_id"]
+    worker_image = {"Id": worker_id,
+                    "Config": {"Labels": {"org.opencontainers.image.revision": manifest["source_sha"]}}}
+    transport_image = {"Id": transport_id,
+                       "Config": {"Labels": {"org.opencontainers.image.revision": transport_sha}}}
+    container = {
+        "Image": transport_id,
+        "Config": {"Env": [f"{k}={v}" for k, v in transport_env.items()]},
+        "State": {"Status": "running", "Health": {"Status": "healthy"}},
+    }
+    monkeypatch.setattr(lifecycle, "inspect", lambda kind, name: (
+        worker_image if kind == "image" and name == worker_id else
+        transport_image if kind == "image" and name == transport_id else
+        container if kind == "container" and name == "synthetic-transport" else
+        pytest.fail(f"unexpected inspect: {kind} {name}")))
+    assert lifecycle.preflight()[0]["first_contact_transport"]["source_sha"] == transport_sha
+    transport_image["Config"]["Labels"]["org.opencontainers.image.revision"] = "e" * 40
+    with pytest.raises(lifecycle.InvariantError, match="FIRST_CONTACT_TRANSPORT_REVISION_DRIFT"):
+        lifecycle.preflight()
+
+
+def test_already_healthy_reconciler_never_mutates_docker(scenario, monkeypatch):
+    """A healthy matching worker/DB needs no Docker start, update or Compose up."""
+    target = lifecycle.preflight()
+    verify_calls = []
+    monkeypatch.setattr(lifecycle, "verify", lambda *_args, **kwargs: verify_calls.append(kwargs))
+    monkeypatch.setattr(lifecycle, "preflight", lambda **_kwargs: target)
+    monkeypatch.setattr(lifecycle, "invoke", lambda *_args, **_kwargs: pytest.fail("unexpected docker command"))
+    lifecycle.reconcile(*target)
+    assert len(verify_calls) == 2
+    assert verify_calls[0]["require_running"] is False
+    assert verify_calls[1]["require_running"] is True
+
+
+def test_healthy_fast_path_revalidates_pins_before_success(scenario, monkeypatch):
+    target = lifecycle.preflight()
+    changed = dict(target[0], image_id="sha256:" + "9" * 64)
+    monkeypatch.setattr(lifecycle, "verify", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "preflight", lambda **_kwargs: (changed, *target[1:]))
+    monkeypatch.setattr(lifecycle, "invoke", lambda *_args, **_kwargs: pytest.fail("unexpected docker command"))
+    with pytest.raises(lifecycle.InvariantError, match="TARGET_CHANGED_BEFORE_UP"):
+        lifecycle.reconcile(*target)
