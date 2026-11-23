@@ -436,6 +436,10 @@ def test_postgres_publisher_requires_current_execution_summary(tmp_path, case):
     if case == "duplicate_summary":
         log += f"CI_DISTRIBUTED_SUMMARY={path}\n"
     assert module.verified_success(module.extract_summary(log), sha, log) is (case == "valid")
+    if case == "valid":
+        waiting = "CI_DISTRIBUTED_STATUS=WAITING_FOR_DISCOVERY_CAPACITY\n"
+        assert module.verified_success(summary, sha, waiting + log)
+        assert not module.verified_success(summary, sha, "CI_DISTRIBUTED_STATUS=FAIL\n" + log)
 
 
 @pytest.mark.parametrize("mode", ["retry_busy", "stale_profile", "missing_duration"])

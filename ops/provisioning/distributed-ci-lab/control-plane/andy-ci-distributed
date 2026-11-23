@@ -335,6 +335,10 @@ classify_attempt() {
     echo WORKER_BUSY
     return
   fi
+  if grep -Eq 'CI_POSTGRES_(NODE_SELECTION_MISMATCH|EXECUTION_INCOMPLETE|TARGET_MANIFEST_)' "$log"; then
+    echo MANIFEST_MISMATCH
+    return
+  fi
   if (( rc == 255 )) || grep -Eq \
       'ssh:|Connection (timed out|refused|closed)|No route to host|Could not resolve hostname|Broken pipe|kex_exchange_identification' \
       "$log"; then

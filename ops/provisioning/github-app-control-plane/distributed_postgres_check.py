@@ -220,7 +220,8 @@ def extract_summary(output: str) -> dict | None:
 
 
 def verified_success(summary: dict | None, sha: str, output: str) -> bool:
-    if summary is None or re.findall(r"^CI_DISTRIBUTED_STATUS=(.*)$", output, re.M) != ["PASS"]:
+    terminal = re.findall(r"^CI_DISTRIBUTED_STATUS=(PASS|FAIL)$", output, re.M)
+    if summary is None or terminal != ["PASS"]:
         return False
     if (summary.get("schema_version") != 5 or summary.get("sha") != sha
             or summary.get("suite") != "postgres" or summary.get("status") != "PASS"
