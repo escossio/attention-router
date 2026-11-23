@@ -9,12 +9,13 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, "/usr/local/lib/andy-github-app")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from probe import CONFIG, INSTALLATION_CONFIG, load_env, make_jwt, request_json
-from ci_impact_policy import get_pr_impact
+from ci_impact_policy import get_pr_impact, merged_main_target
 
 DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
 CHECK_NAME = "distributed-postgres"
@@ -273,22 +274,28 @@ def render_summary(summary: dict | None, *, reprofiled: bool) -> str:
             f"{data.get('passed_tests','?')} | {data.get('target_files','?')} |"
         )
     return "\n".join(parts)
-def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, int | None]:
+def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool = False) -> tuple[str, str, int | None]:
     token = installation_token()
-    pr = current_pr(token, repo, pr_number)
-    current_sha = ((pr.get("head") or {}).get("sha") or "").lower()
-    if pr.get("state") != "open" or current_sha != sha.lower():
-        return "STALE", "PR is closed or head SHA moved before execution.", None
+    request = partial(request_json, token=token)
+    if merged_main:
+        if not merged_main_target(repo, pr_number, sha, request):
+            return "REFUSED", "Merged PR and main ancestry did not verify.", None
+    else:
+        pr = current_pr(token, repo, pr_number)
+        current_sha = ((pr.get("head") or {}).get("sha") or "").lower()
+        if pr.get("state") != "open" or current_sha != sha.lower():
+            return "STALE", "PR is closed or head SHA moved before execution.", None
 
     check_id = create_check(token, repo, sha, pr_number)
     reprofiled = False
     try:
-        impact = get_pr_impact(repo, pr_number, sha, lambda path: request_json(path, token))
-        if not impact.required("postgres"):
-            detail = impact.summary("postgres")
-            complete_check(token, repo, check_id, "success",
-                           "NOT APPLICABLE: distributed-postgres (no test run)", detail)
-            return "NOT_APPLICABLE", detail, check_id
+        if not merged_main:
+            impact = get_pr_impact(repo, pr_number, sha, request)
+            if not impact.required("postgres"):
+                detail = impact.summary("postgres")
+                complete_check(token, repo, check_id, "success",
+                               "NOT APPLICABLE: distributed-postgres (no test run)", detail)
+                return "NOT_APPLICABLE", detail, check_id
         result = run_command([CI_RUN, sha, "postgres"])
         if result.returncode == 66:
             reprofiled = True
@@ -304,6 +311,8 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, in
 
         summary = extract_summary(result.stdout)
         if result.returncode == 0 and verified_success(summary, sha, result.stdout):
+            if merged_main and not merged_main_target(repo, pr_number, sha, request):
+                raise RuntimeError("MERGED_MAIN_ANCESTRY_CHANGED")
             text = render_summary(summary, reprofiled=reprofiled)
             complete_check(
                 token, repo, check_id, "success",
@@ -368,16 +377,18 @@ def main() -> None:
     run.add_argument("--repo", default=TARGET_REPO, choices=[TARGET_REPO])
     run.add_argument("--pr", type=int, required=True)
     run.add_argument("--sha", required=True)
+    run.add_argument("--merged-main", action="store_true", help="Certify the integrated commit of a merged main PR.")
     sub.add_parser("daemon")
     args = parser.parse_args()
 
-    ensure_tables()
     if args.command == "daemon":
         daemon()
         return
+    if not args.merged_main:
+        ensure_tables()
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.sha):
         raise SystemExit("invalid SHA")
-    state, detail, check_id = execute_exact_sha(args.repo, args.pr, args.sha.lower())
+    state, detail, check_id = execute_exact_sha(args.repo, args.pr, args.sha.lower(), merged_main=args.merged_main)
     print(f"STATE={state}")
     print(f"CHECK_RUN_ID={check_id or ''}")
     print(detail)

@@ -118,6 +118,17 @@ systemctl enable --now andy-github-distributed-shadow-ci.service
 
 The Python migration completed after repeated exact-SHA equivalence with the former GitHub-hosted full suite. `distributed-python` is required; GitHub-hosted `python-tests` is retained only as lightweight public preflight. `distributed-transport` and `distributed-docker` remain in the shadow-certification phase, and promoting either one requires a separate repository-ruleset change.
 
+### Certifying the main merge commit for promotion
+
+G3–G6 promotion checks consume the two distributed receipts on the integrated commit. An authorized operator can run both existing publishers from their provisioned environments with the merged PR number and the full merge SHA.
+
+```sh
+python distributed_shadow_checks.py run --merged-main --suite python --pr "$PR_NUMBER" --sha "$MERGE_SHA"
+python distributed_postgres_check.py run --merged-main --pr "$PR_NUMBER" --sha "$MERGE_SHA"
+```
+
+Each command validates the closed, merged PR in `escossio/attention-router`, its base branch and merge SHA, and GitHub's comparison with current `main`. It runs the full requested suite, verifies the worker receipt and checks main ancestry again before publishing success. Inspect both check-run IDs on that merge SHA. A refused target exits nonzero before check creation. This explicit path uses the existing App credentials and worker schedulers. Daemons continue to consume open-PR events through their existing queue.
+
 ## Event-driven continuation stages
 
 A controller may pre-register a bounded stage that it is waiting for. Correlation is exact across:

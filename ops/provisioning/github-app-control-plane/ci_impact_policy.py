@@ -103,6 +103,33 @@ def classify_files(files: list[dict] | None) -> Impact:
     return Impact(frozenset(suites), reason, fingerprint, len(normalized))
 
 
+def merged_main_target(repo: str, number: int, sha: str, request: Callable[[str], tuple[int, object]]) -> bool:
+    """A closed canonical PR identifies the integrated commit; main may have advanced since."""
+    if repo != REPO or type(number) is not int or number < 1 or not _SHA.fullmatch(sha):
+        return False
+
+    def read(endpoint):
+        try:
+            status, body = request(f"/repos/{repo}/{endpoint}")
+        except (OSError, ValueError):
+            return {}
+        return body if status == 200 and isinstance(body, dict) else {}
+
+    pr = read(f"pulls/{number}")
+    if (pr.get("number") != number
+            or pr.get("state") != "closed" or pr.get("merged") is not True
+            or pr.get("merge_commit_sha") != sha):
+        return False
+    base = pr.get("base")
+    if (not isinstance(base, dict) or base.get("ref") != "main" or not isinstance(base.get("repo"), dict)
+            or base["repo"].get("full_name") != repo):
+        return False
+    relation = read(f"compare/{sha}...main?per_page=1")
+    merge_base = relation.get("merge_base_commit")
+    return (relation.get("status") in {"ahead", "identical"}
+            and isinstance(merge_base, dict) and merge_base.get("sha") == sha)
+
+
 def get_pr_impact(
     repo: str, number: int, head_sha: str, request: Callable[[str], tuple[int, object]],
     *, base_branch: str = "main",

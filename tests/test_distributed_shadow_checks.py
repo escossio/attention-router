@@ -70,6 +70,99 @@ def init_deliveries(path: Path) -> None:
         db.commit()
 
 
+@pytest.mark.parametrize("suite", ["postgres", "python"])
+@pytest.mark.parametrize("case", [
+    "valid", "main_advanced", "open", "unmerged", "wrong_number", "wrong_sha", "wrong_base", "wrong_repo",
+    "diverged", "wrong_ancestor", "unreadable", "transport_error", "moved_during_run", "wrong_receipt", "worker_failure",
+    "ordinary_pr", "closed_without_flag",
+])
+def test_manual_merged_main_cli_uses_exact_commit_and_real_execution(tmp_path, monkeypatch, suite, case):
+    postgres = suite == "postgres"
+    module = load_publisher(PUBLISHER.with_name("distributed_postgres_check.py") if postgres else PUBLISHER)
+    sha, other = "a" * 40, "b" * 40
+    repo = module.TARGET_REPO
+    pr = {"number": 18 if case == "wrong_number" else 17,
+          "state": "open" if case in {"open", "ordinary_pr"} else "closed", "merged": case != "unmerged",
+          "merge_commit_sha": other if case == "wrong_sha" else sha, "head": {"sha": sha},
+          "base": {"ref": "other" if case == "wrong_base" else "main",
+                   "repo": {"full_name": "other/project" if case == "wrong_repo" else repo}}}
+    comparisons = []
+
+    def read_github(path, token):
+        if path == f"/repos/{repo}/pulls/17":
+            return 200, pr
+        assert path == f"/repos/{repo}/compare/{sha}...main?per_page=1"
+        comparisons.append(path)
+        if case == "unreadable":
+            return 503, {}
+        if case == "transport_error":
+            raise OSError("connection unavailable")
+        status = "ahead" if case == "main_advanced" else "identical"
+        if case == "diverged" or case == "moved_during_run" and len(comparisons) == 2:
+            status = "diverged"
+        return 200, {"status": status, "merge_base_commit": {"sha": other if case == "wrong_ancestor" else sha}}
+
+    published, created, executed, impacts = [], [], [], []
+    monkeypatch.setattr(module, "installation_token", lambda: "synthetic")
+    monkeypatch.setattr(module, "request_json", read_github)
+    monkeypatch.setattr(module, "create_check", lambda token, project, target, *args: created.append(target) or 42)
+    monkeypatch.setattr(module, "complete_check", lambda token, project, run_id, state, *args: published.append(state))
+    monkeypatch.setattr(module, "get_pr_impact", lambda *args: impacts.append(True) or types.SimpleNamespace(
+        required=lambda _: False, summary=lambda _: "NOT_APPLICABLE"))
+    ordinary = case in {"ordinary_pr", "closed_without_flag"}
+    monkeypatch.setattr(module, "ensure_tables", lambda: None if ordinary else pytest.fail("manual run opened queue"))
+    receipt_sha = other if case == "wrong_receipt" else sha
+    digest = "d" * 64
+    if postgres:
+        summary = {"sha": receipt_sha, "schema_version": 5, "suite": suite, "status": "PASS",
+                   "configured_workers": ["ci03"], "selection_sha256": digest, "profile_key": f"nodes-{digest}",
+                   "selected_file_count": 3, "selected_test_count": 10, "total_passed_tests": 10,
+                   "workers": {"ci03": {"status": "PASS", "rc": 0, "target_files": 3, "passed_tests": 10}}}
+        command = [module.CI_RUN, sha, "postgres"]
+    else:
+        summary = {"sha": receipt_sha, "repository": "attention-router", "suite": suite, "status": "PASS",
+                   "selected_worker": "ci02", "attempts": [
+                       {"attempt": 1, "worker": "ci02", "classification": "PASS", "rc": 0, "duration_seconds": 1}]}
+        command = [module.CI_RUN, "attention-router", sha, "python"]
+    def run(argv):
+        executed.append(argv)
+        path = tmp_path / "summary.json"
+        path.write_text(json.dumps(summary))
+        return subprocess.CompletedProcess(argv, 1 if case == "worker_failure" else 0,
+                                           f"CI_DISTRIBUTED_SUMMARY={path}\nCI_DISTRIBUTED_STATUS=PASS\n")
+    monkeypatch.setattr(module, "run_command", run)
+    args = ["publisher", "run", "--pr", "17", "--sha", sha]
+    if not postgres:
+        args.extend(["--suite", "python"])
+    if not ordinary:
+        args.append("--merged-main")
+    monkeypatch.setattr(sys, "argv", args)
+    with pytest.raises(SystemExit) as stopped:
+        module.main()
+    ran = case in {"valid", "main_advanced", "moved_during_run", "wrong_receipt", "worker_failure"}
+    assert executed == ([command] if ran else [])
+    assert created == ([sha] if ran or case == "ordinary_pr" else [])
+    assert impacts == ([True] if case == "ordinary_pr" else [])
+    if case in {"valid", "main_advanced"}:
+        assert published == ["success"] and len(comparisons) == 2 and stopped.value.code == 0
+    elif ran:
+        assert published == ["failure"] and stopped.value.code != 0
+    elif ordinary:
+        assert published == (["success"] if case == "ordinary_pr" else [])
+    else:
+        assert not published and stopped.value.code != 0
+
+
+@pytest.mark.parametrize(("repo", "suite"), [
+    ("escossio/attention-router", "transport"), ("escossio/attention-router", "docker"), ("escossio/andy-android", "android"),
+])
+def test_merged_main_cli_limits_shadow_publisher_to_canonical_python(monkeypatch, repo, suite):
+    module = load_publisher()
+    monkeypatch.setattr(module, "installation_token", lambda: pytest.fail("unexpected App access"))
+    state, _, check_id = module.execute_exact_sha(repo, 17, "a" * 40, suite, merged_main=True)
+    assert state == "REFUSED" and check_id is None
+
+
 def test_shadow_publisher_enqueues_three_suites_per_exact_head(tmp_path):
     module = load_publisher()
     db_path = tmp_path / "events.sqlite3"
