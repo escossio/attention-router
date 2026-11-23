@@ -1,5 +1,6 @@
 """Opt-in paired G7 benchmark on a disposable database. Invoke this file explicitly."""
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
 from datetime import timedelta
 from hashlib import sha256
 import json
@@ -19,6 +20,7 @@ from attention_router.application.context_validity import ContextValidity
 from attention_router.application.conversation_evidence_staged import StagedConversationEvidenceReader
 from attention_router.application.staged_read import StagedReadRejected
 from attention_router.infrastructure.models import ConversationMessageRow
+from attention_router.web.private_context import owner_answer
 from test_passive_vectors import provider  # noqa: F401
 from test_postgres_client_context import context_reader, enroll_device, issue  # noqa: F401
 from test_postgres_client_session import NOW, service
@@ -48,24 +50,25 @@ def _burst(fetch, cases, engine, Session, marker_id, arm):
         gate.wait()
         start = monotonic()
         try:
-            result = fetch(index, question)
+            candidates, delivered = fetch(index, question)
             status = "ok"
         except DBAPIError as exc:
             code = getattr(exc.orig, "sqlstate", None)
             if code not in ("55P03", "57014"):
                 raise
-            result, status = [], code
+            candidates, delivered, status = [], [], code
         except (ValueError, StagedReadRejected) as exc:
             # Unknown errors are harness or product failures and must surface.
             if str(exc) not in ("CONTEXT_CONSENT_UNAVAILABLE", "STAGED_CONVERSATION_SUPPORT_CHANGED",
                                 "CONTEXT_EPOCH_ANCHOR_UNAVAILABLE", "CONTEXT_INDEX_FENCE_BUSY"):
                 raise
-            result, status = [], str(exc)
-        found = list(dict.fromkeys(entry[0] for entry in result))
+            candidates, delivered, status = [], [], str(exc)
+        candidate_refs = list(dict.fromkeys(entry[0] for entry in candidates))
+        found = list(dict.fromkeys(entry[0] for entry in delivered))
         hits = set(found).intersection(expected)
         return {
             "case": key, "category": category, "status": status, "milliseconds": (monotonic()-start)*1000,
-            "expected": expected, "evidence": found, "hits": len(hits),
+            "expected": expected, "candidates": candidate_refs, "evidence": found, "hits": len(hits),
             "complete_support": status == "ok" and (bool(expected) and hits == set(expected) or not expected and not found),
         }
 
@@ -104,8 +107,11 @@ def _burst(fetch, cases, engine, Session, marker_id, arm):
     times = sorted(row["milliseconds"] for row in rows)
     answered = [row for row in rows if row["status"] == "ok"]
     references = sum(len(row["evidence"]) for row in answered)
+    candidate_count = sum(len(row["candidates"]) for row in answered)
+    candidate_hits = sum(len(set(row["expected"]).intersection(row["candidates"])) for row in answered)
     return {
         "requests": rows, "offered": len(rows), "answered": len(answered), "writer": progress,
+        "candidate_precision_at_3": candidate_hits/candidate_count if candidate_count else None,
         "precision_at_3": sum(row["hits"] for row in answered)/references if references else None,
         "wall_seconds": monotonic()-start, "process_cpu_seconds": process_time()-before_cpu,
         "process_peak_rss_kib_cumulative": getrusage(RUSAGE_SELF).ru_maxrss,
@@ -154,8 +160,13 @@ def test_governed_paired_readers_and_writer(Session, evidence_world, context_rea
                 found.extend(provenance(m["id"], m["text"]) for m in members)
         return found
 
+    candidates_at_render = ContextVar("g7_packet_candidates")
+
     def render(packet):
-        return [provenance(m["source_ref"], m["text"]) for item in packet.items for m in item.attributes["excerpts"]]
+        candidates_at_render.set([
+            provenance(m["source_ref"], m["text"]) for item in packet.items for m in item.attributes["excerpts"]
+        ])
+        return owner_answer(packet)
 
     started = monotonic()
     boundary = ClientContextReader(sessions, role=role, client_sessions=service(), scope_registry={scope_ref: scope_id},
@@ -166,18 +177,28 @@ def test_governed_paired_readers_and_writer(Session, evidence_world, context_rea
     devices = [issue(Session, enroll_device(Session), NOW, tenant_id=scope_id.tenant_id) for _ in cases]
 
     def raw(slot, question):
-        return boundary.query(bearer=devices[slot].session_token, scope_ref=scope_ref, question=question)
+        delivered = boundary.query(bearer=devices[slot].session_token, scope_ref=scope_ref, question=question)
+        return delivered, delivered
+
     def staged(slot, question):
         bodies = []
-        receipt = governed.query_and_deliver(bearer=devices[slot].session_token, scope_ref=scope_ref, question=question,
-                                             deliver=bodies.append)
-        assert len(bodies) == 1 and receipt.body_size == len(bodies[0])
-        return [tuple(entry) for entry in json.loads(bodies[0])]
+        token = candidates_at_render.set(None)
+        try:
+            receipt = governed.query_and_deliver(bearer=devices[slot].session_token, scope_ref=scope_ref, question=question,
+                                                 deliver=bodies.append)
+            assert len(bodies) == 1 and receipt.body_size == len(bodies[0])
+            answer = json.loads(bodies[0])
+            assert answer["kind"] == ("OBSERVATION" if answer["evidence"] else "INSUFFICIENT_EVIDENCE")
+            delivered = [provenance(row["source_ref"], row["excerpt"]) for row in answer["evidence"]]
+            return candidates_at_render.get(), delivered
+        finally:
+            candidates_at_render.reset(token)
 
     runs = (("hybrid", raw), ("governed", staged))
     for _, fetch in runs:
         for ref in ("s11", "s12"):
-            assert (ref, digest(sources[ref])) in fetch(0, sources[ref])
+            _, delivered = fetch(0, sources[ref])
+            assert (ref, digest(sources[ref])) in delivered
     report = {arm: _burst(fetch, cases, engine, Session, ids["d000"], arm) for arm, fetch in runs}
 
     corrected = "A caixa de amostras de quartzo chegou na terça-feira."
@@ -189,11 +210,17 @@ def test_governed_paired_readers_and_writer(Session, evidence_world, context_rea
             validity = ContextValidity(db, **scope, now=read_time, source_allowed=permits)
             pilot._epoch.advance(validity, validity.revoke_receipt, receipts["s12"])
     for arm, fetch in runs:
-        current = fetch(0, corrected)
-        withdrawn = fetch(0, sources["s12"])
+        _, current = fetch(0, corrected)
+        _, withdrawn = fetch(0, sources["s12"])
         report[arm]["correction"] = ("s11", digest(corrected)) in current and ("s11", digest(sources["s11"])) not in current
         report[arm]["withdrawal"] = all(row[0] != "s12" for row in withdrawn)
-        report[arm]["scope_isolated"] = all(forbidden.isdisjoint(row["evidence"]) for row in report[arm]["requests"])
+        scoped = [fetch(0, question) for question in (
+            "O código do cofre de safira é nove.", "A altitude do planador de jade é novecentos metros.",
+        )]
+        report[arm]["scope_isolated"] = (
+            all(forbidden.isdisjoint(row["candidates"] + row["evidence"]) for row in report[arm]["requests"])
+            and all(forbidden.isdisjoint(ref for ref, _ in candidates + delivered) for candidates, delivered in scoped)
+        )
     with capsys.disabled():
         print("G7_PAIRED " + json.dumps(report, sort_keys=True), flush=True)
     assert all(result["correction"] and result["withdrawal"] and result["scope_isolated"] for result in report.values())

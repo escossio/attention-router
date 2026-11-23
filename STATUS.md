@@ -4,6 +4,8 @@
 
 A candidata de benchmark exercita 200 segmentos e 16 consultas simultâneas em dois caminhos autenticados sob o mesmo escopo. Registra referências, precisão, rejeições, latências, recursos e progresso de escritor. O gabarito inclui ausência de suporte, contradição, correção, revogação e dois controles de isolamento. O protocolo e o corpus estão em `evals/governed-retrieval/`.
 
+A primeira rajada mediu os candidatos no SHA `aba813c82c29c6ed74d5ff51770870ffc05a0a11`. A instrumentação seguinte registra separadamente o pacote bruto e a evidência que o apresentador OWNER serializa e entrega depois de revalidar o escopo.
+
 ## Consulta privada OWNER, unidade 4 de #425 e #428
 
 Candidata ligada à recuperação #433 e ao schema/papéis #434. O runtime consulta fontes consentidas com ClientSession, epoch durável, E5 e revalidação antes da entrega. Perfis privados de OCI, rollback e matriz dos 12 casos em [consulta privada](ops/context-canary/private-runtime.md). 31 testes dirigidos de runtime, E5 em fases e socket aprovados em bancada. Certificação PostgreSQL no SHA, ensaio OCI com base atestada e homologação semântica permanecem pendentes.
