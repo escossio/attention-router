@@ -475,13 +475,17 @@ def upsert_actor_binding(
     is_active: bool = True,
     tenant_id: str = DEFAULT_TENANT_ID,
 ) -> ActorBindingRow:
+    from attention_router.infrastructure.context_generations import RESERVED_FIELD, advance_generations
+
+    if metadata is not None and RESERVED_FIELD in metadata:
+        raise ValueError("CONTEXT_GENERATION_RESERVED_FIELD")
     stamp = now_utc()
     row = session.scalars(
         select(ActorBindingRow).where(
             ActorBindingRow.source == source,
             ActorBindingRow.external_actor_id == external_actor_id,
             ActorBindingRow.tenant_id == tenant_id,
-        )
+        ).with_for_update().execution_options(populate_existing=True)
     ).first()
     if row is None:
         row = ActorBindingRow(
@@ -513,12 +517,26 @@ def upsert_actor_binding(
             "actor_category": row.actor_category,
             "is_active": row.is_active,
         }
+        old_metadata = dict(row.binding_metadata or {})
+        identity_changed = (
+            row.actor_key != actor_key or row.actor_category != actor_category
+            or row.is_active != is_active
+            or old_metadata.get("owner") != (metadata or {}).get("owner")
+        )
         row.actor_key = actor_key
         row.display_name = display_name
         row.actor_category = actor_category
         row.active_context = active_context
         row.is_active = is_active
-        row.binding_metadata = metadata or {}
+        row.binding_metadata = {
+            **(metadata or {}),
+            **({RESERVED_FIELD: old_metadata[RESERVED_FIELD]} if RESERVED_FIELD in old_metadata else {}),
+        }
+        if identity_changed:
+            advance_generations(
+                session, row, old_metadata.get(RESERVED_FIELD, {}),
+                "ACTOR_BINDING_IDENTITY_CHANGED", row.id,
+            )
         row.updated_at = stamp
         audit(
             session,
@@ -543,7 +561,16 @@ def set_actor_binding_active(
     active: bool,
     tenant_id: str = DEFAULT_TENANT_ID,
 ) -> ActorBindingRow:
-    row = get_actor_binding(session, binding_id, tenant_id)
+    from attention_router.infrastructure.context_generations import locked_binding, advance_generations
+
+    row = locked_binding(session, binding_id, tenant_id)
+    if row is None:
+        raise KeyError(binding_id)
+    if row.is_active != active:
+        advance_generations(
+            session, row, (row.binding_metadata or {}).get("context_generations", {}),
+            "ACTOR_BINDING_ACTIVATION_CHANGED", row.id,
+        )
     row.is_active = active
     row.updated_at = now_utc()
     audit(

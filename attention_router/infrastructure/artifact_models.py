@@ -48,6 +48,7 @@ class ArtifactRow(Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JsonType, nullable=False, default=dict
     )
+    context_revision: Mapped[str] = mapped_column(String(36), nullable=False, server_default="legacy")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -76,6 +77,7 @@ class ArtifactReceiptRow(Base):
     external_receipt_id: Mapped[str] = mapped_column(String(240), nullable=False)
     sender_actor_id: Mapped[str | None] = mapped_column(String(120))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    context_revision: Mapped[str] = mapped_column(String(36), nullable=False, server_default="legacy")
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JsonType, nullable=False, default=dict
     )

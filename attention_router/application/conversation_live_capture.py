@@ -328,6 +328,12 @@ def attach_canonical_artifact(
         ArtifactReceiptRow.source_account == details["source_account"],
         ArtifactReceiptRow.external_receipt_id == receipt_key,
     ))
+    if linked_receipt is not None and (linked_receipt.metadata_json or {}).get("context_evidence_withdrawn") is True:
+        previous["context_evidence_withdrawn"] = True
+        row.metadata_json = previous
+        row.searchable = False
+        session.flush()
+        return ConversationCaptureResult("SKIPPED", message_id=row.id, reason="ARTIFACT_RECEIPT_WITHDRAWN")
     understanding = session.scalar(select(ArtifactUnderstandingRow).where(
         ArtifactUnderstandingRow.tenant_id == receipt.tenant_id,
         ArtifactUnderstandingRow.inbound_event_id == receipt.id,
@@ -457,13 +463,28 @@ def capture_voice_transcription(
         raise ConversationCaptureConflict("TRANSCRIPTION_EVENT_SCOPE_MISMATCH")
     if transcription.status not in {"READY", "FAILED"}:
         return ConversationCaptureResult("SKIPPED", reason="NOT_TERMINAL")
+    # Enrolled pilot accounts share the binding lock with contextual consumers.
+    context_binding = None
+    context_scope = stable_hash(dict(
+        tenant_id=receipt.tenant_id, binding_id=settings.persistent_memory_canary_binding_id,
+        source_account=details["source_account"],
+    ))
+    if receipt.tenant_id == settings.cognitive_runtime_canary_tenant_id:
+        from attention_router.infrastructure.context_generations import locked_binding
+        context_binding = locked_binding(
+            session, settings.persistent_memory_canary_binding_id, receipt.tenant_id,
+        )
+        if context_binding is not None and context_scope not in (
+            context_binding.binding_metadata or {}
+        ).get("context_generations", {}):
+            context_binding = None
     row = session.scalar(
         select(ConversationMessageRow).where(
             ConversationMessageRow.tenant_id == receipt.tenant_id,
             ConversationMessageRow.source == receipt.source,
             ConversationMessageRow.source_account == details["source_account"],
             ConversationMessageRow.source_message_id == receipt.external_event_id,
-        )
+        ).execution_options(populate_existing=True)
     )
     if row is None:
         return ConversationCaptureResult("SKIPPED", reason="MESSAGE_NOT_ARCHIVED")
@@ -476,6 +497,7 @@ def capture_voice_transcription(
         or row.message_type != "VOICE"
     ):
         raise ConversationCaptureConflict("TRANSCRIPTION_ARCHIVE_SCOPE_MISMATCH")
+    before_content = (row.text, row.sensitivity_class, row.searchable)
     metadata = dict(row.metadata_json or {})
     if metadata.get("capture_contract") != "LIVE_CONVERSATION_ARCHIVE_V0":
         return ConversationCaptureResult("SKIPPED", reason="NOT_CAPTURED_HERE")
@@ -493,7 +515,7 @@ def capture_voice_transcription(
         row.normalized_text = _normalize(safe_text)
         row.content_hash = stable_hash(safe_text)
         row.sensitivity_class = sensitivity
-        row.searchable = sensitivity != "SECRET"
+        row.searchable = sensitivity != "SECRET" and not metadata.get("context_evidence_withdrawn")
         metadata["content_state"] = "TRANSCRIBED"
         metadata["transcription_status"] = "READY"
     else:
@@ -505,6 +527,15 @@ def capture_voice_transcription(
         metadata["transcription_completed_at"] = _utc(transcription.completed_at).isoformat()
     row.metadata_json = metadata
     session.flush()
+    if context_binding is not None and before_content != (row.text, row.sensitivity_class, row.searchable):
+        from attention_router.infrastructure.context_generations import advance_generations
+        advance_generations(session, context_binding, [context_scope], "TRANSCRIPTION_ELIGIBILITY_CHANGED", row.id)
+        from attention_router.application.cognitive_observation import _reconcile_observation_support
+        _reconcile_observation_support(
+            session, tenant_id=receipt.tenant_id, binding_id=context_binding.id,
+            source_account=details["source_account"], start=datetime(1970, 1, 1, tzinfo=UTC),
+            stamp=datetime.now(UTC),
+        )
     return ConversationCaptureResult("TRANSCRIPTION_ATTACHED", message_id=row.id)
 
 
