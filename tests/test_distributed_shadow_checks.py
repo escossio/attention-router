@@ -282,6 +282,20 @@ def test_postgres_worker_verifies_full_manifest_before_natural_collection(tmp_pa
     assert "PYTEST_ARGS=(-m postgres -q)" in worker
 
 
+def test_alembic_test_environment_is_scoped_to_disposable_worker_database():
+    worker = (
+        ROOT / "ops/provisioning/distributed-ci-lab/worker/andy-ci-run"
+    ).read_text()
+    postgres = worker.split("run_postgres() {", 1)[1].split("\n}\n", 1)[0]
+    ready = 'docker exec "$PG_NAME" pg_isready'
+    migration = 'APP_ENV=test DATABASE_URL="$disposable_url" python -m alembic upgrade head'
+    assert postgres.index('docker run -d --name "$PG_NAME"') < postgres.index(ready)
+    assert postgres.rindex(ready) < postgres.index(migration)
+    assert 'local disposable_url="postgresql+psycopg://ar_test:' in postgres
+    assert '127.0.0.1:${PG_PORT}/attention_router_test"' in postgres
+    assert worker.count("APP_ENV=test") == 1
+
+
 def test_all_distributed_scheduler_scripts_are_valid_bash():
     for script in (SCHEDULER, POSTGRES_SCHEDULER, POSTGRES_REPROFILE):
         result = subprocess.run(

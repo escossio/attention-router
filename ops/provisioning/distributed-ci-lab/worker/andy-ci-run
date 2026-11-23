@@ -203,8 +203,9 @@ run_postgres() {
     -c fsync=off -c synchronous_commit=off -c full_page_writes=off >/dev/null
   PG_PORT=$(docker port "$PG_NAME" 5432/tcp | awk -F: 'END {print $NF}')
   [[ "$PG_PORT" =~ ^[0-9]+$ ]] || { echo "invalid dynamic postgres port" >&2; return 70; }
-  export DATABASE_URL="postgresql+psycopg://ar_test:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/attention_router_test"
-  export PUBLIC_POSTGRES_TEST_URL="$DATABASE_URL"
+  local disposable_url="postgresql+psycopg://ar_test:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/attention_router_test"
+  export DATABASE_URL="$disposable_url"
+  export PUBLIC_POSTGRES_TEST_URL="$disposable_url"
   echo "CI_POSTGRES_PORT=$PG_PORT"
   echo "CI_POSTGRES_STAGE=wait_ready"
   for _ in $(seq 1 60); do
@@ -216,7 +217,8 @@ run_postgres() {
   python scripts/ci_settings_check.py --self-test
   python scripts/ci_settings_check.py
   echo "CI_POSTGRES_STAGE=alembic"
-  python -m alembic upgrade head
+  # Only the ephemeral container just created by this worker may use test DDL.
+  APP_ENV=test DATABASE_URL="$disposable_url" python -m alembic upgrade head
   if [[ "${ANDY_CI_DISCOVER_POSTGRES:-0}" == "1" ]]; then
     # Exact-SHA PostgreSQL-backed collection, not a filename heuristic.
     # It runs after schema/setup just like the normal pytest execution.
