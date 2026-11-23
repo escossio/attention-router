@@ -1,5 +1,9 @@
 # Project status
 
+## Correção e persistência no runtime privado de #435
+
+Novos anchors usam o modo de journal compatível com o mount somente leitura após encerrar o escritor. A prova descartável do leitor E5 privado agora fecha a sessão, reabre no mesmo dispositivo em um processo novo e verifica correção explícita por outro recibo e retirada durante a entrega. O build OCI fixa a imagem Python oficial por digest e 49 wheels por hash, verifica a instalação offline, manifesto, plataforma e entrada privada. O workflow proposto prevê reconstrução sem cache, SBOM e atestação sem push de imagem. Execução no SHA e decisão G5 seguem em revisão.
+
 ## Consulta privada OWNER, unidade 4 de #425 e #428
 
 Candidata ligada à recuperação #433 e ao schema/papéis #434. O runtime consulta fontes consentidas com ClientSession, epoch durável, E5 e revalidação antes da entrega. Perfis privados de OCI, rollback e matriz dos 12 casos em [consulta privada](ops/context-canary/private-runtime.md). 31 testes dirigidos de runtime, E5 em fases e socket aprovados em bancada. Certificação PostgreSQL no SHA, ensaio OCI com base atestada e homologação semântica permanecem pendentes.

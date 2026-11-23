@@ -104,8 +104,8 @@ def test_oci_boundaries_and_release_refuses_before_execution(monkeypatch, tmp_pa
     assert all(vol["read_only"] and vol["bind"]["create_host_path"] is False for vol in compose["services"]["owner"]["volumes"])
     release = runpy.run_path(str(ops / "private_runtime_release.py"))["run"]
     build = runpy.run_path(str(ops / "build_private_oci.py"))["build"]
-    with pytest.raises(ValueError, match="immutable"):
-        build(root=root, sha="a"*40, base="image:tag", output=tmp_path/"image.tar")
+    with pytest.raises(ValueError, match="full commit"):
+        build(root=root, sha="branch", wheelhouse=tmp_path, output=tmp_path/"image.tar")
     with pytest.raises(ValueError, match="immutable"):
         release("canary_enable", 1, "image:latest", root=root)
     operations = []
@@ -119,3 +119,41 @@ def test_oci_boundaries_and_release_refuses_before_execution(monkeypatch, tmp_pa
     with pytest.raises(ValueError, match="provenance"):
         release("canary_enable", 1, "ghcr.io/escossio/attention-router@sha256:"+"a"*64, root=root)
     assert len(operations) == 2
+
+
+def test_oci_reader_verifies_each_blob_and_revision(tmp_path):
+    import hashlib
+    import io
+    import tarfile
+
+    ops = Path(__file__).resolve().parents[1] / "ops/context-canary"
+    inspect_image = runpy.run_path(str(ops / "build_private_oci.py"))["inspect_image"]
+    objects = {}
+    def blob(payload):
+        key = hashlib.sha256(payload).hexdigest()
+        objects["blobs/sha256/" + key] = payload
+        return {"digest": "sha256:" + key, "size": len(payload)}
+    sha = "a" * 40
+    config = blob(json.dumps({"os": "linux", "architecture": "amd64", "config": {
+        "Labels": {"org.opencontainers.image.revision": sha},
+        "Entrypoint": ["python", "-m", "attention_router.private_context_entrypoint"],
+        "User": "65532:65532", "Env": ["STAGED_CONTEXT_PRIVATE_CANARY_ENABLED=false"],
+    }}).encode())
+    layer = blob(b"synthetic layer")
+    manifest = blob(json.dumps({"config": config, "layers": [layer]}).encode())
+    objects["index.json"] = json.dumps({"manifests": [manifest]}).encode()
+    archive = tmp_path / "image.tar"
+    def write_tar():
+        with tarfile.open(archive, "w") as tar:
+            for name, value in objects.items():
+                entry = tarfile.TarInfo(name)
+                entry.size = len(value)
+                tar.addfile(entry, io.BytesIO(value))
+    write_tar()
+    assert inspect_image(archive, sha) == manifest["digest"]
+    with pytest.raises(ValueError, match="unexpected"):
+        inspect_image(archive, "b" * 40)
+    objects["blobs/sha256/" + layer["digest"].split(":")[1]] = b"tampered layer!"
+    write_tar()
+    with pytest.raises(ValueError, match="OCI (digest|blob size)"):
+        inspect_image(archive, sha)
