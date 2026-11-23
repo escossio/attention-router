@@ -504,7 +504,7 @@ def _estimate_tokens(payload: dict[str, Any]) -> int:
 
 
 def _bounded_items(
-    candidates: list[CompiledContextItem],
+    candidates: Iterable[CompiledContextItem],
     *,
     item_budget: int,
     token_budget: int,
@@ -520,6 +520,56 @@ def _bounded_items(
         selected.append(item)
         used += cost
     return tuple(selected), used
+
+
+def compile_evidence_candidates(
+    tenant_id: str,
+    query: str,
+    candidates: tuple[RankedEvidenceCandidate, ...],
+    *,
+    item_budget: int = 10,
+    token_budget: int = 4000,
+    now: datetime,
+    lazy_items: bool = False,
+) -> CompiledContextPacket:
+    """Budget authorized evidence for a downstream interpreter in the same read."""
+    if not 1 <= item_budget <= MAX_ITEM_BUDGET or not 32 <= token_budget <= MAX_TOKEN_BUDGET:
+        raise ContextCompilerError("CONTEXT_COMPILER_EVIDENCE_BUDGET")
+    items = (
+        CompiledContextItem(
+            node_id=f"conversation-segment:{candidate.segment_ref}",
+            kind="EVIDENCE_CANDIDATE",
+            source_type="CONVERSATION_VECTOR_SEGMENT",
+            source_id=candidate.segment_ref,
+            label=None,
+            relevance_score=candidate.relevance_score,
+            hop_count=0,
+            matched_terms=(),
+            confidence=None,
+            valid_from=None,
+            valid_until=None,
+            path=(),
+            score_components={},
+            attributes={"excerpts": tuple(asdict(excerpt) for excerpt in candidate.excerpts)},
+            provenance={
+                "source_hash": candidate.source_hash,
+                "content_hash": candidate.content_hash,
+                "single_excerpt_heuristic": candidate.single_excerpt_heuristic,
+                "trust": "UNTRUSTED_RETRIEVED_CONTENT_NO_EXECUTION_AUTHORITY",
+                "grants_authority": False,
+            },
+        )
+        for candidate in candidates
+    )
+    bounded, used = _bounded_items(
+        items if lazy_items else list(items), item_budget=item_budget, token_budget=token_budget,
+    )
+    return CompiledContextPacket(
+        tenant_id=tenant_id, query=query, retrieval_method="AUTHORIZED_EVIDENCE_CANDIDATES_V1",
+        seed_node_ids=(), items=bounded, graph_node_count=0, graph_edge_count=0,
+        candidate_count=len(candidates), estimated_tokens=used, item_budget=item_budget,
+        token_budget=token_budget, max_hops=0, lexical_fallback_used=False, generated_at=_utc(now),
+    )
 
 
 def _compile_lexical_fallback(

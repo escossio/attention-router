@@ -1,0 +1,22 @@
+# VECTOR_BASE is a separately approved, digest-pinned Python/E5 dependency image.
+# Built only via build_private_oci.py, with no package/model download.
+ARG VECTOR_BASE
+FROM ${VECTOR_BASE}
+ARG BUILD_SHA
+LABEL org.opencontainers.image.revision=${BUILD_SHA} \
+      org.opencontainers.image.source=https://github.com/escossio/attention-router \
+      org.opencontainers.image.title="Andy private context reader"
+ENV PYTHONPATH=/opt/private-context PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    ADMIN_AUTH_ENABLED=false APP_ENV=production STAGED_CONTEXT_PRIVATE_CANARY_ENABLED=false \
+    CLIENT_SESSION_ENABLED=false CONTEXT_EPOCH_AUTHORITY_CANARY_ENABLED=false \
+    HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 TOKENIZERS_PARALLELISM=false
+WORKDIR /opt/private-context
+COPY attention_router ./attention_router
+COPY ops/reconciliation/model-manifest.json ./ops/reconciliation/model-manifest.json
+COPY pyproject.toml ./pyproject.toml
+RUN python -c "from importlib.metadata import version; import tomllib; from packaging.requirements import Requirement; p=tomllib.load(open('pyproject.toml','rb'))['project']; deps=map(Requirement,p['dependencies']+p['optional-dependencies']['vector']); assert all(version(d.name) in d.specifier for d in deps)" \
+    && python -c "from attention_router.private_context_entrypoint import main; assert callable(main)"
+USER 65532:65532
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD ["python","-c","from urllib.request import urlopen; urlopen('http://127.0.0.1:18110/health/live', timeout=2).close()"]
+ENTRYPOINT ["python","-m","attention_router.private_context_entrypoint"]
+CMD []

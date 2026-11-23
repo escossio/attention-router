@@ -1,0 +1,63 @@
+# Isolated review spec. G5/G6 approvals apply separately to the selected profile.
+name: andy-private-context
+x-runtime: &runtime
+  image: ${CONTEXT_IMAGE:?immutable OCI reference required}
+  pull_policy: never
+  entrypoint: ["python", "-m", "attention_router.private_context_entrypoint"]
+  command: []
+  network_mode: none
+  read_only: true
+  user: "65532:65532"
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 64
+  mem_limit: 2g
+  cpus: 2
+  restart: "no"
+  stop_grace_period: 15s
+  tmpfs: ["/tmp:size=16m,noexec,nosuid,nodev"]
+  logging:
+    driver: local
+    options: {max-size: "2m", max-file: "2"}
+services:
+  dark:
+    <<: *runtime
+    profiles: [dark]
+    environment:
+      APP_ENV: production
+      STAGED_CONTEXT_PRIVATE_CANARY_ENABLED: "false"
+  owner:
+    <<: *runtime
+    profiles: [owner]
+    environment:
+      APP_ENV: production
+      STAGED_CONTEXT_PRIVATE_CANARY_ENABLED: "true"
+      CLIENT_SESSION_ENABLED: "true"
+      CONTEXT_EPOCH_AUTHORITY_CANARY_ENABLED: "true"
+      COGNITIVE_RUNTIME_CANARY_TENANT_ID: ${CONTEXT_TENANT:-}
+      PERSISTENT_MEMORY_CANARY_BINDING_ID: ${CONTEXT_BINDING:-}
+      STAGED_CONTEXT_CANARY_OWNER_ID: ${CONTEXT_OWNER:-}
+      STAGED_CONTEXT_CANARY_SOURCE_ACCOUNT: ${CONTEXT_ACCOUNT:-}
+      CONTEXT_EPOCH_AUTHORITY_ID: ${CONTEXT_EPOCH_AUTHORITY_ID:-}
+      CONTEXT_EPOCH_ENVIRONMENT: ${CONTEXT_EPOCH_ENVIRONMENT:-}
+    volumes:
+      - type: bind
+        source: ${CONTEXT_SOCKET_DIR:-/nonexistent/andy-context/socket}
+        target: /run/postgresql
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${CONTEXT_ANCHOR_DIR:-/nonexistent/andy-context/anchor}
+        target: /run/context-epoch
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${CONTEXT_MODEL_DIR:-/nonexistent/andy-context/model}
+        target: /opt/andy-embedding-model
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${CONTEXT_SECRETS_DIR:-/nonexistent/andy-context/secrets}
+        target: /run/secrets
+        read_only: true
+        bind: {create_host_path: false}
