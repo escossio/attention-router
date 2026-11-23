@@ -308,7 +308,15 @@ TERMINAL_FAILURE=0
 classify_attempt() {
   local rc="$1"
   local log="$2"
-  if (( rc == 0 )) && grep -q '^CI_STATUS=PASS$' "$log"; then
+  local files="$3"
+  if (( rc == 0 )); then
+    if [[ "$(grep '^CI_STATUS=' "$log")" != "CI_STATUS=PASS" \
+      || "$(grep '^CI_SHA=' "$log")" != "CI_SHA=$SHA" \
+      || "$(grep '^CI_POSTGRES_TARGET_MANIFEST_SHA=' "$log")" != "CI_POSTGRES_TARGET_MANIFEST_SHA=$SHA" \
+      || "$(grep '^CI_POSTGRES_FULL_COLLECTION_VERIFIED=' "$log")" != "CI_POSTGRES_FULL_COLLECTION_VERIFIED=$files" ]]; then
+      echo MANIFEST_MISMATCH
+      return
+    fi
     echo PASS
     return
   fi
@@ -434,7 +442,7 @@ while [[ -s "$PENDING" ]]; do
     log="${WAVE_LOGS[$worker]}"
     shard="${WAVE_SHARDS[$worker]}"
     files="$(wc -l < "$shard")"
-    classification="$(classify_attempt "$rc" "$log")"
+    classification="$(classify_attempt "$rc" "$log" "$files")"
     duration="$(awk -F= '/^CI_DURATION_SECONDS=/{v=$2} END{print v}' "$log")"
     duration="${duration:-0}"
     passed="$(awk '/^[0-9]+ passed([, ]|$)/{v=$1} END{print v}' "$log")"
@@ -459,8 +467,8 @@ while [[ -s "$PENDING" ]]; do
         REQUEUED_FILES=$((REQUEUED_FILES + files))
         DEGRADED=1
         ;;
-      TEST_FAILURE)
-        set_health "$worker" READY "test_failure"
+      TEST_FAILURE|MANIFEST_MISMATCH)
+        set_health "$worker" READY "${classification,,}"
         TERMINAL_FAILURE=1
         ;;
     esac

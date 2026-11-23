@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -240,8 +241,10 @@ def test_distributed_schedulers_coordinate_worker_mirror_lock():
     assert "WORKER_BUSY|MIRROR_BUSY" in generic
 
 
-@pytest.mark.parametrize("case", ["full", "partial", "excess", "duplicate", "stale", "empty"])
-def test_postgres_worker_verifies_full_manifest_before_natural_collection(tmp_path, case):
+@pytest.mark.parametrize(
+    "case", ["full", "partial", "excess", "duplicate", "stale", "empty", "sort_failure"]
+)
+def test_postgres_worker_verifies_full_manifest_before_natural_collection(tmp_path, monkeypatch, case):
     worker = (
         ROOT / "ops/provisioning/distributed-ci-lab/worker/andy-ci-run"
     ).read_text()
@@ -259,7 +262,13 @@ def test_postgres_worker_verifies_full_manifest_before_natural_collection(tmp_pa
         "duplicate": [f"sha={sha}", names[0], names[0]],
         "stale": ["sha=" + "b" * 40, *names],
         "empty": [f"sha={sha}"],
+        "sort_failure": [f"sha={sha}", *names],
     }
+    if case == "sort_failure":
+        sort = tmp_path / "sort"
+        sort.write_text("#!/bin/sh\nexit 1\n")
+        sort.chmod(0o700)
+        monkeypatch.setenv("PATH", str(tmp_path), prepend=os.pathsep)
     manifest.write_text("\n".join(headers[case]) + "\n")
 
     result = subprocess.run(
@@ -280,6 +289,34 @@ def test_postgres_worker_verifies_full_manifest_before_natural_collection(tmp_pa
     assert 'verify_postgres_target_manifest "$ANDY_CI_PYTEST_TARGETS_FILE" "$verified"' in worker
     assert 'PYTEST_ARGS+=("${PYTEST_TARGETS[@]}")' not in worker
     assert "PYTEST_ARGS=(-m postgres -q)" in worker
+
+
+@pytest.mark.parametrize(
+    "receipt", ["valid", "absent", "wrong_sha", "wrong_count", "duplicate", "conflicting_status"]
+)
+def test_postgres_coordinator_rejects_unverified_success(tmp_path, receipt):
+    scheduler = POSTGRES_SCHEDULER.read_text()
+    start = "classify_attempt() {\n"
+    classifier = start + scheduler.split(start, 1)[1].split("\n}\n", 1)[0] + "\n}"
+    sha = "a" * 40
+    verified_sha = "b" * 40 if receipt == "wrong_sha" else sha
+    count = 68 if receipt == "wrong_count" else 69
+    records = [f"CI_SHA={sha}", "CI_STATUS=PASS"]
+    if receipt != "absent":
+        records.extend([f"CI_POSTGRES_TARGET_MANIFEST_SHA={verified_sha}",
+                        f"CI_POSTGRES_FULL_COLLECTION_VERIFIED={count}"])
+    if receipt == "duplicate":
+        records.append("CI_POSTGRES_FULL_COLLECTION_VERIFIED=69")
+    if receipt == "conflicting_status":
+        records.append("CI_STATUS=FAIL")
+    log = tmp_path / "worker.log"
+    log.write_text("\n".join(records) + "\n")
+    result = subprocess.run(
+        ["bash", "-euc", classifier + '\nSHA="$1"; classify_attempt 0 "$2" 69',
+         "classify-postgres", sha, str(log)],
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout.strip() == ("PASS" if receipt == "valid" else "MANIFEST_MISMATCH")
 
 
 def test_alembic_test_environment_is_scoped_to_disposable_worker_database():

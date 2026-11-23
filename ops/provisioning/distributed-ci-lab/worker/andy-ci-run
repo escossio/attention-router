@@ -150,9 +150,13 @@ verify_postgres_target_manifest() {
     return 70
   fi
   local count=$(( ${#entries[@]} - 1 ))
-  if (( count == 0 )) || ! cmp -s \
-      <(LC_ALL=C sort "$discovered") \
-      <(printf '%s\n' "${entries[@]:1}" | LC_ALL=C sort); then
+  local actual expected
+  if ! actual="$(LC_ALL=C sort -- "$discovered")" || \
+     ! expected="$(printf '%s\n' "${entries[@]:1}" | LC_ALL=C sort)"; then
+    echo "CI_POSTGRES_TARGET_MANIFEST_SORT_FAILED" >&2
+    return 70
+  fi
+  if (( count == 0 )) || [[ -z "$actual" || "$actual" != "$expected" ]]; then
     echo "CI_POSTGRES_TARGET_MANIFEST_NOT_COMPLETE" >&2
     return 70
   fi

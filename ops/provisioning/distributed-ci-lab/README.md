@@ -114,6 +114,9 @@ manifest. CI03 compares it with the checkout SHA and compares the remaining
 paths, including multiplicity, with a fresh marker collection. A partial,
 extra, duplicate, empty or stale manifest stops the job before test execution.
 The verified job then runs `pytest -m postgres` using normal directory collection.
+The coordinator accepts successful completion only with one receipt for the
+requested SHA and exact file count. Discovery can report its own success
+before running any test and cannot satisfy that execution receipt.
 The duration-ordered positional list can change fixture registration when
 ordinary and integration paths are interleaved. Both suites use the same
 disposable database and Alembic head.
@@ -129,8 +132,10 @@ OCI image includes the parser. Check digests against the approved SHA,
 verify that the publisher queue has no required active job and CI03 is idle.
 Back up the executable set and publisher state. Install the scheduler and
 worker as one release because the dispatch envelope changed. Preserve the
-collector, discovery parser and reprofile from the reviewed tree. Check the
-deployed hashes, verify service health and re-run the official App check on
+collector, discovery parser and reprofile from the reviewed tree. If the
+publisher runs in OCI, pin the candidate and rollback image IDs or digests
+and check the scheduler hashes inside the container. Check the deployed
+hashes, verify service health and re-run the official App check on
 the approved application SHA. If verification fails, restore the previous
 coherent executable set and verify the previous hashes and service health.
 Cutover and rollback require their operational authorization.
