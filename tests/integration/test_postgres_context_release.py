@@ -107,6 +107,9 @@ def test_rls_install_legacy_writer_and_reversal(Session):
             conn.exec_driver_sql("SELECT public.andy_context_index_writer_lock('unenrolled')")
             assert not conn.scalar(text("SELECT has_function_privilege(current_user,"
                                         "'public.andy_context_index_lock(text,boolean)','EXECUTE')"))
+            for function in ("andy_context_index_row()", "andy_context_index_truncate()"):
+                assert not conn.scalar(text("SELECT has_function_privilege(current_user,:name,'EXECUTE')"),
+                                       {"name": "public." + function})
             assert not conn.scalar(text("SELECT has_table_privilege(current_user,'artifacts','SELECT')"))
             assert conn.scalar(text("SELECT count(*) FROM public.andy_vector_attachment_provenance")) == 0
             conn.exec_driver_sql("RESET ROLE")

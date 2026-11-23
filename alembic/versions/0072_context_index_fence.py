@@ -125,6 +125,7 @@ def upgrade():
             END IF;
             RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
         END $$;
+        REVOKE ALL ON FUNCTION public.andy_context_index_row() FROM PUBLIC;
     """)
     op.execute("""
         CREATE FUNCTION public.andy_context_index_truncate() RETURNS trigger
@@ -139,6 +140,7 @@ def upgrade():
             END IF;
             RETURN NULL;
         END $$;
+        REVOKE ALL ON FUNCTION public.andy_context_index_truncate() FROM PUBLIC;
     """)
     for table in FENCED_TABLES:
         op.execute(f"""
