@@ -21,7 +21,7 @@ from attention_router.infrastructure.hashing import stable_json
 
 
 class DurableEpochAuthority:
-    """Multi-process SQLite WAL authority, with read-only lookups and CAS writes."""
+    """Multi-process SQLite authority, with read-only lookups and CAS writes."""
 
     def __init__(self, path: Path, *, authority_id: str, key: bytes):
         if not (settings.app_env == "test" or settings.context_epoch_authority_canary_enabled):
@@ -69,7 +69,9 @@ class DurableEpochAuthority:
             os.close(fd)
         self = cls(path, authority_id=authority_id, key=key)
         with closing(self._connect(read_only=False)) as conn, conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+            # Keep SQLite's rollback journal for new anchors. A closed WAL database
+            # may require sidecar creation on first read, forbidden by the reader mount.
+            # Existing databases retain their operator-selected journal mode.
             conn.execute("CREATE TABLE IF NOT EXISTS epochs (domain TEXT PRIMARY KEY, state TEXT NOT NULL)")
             state = EpochState(authority_id, domain, token_hex(16), 0, checkpoint)
             try:

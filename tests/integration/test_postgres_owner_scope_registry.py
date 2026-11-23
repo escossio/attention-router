@@ -280,6 +280,12 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
 
     role, restricted = context_reader
     args, writer, _, decision, _ = consent_clients
+    if prod_canary:
+        from test_postgres_client_context import enroll_device, issue
+        from test_postgres_client_session import NOW
+        device = enroll_device(Session)
+        first_session = issue(Session, device, NOW, tenant_id=writer._reader._scopes["owner"].tenant_id)
+        args = {**args, "bearer": first_session.session_token}
     registry = AuthenticatedOwnerScopeRegistry(
         client_sessions=service(),
         clock=writer._reader._clock,
@@ -296,7 +302,7 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
     # The source corpus is explicitly granted after enrollment. These
     # synthetic media-caption messages must be TEXT to be indexable by E5.
     with Session.begin() as db:
-        for name in ("proposal", "confirm"):
+        for name in ("proposal", "confirm", "conflict"):
             row = db.get(ConversationMessageRow, decision(name)["message_id"])
             row.message_type = "TEXT"
     for name in ("proposal", "confirm"):
@@ -340,7 +346,7 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
     if prod_canary:
         from attention_router.config import settings
         bound = writer._reader._scopes["owner"]
-        for field, value in {
+        canary = {
             "app_env": "production",
             "staged_context_private_canary_enabled": True,
             "client_session_enabled": True,
@@ -349,7 +355,8 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
             "persistent_memory_canary_binding_id": bound.owner_binding_id,
             "staged_context_canary_owner_id": bound.owner_id,
             "staged_context_canary_source_account": bound.source_account,
-        }.items():
+        }
+        for field, value in canary.items():
             monkeypatch.setattr(settings, field, value)
     epoch = ContextEpoch(
         anchor, authority_id="owner-staged-anchor", environment=environment, key=key,
@@ -376,6 +383,7 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
     headers = {"Authorization": "Bearer " + args["bearer"]}
     payload = {"scope_ref": scope_ref, "question": "Em que data ficou a viagem?"}
 
+    active_source = "confirm"
     from contextlib import ExitStack
     with ExitStack() as stack:
         if prod_canary:
@@ -421,6 +429,60 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
             assert quoted.status_code == 200 and decision("confirm")["message_id"] in {
                 entry["source_ref"] for entry in quoted.json()["evidence"]
             }
+
+            import json
+            import os
+            from pathlib import Path
+            import subprocess
+            import sys
+            from attention_router.infrastructure.client_session_models import ClientSessionRow
+
+            # Persisted scope, consent and independent epoch survive both a new
+            # ClientSession for the same physical key and a new reader process.
+            with Session.begin() as db:
+                closed = db.get(ClientSessionRow, first_session.session_id)
+                closed.state = "REVOKED"
+                closed.revoked_at = NOW
+            old = client.post(path, headers=headers, json=payload)
+            assert old.status_code != 200 and old.content == b""
+            new_session = issue(Session, device, NOW, tenant_id=bound.tenant_id)
+            assert new_session.session_id != first_session.session_id
+            args = {"bearer": new_session.session_token, "scope_ref": scope_ref}
+            headers = {"Authorization": "Bearer " + args["bearer"]}
+            known = {**payload, "question": "Confirmo a viagem para domingo."}
+            child = subprocess.run(
+                [sys.executable, "-m", "andy_reopen_private_context"],
+                input=json.dumps({
+                    "database": restricted.kw["bind"].url.render_as_string(hide_password=False),
+                    "canary": canary, "clock": original._clock().isoformat(),
+                    "auth_clock": original._auth_clock().isoformat(), "key": key.hex(),
+                    "authority_id": "owner-staged-anchor", "environment": environment,
+                    "anchor": str(tmp_path / "scope-anchor.sqlite"), "bearer": args["bearer"],
+                    "question": known,
+                }), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45,
+                cwd=Path(__file__).resolve().parents[2],
+                env={**os.environ, "PYTHONPATH": os.pathsep.join((str(Path(__file__).parent), str(Path.cwd())))},
+            )
+            assert child.returncode == 0, "new synthetic reader failed"
+            reopened, earlier = json.loads(child.stdout), quoted.json()
+            assert reopened.pop("correlation_id") != earlier.pop("correlation_id")
+            assert reopened == earlier
+
+            # An explicit correction withdraws the old source and consents to
+            # its distinct replacement receipt. The original tombstone persists.
+            superseded = decision("confirm")
+            replacement = decision("conflict")
+            assert superseded["receipt_id"] != replacement["receipt_id"]
+            assert owner_writer.revoke_current(**args, message_id=superseded["message_id"])
+            assert owner_writer.grant(
+                **args, **{**replacement, "decision_ref": "fixture:owner-corrected-travel-date"},
+            )
+            payload = {**payload, "question": "Confirmo a viagem para sábado."}
+            corrected = client.post(path, headers=headers, json=payload)
+            assert corrected.status_code == 200
+            cited = {e["source_ref"] for e in corrected.json()["evidence"]}
+            assert replacement["message_id"] in cited and superseded["message_id"] not in cited
+            active_source = "conflict"
         else:
             assert first.json()["items"]
 
@@ -430,7 +492,7 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
             calculated = original_compile(*call_args, **call_kwargs)
             assert owner_writer.revoke(
                 bearer=args["bearer"], scope_ref=scope_ref,
-                message_id=decision("confirm")["message_id"],
+                message_id=decision(active_source)["message_id"],
             )
             return calculated
 

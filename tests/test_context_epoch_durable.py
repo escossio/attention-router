@@ -73,3 +73,24 @@ def test_runtime_epoch_canary_requires_explicit_flag_and_durable_authority(tmp_p
     assert ContextEpoch(anchor, authority_id="test-anchor", environment="test", key=KEY)
     with pytest.raises(ValueError, match="CONFIGURATION_DENIED"):
         ContextEpoch(object(), authority_id="test-anchor", environment="test", key=KEY)
+
+
+def test_new_anchor_is_readable_after_writer_closes_without_wal_sidecars(tmp_path):
+    import sqlite3
+    from contextlib import closing
+
+    path = tmp_path / "epoch.sqlite"
+    anchor = DurableEpochAuthority.provision(
+        path, authority_id="test-anchor", key=KEY, domain="one", checkpoint="v1",
+    )
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
+        assert db.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+    tmp_path.chmod(0o500)
+    path.chmod(0o400)
+    try:
+        state, signature = anchor.read("one", "fresh")
+        assert state.checkpoint == "v1" and compare_digest(signature, sign_state(KEY, state, "fresh"))
+        assert set(tmp_path.iterdir()) == {path}
+    finally:
+        tmp_path.chmod(0o700)
+        path.chmod(0o600)
