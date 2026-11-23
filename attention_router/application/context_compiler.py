@@ -100,6 +100,33 @@ class CompiledContextPacket:
 
 
 @dataclass(frozen=True, slots=True)
+class ConversationExcerpt:
+    source_ref: str
+    conversation_ref: str
+    observed_at: datetime
+    text: str
+    char_start: int
+    char_end: int
+    source_fingerprint: str
+    source_revision: str
+    receipt_ref: str
+    receipt_revision: str
+    transcription_ref: str | None
+    reply_to_ref: str | None
+    role: str
+
+
+@dataclass(frozen=True, slots=True)
+class RankedEvidenceCandidate:
+    segment_ref: str
+    relevance_score: float
+    source_hash: str
+    content_hash: str
+    excerpts: tuple[ConversationExcerpt, ...]
+    single_excerpt_heuristic: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class _Reachable:
     node_id: str
     seed_node_id: str

@@ -1,5 +1,10 @@
 # Project status
 
+## Recuperação contextual E5, unidade 2 de #425/#428
+
+- Candidata sobre a unidade de observação #429. A busca revalida fonte, transcrição e recibo no escopo do tenant e da conta antes de materializar o resultado. O papel passivo recebe uma projeção de proveniência na etapa de papéis. A instalação de schema, as concessões e a entrega HTTP em fases dependem das unidades próprias.
+- A comparação lexical, vetorial e RRF usa o modelo e a política existentes. O CI deve comprovar o leitor restrito e o indexador legado com dados sintéticos no SHA publicado.
+
 ## WhatsApp inbound media and visitor PTT modality, PR #398 (13/11/2026)
 
 - Commit d5c414b pins whatsapp-web.js 1.34.8, verifies inbound media-cache resolution and outbound media-ID compatibility and repairs non-root transport image file permissions.
