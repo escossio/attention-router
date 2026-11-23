@@ -2,6 +2,7 @@
 import argparse
 import collections
 import datetime as dt
+from hashlib import sha256
 import json
 import pathlib
 import re
@@ -11,6 +12,7 @@ parser.add_argument('--log', required=True)
 parser.add_argument('--capacity', required=True)
 parser.add_argument('--output-dir', required=True)
 parser.add_argument('--source-sha', required=True)
+parser.add_argument('--selection-sha256')
 args = parser.parse_args()
 
 log = pathlib.Path(args.log).read_text(errors='replace')
@@ -21,6 +23,10 @@ for sec, phase, nodeid in rx.findall(log):
     tests[nodeid.strip()] += float(sec)
 if not tests:
     raise SystemExit('no pytest duration records found')
+if args.selection_sha256:
+    payload = json.dumps(sorted(tests), ensure_ascii=True, separators=(",", ":"))
+    if sha256(payload.encode()).hexdigest() != args.selection_sha256:
+        raise SystemExit("pytest duration node IDs differ from the verified selection")
 
 files = collections.defaultdict(float)
 counts = collections.Counter()

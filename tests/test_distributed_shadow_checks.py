@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+from hashlib import sha256
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -30,7 +32,7 @@ POSTGRES_REPROFILE = (
 )
 
 
-def load_publisher():
+def load_publisher(path=PUBLISHER):
     fake_probe = types.ModuleType("probe")
     fake_probe.CONFIG = Path("/nonexistent/app.env")
     fake_probe.INSTALLATION_CONFIG = Path("/nonexistent/installation.env")
@@ -41,7 +43,7 @@ def load_publisher():
     sys.modules["probe"] = fake_probe
     try:
         spec = importlib.util.spec_from_file_location(
-            "distributed_shadow_checks_test", PUBLISHER
+            "distributed_checks_test", path
         )
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
@@ -292,19 +294,30 @@ def test_postgres_worker_verifies_full_manifest_before_natural_collection(tmp_pa
 
 
 @pytest.mark.parametrize(
-    "receipt", ["valid", "absent", "wrong_sha", "wrong_count", "duplicate", "conflicting_status"]
+    "receipt", ["valid", "absent", "wrong_sha", "wrong_count", "wrong_nodes",
+                "duplicate", "duplicate_passed", "conflicting_status", "no_execution"]
 )
 def test_postgres_coordinator_rejects_unverified_success(tmp_path, receipt):
     scheduler = POSTGRES_SCHEDULER.read_text()
     start = "classify_attempt() {\n"
     classifier = start + scheduler.split(start, 1)[1].split("\n}\n", 1)[0] + "\n}"
     sha = "a" * 40
+    digest = "c" * 64
     verified_sha = "b" * 40 if receipt == "wrong_sha" else sha
     count = 68 if receipt == "wrong_count" else 69
     records = [f"CI_SHA={sha}", "CI_STATUS=PASS"]
     if receipt != "absent":
-        records.extend([f"CI_POSTGRES_TARGET_MANIFEST_SHA={verified_sha}",
-                        f"CI_POSTGRES_FULL_COLLECTION_VERIFIED={count}"])
+        records.extend([
+            f"CI_POSTGRES_TARGET_MANIFEST_SHA={verified_sha}",
+            f"CI_POSTGRES_FULL_COLLECTION_VERIFIED={count}",
+            "CI_POSTGRES_FILE_COUNT=69",
+            "CI_POSTGRES_TEST_COUNT=712",
+            f"CI_POSTGRES_SELECTION_SHA256={digest if receipt != 'wrong_nodes' else 'd' * 64}",
+        ])
+    if receipt != "no_execution":
+        records.append("CI_POSTGRES_PASSED_TEST_COUNT=712")
+    if receipt == "duplicate_passed":
+        records.append("CI_POSTGRES_PASSED_TEST_COUNT=712")
     if receipt == "duplicate":
         records.append("CI_POSTGRES_FULL_COLLECTION_VERIFIED=69")
     if receipt == "conflicting_status":
@@ -312,8 +325,10 @@ def test_postgres_coordinator_rejects_unverified_success(tmp_path, receipt):
     log = tmp_path / "worker.log"
     log.write_text("\n".join(records) + "\n")
     result = subprocess.run(
-        ["bash", "-euc", classifier + '\nSHA="$1"; classify_attempt 0 "$2" 69',
-         "classify-postgres", sha, str(log)],
+        ["bash", "-euc", classifier + '\nSHA="$1"; SELECTION_SHA="$3"; SELECTED_TESTS=712; '
+         'passed="$(sed -n \'s/^CI_POSTGRES_PASSED_TEST_COUNT=//p\' "$2")"; '
+         'classify_attempt 0 "$2" 69 "${passed:-0}"',
+         "classify-postgres", sha, str(log), digest],
         capture_output=True, text=True, check=True,
     )
     assert result.stdout.strip() == ("PASS" if receipt == "valid" else "MANIFEST_MISMATCH")
@@ -393,6 +408,101 @@ def test_postgres_check_ui_reports_exclusive_worker_policy():
     content = publisher.read_text()
     assert "PostgreSQL worker policy: CI03" in content
     assert "CI01/CI02/CI03" not in content
+
+
+@pytest.mark.parametrize("case", ["valid", "wrong_sha", "wrong_suite", "old_summary",
+                                  "wrong_worker", "zero_tests", "wrong_files", "duplicate_summary"])
+def test_postgres_publisher_requires_current_execution_summary(tmp_path, case):
+    module = load_publisher(PUBLISHER.with_name("distributed_postgres_check.py"))
+    sha, digest = "a" * 40, "c" * 64
+    summary = {
+        "sha": sha, "schema_version": 5, "suite": "postgres", "status": "PASS", "configured_workers": ["ci03"],
+        "selection_sha256": digest, "profile_key": f"nodes-{digest}", "selected_file_count": 69,
+        "selected_test_count": 712, "total_passed_tests": 712,
+        "workers": {"ci03": {"status": "PASS", "rc": 0, "target_files": 69, "passed_tests": 712}},
+    }
+    notes = {
+        "wrong_sha": {"sha": "b" * 40},
+        "wrong_suite": {"suite": "python"},
+        "old_summary": {"schema_version": 3},
+        "wrong_worker": {"configured_workers": ["ci02"]},
+        "zero_tests": {"total_passed_tests": 0},
+        "wrong_files": {"selected_file_count": 68},
+    }
+    summary.update(notes.get(case, {}))
+    path = tmp_path / "summary.json"
+    path.write_text(json.dumps(summary))
+    log = f"CI_DISTRIBUTED_SUMMARY={path}\nCI_DISTRIBUTED_STATUS=PASS\n"
+    if case == "duplicate_summary":
+        log += f"CI_DISTRIBUTED_SUMMARY={path}\n"
+    assert module.verified_success(module.extract_summary(log), sha, log) is (case == "valid")
+
+
+@pytest.mark.parametrize("mode", ["retry_busy", "stale_profile", "missing_duration"])
+def test_reprofile_binds_streamed_durations_to_exact_selection(tmp_path, monkeypatch, mode):
+    sha = "a" * 40
+    nodeid = "tests/test_passive_vectors.py::test_synthetic"
+    digest = sha256(json.dumps([nodeid], separators=(",", ":")).encode()).hexdigest()
+    control = POSTGRES_REPROFILE.parent
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("plan-postgres.py", "parse-postgres-discovery.py"):
+        (bin_dir / name).symlink_to(control / name)
+    (tmp_path / "capacity.json").write_text('{"pytest_full_seconds":{"ci03":1}}')
+    (tmp_path / "registry.py").write_text(
+        'import sys\ncommand=sys.argv[3]\n'
+        'if command == "list-workers": print("ci03")\n'
+        'if command == "field": print("synthetic-worker")\n',
+    )
+    discovery = (
+        f"CI_SHA={sha}\nCI_SUITE=postgres\nCI_POSTGRES_DISCOVERY_SHA={sha}\n"
+        f"CI_POSTGRES_FILE=tests/test_passive_vectors.py\nCI_POSTGRES_FILE_COUNT=1\n"
+        f"CI_POSTGRES_TEST_COUNT=1\nCI_POSTGRES_SELECTION_SHA256={digest}\nCI_STATUS=PASS\n"
+    )
+    profile = discovery.replace(f"CI_POSTGRES_DISCOVERY_SHA={sha}\n", "").replace(
+        "CI_STATUS=PASS", "CI_POSTGRES_PASSED_TEST_COUNT=1\nCI_STATUS=PASS",
+    )
+    if mode == "stale_profile":
+        profile = profile.replace(f"CI_SHA={sha}", f"CI_SHA={'b' * 40}")
+    duration_node = nodeid if mode != "missing_duration" else nodeid.replace("synthetic", "missing")
+    (tmp_path / "discovery").write_text(discovery)
+    (tmp_path / "profile").write_text(f"0.11s call {duration_node}\n{profile}")
+    ssh = bin_dir / "ssh"
+    ssh.write_text(
+        "#!/bin/bash\ncase \"${*: -1}\" in\n"
+        '  ANDY_CI_DISCOVER_POSTGRES=*) cat "$FIXTURE/discovery";;\n'
+        '  ANDY_CI_PROFILE_DURATIONS=*)\n'
+        '    if [[ "$MODE" == retry_busy && ! -f "$FIXTURE/retried" ]]; then\n'
+        '      touch "$FIXTURE/retried"; echo CI_WORKER_BUSY; exit 75\n'
+        '    fi\n'
+        '    cat "$FIXTURE/profile";;\n'
+        "esac\n",
+    )
+    ssh.chmod(0o700)
+    sleep = bin_dir / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o700)
+    for key, value in {
+        "ANDY_CI_BASE": tmp_path, "ANDY_CI_LOG_ROOT": tmp_path / "logs",
+        "ANDY_CI_HOST_REGISTRY_CLI": tmp_path / "registry.py",
+        "ANDY_CI_CAPACITY_FILE": tmp_path / "capacity.json",
+        "ANDY_CI_PROFILE_ROOT": tmp_path / "profiles", "ANDY_CI_SSH_BIN": ssh,
+        "FIXTURE": tmp_path, "MODE": mode,
+    }.items():
+        monkeypatch.setenv(key, str(value))
+    monkeypatch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
+    result = subprocess.run(
+        ["bash", str(POSTGRES_REPROFILE), sha], capture_output=True, text=True,
+        check=False, timeout=10,
+    )
+    published = tmp_path / "profiles" / f"nodes-{digest}" / "manifest.json"
+    if mode == "retry_busy":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (tmp_path / "retried").exists()
+        assert json.loads(published.read_text())["source_sha"] == sha
+    else:
+        assert result.returncode != 0
+        assert not published.exists()
 
 
 

@@ -26,7 +26,7 @@ class Impact:
     reason: str
     paths_sha256: str
     file_count: int
-    policy: str = "ci-impact-v1"
+    policy: str = "ci-impact-v2"
 
     def required(self, suite: str) -> bool:
         return suite in self.suites
@@ -68,10 +68,9 @@ def _suites_for_path(path: str) -> frozenset[str]:
         return frozenset({"transport", "docker", "python"})
     if path.startswith("alembic/") or path == "alembic.ini":
         return frozenset({"python", "postgres", "docker"})
-    if path.startswith("tests/integration/"):
-        return frozenset({"python", "postgres"})
     if path.startswith("tests/"):
-        return frozenset({"python"})
+        # A test or shared fixture can select PostgreSQL anywhere in tests/.
+        return frozenset({"python", "postgres"})
     if path.startswith("attention_router/"):
         # Most code shares auth/tenant/DB execution contracts. Full is safer.
         return _FULL

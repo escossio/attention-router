@@ -40,9 +40,13 @@ def test_transport_source_and_tests_are_distinct():
     check(["docs/public/cognitive-architecture/app.js"], ("transport",))
 
 
-def test_python_legacy_tests_do_not_require_postgres_or_docker():
-    check(["tests/test_repetition.py"], ("python",))
+def test_python_tests_and_shared_fixtures_may_select_postgres_anywhere():
+    check(["tests/test_repetition.py"], ("python", "postgres"))
     check(["tests/integration/test_postgres_first_contact.py"], ("python", "postgres"))
+    for status in ("added", "modified", "removed"):
+        for path in ("tests/test_passive_vectors.py", "tests/test_conversation_hybrid.py", "tests/conftest.py"):
+            assert classify_files([file(path, status)]).required("postgres")
+    assert classify_files([file("docs/story.md", "renamed", "tests/test_passive_vectors.py")]).required("postgres")
 
 
 def test_schema_and_migrations_keep_postgres_and_docker():

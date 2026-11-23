@@ -209,13 +209,40 @@ def run_command(argv: list[str]) -> subprocess.CompletedProcess:
 
 def extract_summary(output: str) -> dict | None:
     matches = re.findall(r"^CI_DISTRIBUTED_SUMMARY=(.+)$", output, re.M)
-    if not matches:
+    if len(matches) != 1:
         return None
-    path = Path(matches[-1].strip())
+    path = Path(matches[0].strip())
     try:
-        return json.loads(path.read_text())
-    except Exception:
+        summary = json.loads(path.read_text())
+    except (OSError, ValueError):
         return None
+    return summary if isinstance(summary, dict) else None
+
+
+def verified_success(summary: dict | None, sha: str, output: str) -> bool:
+    if summary is None or re.findall(r"^CI_DISTRIBUTED_STATUS=(.*)$", output, re.M) != ["PASS"]:
+        return False
+    if (summary.get("schema_version") != 5 or summary.get("sha") != sha
+            or summary.get("suite") != "postgres" or summary.get("status") != "PASS"
+            or summary.get("configured_workers") != ["ci03"]):
+        return False
+    digest = summary.get("selection_sha256")
+    files = summary.get("selected_file_count")
+    tests = summary.get("selected_test_count")
+    passed = summary.get("total_passed_tests")
+    if (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or summary.get("profile_key") != f"nodes-{digest}"
+            or any(type(count) is not int for count in (files, tests, passed))
+            or not 0 < files <= tests or not 0 < passed <= tests):
+        return False
+    workers = summary.get("workers")
+    if not isinstance(workers, dict) or set(workers) != {"ci03"}:
+        return False
+    worker = workers["ci03"]
+    return (
+        isinstance(worker, dict) and worker.get("status") == "PASS" and worker.get("rc") == 0
+        and worker.get("target_files") == files and worker.get("passed_tests") == passed
+    )
 
 
 def render_summary(summary: dict | None, *, reprofiled: bool) -> str:
@@ -231,6 +258,12 @@ def render_summary(summary: dict | None, *, reprofiled: bool) -> str:
         "| Worker | Status | Duration | Tests | Files |",
         "| --- | --- | ---: | ---: | ---: |",
     ]
+    if selection := summary.get("selection_sha256"):
+        parts[3:3] = [
+            f"Selected tests: {summary.get('selected_test_count')}",
+            f"Selected files: {summary.get('selected_file_count')}",
+            f"Selection SHA-256: {selection}",
+        ]
     for name in ("ci01", "ci02", "ci03"):
         data = workers.get(name) or {}
         parts.append(
@@ -269,7 +302,7 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, in
             result = run_command([CI_RUN, sha, "postgres"])
 
         summary = extract_summary(result.stdout)
-        if result.returncode == 0 and summary and summary.get("status") == "PASS":
+        if result.returncode == 0 and verified_success(summary, sha, result.stdout):
             text = render_summary(summary, reprofiled=reprofiled)
             complete_check(
                 token, repo, check_id, "success",
@@ -278,6 +311,8 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, in
             return "PASS", text, check_id
 
         detail = render_summary(summary, reprofiled=reprofiled)
+        if result.returncode == 0:
+            detail = "PostgreSQL execution summary did not verify.\n\n" + detail
         detail += "\n\n" + result.stdout[-12000:]
         complete_check(
             token, repo, check_id, "failure",

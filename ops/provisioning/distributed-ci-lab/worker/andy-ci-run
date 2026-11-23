@@ -247,12 +247,25 @@ run_postgres() {
     # An exclusive PostgreSQL worker can run only the full selected file set.
     # Positional files change pytest's collection order and fixture behavior.
     local verified="$WORK/postgres-all-marked-files.txt"
-    python "$RUNNER_BIN/ci-postgres-manifest.py" --output "$verified"
+    python "$RUNNER_BIN/ci-postgres-manifest.py" --output "$verified" > "$WORK/preflight-collection.log"
     verify_postgres_target_manifest "$ANDY_CI_PYTEST_TARGETS_FILE" "$verified"
   else
     echo "CI_POSTGRES_TARGET_COUNT=ALL"
   fi
-  python -m pytest "${PYTEST_ARGS[@]}"
+  local selection="${ANDY_CI_POSTGRES_SELECTION_SHA256:-}"
+  if [[ -n "$selection" || -n "${ANDY_CI_PYTEST_TARGETS_FILE:-}" ]]; then
+    [[ "$selection" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "CI_POSTGRES_SELECTION_REQUIRED" >&2
+      return 70
+    }
+    local -a manifest_args=(--execute --expected-selection "$selection")
+    if [[ "${ANDY_CI_PROFILE_DURATIONS:-0}" == "1" ]]; then
+      manifest_args+=(--durations)
+    fi
+    python "$RUNNER_BIN/ci-postgres-manifest.py" "${manifest_args[@]}"
+  else
+    python -m pytest "${PYTEST_ARGS[@]}"
+  fi
   docker rm -f "$PG_NAME" >/dev/null
   unset DATABASE_URL PUBLIC_POSTGRES_TEST_URL ADMIN_TOKEN INTERNAL_INGRESS_HMAC_SECRET
 }
