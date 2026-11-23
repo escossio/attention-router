@@ -124,7 +124,7 @@ def verify_snapshot(conn, *, root: Path, acl_path: Path, catalog_path: Path, rev
     stable_fields = (
         "schema_revision", "contact_columns", "contact_indexes",
         "vector_policies", "rls_tables", "roles", "memberships",
-        "effective_access_roles", "extensions", "column_acls", "shared_policies",
+        "effective_access_roles", "extensions", "column_acls", "shared_policies", "context_object_acls",
     )
     if (
         current_acl != stored_acl
@@ -208,7 +208,7 @@ def _preflight_running_writers(conn):
     active = conn.execute(text("""
         SELECT count(*) FROM pg_stat_activity
         WHERE datname=current_database() AND pid<>pg_backend_pid()
-          AND (state='active' OR xact_start IS NOT NULL)
+          AND (state IS NULL OR state='active' OR xact_start IS NOT NULL)
     """)).scalar_one()
     if active:
         raise RuntimeError("RELEASE_ACTIVE_DATABASE_WRITERS")
@@ -295,7 +295,7 @@ def run(action: str, *, root: Path, acl_path: Path,
                 else:
                     report = {"status": "ROLLBACK_REQUIRES_ABSENCE_OF_CANARY_HISTORY"}
                     if conn.execute(text(
-                        "SELECT count(*) FROM andy_context_fenced_tenants WHERE enabled"
+                        "SELECT count(*) FROM andy_context_fenced_tenants"
                     )).scalar_one():
                         raise RuntimeError("RELEASE_ROLLBACK_TENANT_STILL_ENROLLED")
                     if conn.execute(text("SELECT count(*) FROM context_consent_scopes")).scalar_one():

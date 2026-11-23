@@ -79,6 +79,7 @@ def test_enrollment_and_consent_history_block_downgrade(Session):
 def test_rls_install_legacy_writer_and_reversal(Session):
     plan = runpy.run_path(str(ROOT / "ops/context-canary/role_plan.py"))
     release = runpy.run_path(str(ROOT / "ops/context-canary/release_roles.py"))
+    object_acls = runpy.run_path(str(ROOT / "ops/context-canary/audit_live_readonly.py"))["context_object_acls"]
     token = uuid4().hex[:12]
     indexer, monitor = f"fixture_vi_{token}", f"fixture_mon_{token}"
     args = dict(tenant="synthetic-tenant", owner="synthetic-owner", account="synthetic-account")
@@ -92,6 +93,7 @@ def test_rls_install_legacy_writer_and_reversal(Session):
             conn.exec_driver_sql(f"GRANT INSERT ON conversation_vector_segments, conversation_embeddings TO {indexer}")
             conn.exec_driver_sql(f"GRANT UPDATE(payload) ON queue TO {indexer}")
             conn.exec_driver_sql(f"GRANT SELECT(id), UPDATE(status) ON resources TO {monitor}")
+            before_objects = object_acls(conn)
             before = plan["audit_catalog"](conn, legacy_roles=[indexer, monitor])
             args.update(legacy_manifest=before, indexer_roles=[indexer])
             for line in plan["generate"](**args).splitlines():
@@ -132,6 +134,12 @@ def test_rls_install_legacy_writer_and_reversal(Session):
                 if line and not line.startswith("--") and line not in {"BEGIN;", "COMMIT;"}:
                     conn.exec_driver_sql(line)
             assert plan["audit_catalog"](conn, legacy_roles=[indexer, monitor]) == before
+            assert object_acls(conn) == before_objects
+            with conn.begin_nested():
+                conn.exec_driver_sql(f"GRANT SELECT ON public.andy_vector_attachment_provenance TO {indexer}")
+                assert plan["audit_catalog"](conn, legacy_roles=[indexer, monitor]) == before
+                assert object_acls(conn) != before_objects
+            conn.exec_driver_sql(f"REVOKE SELECT ON public.andy_vector_attachment_provenance FROM {indexer}")
             assert not conn.scalar(text("SELECT has_function_privilege(:role,"
                                         "'public.andy_context_index_writer_lock(text)','EXECUTE')"), {"role": indexer})
         finally:
