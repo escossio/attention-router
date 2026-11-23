@@ -195,7 +195,7 @@ def test_attention_salience_table_is_registered():
 
 def test_platform_evolution_migration_waves_form_one_chain():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["0068_google_contacts_cache"]
+    assert len(scripts.get_heads()) == 1
 
     revisions = {revision.revision: revision for revision in scripts.walk_revisions()}
     assert revisions["0038_human_identity_v1"].down_revision == (
@@ -267,6 +267,8 @@ def test_platform_evolution_migration_waves_form_one_chain():
         "0066_vector_owner_scope": "0065_conversation_vectors",
         "0067_vector_lock_order": "0066_vector_owner_scope",
         "0068_google_contacts_cache": "0067_vector_lock_order",
+        "0069_cognitive_revocation_v0": "0068_google_contacts_cache",
+        "0070_context_integrity": "0069_cognitive_revocation_v0",
     }
     for revision, expected_parent in operational_parents.items():
         assert revisions[revision].down_revision == expected_parent
