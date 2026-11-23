@@ -399,8 +399,10 @@ while [[ -s "$PENDING" ]]; do
     WAVE_LOGS[$worker]="$log"
     WAVE_SHARDS[$worker]="$shard"
 
+    manifest="$WAVE_DIR/targets-$worker.txt"
+    { printf 'sha=%s\n' "$SHA"; cat "$shard"; } > "$manifest"
     if ! "$SCP_BIN" -q -o BatchMode=yes -o ConnectTimeout=5 \
-        "$shard" "$target:$remote" >/dev/null 2>&1; then
+        "$manifest" "$target:$remote" >/dev/null 2>&1; then
       set_health "$worker" UNAVAILABLE "shard_copy_failed"
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$WAVE" "$worker" WORKER_LOST 255 0 0 "$files" >> "$ATTEMPTS"

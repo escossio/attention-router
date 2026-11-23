@@ -7,6 +7,8 @@ import subprocess
 import sys
 import types
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLISHER = (
@@ -238,6 +240,48 @@ def test_distributed_schedulers_coordinate_worker_mirror_lock():
     assert "WORKER_BUSY|MIRROR_BUSY" in generic
 
 
+@pytest.mark.parametrize("case", ["full", "partial", "excess", "duplicate", "stale", "empty"])
+def test_postgres_worker_verifies_full_manifest_before_natural_collection(tmp_path, case):
+    worker = (
+        ROOT / "ops/provisioning/distributed-ci-lab/worker/andy-ci-run"
+    ).read_text()
+    guard = "verify_postgres_target_manifest() {\n"
+    verifier = guard + worker.split(guard, 1)[1].split("\n}\n", 1)[0] + "\n}"
+    sha = "a" * 40
+    names = ["tests/integration/test_fixture.py", "tests/test_passive_vectors.py"]
+    actual = tmp_path / "actual.txt"
+    actual.write_text("\n".join(names) + "\n")
+    manifest = tmp_path / "manifest.txt"
+    headers = {
+        "full": [f"sha={sha}", *reversed(names)],
+        "partial": [f"sha={sha}", names[0]],
+        "excess": [f"sha={sha}", *names, "tests/test_extra.py"],
+        "duplicate": [f"sha={sha}", names[0], names[0]],
+        "stale": ["sha=" + "b" * 40, *names],
+        "empty": [f"sha={sha}"],
+    }
+    manifest.write_text("\n".join(headers[case]) + "\n")
+
+    result = subprocess.run(
+        ["bash", "-euc", verifier + '\nSHA="$1"; verify_postgres_target_manifest "$2" "$3"',
+         "verify-postgres", sha, str(manifest), str(actual)],
+        capture_output=True, text=True, check=False,
+    )
+    if case == "full":
+        assert result.returncode == 0
+        assert f"CI_POSTGRES_TARGET_MANIFEST_SHA={sha}" in result.stdout
+        assert "CI_POSTGRES_FULL_COLLECTION_VERIFIED=2" in result.stdout
+    else:
+        assert result.returncode == 70
+        assert "CI_POSTGRES_TARGET_MANIFEST_" in result.stderr
+
+    scheduler = POSTGRES_SCHEDULER.read_text()
+    assert """printf 'sha=%s\\n' "$SHA"; cat "$shard";""" in scheduler
+    assert 'verify_postgres_target_manifest "$ANDY_CI_PYTEST_TARGETS_FILE" "$verified"' in worker
+    assert 'PYTEST_ARGS+=("${PYTEST_TARGETS[@]}")' not in worker
+    assert "PYTEST_ARGS=(-m postgres -q)" in worker
+
+
 def test_all_distributed_scheduler_scripts_are_valid_bash():
     for script in (SCHEDULER, POSTGRES_SCHEDULER, POSTGRES_REPROFILE):
         result = subprocess.run(
@@ -267,7 +311,7 @@ def test_postgres_discovery_uses_exact_sha_pytest_markers_and_deadline():
         assert "grep '^tests/integration/test_postgres" not in content
         assert 'ANDY_CI_CAPACITY_WAIT_SECONDS:-300' in content
 
-    assert 'python "$BASE/bin/ci-postgres-manifest.py"' in worker
+    assert 'python "$RUNNER_BIN/ci-postgres-manifest.py"' in worker
     assert '"--collect-only", "-m", "postgres"' in collector
     assert 'CI_POSTGRES_DISCOVERY_SHA_MISMATCH' in parser
     assert 'CI_POSTGRES_DISCOVERY_INCOMPLETE' in parser

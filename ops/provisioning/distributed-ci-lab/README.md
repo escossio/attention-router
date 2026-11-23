@@ -109,6 +109,15 @@ manifest comparison and distributed sharding use this identical verified file
 set. An absent collector or mismatch **blocks CI**; it never silently falls
 back to a reduced glob.
 
+The coordinator places the target SHA in the first line of the dispatched
+manifest. CI03 compares it with the checkout SHA and compares the remaining
+paths, including multiplicity, with a fresh marker collection. A partial,
+extra, duplicate, empty or stale manifest stops the job before test execution.
+The verified job then runs `pytest -m postgres` using normal directory collection.
+The duration-ordered positional list can change fixture registration when
+ordinary and integration paths are interleaved. Both suites use the same
+disposable database and Alembic head.
+
 **Versioned rollout dependency:** before using this discovery, deploy the
 reviewed worker executor and helper together on the authorized PostgreSQL
 worker. Install `worker/andy-ci-run` as `/srv/andy-ci/bin/andy-ci-run`
@@ -117,8 +126,14 @@ and `scripts/ci_postgres_manifest.py` as
 scripts and `control-plane/parse-postgres-discovery.py` at
 `$ANDY_CI_BASE/bin/parse-postgres-discovery.py`; the versioned publisher
 OCI image includes the parser. Check digests against the approved SHA,
-run the marker and 67-plus-two regression, and cut over only under an
-operator-approved maintenance gate.
+verify that the publisher queue has no required active job and CI03 is idle.
+Back up the executable set and publisher state. Install the scheduler and
+worker as one release because the dispatch envelope changed. Preserve the
+collector, discovery parser and reprofile from the reviewed tree. Check the
+deployed hashes, verify service health and re-run the official App check on
+the approved application SHA. If verification fails, restore the previous
+coherent executable set and verify the previous hashes and service health.
+Cutover and rollback require their operational authorization.
 
 No live scripts, workers, publisher containers, production PostgreSQL or
 `distributed-postgres` checks may be modified manually from this PR.
