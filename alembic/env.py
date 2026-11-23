@@ -4,7 +4,9 @@ import os
 from alembic import context
 
 from attention_router.config import settings
+from attention_router.application.context_schema_release import context_schema_release_authorized
 from attention_router.infrastructure.db import Base
+from attention_router.infrastructure import context_consent_models  # noqa: F401
 from attention_router.infrastructure import artifact_models  # noqa: F401
 from attention_router.infrastructure import human_identity_models  # noqa: F401
 from attention_router.infrastructure import client_location_models  # noqa: F401
@@ -37,8 +39,28 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def guard_context_revision(*, ctx, step, **_):
+    # Alembic invokes this before the migration transaction commits. A caller
+    # selecting an intermediate revision must pass the same production gate.
+    if (settings.app_env == "production"
+            and set(step.up_revision_ids) & {
+                "0069_cognitive_revocation_v0", "0070_context_integrity",
+                "0071_context_source_consent", "0072_context_index_fence",
+            } and not context_schema_release_authorized(ctx.connection)):
+        raise RuntimeError("CONTEXT_INDEX_FENCE_PROMOTION_NOT_AUTHORIZED")
+
+
 def run_migrations_online() -> None:
     from sqlalchemy import engine_from_config, pool
+
+    # The controlled release runner supplies an already-validated connection
+    # and an explicit outer transaction. No second connection is opened.
+    provided = config.attributes.get("connection")
+    if provided is not None:
+        context.configure(connection=provided, target_metadata=target_metadata, on_version_apply=guard_context_revision)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
 
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
@@ -47,7 +69,7 @@ def run_migrations_online() -> None:
         hide_parameters=True,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata, on_version_apply=guard_context_revision)
         with context.begin_transaction():
             context.run_migrations()
 

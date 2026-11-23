@@ -1,5 +1,9 @@
 # Project status
 
+## Schema e papéis contextuais, unidade 3 de #428
+
+Candidata sobre #433 e #429. G3 e G4 têm runners e aprovações distintos. O downgrade preserva Contacts, tombstones e autoridade. A unidade acrescenta quatro contratos PostgreSQL descartáveis de reversão, papéis mínimos, isolamento e progresso dos escritores. Homologação no SHA e janela operacional seguem pendentes.
+
 ## Recuperação contextual E5, unidade 2 de #425/#428
 
 - Candidata sobre a unidade de observação #429. A busca revalida fonte, transcrição e recibo no escopo do tenant e da conta antes de materializar o resultado. O papel passivo recebe uma projeção de proveniência na etapa de papéis. A instalação de schema, as concessões e a entrega HTTP em fases dependem das unidades próprias.

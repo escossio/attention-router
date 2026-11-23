@@ -20,7 +20,7 @@ def migration(connection):
     return instance
 
 
-def test_google_contacts_migration_idempotent_and_rollback_is_fail_closed():
+def test_google_contacts_rollback_preserves_existing_schema_data_and_index():
     engine = sa.create_engine("sqlite+pysqlite:///:memory:")
     with engine.begin() as connection:
         m = migration(connection)
@@ -37,13 +37,17 @@ def test_google_contacts_migration_idempotent_and_rollback_is_fail_closed():
         })
         m.upgrade()
         assert connection.execute(sa.select(sa.func.count()).select_from(m.cache)).scalar() == 1
-        with pytest.raises(RuntimeError, match="REQUIRES_EMPTY_TABLES"):
-            m.downgrade()
+        m.downgrade()
+        assert connection.execute(sa.select(m.cache.c.resource)).scalar_one() == "people/synthetic"
+        assert connection.execute(sa.select(m.connections.c.id)).scalar_one() == "synthetic"
         connection.execute(sa.delete(m.cache))
         connection.execute(sa.delete(m.connections))
         m.downgrade()
-        assert "google_contacts_connections" not in sa.inspect(connection).get_table_names()
-        assert "google_contacts_cache" not in sa.inspect(connection).get_table_names()
+        assert set(sa.inspect(connection).get_table_names()) == {m.cache.name, m.connections.name}
+        assert m.tenant_index.name in {
+            idx["name"] for idx in sa.inspect(connection).get_indexes(m.connections.name)
+        }
+        m.upgrade()
 
 
 def test_google_contacts_migration_rejects_namesake_schema_missing_columns():

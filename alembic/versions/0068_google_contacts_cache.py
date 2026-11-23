@@ -72,10 +72,18 @@ def upgrade():
 
 
 def downgrade():
+    """Preserve operational Contacts tables that existed before Alembic 0068.
+
+    The production schema already included these objects when its revision
+    marker was 0067. A downgrade that drops empty tables would destroy part
+    of that pre-existing schema, while rejecting non-empty tables would
+    make rollback impossible. Revert version metadata without removing the
+    independently managed Contacts tables. On a brand-new database, this is
+    deliberately a data-preserving, additive rollback rather than an exact
+    removal of every table created by 0068.
+    """
     bind = op.get_bind()
-    for table in (cache, connections):
-        if sa.inspect(bind).has_table(table.name):
-            if bind.execute(sa.select(sa.literal(1)).select_from(table).limit(1)).first():
-                raise RuntimeError("GOOGLE_CONTACTS_DOWNGRADE_REQUIRES_EMPTY_TABLES")
-    cache.drop(bind, checkfirst=True)
-    connections.drop(bind, checkfirst=True)
+    for table in (connections, cache):
+        if not sa.inspect(bind).has_table(table.name):
+            raise RuntimeError("GOOGLE_CONTACTS_ROLLBACK_SCHEMA_MISSING")
+    # No DROP TABLE and no DROP INDEX. Alembic updates its revision marker.

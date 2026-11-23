@@ -183,6 +183,12 @@ def upgrade():
 
 
 def downgrade():
+    # Hold writers from the history checks through removal of their guards.
+    op.execute("""
+        LOCK TABLE actor_bindings, artifact_receipts, artifacts, audit_events,
+            candidate_insights, client_tenant_memberships, conversation_messages,
+            semantic_episodes, timeline_events IN ACCESS EXCLUSIVE MODE
+    """)
     bind = op.get_bind()
     if bind.scalar(sa.text("""
         SELECT EXISTS (SELECT 1 FROM candidate_insights WHERE evidence_status <> 'CURRENT'
@@ -191,7 +197,15 @@ def downgrade():
         raise RuntimeError("COGNITIVE_REVOCATION_DOWNGRADE_REQUIRES_NO_REVOKED_ROWS")
     if bind.scalar(sa.text("""
         SELECT EXISTS (SELECT 1 FROM timeline_events WHERE metadata::jsonb ? 'owner_authority_revision'
-                       UNION ALL SELECT 1 FROM audit_events WHERE origin = 'context_validity')
+                       UNION ALL SELECT 1 FROM audit_events WHERE origin = 'context_validity'
+                       UNION ALL SELECT 1 FROM timeline_events WHERE
+                           metadata::jsonb->'technical_evidence_revoked' = 'true'::jsonb
+                       UNION ALL SELECT 1 FROM conversation_messages WHERE
+                           metadata::jsonb->'context_evidence_withdrawn' = 'true'::jsonb
+                       UNION ALL SELECT 1 FROM artifact_receipts WHERE
+                           metadata::jsonb->'context_evidence_withdrawn' = 'true'::jsonb
+                       UNION ALL SELECT 1 FROM actor_bindings WHERE
+                           coalesce(metadata::jsonb->'context_generations', '{}'::jsonb) <> '{}'::jsonb)
     """)):
         raise RuntimeError("CONTEXT_INTEGRITY_DOWNGRADE_REQUIRES_NO_PILOT_HISTORY")
     for trigger, table in (
