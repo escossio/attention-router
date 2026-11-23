@@ -14,6 +14,8 @@ HEAD = "2" * 40
 TREE = "3" * 40
 NOW = datetime(2026, 1, 1, 12, tzinfo=UTC)
 REPO = "escossio/attention-router"
+BRANCH_RULES = "rules/branches/main?per_page=100"
+CHECK_RUNS = f"commits/{SHA}/check-runs?filter=all&per_page=100"
 
 
 @pytest.fixture()
@@ -41,11 +43,14 @@ def release(monkeypatch, tmp_path):
         f"compare/{SHA}...main?per_page=1": {"merge_base_commit": {"sha": SHA}, "status": "ahead"},
         f"git/commits/{SHA}": {"sha": SHA, "tree": {"sha": TREE}},
         "branches/main/protection/required_status_checks": {"checks": [
-            {"context": name, "app_id": 15368} for name in sorted(gate["REQUIRED_CHECKS"])
+            {"context": name, "app_id": 15368} for name in sorted(gate["REQUIRED_CHECKS"] - {"distributed-python"})
         ]},
-        f"commits/{SHA}/check-runs?filter=all&per_page=100": [
+        BRANCH_RULES: [{"type": "required_status_checks", "parameters": {"required_status_checks": [
+            {"context": name, "integration_id": 15368} for name in ("distributed-postgres", "distributed-python")
+        ]}}],
+        CHECK_RUNS: [
             {"id": 1, "name": name, "app": {"id": 15368}, "head_sha": SHA,
-             "status": "completed", "conclusion": "success"} for name in sorted(gate["REQUIRED_CHECKS"] | {"distributed-python"})
+             "status": "completed", "conclusion": "success"} for name in sorted(gate["REQUIRED_CHECKS"])
         ],
     }
     responses = {
@@ -151,6 +156,38 @@ def test_new_failed_check_supersedes_success(release):
     checks = api[f"commits/{SHA}/check-runs?filter=all&per_page=100"]
     checks.append(dict(checks[0], id=2, conclusion="failure"))
     with pytest.raises(Blocked, match="sem sucesso"):
+        check()
+
+
+def test_new_ruleset_check_must_succeed_at_exact_sha(release):
+    check, _, api, _, _ = release
+    api[BRANCH_RULES][0]["parameters"]["required_status_checks"].append(
+        {"context": "new-required-check", "integration_id": 42},
+    )
+    with pytest.raises(Blocked, match="new-required-check"):
+        check()
+    api[CHECK_RUNS].append({
+        "id": 5, "name": "new-required-check", "app": {"id": 42}, "head_sha": SHA,
+        "status": "completed", "conclusion": "success",
+    })
+    assert check() == (SHA, 5)
+
+
+def test_missing_ruleset_python_requirement_blocks_release(release):
+    check, _, api, _, _ = release
+    api[BRANCH_RULES].clear()
+    with pytest.raises(Blocked, match="política de checks obrigatórios incompleta"):
+        check()
+
+
+@pytest.mark.parametrize(("app_id", "reason"), [
+    (None, "App obrigatório sem vínculo"),
+    (42, "Apps obrigatórios divergentes"),
+])
+def test_unbound_or_conflicting_ruleset_apps_block_release(release, app_id, reason):
+    check, _, api, _, _ = release
+    api[BRANCH_RULES][0]["parameters"]["required_status_checks"][0]["integration_id"] = app_id
+    with pytest.raises(Blocked, match=reason):
         check()
 
 

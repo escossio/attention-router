@@ -25,6 +25,7 @@ OPERATIONS = {
 REQUIRED_CHECKS = {
     "python-tests", "transport-tests", "docker-build", "secret-scan",
     "analyze (python)", "analyze (javascript-typescript)", "distributed-postgres",
+    "distributed-python",
 }
 
 
@@ -105,12 +106,24 @@ def verify_reviews(pr, reviews):
             "PR ainda tem pedido de alteração")
 
 
-def verify_checks(sha, checks, required):
-    expected = {check["context"]: check["app_id"] for check in required}
-    require(REQUIRED_CHECKS <= expected.keys(), "política de checks obrigatórios incompleta")
-    expected["distributed-python"] = expected["distributed-postgres"]
-    for name, app_id in sorted(expected.items()):
+def required_check_apps(protection, branch_rules):
+    entries = [(check["context"], check.get("app_id")) for check in protection]
+    for rule in branch_rules:
+        if rule["type"] == "required_status_checks":
+            entries.extend(
+                (check["context"], check.get("integration_id"))
+                for check in rule["parameters"]["required_status_checks"]
+            )
+    expected = {}
+    for name, app_id in entries:
         require(type(app_id) is int and app_id > 0, f"App obrigatório sem vínculo: {name}")
+        require(expected.setdefault(name, app_id) == app_id, f"Apps obrigatórios divergentes: {name}")
+    require(REQUIRED_CHECKS <= expected.keys(), "política de checks obrigatórios incompleta")
+    return expected
+
+
+def verify_checks(sha, checks, expected):
+    for name, app_id in sorted(expected.items()):
         matching = [check for check in checks
                     if check["name"] == name and check["app"]["id"] == app_id
                     and check["head_sha"] == sha]
@@ -138,9 +151,11 @@ def verify(comment_id, operation, root, artifact, *, approval_ref=None, fetch=gi
             "SHA aprovado diverge da linhagem atual da main")
     commit = fetch(f"git/commits/{sha}")
     require(commit["sha"] == sha, "GitHub retornou commit divergente")
-    required = fetch("branches/main/protection/required_status_checks")["checks"]
+    protection = fetch("branches/main/protection/required_status_checks")["checks"]
+    branch_rules = fetch("rules/branches/main?per_page=100", key="")
+    expected = required_check_apps(protection, branch_rules)
     checks = fetch(f"commits/{sha}/check-runs?filter=all&per_page=100", key="check_runs")
-    verify_checks(sha, checks, required)
+    verify_checks(sha, checks, expected)
     verify_checkout(root, sha, commit["tree"]["sha"])
 
     expected_digest = record.get("artifact_sha256", "")
