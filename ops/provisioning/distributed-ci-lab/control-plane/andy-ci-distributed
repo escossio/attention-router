@@ -223,7 +223,7 @@ PY
 discover_postgres_files() {
   local deadline=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))
   local remote_cmd
-  remote_cmd="git --git-dir=/srv/andy-ci/repos/attention-router.git remote update --prune >/dev/null 2>&1; git --git-dir=/srv/andy-ci/repos/attention-router.git cat-file -e ${SHA}^{commit}; git --git-dir=/srv/andy-ci/repos/attention-router.git ls-tree -r --name-only ${SHA} -- tests/integration"
+  remote_cmd="ANDY_CI_DISCOVER_POSTGRES=1 /srv/andy-ci/bin/andy-ci-run '${SHA}' postgres"
 
   while (( $(date +%s) < deadline )); do
     refresh_pool
@@ -238,16 +238,17 @@ discover_postgres_files() {
       [[ -n "$worker" ]] || continue
       target="$(host_target "$worker")"
       raw="$RUN_DIR/discovery-${worker}.txt"
+      # Worker executor owns its own flock; discovery must not nest it.
       if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-          "flock -n /srv/andy-ci/worker.lock -c '$remote_cmd'" \
-          >"$raw" 2>/dev/null; then
-        grep '^tests/integration/test_postgres.*\.py$' "$raw" \
-          | LC_ALL=C sort > "$RUN_DIR/current-postgres-files.txt"
-        if [[ -s "$RUN_DIR/current-postgres-files.txt" ]]; then
+          "$remote_cmd" >"$raw" 2>/dev/null; then
+        if python3 "$BASE/bin/parse-postgres-discovery.py" \
+            --sha "$SHA" --log "$raw" \
+            --output "$RUN_DIR/current-postgres-files.txt"; then
           echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
           return 0
         fi
-        echo "CI_DISTRIBUTED_DISCOVERY_EMPTY worker=$worker"
+        echo "CI_DISTRIBUTED_DISCOVERY_INVALID worker=$worker"
+        set_health "$worker" DEGRADED invalid_discovery_manifest
         return 1
       fi
       set_health "$worker" DEGRADED "discovery_busy_or_failed"
