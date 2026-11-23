@@ -89,6 +89,42 @@ The generic `python`, `transport` and `docker` schedulers remain capability-base
 This keeps the physical-worker choice explicit and replaceable without encoding
 an IP address or local hostname in Git.
 
+## PostgreSQL marker discovery contract
+
+A PostgreSQL profile must be derived from **pytest's actual selected items at
+the exact published SHA**, not a filename prefix. Files outside
+`tests/integration/`, such as `tests/test_conversation_hybrid.py` and
+`tests/test_passive_vectors.py`, stay in the suite when selected by
+`-m postgres`.
+
+The worker's `ANDY_CI_DISCOVER_POSTGRES=1` mode uses the **same** disposable
+PostgreSQL, Python environment, vector setup and Alembic revision as the full
+run, then calls the installed `ci-postgres-manifest.py` to perform
+`pytest --collect-only -m postgres`. It emits exact-SHA file paths and a
+file count, returning a normal `CI_STATUS=PASS` only on successful collection.
+
+The control-plane `parse-postgres-discovery.py` rejects stale SHAs, missing
+success markers, duplicates, bad paths and incomplete counts. Reprofile,
+manifest comparison and distributed sharding use this identical verified file
+set. An absent collector or mismatch **blocks CI**; it never silently falls
+back to a reduced glob.
+
+**Versioned rollout dependency:** before using this discovery, deploy the
+reviewed worker executor and helper together on the authorized PostgreSQL
+worker. Install `worker/andy-ci-run` as `/srv/andy-ci/bin/andy-ci-run`
+and `scripts/ci_postgres_manifest.py` as
+`/srv/andy-ci/bin/ci-postgres-manifest.py`. Install the reviewed control-plane
+scripts and `control-plane/parse-postgres-discovery.py` at
+`$ANDY_CI_BASE/bin/parse-postgres-discovery.py`; the versioned publisher
+OCI image includes the parser. Check digests against the approved SHA,
+run the marker and 67-plus-two regression, and cut over only under an
+operator-approved maintenance gate.
+
+No live scripts, workers, publisher containers, production PostgreSQL or
+`distributed-postgres` checks may be modified manually from this PR.
+After authorized cutover, reprofile and rerun the official check against
+the unmodified PR #429 head. Do not waive the manifest equality check.
+
 ## Control-plane commands
 
 After host-specific SSH aliases and worker installation are configured:
