@@ -20,6 +20,7 @@ from attention_router.application.context_validity import ContextValidity
 from attention_router.application.conversation_evidence_staged import StagedConversationEvidenceReader
 from attention_router.application.staged_read import StagedReadRejected
 from attention_router.infrastructure.models import ConversationMessageRow
+from attention_router.observability.private_context import query_trace
 from attention_router.web.private_context import owner_answer
 from test_passive_vectors import provider  # noqa: F401
 from test_postgres_client_context import context_reader, enroll_device, issue  # noqa: F401
@@ -184,10 +185,13 @@ def test_governed_paired_readers_and_writer(Session, evidence_world, context_rea
         bodies = []
         token = candidates_at_render.set(None)
         try:
-            receipt = governed.query_and_deliver(bearer=devices[slot].session_token, scope_ref=scope_ref, question=question,
-                                                 deliver=bodies.append)
+            with query_trace() as correlation:
+                receipt = governed.query_and_deliver(
+                    bearer=devices[slot].session_token, scope_ref=scope_ref, question=question, deliver=bodies.append,
+                )
             assert len(bodies) == 1 and receipt.body_size == len(bodies[0])
             answer = json.loads(bodies[0])
+            assert answer["correlation_id"] == correlation
             assert answer["kind"] == ("OBSERVATION" if answer["evidence"] else "INSUFFICIENT_EVIDENCE")
             delivered = [provenance(row["source_ref"], row["excerpt"]) for row in answer["evidence"]]
             return candidates_at_render.get(), delivered
