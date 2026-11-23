@@ -123,7 +123,7 @@ def _prepare():
     try:
         def ready():
             with factory.begin() as db:
-                require_context_database(db, reader_role=role, require_pg_consent=True)
+                require_context_database(db, reader_role=role, require_pg_consent=True, require_fence=True)
                 fence_index(SimpleNamespace(session=db, arguments={"tenant_id": settings.cognitive_runtime_canary_tenant_id}))
         ready()
         original = ClientContextReader(factory, role=role, client_sessions=sessions, scope_registry={},

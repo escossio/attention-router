@@ -44,7 +44,8 @@ class VerifyEvidence(Protocol):
 
 
 def _prepare_transaction(reader, session, bearer, scope, *, pg_consent):
-    require_context_database(session, reader_role=reader._role, require_pg_consent=pg_consent)
+    require_context_database(session, reader_role=reader._role, require_pg_consent=pg_consent,
+                             require_fence=pg_consent and settings.app_env == "production")
     session.execute(text("SET LOCAL lock_timeout = '4s'"))
     session.execute(text("SET LOCAL statement_timeout = '8s'"))
     reader._require_owner(session, bearer, scope)

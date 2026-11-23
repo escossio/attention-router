@@ -32,6 +32,11 @@ def run(operation, comment, image, *, root):
     compose = ["docker", "compose", "--project-name", "andy-private-context", "--env-file", os.devnull,
                "-f", ops / "compose.private.yaml", "--profile", profile]
     # Refuse replacement/stopping of an instance running a different authorized digest.
+    if operation == "runtime_rollback":
+        owner = subprocess.check_output([*compose, "--profile", "owner", "ps", "--status", "running",
+                                         "-q", "owner"], env=env, text=True).strip()
+        if owner:
+            raise ValueError("active OWNER requires approved G6 disable before G5 rollback")
     containers = subprocess.check_output([*compose, "ps", "--all", "-q", profile], env=env, text=True).split()
     for cid in containers:
         container = json.loads(subprocess.check_output(["docker", "inspect", cid]))[0]

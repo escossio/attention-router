@@ -29,6 +29,11 @@ services:
   owner:
     <<: *runtime
     profiles: [owner]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:18110/health/ready', timeout=2).close()"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
     environment:
       APP_ENV: production
       STAGED_CONTEXT_PRIVATE_CANARY_ENABLED: "true"

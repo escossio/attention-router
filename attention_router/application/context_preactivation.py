@@ -17,7 +17,9 @@ CONTEXT_SCHEMA = "0070_context_integrity"
 CONSENT_SCHEMA = "0071_context_source_consent"
 
 
-def require_context_database(session: Session, *, reader_role: str, require_pg_consent=False) -> None:
+def require_context_database(
+    session: Session, *, reader_role: str, require_pg_consent=False, require_fence=False,
+) -> None:
     """Compare the authenticated database principal and installed revision."""
     if not canary_configured() or session.get_bind().dialect.name != "postgresql":
         raise ValueError("CONTEXT_PREACTIVATION_UNAVAILABLE")
@@ -29,7 +31,9 @@ def require_context_database(session: Session, *, reader_role: str, require_pg_c
         raise ValueError("CONTEXT_DATABASE_ROLE_MISMATCH")
     revisions = session.scalars(text("SELECT version_num FROM alembic_version")).all()
     supported = (CONSENT_SCHEMA, FENCE_SCHEMA)
-    if not require_pg_consent:
+    if require_fence:
+        supported = (FENCE_SCHEMA,)
+    elif not require_pg_consent:
         supported += (CONTEXT_SCHEMA,)
     if len(revisions) != 1 or revisions[0] not in supported:
         raise ValueError("CONTEXT_DATABASE_SCHEMA_MISMATCH")
