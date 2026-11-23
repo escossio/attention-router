@@ -249,17 +249,28 @@ def test_all_distributed_scheduler_scripts_are_valid_bash():
         assert result.returncode == 0, f"{script}: {result.stderr}"
 
 
-def test_postgres_discovery_uses_correct_python_regex_and_deadline():
+def test_postgres_discovery_uses_exact_sha_pytest_markers_and_deadline():
     postgres = POSTGRES_SCHEDULER.read_text()
     reprofile = POSTGRES_REPROFILE.read_text()
-    expected = r"test_postgres.*\.py$"
-    broken = r"test_postgres.*\\.py$"
+    worker = (
+        ROOT / "ops/provisioning/distributed-ci-lab/worker/andy-ci-run"
+    ).read_text()
+    collector = (ROOT / "scripts/ci_postgres_manifest.py").read_text()
+    parser = (
+        ROOT
+        / "ops/provisioning/distributed-ci-lab/control-plane/parse-postgres-discovery.py"
+    ).read_text()
 
     for content in (postgres, reprofile):
-        assert expected in content
-        assert broken not in content
+        assert "ANDY_CI_DISCOVER_POSTGRES=1" in content
+        assert "parse-postgres-discovery.py" in content
+        assert "grep '^tests/integration/test_postgres" not in content
         assert 'ANDY_CI_CAPACITY_WAIT_SECONDS:-300' in content
 
+    assert 'python "$BASE/bin/ci-postgres-manifest.py"' in worker
+    assert '"--collect-only", "-m", "postgres"' in collector
+    assert 'CI_POSTGRES_DISCOVERY_SHA_MISMATCH' in parser
+    assert 'CI_POSTGRES_DISCOVERY_INCOMPLETE' in parser
     assert "local attempts=0" not in postgres
     assert "while (( attempts < 8 ))" not in postgres
     assert "local deadline=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))" in postgres
