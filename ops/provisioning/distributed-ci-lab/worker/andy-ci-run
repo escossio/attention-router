@@ -200,7 +200,7 @@ run_postgres() {
     # Exact-SHA PostgreSQL-backed collection, not a filename heuristic.
     # It runs after schema/setup just like the normal pytest execution.
     echo "CI_POSTGRES_STAGE=collect"
-    python scripts/ci_postgres_manifest.py --output "$WORK/postgres-files.txt"
+    python "$BASE/bin/ci-postgres-manifest.py" --output "$WORK/postgres-files.txt"
     [[ -s "$WORK/postgres-files.txt" ]] || {
       echo "CI_POSTGRES_DISCOVERY_EMPTY" >&2
       return 70
