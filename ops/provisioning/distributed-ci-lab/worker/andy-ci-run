@@ -196,6 +196,20 @@ run_postgres() {
   python scripts/ci_settings_check.py
   echo "CI_POSTGRES_STAGE=alembic"
   python -m alembic upgrade head
+  if [[ "${ANDY_CI_DISCOVER_POSTGRES:-0}" == "1" ]]; then
+    # Exact-SHA PostgreSQL-backed collection, not a filename heuristic.
+    # It runs after schema/setup just like the normal pytest execution.
+    echo "CI_POSTGRES_STAGE=collect"
+    python scripts/ci_postgres_manifest.py --output "$WORK/postgres-files.txt"
+    [[ -s "$WORK/postgres-files.txt" ]] || {
+      echo "CI_POSTGRES_DISCOVERY_EMPTY" >&2
+      return 70
+    }
+    echo "CI_POSTGRES_DISCOVERY_SHA=$SHA"
+    docker rm -f "$PG_NAME" >/dev/null
+    unset DATABASE_URL PUBLIC_POSTGRES_TEST_URL ADMIN_TOKEN INTERNAL_INGRESS_HMAC_SECRET
+    return
+  fi
   echo "CI_POSTGRES_STAGE=pytest"
   PYTEST_ARGS=(-m postgres -q)
   if [[ "${ANDY_CI_PROFILE_DURATIONS:-0}" == "1" ]]; then
