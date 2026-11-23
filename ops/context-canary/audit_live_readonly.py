@@ -30,6 +30,30 @@ VECTOR_TABLES = (
 CONTACT_TABLES = ("google_contacts_connections", "google_contacts_cache")
 
 
+def context_object_acls(conn):
+    # Compare effective ACL entries. After GRANT/REVOKE PostgreSQL can store
+    # an explicit default ACL where the original catalog field was NULL.
+    rows = conn.execute(text("""
+        WITH objects AS (
+          SELECT c.relname AS name, coalesce(c.relacl, acldefault('r',c.relowner)) AS acl
+          FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relname IN
+            ('andy_vector_attachment_provenance','andy_context_fenced_tenants',
+             'context_consent_scopes','context_source_consents','alembic_version')
+          UNION ALL
+          SELECT p.proname, coalesce(p.proacl, acldefault('f',p.proowner)) FROM pg_proc p
+          WHERE p.pronamespace='public'::regnamespace AND p.proname IN
+            ('andy_context_index_lock','andy_context_index_writer_lock','andy_context_index_enrolled',
+             'andy_context_index_row','andy_context_index_truncate')
+        )
+        SELECT name, grantor::regrole::text,
+               CASE WHEN grantee=0 THEN 'PUBLIC' ELSE grantee::regrole::text END,
+               privilege_type, is_grantable
+        FROM objects CROSS JOIN LATERAL aclexplode(acl)
+        ORDER BY 1,2,3,4,5
+    """)).all()
+    return [list(row) for row in rows]
+
+
 def snapshot(conn):
     version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     columns = conn.execute(text("""
@@ -86,11 +110,14 @@ def snapshot(conn):
     # Capture direct column grants and policy definitions as private metadata.
     # Comparing table-level booleans alone cannot detect grants moving columns.
     column_acls = conn.execute(text("""
-        SELECT c.relname,a.attname,a.attacl::text FROM pg_catalog.pg_attribute a
+        SELECT c.relname,a.attname,grantor::regrole::text,
+               CASE WHEN grantee=0 THEN 'PUBLIC' ELSE grantee::regrole::text END,
+               privilege_type,is_grantable FROM pg_catalog.pg_attribute a
         JOIN pg_catalog.pg_class c ON c.oid=a.attrelid
+        CROSS JOIN LATERAL aclexplode(a.attacl)
         WHERE c.relnamespace='public'::regnamespace AND c.relname=ANY(:tables)
-          AND a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL
-        ORDER BY c.relname,a.attname
+          AND a.attnum>0 AND NOT a.attisdropped
+        ORDER BY 1,2,3,4,5,6
     """), {"tables": list(EXPECTED_TABLES)}).all()
     shared_policies = conn.execute(text("""
         SELECT tablename,policyname,permissive,roles,cmd,qual,with_check
@@ -121,6 +148,7 @@ def snapshot(conn):
         "roles": [list(r) for r in all_roles],
         "memberships": [list(r) for r in inherited],
         "effective_access_roles": privileges,
+        "context_object_acls": context_object_acls(conn),
         "column_acls": [list(row) for row in column_acls],
         "shared_policies": [list(row) for row in shared_policies],
         "sessions": [list(r) for r in sessions],

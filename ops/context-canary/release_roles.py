@@ -30,7 +30,7 @@ def role_names(*, tenant: str, owner: str, account: str) -> tuple[str, str]:
 
 def _review_rollback_state(conn):
     if conn.execute(text(
-        "SELECT COUNT(*) FROM public.andy_context_fenced_tenants WHERE enabled"
+        "SELECT COUNT(*) FROM public.andy_context_fenced_tenants"
     )).scalar_one():
         raise RuntimeError("ROLES_RELEASE_FENCE_ENROLLMENT_ACTIVE")
     if conn.execute(text(
