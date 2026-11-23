@@ -1,0 +1,85 @@
+name: Private context OCI archive
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'escossio/attention-router' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      manifest: ${{ steps.image.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.1
+      - name: Fetch locked binary wheels and build for linux/amd64
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/private-output"
+          python3 ops/context-canary/build_private_oci.py fetch-wheels "$GITHUB_SHA" "$RUNNER_TEMP/wheels"
+          manifest=$(python3 ops/context-canary/build_private_oci.py build "$GITHUB_SHA" "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/private-output/private-context.oci.tar")
+          [[ "$manifest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          rebuilt=$(python3 ops/context-canary/build_private_oci.py build "$GITHUB_SHA" "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/rebuilt.oci.tar" --no-cache)
+          test "$manifest" = "$rebuilt"
+          echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$manifest" > "$RUNNER_TEMP/private-output/manifest.digest"
+      - name: Generate SPDX from the built archive
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: oci-archive:${{ runner.temp }}/private-output/private-context.oci.tar
+          output-file: ${{ runner.temp }}/private-output/private-context.spdx.json
+          format: spdx-json
+          upload-artifact: false
+          upload-release-assets: false
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: private-context-${{ github.sha }}
+          path: ${{ runner.temp }}/private-output/
+          if-no-files-found: error
+          compression-level: 0
+
+  attest:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      attestations: write
+      artifact-metadata: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: private-context-${{ github.sha }}
+          path: ${{ runner.temp }}/private-output
+      - name: Attest manifest provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/escossio/attention-router
+          subject-digest: ${{ needs.build.outputs.manifest }}
+          push-to-registry: false
+      - name: Attest the downloadable OCI archive
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/private-output/private-context.oci.tar
+          push-to-registry: false
+      - name: Bind the SBOM to the manifest digest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/escossio/attention-router
+          subject-digest: ${{ needs.build.outputs.manifest }}
+          sbom-path: ${{ runner.temp }}/private-output/private-context.spdx.json
+          push-to-registry: false

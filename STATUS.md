@@ -2,7 +2,7 @@
 
 ## Correção e persistência no runtime privado de #435
 
-Novos anchors usam o modo de journal compatível com o mount somente leitura após encerrar o escritor. A prova descartável do leitor E5 privado agora fecha a sessão, reabre no mesmo dispositivo em um processo novo e verifica correção explícita por outro recibo e retirada durante a entrega. O gate no SHA e a embalagem OCI estão em revisão.
+Novos anchors usam o modo de journal compatível com o mount somente leitura após encerrar o escritor. A prova descartável do leitor E5 privado agora fecha a sessão, reabre no mesmo dispositivo em um processo novo e verifica correção explícita por outro recibo e retirada durante a entrega. O build OCI fixa a imagem Python oficial por digest e 49 wheels por hash, verifica a instalação offline, manifesto, plataforma e entrada privada. O workflow proposto prevê reconstrução sem cache, SBOM e atestação sem push de imagem. Execução no SHA e decisão G5 seguem em revisão.
 
 ## Consulta privada OWNER, unidade 4 de #425 e #428
 
