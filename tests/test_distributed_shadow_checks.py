@@ -219,8 +219,17 @@ def test_distributed_schedulers_coordinate_worker_mirror_lock():
     assert "flock -n /srv/andy-ci/worker.lock -c true" in postgres
     assert "flock -n /srv/andy-ci/worker.lock -c true" in reprofile
 
-    assert postgres.count("flock -n /srv/andy-ci/worker.lock") >= 2
-    assert reprofile.count("flock -n /srv/andy-ci/worker.lock") >= 2
+    # Worker-owned discovery locks internally in andy-ci-run. Wrapping its
+    # SSH invocation in another worker flock would deadlock discovery.
+    worker = (
+        ROOT / "ops/provisioning/distributed-ci-lab/worker/andy-ci-run"
+    ).read_text()
+    assert 'exec 9>"$BASE/worker.lock"' in worker
+    assert "flock -n 9" in worker
+    assert "ANDY_CI_DISCOVER_POSTGRES=1" in postgres
+    assert "ANDY_CI_DISCOVER_POSTGRES=1" in reprofile
+    assert '"flock -n /srv/andy-ci/worker.lock -c \'$remote_cmd\'"' not in postgres
+    assert '"flock -n /srv/andy-ci/worker.lock -c \'$DISCOVERY_COMMAND\'"' not in reprofile
 
     assert 'ANDY_CI_CAPACITY_WAIT_SECONDS:-300' in generic
     assert "cannot lock ref" in generic
