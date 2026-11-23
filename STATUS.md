@@ -1,5 +1,9 @@
 # Project status
 
+## Consumidores de leitura e suporte atual, #425
+
+O snapshot pessoal e a apresentação de propostas conferem o suporte explícito da claim com o contrato de revogação da #429. Cinco regressões sintéticas reproduzidas na base passam na candidata, junto com os controles de compatibilidade dos dois consumidores.
+
 ## WhatsApp inbound media and visitor PTT modality, PR #398 (13/11/2026)
 
 - Commit d5c414b pins whatsapp-web.js 1.34.8, verifies inbound media-cache resolution and outbound media-ID compatibility and repairs non-root transport image file permissions.
