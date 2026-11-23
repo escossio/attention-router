@@ -1,5 +1,9 @@
 # Project status
 
+## Consulta privada OWNER, unidade 4 de #425 e #428
+
+Candidata ligada à recuperação #433 e ao schema/papéis #434. O runtime consulta fontes consentidas com ClientSession, epoch durável, E5 e revalidação antes da entrega. Perfis privados de OCI, rollback e matriz dos 12 casos em [consulta privada](ops/context-canary/private-runtime.md). 31 testes dirigidos de runtime, E5 em fases e socket aprovados em bancada. Certificação PostgreSQL no SHA, ensaio OCI com base atestada e homologação semântica permanecem pendentes.
+
 ## Schema e papéis contextuais, unidade 3 de #428
 
 Candidata sobre #433 e #429. G3 e G4 têm runners e aprovações distintos. O downgrade preserva Contacts, tombstones e autoridade. A unidade acrescenta quatro contratos PostgreSQL descartáveis de reversão, papéis mínimos, isolamento e progresso dos escritores. Homologação no SHA e janela operacional seguem pendentes.
