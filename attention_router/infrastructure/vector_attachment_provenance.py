@@ -14,7 +14,7 @@ VECTOR_ATTACHMENT_PROVENANCE = """
     JOIN public.artifact_receipts r ON r.id = m.metadata->>'artifact_receipt_id'
       AND r.tenant_id = m.tenant_id AND r.source_account = m.source_account
       AND r.source_channel = 'channel.whatsapp'
-      AND r.external_receipt_id = 'whatsapp:' || m.source_message_id || ':media'
+      AND r.external_receipt_id = pg_catalog.concat_ws(':', 'whatsapp', m.source_message_id, 'media')
     JOIN public.artifacts a ON a.id = r.artifact_id AND a.tenant_id = r.tenant_id
       AND a.id = m.metadata->>'artifact_id' AND a.status = 'AVAILABLE'
     LEFT JOIN public.inbound_events i ON i.id = m.metadata->>'source_inbound_event_id'
