@@ -27,6 +27,10 @@ REQUIRED_CHECKS = {
     "analyze (python)", "analyze (javascript-typescript)", "distributed-postgres",
     "distributed-python",
 }
+DISTRIBUTED_TITLES = {
+    "distributed-python": "Distributed python shadow gate passed",
+    "distributed-postgres": "Distributed PostgreSQL gate passed",
+}
 
 
 class PromotionBlocked(ValueError):
@@ -122,6 +126,34 @@ def required_check_apps(protection, branch_rules):
     return expected
 
 
+def verify_distributed_execution(name, sha, output):
+    reason = f"recibo de execução distribuída ausente ou divergente: {name}"
+    require(isinstance(output, dict) and output.get("title") == DISTRIBUTED_TITLES[name], reason)
+    summary = output.get("summary")
+    require(isinstance(summary, str), reason)
+
+    def field(label, pattern):
+        values = [line.removeprefix(label) for line in summary.splitlines() if line.startswith(label)]
+        require(len(values) == 1 and re.fullmatch(pattern, values[0]), reason)
+        return values[0]
+
+    require(field("Exact SHA: ", r"[0-9a-f]{40}") == sha, reason)
+    if name == "distributed-python":
+        field("Suite: ", "python")
+        worker = field("Selected worker: ", r"[a-z][a-z0-9_-]*")
+        attempts = re.findall(r"^\| [1-9][0-9]* \| ([a-z][a-z0-9_-]*) \| PASS \| [0-9]+ s \|$", summary, re.M)
+        require(worker != "none" and attempts == [worker], reason)
+        return
+
+    passed = int(field("Tests passed: ", r"[1-9][0-9]*"))
+    tests = int(field("Selected tests: ", r"[1-9][0-9]*"))
+    files = int(field("Selected files: ", r"[1-9][0-9]*"))
+    field("Selection SHA-256: ", r"[0-9a-f]{64}")
+    rows = [line for line in summary.splitlines() if line.startswith("| CI03 |")]
+    require(len(rows) == 1 and re.fullmatch(rf"\| CI03 \| PASS \| [0-9]+ s \| {passed} \| {files} \|", rows[0])
+            and max(passed, files) <= tests, reason)
+
+
 def verify_checks(sha, checks, expected):
     for name, app_id in sorted(expected.items()):
         matching = [check for check in checks
@@ -130,6 +162,8 @@ def verify_checks(sha, checks, expected):
         latest = max(matching, key=lambda check: check["id"], default={})
         require(latest.get("status") == "completed" and latest.get("conclusion") == "success",
                 f"check ausente ou sem sucesso no SHA: {name}")
+        if name in DISTRIBUTED_TITLES:
+            verify_distributed_execution(name, sha, latest.get("output"))
 
 
 def verify(comment_id, operation, root, artifact, *, approval_ref=None, fetch=github, now=None, return_record=False):
@@ -142,7 +176,8 @@ def verify(comment_id, operation, root, artifact, *, approval_ref=None, fetch=gi
     require(pr["merged"] and pr["merge_commit_sha"] == sha
             and pr["base"]["repo"]["full_name"] == REPO and pr["base"]["ref"] == "main",
             "SHA não corresponde à integração do PR na main")
-    require(re.search(r"(?<!\w)#428\b|/issues/428\b", pr["body"] or ""),
+    gate_ref = rf"(?:#|{re.escape(REPO)}#|https://github\.com/{re.escape(REPO)}/issues/){ISSUE}"
+    require(re.search(rf"(?:^|[\s(\[<*`]){gate_ref}(?![\w/-])", pr["body"] or ""),
             "PR sem referência ao gate #428")
     verify_reviews(pr, fetch(f"pulls/{number}/reviews?per_page=100", key=""))
 

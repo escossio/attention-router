@@ -1,5 +1,9 @@
 # Project status
 
+## Pré-voo de promoção de #428
+
+O verificador sobre #437 exige os recibos das execuções Python e PostgreSQL no SHA de integração. PostgreSQL depende da publicação da seleção completa por #430. Os testes de G3/G4 exercitam a recusa antes de abrir o banco.
+
 ## Schema e papéis contextuais, unidade 3 de #428
 
 Candidata sobre #433 e #429. G3 e G4 têm runners e aprovações distintos. O downgrade preserva Contacts, tombstones e autoridade. A unidade acrescenta quatro contratos PostgreSQL descartáveis de reversão, papéis mínimos, isolamento e progresso dos escritores. Homologação no SHA e janela operacional seguem pendentes.
