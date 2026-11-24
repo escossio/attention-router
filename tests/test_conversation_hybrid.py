@@ -345,3 +345,30 @@ def test_large_neighbor_is_bounded_and_offsets_verifiable(db, provider):
         assert provider.count(neighbor["text"]) <= 350
         assert neighbor["text"] == body[neighbor["char_start"] : neighbor["char_end"]]
         assert neighbor["role"] == "CHRONOLOGICAL_CONTEXT_NOT_CONFIRMED_REPLY"
+
+
+@pytest.mark.parametrize(("query", "content", "reason"), [
+    ("Há menção à sala Marfim na reserva de cerâmica?",
+     "A equipe de cerâmica reservou a sala Marfim.", None),
+    ("Qual a duração do ensaio do quarteto de cordas?",
+     "O ensaio do quarteto de cordas durou 45 minutos.", None),
+    ("Qual a duração do ensaio do quarteto de cordas?",
+     "O ensaio do quarteto de cordas durou muito.", "ANSWER_TYPE_NOT_ESTABLISHED"),
+    ("Quando terminou o inventário do viveiro de lírios?",
+     "O inventário do viveiro de lírios terminou em março.", None),
+    ("Quando terminou o inventário do viveiro de lírios?",
+     "O inventário do viveiro de lírios terminou em um marco importante.",
+     "ANSWER_TYPE_NOT_ESTABLISHED"),
+    ("Qual foi o resultado da inspeção do moinho?",
+     "A inspeção do moinho foi aprovada.", None),
+    ("Qual foi o resultado da inspeção do moinho?",
+     "A inspeção do moinho foi agendada.", "ANSWER_TYPE_NOT_ESTABLISHED"),
+    ("Que horas abre a biblioteca do farol?",
+     "A biblioteca do farol abre às nove horas.", None),
+    ("Que horas abre a biblioteca do farol?",
+     "A biblioteca do farol abre por nove horas.", "ANSWER_TYPE_NOT_ESTABLISHED"),
+])
+def test_grounded_portuguese_lookup_forms(query, content, reason):
+    for prepared in (None, prepare_candidate_features(query)):
+        row = features(query, content, prepared=prepared) | {"similarity": 0.95}
+        assert evidence_reason(row, h.load_policy()) == reason

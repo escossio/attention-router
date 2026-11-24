@@ -221,7 +221,14 @@ class StagedConversationEvidenceReader:
                 json.loads(snapshot.content)["captured_at"],
             )
             if current != snapshot:
-                raise StagedReadRejected("STAGED_CONVERSATION_SUPPORT_CHANGED")
+                error = StagedReadRejected("STAGED_CONVERSATION_SUPPORT_CHANGED")
+                before, after = json.loads(snapshot.content), json.loads(current.content)
+                if snapshot.sources != current.sources:
+                    error.add_note("g7_support_component=sources")
+                for name in sorted(before.keys() | after.keys()):
+                    if before.get(name) != after.get(name):
+                        error.add_note(f"g7_support_component={name}")
+                raise error
             return lambda: _check_expiry(context, current, locked, self._original._clock())
 
         def compute(snapshot, query):
