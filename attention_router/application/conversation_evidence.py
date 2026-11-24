@@ -12,7 +12,10 @@ from attention_router.application.cognitive_observation import (
 from attention_router.application.context_compiler import ConversationExcerpt, RankedEvidenceCandidate
 from attention_router.application.conversation_embedding import get_provider
 from attention_router.application.conversation_hybrid import QueryProvider, _pool, load_policy
-from attention_router.application.conversation_relevance import evidence_reason, order_candidates
+from attention_router.application.conversation_relevance import (
+    CONTRAST_NEEDS_PAIR, contrast_topic_query, evidence_reason, features, order_candidates,
+    prepare_candidate_features,
+)
 from attention_router.application.conversation_segments import segment_messages
 from attention_router.application.platform.artifacts import context_receipt_refusal
 from attention_router.application.context_canary_gate import canary_configured
@@ -231,8 +234,17 @@ def _rank_evidence(
         eligible.append({**row, "content_text": plan["text"]})
 
     ranked = order_candidates(eligible, query, strategy="hybrid", config=policy, prepared=prepared_features)
-    return tuple(RankedEvidenceCandidate(
-        segment_ref=row["id"], relevance_score=row["relevance_score"],
-        source_hash=row["source_hash"], content_hash=row["content_hash"],
-        excerpts=_excerpts(plans[row["id"]], receipts), single_excerpt_heuristic=evidence_reason(row, policy),
-    ) for row in ranked)
+    topic = contrast_topic_query(query)
+    prepared_topic = prepare_candidate_features(topic) if topic is not None else None
+    result = []
+    for row in ranked:
+        reason = evidence_reason(row, policy)
+        if prepared_topic is not None:
+            topic_row = row | features(topic, row["content_text"], prepared=prepared_topic)
+            reason = evidence_reason(topic_row, policy) or CONTRAST_NEEDS_PAIR
+        result.append(RankedEvidenceCandidate(
+            segment_ref=row["id"], relevance_score=row["relevance_score"],
+            source_hash=row["source_hash"], content_hash=row["content_hash"],
+            excerpts=_excerpts(plans[row["id"]], receipts), single_excerpt_heuristic=reason,
+        ))
+    return tuple(result)

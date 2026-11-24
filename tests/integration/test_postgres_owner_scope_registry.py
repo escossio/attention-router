@@ -258,10 +258,115 @@ def test_owner_scope_provisions_independent_epoch_only_after_operator_approval(
         assert epoch.checkpoint(ctx) == proof.checkpoint
 
 
+def _probe_runtime_contention(client, path, headers, scope_ref, source_ref, anchor_path, engine, caplog):
+    """Exercise deployment-shaped pool bounds and the persistent epoch's failure path."""
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import closing
+    import json
+    import logging
+    from math import ceil
+    import sqlite3
+    from threading import Barrier
+    from time import monotonic
+
+    from sqlalchemy import event
+
+    supported = "Confirmo a viagem para domingo."
+    absent = "Qual é o identificador da bicicleta espacial de Mercúrio?"
+    tx_durations = []
+
+    def begin(conn):
+        conn.info["runtime_probe_started"] = monotonic()
+
+    def finish(conn):
+        started = conn.info.pop("runtime_probe_started", None)
+        if started is not None:
+            tx_durations.append(monotonic() - started)
+
+    def query(question):
+        start = monotonic()
+        reply = client.post(path, headers=headers, json={"scope_ref": scope_ref, "question": question})
+        return reply, monotonic() - start
+
+    def p95(values):
+        return round(sorted(values)[ceil(len(values) * 0.95) - 1] * 1000, 1)
+
+    def summarize(rows):
+        results, latencies = zip(*rows)
+        lookup = {reply.headers.get("x-correlation-id"): reply for reply in results}
+        assert None not in lookup and len(lookup) == len(results)
+        counts = {}
+        for log in caplog.records:
+            if len(log.args) >= 2 and log.args[0] in lookup:
+                state = log.args[1]
+                if state in {"TIMEOUT", "DATABASE_FAILURE", "EPOCH_INVALIDATED", "DELIVERY_BLOCKED"}:
+                    counts[state] = counts.get(state, 0) + 1
+        grounded = insufficient = refused = 0
+        for n, reply in enumerate(results):
+            if reply.status_code == 503:
+                assert not reply.content
+                refused += 1
+                continue
+            assert reply.status_code == 200
+            body = reply.json()
+            actual = {row["source_ref"] for row in body["evidence"]}
+            if n % 2 == 0:
+                assert source_ref in actual and body["kind"] == "OBSERVATION"
+                grounded += 1
+            else:
+                assert not actual and body["kind"] == "INSUFFICIENT_EVIDENCE"
+                insufficient += 1
+        return {
+            "offered": len(results), "grounded": grounded, "insufficient": insufficient,
+            "refused": refused, "p95_ms": p95(latencies), "failure_states": counts,
+        }
+
+    questions = (supported, absent)
+    for name, listener in (("begin", begin), ("commit", finish), ("rollback", finish)):
+        event.listen(engine, name, listener)
+    try:
+        with caplog.at_level(logging.INFO, logger="attention_router.observability.private_context"):
+            serial = summarize([query(q) for q in questions * 4])
+            assert (serial["grounded"], serial["insufficient"], serial["refused"]) == (4, 4, 0)
+            barrier = Barrier(4, timeout=5)
+
+            def concurrent(q):
+                barrier.wait()
+                return query(q)
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                burst = summarize(list(pool.map(concurrent, questions * 8)))
+            assert burst["grounded"] > 0 and burst["insufficient"] > 0
+            normal_tx_p95 = p95(tx_durations)
+
+            with closing(sqlite3.connect(anchor_path, timeout=0)) as blocker:
+                journal = blocker.execute("PRAGMA journal_mode").fetchone()[0]
+                assert journal == "delete"
+                blocker.execute("BEGIN EXCLUSIVE")
+                try:
+                    rejected, wait = query(supported)
+                    assert rejected.status_code == 503 and not rejected.content
+                    correlation = rejected.headers["x-correlation-id"]
+                    assert any(log.args[:2] == (correlation, "EPOCH_INVALIDATED") for log in caplog.records)
+                finally:
+                    blocker.rollback()
+            recovered, recovery = query(supported)
+            assert recovered.status_code == 200
+            assert source_ref in {row["source_ref"] for row in recovered.json()["evidence"]}
+    finally:
+        for name, listener in (("begin", begin), ("commit", finish), ("rollback", finish)):
+            event.remove(engine, name, listener)
+    print("G7_RUNTIME_CONTENTION " + json.dumps({
+        "serial": serial, "burst": burst, "parallel": 4, "pg_tx_p95_ms": normal_tx_p95,
+        "epoch_journal": journal, "epoch_lock_refused": True, "epoch_lock_wait_ms": round(wait * 1000, 1),
+        "recovery_ms": round(recovery * 1000, 1),
+    }, sort_keys=True))
+
+
 @pytest.mark.parametrize("lab", ["client-query"], indirect=True)
 @pytest.mark.parametrize("prod_canary", [False, True])
 def test_owner_enrollment_durable_epoch_e5_http_revocation(
-    Session, consent_clients, context_reader, lab, provider, tmp_path, monkeypatch, prod_canary,  # noqa: F811
+    Session, consent_clients, context_reader, lab, provider, tmp_path, monkeypatch, caplog, prod_canary,  # noqa: F811
 ):
     """Single disposable-DB proof of real OWNER scope, anchor, E5 and HTTP."""
     from fastapi import FastAPI
@@ -362,6 +467,17 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
         anchor, authority_id="owner-staged-anchor", environment=environment, key=key,
     )
 
+    if prod_canary:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        runtime_engine = create_engine(
+            restricted.kw["bind"].url, hide_parameters=True,
+            pool_size=2, max_overflow=0, pool_timeout=2,
+            connect_args={"connect_timeout": 3, "options": "-c statement_timeout=8000 -c lock_timeout=4000"},
+        )
+        restricted = sessionmaker(runtime_engine, autoflush=False, expire_on_commit=False)
+
     original = ClientContextReader(
         restricted,
         role=role,
@@ -387,6 +503,7 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
     from contextlib import ExitStack
     with ExitStack() as stack:
         if prod_canary:
+            stack.callback(runtime_engine.dispose)
             import socket
             import threading
             import time
@@ -398,7 +515,7 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
                 port = probe.getsockname()[1]
             server = uvicorn.Server(uvicorn.Config(
                 app, host="127.0.0.1", port=port, access_log=False,
-                log_level="critical", lifespan="off",
+                log_level="critical", lifespan="off", limit_concurrency=6, backlog=8,
             ))
             thread = threading.Thread(target=server.run, daemon=True)
             thread.start()
@@ -415,6 +532,7 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
             assert server.started
             client = stack.enter_context(httpx.Client(
                 base_url=f"http://127.0.0.1:{port}", timeout=10, trust_env=False,
+                limits=httpx.Limits(max_connections=4, max_keepalive_connections=4),
             ))
         else:
             client = stack.enter_context(TestClient(app))
@@ -429,6 +547,11 @@ def test_owner_enrollment_durable_epoch_e5_http_revocation(
             assert quoted.status_code == 200 and decision("confirm")["message_id"] in {
                 entry["source_ref"] for entry in quoted.json()["evidence"]
             }
+
+            _probe_runtime_contention(
+                client, path, headers, scope_ref, decision("confirm")["message_id"],
+                tmp_path / "scope-anchor.sqlite", runtime_engine, caplog,
+            )
 
             import json
             import os
