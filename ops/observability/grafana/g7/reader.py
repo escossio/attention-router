@@ -95,9 +95,9 @@ def major_latency(events, kind, outcomes=None):
             and (outcomes is None or row.get("outcome") in outcomes)]
 
 
-def summarize(events):
+def summarize(events, workload="load"):
     offers = {row["trace"] for row in events if row["event"] == "client_offer"
-              and row["workload"] == "load"}
+              and row["workload"] == workload}
     rows = [row for row in events if row.get("trace") in offers]
     stages = defaultdict(list)
     trace_events = defaultdict(list)
@@ -251,6 +251,7 @@ class Projection:
         metadata, folder = self.metadata(run)
         events = events_in(folder)
         result = summarize(events)
+        result["fault_traces"] = summarize(events, "fault")["traces"]
         result["run_state"] = "complete" if any(row["event"] == "load_complete" for row in events) else "running"
         result["metadata"] = [{"field": key, "value": str(value)} for key, value in
                               (metadata | metadata["config"]).items() if key != "config"]

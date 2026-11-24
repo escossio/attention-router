@@ -91,7 +91,7 @@
       ["Timeout do cliente", summary.client_timeout], ["HTTP 503 vazio", summary.server_empty],
       ["Desconexão observada", serverObserved ? summary.disconnects : null],
       ["Canceladas", serverObserved ? summary.cancelled : null],
-      ["Latência p95 (ms)", summary.p95_ms], ["Latência p99 (ms)", summary.p99_ms],
+      ["Latência p50 (ms)", summary.p50_ms], ["Latência p95 (ms)", summary.p95_ms], ["Latência p99 (ms)", summary.p99_ms],
       ["Conclusões/min", summary.throughput_per_min],
     ];
     find("health").replaceChildren(...metrics.map(([title, value]) => {
@@ -112,14 +112,18 @@
   }
 
   function renderTrace(payload) {
-    const traces = (payload.traces || []).map((row) => ({
-      id: row.trace, label: row.trace.slice(0, 12) + " · " + fmt(row.server_ms) + " ms · " + row.result,
+    const allTraces = [...(payload.traces || []), ...(payload.fault_traces || []).map(
+      (row) => ({...row, induced: true}),
+    )];
+    const traces = allTraces.map((row) => ({
+      id: row.trace, label: (row.induced ? "Falha induzida · " : "") +
+        row.trace.slice(0, 12) + " · " + fmt(row.server_ms) + " ms · " + row.result,
     }));
     choose(trace, traces, {id: "", label: "Escolha uma consulta"});
     table(find("critical"), "Caminho observado", [
       ["trace", "Trace ID"], ["result", "Resultado"], ["server_ms", "Servidor ms"],
       ["observed_wait_ms", "Espera observada ms"], ["unknown_or_processing_ms", "Processamento ou lacuna ms"],
-    ], (payload.traces || []).filter((row) => row.trace === trace.value),
+    ], allTraces.filter((row) => row.trace === trace.value),
     traces.length ? "Escolha uma consulta para exibir o caminho." : "Spans do servidor indisponíveis para esta execução.");
     table(find("timeline"), "Decomposição temporal e logs correlacionados", [
       ["event", "Evento"], ["stage", "Etapa"], ["timestamp_ns", "Hora", time],
