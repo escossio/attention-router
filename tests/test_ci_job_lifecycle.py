@@ -212,6 +212,21 @@ def test_publish_response_loss_reconciles_without_reexecution(staging, loss):
     assert github.completions == (2 if loss == "before" else 1)
 
 
+def test_persisted_result_remains_claimed_during_github_patch(staging, monkeypatch):
+    _, github, _, manager = staging
+    job_id = enqueue(staging)
+    complete = github.complete
+
+    def racing_claim(*args):
+        assert read(staging, job_id)["publication"] is not None
+        assert manager.claim(3) == []
+        complete(*args)
+
+    monkeypatch.setattr(github, "complete", racing_claim)
+    assert drive(staging)["state"] == "PASS"
+    assert github.completions == 1
+
+
 def test_recovery_resumes_safe_claim_but_quarantines_expired_dispatch(staging):
     _, github, clock, manager = staging
     job_id = enqueue(staging)

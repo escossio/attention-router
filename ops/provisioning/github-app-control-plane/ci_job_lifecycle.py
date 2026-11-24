@@ -166,10 +166,11 @@ class Lifecycle:
                     continue
                 job = dict(row)
                 phase = row["phase"]
-                if restart and phase != "dispatch":
+                expired = row["lease_until"] is not None and row["lease_until"] <= int(self.clock())
+                if (restart or expired) and phase != "dispatch":
                     state = "FINALIZING" if row["publication"] else "PENDING"
                     self.update(db, job, state, not_before=0, lease_until=None)
-                elif phase == "dispatch" and row["lease_until"] <= int(self.clock()):
+                elif phase == "dispatch" and expired:
                     if row["check_run_id"] is None:
                         self.update(
                             db,
@@ -299,11 +300,10 @@ class Lifecycle:
         }
         self.save(
             job,
-            "FINALIZING",
+            "RUNNING",
             phase="publication",
             publication=json.dumps(result),
-            not_before=0,
-            lease_until=None,
+            lease_until=result["deadline"],
         )
 
     def publish(self, job, name, token, complete, current):
@@ -314,7 +314,7 @@ class Lifecycle:
                 result.update(
                     state="STALE", conclusion="cancelled", title="CI candidate superseded"
                 )
-                self.save(job, "FINALIZING", publication=json.dumps(result))
+                self.save(job, "RUNNING", publication=json.dumps(result))
             try:
                 complete(
                     job["check_run_id"], result["conclusion"], result["title"], result["detail"]
@@ -407,6 +407,7 @@ class Lifecycle:
                 self.stage_result(
                     job, "UNRECONCILED", "action_required", "CI dispatch outcome uncertain", detail
                 )
+                self.defer(job, detail, finalizing=True)
             elif (
                 self.clock() >= json.loads(job["publication"])["deadline"]
                 if job["publication"]
