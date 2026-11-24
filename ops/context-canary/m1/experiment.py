@@ -104,7 +104,8 @@ def experiment(bodies, controls, order, cases, segment_count):
     folder = root / run_id
     folder.mkdir(mode=0o700, parents=True)
     config = {
-        "waves": int(os.environ["M1_WAVES"]), "offers_per_minute": 20, "burst": 4,
+        "waves": int(os.environ["M1_WAVES"]), "offers_per_minute": 20,
+        "burst": int(os.environ.get("M1_BURST", "4")),
         "client_connections": 4, "client_timeout_seconds": 10, "db_pool_size": 2,
         "db_pool_overflow": 0, "db_pool_timeout_seconds": 2, "db_statement_timeout_ms": 8000,
         "db_lock_timeout_ms": 4000, "uvicorn_limit": 6, "cpu_affinity_count": len(os.sched_getaffinity(0)),

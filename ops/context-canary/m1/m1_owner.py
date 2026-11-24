@@ -54,7 +54,8 @@ def seed(Session, lab, owner_writer, bearer, scope_ref, decision):
     assert len(sources)==12 and len(fixture['queries'])==16
     source_bodies=dict(sources)
     # Reserve headroom within the 200-segment guard for the original OWNER fixture.
-    for index in range(196-len(sources)):
+    target = int(os.environ.get("M1_SEGMENTS", "199"))
+    for index in range(target-3-len(sources)):
         source_bodies[f'd{index:03}']=f'A remessa de etiquetas do arquivo geral recebeu o protocolo {index}.'
     voice={'s03','s12'}
     ids=lab[0]
@@ -96,6 +97,8 @@ def run(client,path,headers,scope_ref,anchor_path,caplog,Session,monkeypatch,wor
     fixture,bodies,ids,tenant=world
     root=Path(os.environ['M1_RESULTS'])
     expected_n=int(os.environ.get('M1_WAVES','6'))
+    burst=int(os.environ.get("M1_BURST", "4"))
+    target=int(os.environ.get("M1_SEGMENTS", "199"))
     by_ref={ref:name for name,ref in ids.items()}
     cases={row[0]: row for row in fixture['queries']}
     cases['foreign-account-exact']=['foreign-account-exact','other_account',CONTROLS['foreign-account'][0],[]]
@@ -105,7 +108,7 @@ def run(client,path,headers,scope_ref,anchor_path,caplog,Session,monkeypatch,wor
         stats=db.execute(text("""SELECT tenant_id,source_account,count(*) FROM conversation_vector_segments
             WHERE state='READY' GROUP BY tenant_id,source_account""")).all()
     shaped={(row[0],row[1]):row[2] for row in stats}
-    assert 196<=shaped[tenant,ACCOUNT]<=200 and shaped[tenant,'other-account']>=1 and shaped['other',ACCOUNT]>=1, shaped
+    assert shaped[tenant,ACCOUNT]==target and shaped[tenant,'other-account']>=1 and shaped['other',ACCOUNT]>=1, shaped
 
     run_observer = experiment(bodies, CONTROLS, order, cases, shaped[tenant,ACCOUNT])
 
@@ -154,8 +157,8 @@ def run(client,path,headers,scope_ref,anchor_path,caplog,Session,monkeypatch,wor
                 rotated=order[wave:]+order[:wave]
                 pending=[]
                 for slot,case in enumerate(rotated):
-                    # Four simultaneous requests, then one every three seconds.
-                    due=wave_start + 3*max(0,slot-3)
+                    # The offered initial burst is a separate lab factor.
+                    due=wave_start + 3*max(0,slot-(burst-1))
                     sleep(max(0,due-monotonic()))
                     pending.append(pool.submit(request,case,due))
                 current=[future.result() for future in pending]
@@ -204,7 +207,7 @@ def run(client,path,headers,scope_ref,anchor_path,caplog,Session,monkeypatch,wor
         row['fault_states']=[s for s in states if s in {'EPOCH_INVALIDATED','TIMEOUT','INDEX_FAILURE','DATABASE_FAILURE','DELIVERY_BLOCKED','QUERY_REFUSED','REVOCATION_OBSERVED'}]
         row['elapsed_ms']=round(1000*row['elapsed'],1)
     summary={'indexed_authorized_scope':shaped[tenant,ACCOUNT],'indexed_isolation_controls':2,'waves':expected_n,
-             'parallel':4,'window_cap':32,'offered_per_minute':20,'minutes_observed':round(duration/60,2),
+             'parallel':4,'burst':burst,'window_cap':32,'offered_per_minute':20,'minutes_observed':round(duration/60,2),
              'http':dict(Counter(r['status'] for r in rows)),'semantics':dict(Counter(r['verdict'] for r in rows)),
              'scope_isolated':isolation,
              'valid_abstentions':sum(not r['expected'] and r['verdict']=='exact' for r in rows),

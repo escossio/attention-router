@@ -5,8 +5,13 @@ stage=${1:?stage}
 sha=${2:?expected SHA}
 waves=${3:?wave count}
 mode=${4:-instrumented}
-[[ $mode =~ ^(control|instrumented)$ ]]
-[[ $(hostname -s) == ci02 && $stage =~ ^/srv/andy-ci/work/andy-m1-e5\.[A-Za-z0-9]+$ && $sha =~ ^[a-f0-9]{40}$ && $waves =~ ^(1|6)$ ]]
+worker=$(hostname -s)
+export M1_SEGMENTS="${M1_SEGMENTS:-199}" M1_BURST="${M1_BURST:-4}"
+[[ $mode =~ ^(control|instrumented)$ && $M1_SEGMENTS =~ ^(63|128|199)$ && $M1_BURST =~ ^(1|2|4)$ ]]
+if [[ $waves == 6 ]]; then
+    [[ $worker == ci02 && $M1_SEGMENTS == 199 && $M1_BURST == 4 ]]
+fi
+[[ $worker =~ ^(ci01|ci02)$ && $stage =~ ^/srv/andy-ci/work/andy-m1-e5\.[A-Za-z0-9]+$ && $sha =~ ^[a-f0-9]{40}$ && $waves =~ ^(1|6)$ ]]
 base=/srv/andy-ci
 mirror="$base/repos/attention-router.git"
 exec 9>"$base/worker.lock"
@@ -48,7 +53,12 @@ deps=$( { python3 -V; cat pyproject.toml; } | sha256sum | cut -c1-16 )
 venv="$base/envs/py$abi-$deps"
 [[ -f "$venv/.ready" ]]
 export PATH="$venv/bin:$PATH"
-if [[ ! -f "$stage/embedding-libs/.ready" ]]; then
+if [[ ! -f "$stage/embedding-libs/.ready" ]] && ! python -B - <<'VERSIONS'
+from importlib.metadata import version
+for name, expected in {"onnxruntime": "1.23.2", "tokenizers": "0.22.1", "numpy": "2.3.5"}.items():
+    assert version(name) == expected
+VERSIONS
+then
     python -B - "$stage" "$base/work/private-oci-dependencies.5VRNL6CN/wheels" <<'PY'
 from hashlib import sha256
 from pathlib import Path
@@ -109,4 +119,4 @@ taskset -c "$cpus" python -m pytest -o addopts= -m postgres -s -q --tb=short \
  > "$job/test.log" 2>&1 || { tail -n 32 "$job/test.log" | sed -E 's/(postgresql[^: ]*:\/\/[^: ]+:)[^@ ]+@/\1[redacted]@/g'; exit 1; }
 grep -E '^M1_WAVE |^M1_METRICS |^M1_REOPEN=|^M1_REVOCATION=|[0-9]+ passed' "$job/test.log"
 [[ -f "$M1_RESULTS" ]]
-printf 'M1_CI02=PASS\n'
+printf 'M1_%s=PASS\n' "${worker^^}"
