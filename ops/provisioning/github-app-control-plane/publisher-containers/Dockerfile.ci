@@ -7,6 +7,7 @@ WORKDIR /usr/local/lib/andy-github-app
 COPY ops/provisioning/github-app-control-plane/probe.py ./probe.py
 COPY ops/provisioning/github-app-control-plane/ci_impact_policy.py ./ci_impact_policy.py
 COPY ops/provisioning/github-app-control-plane/merged_main_evidence.py ./merged_main_evidence.py
+COPY ops/provisioning/github-app-control-plane/ci_job_lifecycle.py ./ci_job_lifecycle.py
 COPY ops/provisioning/github-app-control-plane/publisher-containers/preflight.py ./preflight.py
 COPY ops/provisioning/github-app-control-plane/distributed_postgres_check.py ./distributed_postgres_check.py
 COPY ops/provisioning/github-app-control-plane/distributed_shadow_checks.py ./distributed_shadow_checks.py

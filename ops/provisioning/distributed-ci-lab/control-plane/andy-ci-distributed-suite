@@ -8,6 +8,13 @@ REGISTRY_DB="${ANDY_CI_HOST_REGISTRY_DB:-/var/lib/andy-ci/host-registry.sqlite3}
 CAPACITY="${ANDY_CI_CAPACITY_FILE:-$BASE/worker-capacity.json}"
 SSH_BIN="${ANDY_CI_SSH_BIN:-ssh}"
 CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
+PERSISTENT_JOB="${ANDY_CI_PERSISTENT_JOB:-0}"
+if [[ "$PERSISTENT_JOB" == 1 ]]; then CAPACITY_WAIT_SECONDS=0; fi
+
+capacity_pending() {
+  echo 'CI_DISTRIBUTED_ADMISSION=WAITING_CAPACITY'
+  exit 75
+}
 GENERIC_CAPABILITY="${ANDY_CI_GENERIC_CAPABILITY:-ci-worker}"
 FALLBACK_CAPABILITY="${ANDY_CI_GENERIC_FALLBACK_CAPABILITY:-postgres-worker}"
 
@@ -250,7 +257,7 @@ FAILURE_CLASS="INFRA_EXHAUSTED"
 attempt=0
 TERMINAL=0
 
-while (( $(date +%s) < DEADLINE )); do
+while [[ "$PERSISTENT_JOB" == 1 ]] || (( $(date +%s) < DEADLINE )); do
   if ! wait_for_capacity; then
     FAILURE_CLASS=NO_CAPACITY
     break
@@ -293,6 +300,10 @@ while (( $(date +%s) < DEADLINE )); do
       WORKER_LOST|INFRA_ERROR)
         set_health "$worker" UNAVAILABLE "${classification,,}"
         FAILURE_CLASS="$classification"
+        if [[ "$PERSISTENT_JOB" == 1 ]]; then
+          TERMINAL=1
+          break
+        fi
         RETRYABLE=1
         ;;
       TEST_FAILURE)
@@ -307,6 +318,7 @@ while (( $(date +%s) < DEADLINE )); do
 
   (( TERMINAL == 1 )) && break
   (( RETRYABLE == 1 )) || break
+  [[ "$PERSISTENT_JOB" != 1 ]] || break
   (( $(date +%s) < DEADLINE )) || break
   sleep 2
 done
@@ -364,6 +376,17 @@ echo "CI_DISTRIBUTED_WALL_SECONDS=$WALL_SECONDS"
 if [[ "$FINAL_STATUS" == PASS ]]; then
   echo 'CI_DISTRIBUTED_STATUS=PASS'
   exit 0
+fi
+
+if [[ "$PERSISTENT_JOB" == 1 && -z "$SELECTED_WORKER" ]]; then
+  case "$FAILURE_CLASS" in
+    NO_CAPACITY|WORKER_BUSY|MIRROR_BUSY)
+      # An earlier lost dispatch is ambiguous even if a later worker was busy.
+      if ! awk -F '\t' 'NR>1 && $3!="WORKER_BUSY" && $3!="MIRROR_BUSY" {bad=1} END{exit !bad}' "$ATTEMPTS"; then
+        capacity_pending
+      fi
+      ;;
+  esac
 fi
 
 echo 'CI_DISTRIBUTED_STATUS=FAIL'

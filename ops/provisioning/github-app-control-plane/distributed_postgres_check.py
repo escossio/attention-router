@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -16,17 +18,23 @@ sys.path.insert(0, "/usr/local/lib/andy-github-app")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from probe import CONFIG, INSTALLATION_CONFIG, load_env, make_jwt, request_json
 from ci_impact_policy import get_pr_impact
+from ci_job_lifecycle import Lifecycle, serve
 from merged_main_evidence import (
     APP_ID, EvidenceError, PublicationUncertain, authenticate, finalize, validate,
 )
 
 DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
+QUEUE_TABLE = "distributed_postgres_jobs"
 CHECK_NAME = "distributed-postgres"
 TARGET_REPO = "escossio/attention-router"
 CI_RUN = "/usr/local/lib/andy-ci/bin/andy-ci-distributed"
 CI_REPROFILE = "/usr/local/lib/andy-ci/bin/andy-ci-reprofile"
 ACTIONS = {"opened", "synchronize", "reopened", "ready_for_review"}
 DEBOUNCE_SECONDS = 5
+def lifecycle() -> Lifecycle:
+    return Lifecycle(DB_PATH, QUEUE_TABLE, request_json)
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -71,6 +79,8 @@ def ensure_tables() -> None:
             value TEXT NOT NULL
         )""")
         db.commit()
+        lifecycle().install(db)
+        db.commit()
 
 
 def bootstrap_cursor() -> None:
@@ -110,16 +120,16 @@ def enqueue_new_deliveries() -> int:
             ):
                 cur = db.execute(
                     """INSERT OR IGNORE INTO distributed_postgres_jobs
-                       (delivery_id,repository,pr_number,head_sha,state,created_at,updated_at)
-                       VALUES (?,?,?,?, 'PENDING', ?,?)""",
-                    (delivery_id, repo, pr_number, sha.lower(), stamp, stamp),
+                       (delivery_id,repository,pr_number,head_sha,state,created_at,updated_at,not_before)
+                       VALUES (?,?,?,?, 'PENDING', ?,?,?)""",
+                    (delivery_id, repo, pr_number, sha.lower(), stamp, stamp, int(time.time()) + DEBOUNCE_SECONDS),
                 )
                 created += cur.rowcount
                 if cur.rowcount:
                     db.execute(
                         """UPDATE distributed_postgres_jobs
                            SET state='STALE', detail='superseded before execution', updated_at=?
-                           WHERE repository=? AND pr_number=? AND state='PENDING'
+                           WHERE repository=? AND pr_number=? AND state='PENDING' AND check_run_id IS NULL AND phase IS NULL
                              AND head_sha<>?""",
                         (stamp, repo, pr_number, sha.lower()),
                     )
@@ -131,33 +141,10 @@ def enqueue_new_deliveries() -> int:
         db.commit()
     return created
 def claim_job() -> dict | None:
-    with sqlite3.connect(DB_PATH) as db:
-        db.row_factory = sqlite3.Row
-        db.execute("BEGIN IMMEDIATE")
-        row = db.execute(
-            """SELECT * FROM distributed_postgres_jobs
-               WHERE state='PENDING' ORDER BY id DESC LIMIT 1"""
-        ).fetchone()
-        if row is None:
-            db.commit()
-            return None
-        stamp = now_iso()
-        db.execute(
-            "UPDATE distributed_postgres_jobs SET state='RUNNING',updated_at=? WHERE id=?",
-            (stamp, row["id"]),
-        )
-        db.commit()
-        return dict(row)
+    jobs = lifecycle().claim(1)
+    return jobs[0] if jobs else None
 
 
-def finish_job(job_id: int, state: str, detail: str, check_run_id: int | None) -> None:
-    with sqlite3.connect(DB_PATH) as db:
-        db.execute(
-            """UPDATE distributed_postgres_jobs
-               SET state=?,detail=?,check_run_id=?,updated_at=? WHERE id=?""",
-            (state, detail[:2000], check_run_id, now_iso(), job_id),
-        )
-        db.commit()
 def current_pr(token: str, repo: str, pr_number: int) -> dict:
     status, pr = request_json(f"/repos/{repo}/pulls/{pr_number}", token)
     if status != 200:
@@ -165,7 +152,7 @@ def current_pr(token: str, repo: str, pr_number: int) -> dict:
     return pr
 
 
-def create_check(token: str, repo: str, sha: str, pr_number: int) -> int:
+def create_check(token: str, repo: str, sha: str, pr_number: int, *, external_id: str | None = None) -> int:
     status, check = request_json(
         f"/repos/{repo}/check-runs",
         token,
@@ -173,8 +160,8 @@ def create_check(token: str, repo: str, sha: str, pr_number: int) -> int:
         body={
             "name": CHECK_NAME,
             "head_sha": sha,
-            "status": "in_progress",
-            "started_at": now_iso(),
+            **({"external_id": external_id} if external_id is not None else {}),
+            **({"status": "queued"} if external_id is not None else {"status": "in_progress", "started_at": now_iso()}),
             "output": {
                 "title": "Distributed PostgreSQL gate running",
                 "summary": f"PR #{pr_number} exact SHA {sha} PostgreSQL worker policy: CI03",
@@ -200,7 +187,7 @@ def complete_check(token: str, repo: str, check_id: int, conclusion: str, title:
     )
     if status != 200:
         raise RuntimeError(f"CHECK_UPDATE_FAILED status={status}")
-def run_command(argv: list[str]) -> subprocess.CompletedProcess:
+def run_command(argv: list[str], *, persistent: bool = False) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         text=True,
@@ -208,6 +195,7 @@ def run_command(argv: list[str]) -> subprocess.CompletedProcess:
         stderr=subprocess.STDOUT,
         timeout=1800,
         check=False,
+        env=dict(os.environ, ANDY_CI_PERSISTENT_JOB="1") if persistent else None,
     )
 
 
@@ -277,8 +265,10 @@ def render_summary(summary: dict | None, *, reprofiled: bool) -> str:
             f"{data.get('passed_tests','?')} | {data.get('target_files','?')} |"
         )
     return "\n".join(parts)
-def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool = False) -> tuple[str, str, int | None]:
-    if merged_main:
+def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool = False, queued=None) -> tuple[str, str, int | None]:
+    if queued is not None:
+        token, check_id, stage = queued
+    elif merged_main:
         try:
             app = authenticate(request_json)
             integration = validate(app, repo, pr_number, sha)
@@ -293,14 +283,19 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool 
             return "STALE", "PR is closed or head SHA moved before execution.", None
 
     request = partial(request_json, token=token)
-    try:
-        check_id = create_check(token, repo, sha, pr_number)
-    except (OSError, RuntimeError, ValueError):
-        if not merged_main:
-            raise
-        return "UNRECONCILED", "MERGED_MAIN_CHECK_CREATION_UNRECONCILED", None
+    if queued is None:
+        try:
+            check_id = create_check(token, repo, sha, pr_number)
+        except (OSError, RuntimeError, ValueError):
+            if not merged_main:
+                raise
+            return "UNRECONCILED", "MERGED_MAIN_CHECK_CREATION_UNRECONCILED", None
 
     def finish(conclusion, title, detail):
+        if queued is not None:
+            stage(conclusion, title, detail)
+            return
+
         def publish():
             complete_check(token, repo, check_id, conclusion, title, detail)
 
@@ -310,6 +305,12 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool 
             publish()
     reprofiled = False
 
+    def schedule(command):
+        return run_command(command) if queued is None else run_command(command, persistent=True)
+
+    def deferred(result):
+        return queued is not None and result.returncode == 75 and "CI_DISTRIBUTED_ADMISSION=WAITING_CAPACITY" in result.stdout.splitlines()
+
     try:
         if not merged_main:
             impact = get_pr_impact(repo, pr_number, sha, request)
@@ -317,15 +318,24 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool 
                 detail = impact.summary("postgres")
                 finish("success", "NOT APPLICABLE: distributed-postgres (no test run)", detail)
                 return "NOT_APPLICABLE", detail, check_id
-        result = run_command([CI_RUN, sha, "postgres"])
+        result = schedule([CI_RUN, sha, "postgres"])
+        if deferred(result):
+            return "WAITING_CAPACITY", "CI03 unavailable before PostgreSQL execution", check_id
         if result.returncode == 66:
             reprofiled = True
-            repro = run_command([CI_REPROFILE, sha])
+            repro = schedule([CI_REPROFILE, sha])
+            if deferred(repro):
+                return "WAITING_CAPACITY", "CI03 unavailable before reprofile execution", check_id
             if repro.returncode != 0:
                 detail = "Automatic reprofile failed.\n\n" + repro.stdout[-12000:]
+                if queued is not None and "CI_REPROFILE_STATUS=TEST_FAILURE" not in repro.stdout.splitlines():
+                    finish("action_required", "Distributed PostgreSQL reprofile infrastructure failed", detail)
+                    return "INFRA_EXHAUSTED", detail, check_id
                 finish("failure", "Distributed PostgreSQL reprofile failed", detail)
                 return "FAIL", detail, check_id
-            result = run_command([CI_RUN, sha, "postgres"])
+            result = schedule([CI_RUN, sha, "postgres"])
+            if deferred(result):
+                return "WAITING_CAPACITY", "CI03 unavailable before PostgreSQL execution", check_id
 
         summary = extract_summary(result.stdout)
         if result.returncode == 0 and verified_success(summary, sha, result.stdout):
@@ -340,12 +350,17 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool 
         if result.returncode == 0:
             detail = "PostgreSQL execution summary did not verify.\n\n" + detail
         detail += "\n\n" + result.stdout[-12000:]
+        if queued is not None and not any(worker.get("status") == "TEST_FAILURE" for worker in (summary or {}).get("workers", {}).values()):
+            finish("action_required", "Distributed PostgreSQL infrastructure failed", detail)
+            return "INFRA_EXHAUSTED", detail, check_id
         finish("failure", "Distributed PostgreSQL gate failed", detail,
         )
         return "FAIL", detail, check_id
     except PublicationUncertain as error:
         return "UNRECONCILED", str(error), check_id
     except Exception as exc:
+        if queued is not None:
+            raise RuntimeError("CI_DISPATCH_UNRECONCILED") from None
         detail = f"{type(exc).__name__}: {exc}"
         try:
             finish("failure", "Distributed PostgreSQL gate error", detail,
@@ -356,35 +371,27 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool 
             return "FAIL", detail, check_id
         return "FAIL", detail, check_id
 def run_job(job: dict) -> None:
-    time.sleep(DEBOUNCE_SECONDS)
-    state, detail, check_id = execute_exact_sha(
-        job["repository"],
-        int(job["pr_number"]),
-        job["head_sha"],
+    repo, number, sha = job["repository"], int(job["pr_number"]), job["head_sha"]
+    name = CHECK_NAME
+
+    def current(token):
+        pr = current_pr(token, repo, number)
+        return pr.get("state") == "open" and ((pr.get("head") or {}).get("sha") or "").lower() == sha
+
+    lifecycle().run(
+        job, name=name, authenticate=installation_token, current=current,
+        create=lambda token, external: create_check(token, repo, number, sha, external_id=external),
+        complete=lambda token, *result: complete_check(token, repo, *result),
+        execute=lambda token, check, stage: execute_exact_sha(repo, number, sha, queued=(token, check, stage)),
     )
-    finish_job(int(job["id"]), state, detail, check_id)
-    print(
-        f"JOB={job['id']} PR={job['pr_number']} SHA={job['head_sha'][:12]} "
-        f"STATE={state} CHECK={check_id}",
-        flush=True,
-    )
+    print(f"JOB={job['id']} PR={number} SHA={sha[:12]} STATE={job['state']} CHECK={job['check_run_id']}", flush=True)
 
 
 def daemon() -> None:
     ensure_tables()
     bootstrap_cursor()
     print("DISTRIBUTED_POSTGRES_DAEMON=READY", flush=True)
-    while True:
-        try:
-            enqueue_new_deliveries()
-            job = claim_job()
-            if job is None:
-                time.sleep(1)
-                continue
-            run_job(job)
-        except Exception as exc:
-            print(f"DAEMON_ERROR={type(exc).__name__}:{exc}", flush=True)
-            time.sleep(3)
+    serve(lifecycle(), enqueue_new_deliveries, run_job, 1)
 
 
 def main() -> None:
@@ -417,7 +424,9 @@ def main() -> None:
         ensure_tables()
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.sha):
         raise SystemExit("invalid SHA")
-    state, detail, check_id = execute_exact_sha(args.repo, args.pr, args.sha.lower(), merged_main=args.merged_main)
+    priority = lifecycle().main_priority() if args.merged_main and DB_PATH.is_file() else nullcontext()
+    with priority:
+        state, detail, check_id = execute_exact_sha(args.repo, args.pr, args.sha.lower(), merged_main=args.merged_main)
     print(f"STATE={state}")
     print(f"CHECK_RUN_ID={check_id or ''}")
     print(detail)

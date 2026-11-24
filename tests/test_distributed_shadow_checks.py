@@ -84,6 +84,7 @@ def test_manual_merged_main_cli_uses_exact_commit_and_real_execution(tmp_path, m
     sha, other = "a" * 40, "b" * 40
     api = GitHub(number=17)
     api.credentials(monkeypatch)
+    monkeypatch.setattr(module, "DB_PATH", tmp_path / "events.sqlite3")
     api.pr.update(
         number=18 if case == "wrong_number" else 17,
         state="open" if case in {"open", "ordinary_pr"} else "closed",
@@ -177,6 +178,7 @@ def test_merged_main_cli_limits_shadow_publisher_to_canonical_python(monkeypatch
 
 def test_shadow_publisher_enqueues_three_suites_per_exact_head(tmp_path):
     module = load_publisher()
+    module.DEBOUNCE_SECONDS = 0
     db_path = tmp_path / "events.sqlite3"
     module.DB_PATH = db_path
     init_deliveries(db_path)
@@ -195,9 +197,9 @@ def test_shadow_publisher_enqueues_three_suites_per_exact_head(tmp_path):
 
     assert module.enqueue_new_deliveries() == 3
     jobs = module.claim_jobs()
-    assert {job["suite"] for job in jobs} == {"python", "transport", "docker"}
-    assert {job["head_sha"] for job in jobs} == {sha}
-    assert {job["state"] for job in jobs} == {"PENDING"}
+    assert [job["suite"] for job in jobs] == ["python"]
+    assert jobs[0]["head_sha"] == sha
+    assert jobs[0]["state"] == "RUNNING"
 
     with sqlite3.connect(db_path) as db:
         states = {
@@ -206,11 +208,12 @@ def test_shadow_publisher_enqueues_three_suites_per_exact_head(tmp_path):
                 "SELECT state FROM distributed_shadow_jobs ORDER BY suite"
             )
         }
-    assert states == {"RUNNING"}
+    assert states == {"RUNNING", "PENDING"}
 
 
 def test_shadow_publisher_enqueues_android_suite(tmp_path):
     module = load_publisher()
+    module.DEBOUNCE_SECONDS = 0
     db_path = tmp_path / "events.sqlite3"
     module.DB_PATH = db_path
     init_deliveries(db_path)

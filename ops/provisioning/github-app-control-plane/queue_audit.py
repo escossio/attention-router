@@ -63,11 +63,15 @@ def audit(database: Path) -> dict:
             )
             if jobs == "distributed_shadow_jobs":
                 fields += ",suite"
+            columns = {row["name"] for row in db.execute(f"PRAGMA table_info({jobs})")}
+            for field in ("not_before", "retry_count", "phase", "lease_until"):
+                if field in columns:
+                    fields += f",{field}"
             rows = [
                 dict(row)
                 for row in db.execute(
                     f"SELECT {fields} FROM {jobs} "
-                    "WHERE state IN ('PENDING','RUNNING') ORDER BY id"
+                    "WHERE state IN ('PENDING','RUNNING','FINALIZING','UNRECONCILED') ORDER BY id"
                 )
             ]
             report["queues"][jobs] = {
