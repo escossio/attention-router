@@ -111,20 +111,49 @@ def test_oci_boundaries_and_release_refuses_before_execution(monkeypatch, tmp_pa
     operations = []
     archive = tmp_path / "private-context.oci.tar"
     image_id = f"sha256:{'b' * 64}"
+    manifest_id = f"sha256:{'a' * 64}"
 
     def invoke(args, **kw):
         operations.append(args)
         if len(operations) == 1:
             assert args[-2:] == ["--archive", archive]
             return f"PREFLIGHT_APROVADO canary_enable #428 PR #1 {'a' * 40}\nOCI_IMAGE_ID={image_id}\n"
-        assert args == ["docker", "image", "inspect", image_id]
+        assert args == ["docker", "image", "inspect", image_id if len(operations) == 2 else manifest_id]
         return json.dumps([{"Id": f"sha256:{'c' * 64}", "Config": {"Labels": {}}}])
 
     monkeypatch.setattr(subprocess, "check_output", invoke)
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("unverified OCI executed"))
     with pytest.raises(ValueError, match="provenance"):
         release("canary_enable", 1, "ghcr.io/escossio/attention-router@sha256:"+"a"*64, root=root, archive=archive)
-    assert len(operations) == 2
+    assert len(operations) == 3
+
+
+@pytest.mark.parametrize("containerd", [False, True])
+def test_attested_archive_selects_local_image_id(monkeypatch, containerd):
+    ops = Path(__file__).resolve().parents[1] / "ops/context-canary"
+    verify_local = runpy.run_path(str(ops / "private_runtime_release.py"))["verified_local_image"]
+    sha = "a" * 40
+    config_id, manifest_id = f"sha256:{'b' * 64}", f"sha256:{'c' * 64}"
+    image_id = manifest_id if containerd else config_id
+    inspected = {"Id": image_id, "Config": {
+        "Labels": {"org.opencontainers.image.revision": sha},
+        "Entrypoint": ["python", "-m", "attention_router.private_context_entrypoint"],
+    }}
+    if containerd:
+        inspected["Descriptor"] = {"digest": manifest_id}
+
+    def invoke(args, **kwargs):
+        assert kwargs["stderr"] == subprocess.DEVNULL
+        if args[-1] != image_id:
+            raise subprocess.CalledProcessError(1, args)
+        return json.dumps([inspected])
+
+    monkeypatch.setattr(subprocess, "check_output", invoke)
+    assert verify_local(config_id, manifest_id, sha) == inspected
+    if containerd:
+        inspected["Descriptor"] = {"digest": config_id}
+        with pytest.raises(ValueError, match="local OCI provenance mismatch"):
+            verify_local(config_id, manifest_id, sha)
 
 
 def test_oci_reader_verifies_each_blob_and_revision(tmp_path):

@@ -13,6 +13,28 @@ PROFILES = {"runtime_apply": ("dark", "up"), "runtime_rollback": ("dark", "stop"
             "canary_enable": ("owner", "up"), "canary_disable": ("owner", "stop")}
 
 
+def verified_local_image(config_id, manifest_id, sha):
+    # Docker's classic store identifies the config blob. Containerd can
+    # identify the same verified image by the single-platform OCI manifest.
+    for image_id in (config_id, manifest_id):
+        try:
+            rows = json.loads(subprocess.check_output(
+                ["docker", "image", "inspect", image_id], stderr=subprocess.DEVNULL,
+            ))
+        except subprocess.CalledProcessError:
+            continue
+        if len(rows) != 1 or rows[0].get("Id") != image_id:
+            continue
+        image = rows[0]
+        if image_id != config_id and (image.get("Descriptor") or {}).get("digest") != manifest_id:
+            continue
+        cfg = image.get("Config") or {}
+        if ((cfg.get("Labels") or {}).get("org.opencontainers.image.revision") == sha
+                and cfg.get("Entrypoint") == ["python", "-m", "attention_router.private_context_entrypoint"]):
+            return image
+    raise ValueError("local OCI provenance mismatch")
+
+
 def run(operation, comment, image, *, root, archive=None):
     if not re.fullmatch(r"ghcr\.io/escossio/attention-router@sha256:[0-9a-f]{64}", image):
         raise ValueError("immutable repository manifest digest required")
@@ -28,14 +50,9 @@ def run(operation, comment, image, *, root, archive=None):
     config = re.fullmatch(r"OCI_IMAGE_ID=(sha256:[0-9a-f]{64})", verified[1])
     if promotion is None or config is None:
         raise ValueError("invalid promotion receipt")
-    sha, image_id = promotion[1], config[1]
-    actual = json.loads(subprocess.check_output(["docker", "image", "inspect", image_id]))
-    if (len(actual) != 1 or actual[0].get("Id") != image_id
-            or (actual[0]["Config"].get("Labels") or {}).get("org.opencontainers.image.revision") != sha
-            or actual[0]["Config"]["Entrypoint"] != ["python", "-m", "attention_router.private_context_entrypoint"]):
-        raise ValueError("local OCI provenance mismatch")
+    actual = verified_local_image(config[1], image.rsplit("@", 1)[1], promotion[1])
     profile, action = PROFILES[operation]
-    env = dict(os.environ, CONTEXT_IMAGE=image_id)
+    env = dict(os.environ, CONTEXT_IMAGE=actual["Id"])
     compose = ["docker", "compose", "--project-name", "andy-private-context", "--env-file", os.devnull,
                "-f", ops / "compose.private.yaml", "--profile", profile]
     # Refuse replacement/stopping of an instance running a different authorized digest.
@@ -47,7 +64,7 @@ def run(operation, comment, image, *, root, archive=None):
     containers = subprocess.check_output([*compose, "ps", "--all", "-q", profile], env=env, text=True).split()
     for cid in containers:
         container = json.loads(subprocess.check_output(["docker", "inspect", cid]))[0]
-        if container["Image"] != actual[0]["Id"]:
+        if container["Image"] != actual["Id"]:
             raise ValueError("different running artifact requires its own rollback approval")
     args = ["up", "-d", "--wait", "--no-build", "--pull", "never", "--no-deps"] if action == "up" else ["stop"]
     subprocess.run([*compose, *args, profile], env=env, check=True)
