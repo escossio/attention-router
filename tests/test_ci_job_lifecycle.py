@@ -269,6 +269,17 @@ def test_main_priority_does_not_take_worker_or_queue_lease(staging):
         assert recovered
 
 
+def test_main_priority_also_protects_shared_capacity_from_the_other_queue(staging):
+    _, _, _, manager = staging
+    other = type(manager)(manager.path, "distributed_postgres_jobs", manager.request)
+    with manager.main_priority(), other.main_priority(), manager.candidate_admission() as allowed:
+        assert not allowed
+    with other.main_priority(), manager.candidate_admission() as allowed:
+        assert not allowed
+    with manager.candidate_admission() as allowed:
+        assert allowed
+
+
 @pytest.mark.parametrize(
     "suite, scheduler",
     [("python", SCHEDULER), ("postgres", POSTGRES_SCHEDULER), ("reprofile", POSTGRES_REPROFILE)],

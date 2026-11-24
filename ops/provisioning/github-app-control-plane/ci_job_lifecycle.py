@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 import fcntl
 import json
@@ -56,9 +56,9 @@ class Lifecycle:
                 db.execute(f"ALTER TABLE {self.table} ADD COLUMN {name} {kind}")
 
     @contextmanager
-    def lock(self, kind, *, shared=False):
+    def lock(self, kind, *, shared=False, table=None):
         # Lock files, like the worker lock, are stable inodes. Never unlink.
-        path = self.path.with_name(f"{self.path.name}.{self.table}.{kind}.lock")
+        path = self.path.with_name(f"{self.path.name}.{table or self.table}.{kind}.lock")
         with path.open("a") as stream:
             try:
                 kind = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
@@ -76,6 +76,17 @@ class Lifecycle:
             if not acquired:
                 raise RuntimeError("MAIN_CERTIFICATION_ALREADY_ACTIVE")
             yield
+
+    @contextmanager
+    def candidate_admission(self):
+        # Worker capabilities overlap. Either main publisher may need a host
+        # that would otherwise be admitted by the other queue.
+        with ExitStack() as locks:
+            for table in sorted(TABLES):
+                if not locks.enter_context(self.lock("main", shared=True, table=table)):
+                    yield False
+                    return
+            yield True
 
     def claim(self, limit):
         with sqlite3.connect(self.path) as db:
@@ -382,7 +393,7 @@ class Lifecycle:
                         "No verified run within the operational deadline.",
                     )
                 else:
-                    with self.lock("main", shared=True) as can_dispatch:
+                    with self.candidate_admission() as can_dispatch:
                         if not can_dispatch:
                             self.defer(job, "Integrated main certification has dispatch priority")
                             return
