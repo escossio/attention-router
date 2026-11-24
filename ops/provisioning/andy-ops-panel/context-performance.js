@@ -54,7 +54,10 @@
       const row = body.insertRow();
       for (const [key, , format] of columns) {
         const value = record[key];
-        row.insertCell().textContent = format && value != null ? format(value) : fmt(value);
+        const rendered = format && value != null ? format(value) : fmt(value);
+        const cell = row.insertCell();
+        if (rendered instanceof Node) cell.append(rendered);
+        else cell.textContent = rendered;
       }
     }
     card.append(grid);
@@ -63,6 +66,42 @@
   const duration = (nanos) => fmt(nanos / 1e6) + " ms";
   const time = (nanos) => new Date(nanos / 1e6).toLocaleTimeString("pt-BR");
   const percent = (value) => fmt(value) + "%";
+  const yesNo = (value) => value ? "Sim" : "Não";
+
+  function pickTrace(identifier) {
+    const button = element("button", identifier.slice(0, 12), "tab");
+    button.type = "button";
+    button.title = identifier;
+    button.addEventListener("click", () => {
+      if (!Array.from(trace.options).some((option) => option.value === identifier)) {
+        const option = new Option(identifier.slice(0, 12), identifier);
+        trace.add(option);
+      }
+      trace.value = identifier;
+      lookup("trace").click();
+    });
+    return button;
+  }
+
+  function renderPool(payload) {
+    const summary = payload.pool_summary?.[0];
+    table(find("pool-summary"), "Pool PostgreSQL · amostras e contagens observadas", [
+      ["capacity", "Capacidade"], ["occupied", "Ocupadas"], ["free", "Livres"],
+      ["waiting", "Aquisições abertas"], ["timeouts", "Timeouts de aquisição"],
+      ["sampler_state", "Amostragem PostgreSQL"], ["lock_samples", "Amostras Lock"],
+      ["pool_lock_timeouts", "Locks com timeout"],
+    ], summary?.capacity != null ? [summary] : [], "Ciclo do pool indisponível nesta execução.");
+    table(find("pool-open"), "Em aberto · fase inferida pelos eventos do trace", [
+      ["state", "Estado observado"], ["age_ms", "Idade ms"], ["phase", "Fase inferida"],
+      ["driver_active", "SQL ativo", yesNo], ["sql_count", "Operações SQL"],
+      ["outside_cursor_ms", "Fora do cursor ms"], ["lock_samples", "Amostras Lock"],
+      ["disconnected", "Cliente desconectado", yesNo], ["trace", "Trace", pickTrace],
+    ], payload.pool_open, summary?.capacity != null ? "Nenhuma aquisição ou posse aberta na última amostra." : empty);
+    table(find("pool-distribution"), "Distribuição do ciclo da conexão · fora do cursor inclui transações e espera não decomposta", [
+      ["measure", "Medida"], ["samples", "Amostras"], ["p50_ms", "p50 ms"],
+      ["p95_ms", "p95 ms"], ["p99_ms", "p99 ms"], ["max_ms", "Máximo ms"],
+    ], payload.pool_distribution);
+  }
 
   function renderWorker(payload) {
     const worker = payload.metadata?.find((row) => row.field === "worker")?.value;
@@ -111,6 +150,7 @@
     table(find("capacity"), "Ocupação observada", [
       ["resource", "Recurso"], ["used", "Ocupado na amostra"], ["limit", "Limite"], ["waiting", "Fila observada"],
     ], Array.from(latest.values()).map((row) => row.resource === "pool_capacity" ? {...row, waiting:null} : row));
+    renderPool(payload);
     table(find("outcomes"), "Desfechos do servidor", [["outcome", "Motivo"], ["count", "Consultas"]], payload.outcomes);
   }
 
@@ -122,6 +162,13 @@
       id: row.trace, label: (row.induced ? "Falha induzida · " : "") +
         row.trace.slice(0, 12) + " · " + fmt(row.server_ms) + " ms · " + row.result,
     }));
+    const known = new Set(traces.map((row) => row.id));
+    for (const row of payload.pool_open || []) {
+      if (row.trace && !known.has(row.trace)) {
+        known.add(row.trace);
+        traces.push({id: row.trace, label: "Em andamento · " + row.trace.slice(0, 12)});
+      }
+    }
     choose(trace, traces, {id: "", label: "Escolha uma consulta"});
     table(find("critical"), "Caminho observado", [
       ["trace", "Trace ID"], ["result", "Resultado"], ["server_ms", "Servidor ms"],
@@ -135,6 +182,14 @@
       ["correlation", "Correlation ID"],
       ["sql_count", "Operações SQL"],
     ], payload.timeline);
+    table(find("pool-trace"), "Ciclo das conexões deste trace", [
+      ["event", "Evento"], ["pool_lease", "Posse", (value) => value.slice(0, 12)],
+      ["timestamp_ns", "Hora", time], ["duration_ns", "Duração observada", duration],
+      ["pool_sql_count", "Operações SQL"], ["pool_begins", "Inícios"],
+      ["pool_commits", "Commits"], ["pool_rollbacks", "Rollbacks"],
+      ["pool_outside_cursor_ns", "Fora do cursor", duration],
+      ["pool_after_disconnect_ns", "Retida após desconexão", duration], ["outcome", "Resultado"],
+    ], payload.pool_trace);
     const link = find("tempo");
     link.hidden = true;
     const grafanaUrl = state.config?.context_tempo_url || state.config?.network_osi_url;

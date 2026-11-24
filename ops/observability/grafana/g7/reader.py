@@ -96,6 +96,97 @@ def major_latency(events, kind, outcomes=None):
             and (outcomes is None or row.get("outcome") in outcomes)]
 
 
+def project_pool(events, selected_trace=""):
+    phases = defaultdict(list)
+    waiting, active = {}, {}
+    disconnected = set()
+    durations = defaultdict(list)
+    selected_events = []
+    metrics = Counter()
+    capacity = occupied = latest_mono = None
+    sampler_state = "unavailable"
+    for row in events:
+        event, trace = row["event"], row.get("trace")
+        stage = row.get("stage")
+        stamp = row.get("monotonic_ns")
+        if type(stamp) is int:
+            latest_mono = max(latest_mono or 0, stamp)
+        if event == "pool_sampler":
+            sampler_state = row["sampler_state"]
+        if trace and event == "disconnect":
+            disconnected.add(trace)
+        if trace and event in {"begin", "end"} and STAGE.fullmatch(stage or ""):
+            stack = phases[trace]
+            if event == "begin":
+                stack.append(stage)
+            elif stage in stack:
+                stack.pop(len(stack) - 1 - stack[::-1].index(stage))
+
+        lease = row.get("pool_lease")
+        if not isinstance(lease, str) or not TRACE.fullmatch(lease):
+            continue
+        if selected_trace and trace == selected_trace:
+            selected_events.append(row)
+        if type(row.get("pool_limit")) is int:
+            capacity = row["pool_limit"]
+        if type(row.get("pool_used")) is int:
+            occupied = row["pool_used"]
+        if event == "pool_request":
+            waiting[lease] = row
+        elif event == "pool_checkout":
+            waiting.pop(lease, None)
+            active[lease] = {"checkout": row, "last": row, "lock_samples": 0}
+            durations["Acquisition"].append(ms(row["duration_ns"]))
+        elif event == "pool_acquire_failed":
+            waiting.pop(lease, None)
+            if row.get("outcome") == "pool_exhausted":
+                metrics["timeouts"] += 1
+                durations["Acquisition timeout"].append(ms(row["duration_ns"]))
+        elif event == "pool_checkin":
+            active.pop(lease, None)
+            for field, label in (("duration_ns", "Hold"), ("pool_sql_ns", "SQL cursor"),
+                                 ("pool_outside_cursor_ns", "Outside cursor"),
+                                 ("pool_after_disconnect_ns", "Hold after disconnect")):
+                if field in row and (field != "pool_after_disconnect_ns" or row[field]):
+                    durations[label].append(ms(row[field]))
+            for field in ("pool_sql_count", "pool_begins", "pool_commits", "pool_rollbacks",
+                          "pool_lock_timeouts"):
+                metrics[field] += row.get(field, 0)
+        elif event == "pool_progress" and lease in active:
+            active[lease]["last"] = row
+        elif event == "pool_pg_lock_sample":
+            metrics["lock_samples"] += 1
+            if lease in active:
+                active[lease]["lock_samples"] += 1
+
+    def open_row(row, state, start, latest, samples=None):
+        trace = row.get("trace")
+        return {"lease": row["pool_lease"], "trace": trace, "state": state,
+                "age_ms": ms(max(0, latest_mono - start)) if latest_mono is not None and start else None,
+                "phase": phases[trace][-1] if phases[trace] else None,
+                "driver_active": latest.get("pool_sql_active"), "sql_count": latest.get("pool_sql_count"),
+                "outside_cursor_ms": ms(latest["pool_outside_cursor_ns"]) if "pool_outside_cursor_ns" in latest else None,
+                "lock_samples": samples, "disconnected": trace in disconnected}
+
+    open_rows = [open_row(record["checkout"], "ocupada", record["checkout"].get("monotonic_ns"),
+                          record["last"], record["lock_samples"]) for record in active.values()]
+    open_rows.extend(open_row(row, "aguardando", row.get("monotonic_ns"), row) for row in waiting.values())
+    return {
+        "pool_summary": [{"capacity": capacity, "occupied": occupied,
+                          "free": max(0, capacity - occupied) if capacity is not None and occupied is not None else None,
+                          "waiting": len(waiting) if capacity is not None else None, "sampler_state": sampler_state,
+                          **{key: metrics[key] if capacity is not None else None for key in (
+                              "timeouts", "lock_samples", "pool_lock_timeouts", "pool_sql_count",
+                              "pool_begins", "pool_commits", "pool_rollbacks",
+                          )}}],
+        "pool_open": sorted(open_rows, key=lambda row: -(row["age_ms"] or 0)),
+        "pool_distribution": [{"measure": label, "samples": len(values), "p50_ms": percentile(values, .5),
+                               "p95_ms": percentile(values, .95), "p99_ms": percentile(values, .99),
+                               "max_ms": max(values)} for label, values in sorted(durations.items())],
+        "pool_trace": selected_events[-160:],
+    }
+
+
 def summarize(events, workload="load"):
     offers = {row["trace"] for row in events if row["event"] == "client_offer"
               and row["workload"] == workload}
@@ -279,6 +370,7 @@ class Projection:
         ]
         result["baseline_resources"] = before["resources"]
         trace = query.get("trace", [""])[0]
+        result.update(project_pool(events, trace if TRACE.fullmatch(trace) else ""))
         result["timeline"] = trace_timeline([
             row for row in events if TRACE.fullmatch(trace) and row.get("trace") == trace
         ])

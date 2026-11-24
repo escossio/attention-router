@@ -88,8 +88,9 @@ _observed_engines = WeakSet()
 logger = logging.getLogger("attention_router.observability.private_context")
 
 
-def emit(kind, stage, *, duration=None, outcome=None, count=None, sql=None, capacity=None):
-    sample = request_sample.get()
+def emit(kind, stage, *, duration=None, outcome=None, count=None, sql=None, capacity=None,
+         sample=None, pool=None):
+    sample = sample if sample is not None else request_sample.get()
     if sample is None:
         return
     fields = {"event": kind, "stage": stage.value, "timestamp_ns": time_ns(),
@@ -108,6 +109,8 @@ def emit(kind, stage, *, duration=None, outcome=None, count=None, sql=None, capa
             fields.update(used=used, limit=limit, waiting=waiting)
     if sql is not None and sql.sql_count:
         fields.update(sql_ns=sql.sql_ns, sql_count=sql.sql_count)
+    if pool is not None:
+        fields.update(pool)
     try:
         logger.info("g7_event %s", json.dumps(fields, separators=(",", ":")))
     except Exception:
@@ -274,4 +277,7 @@ def observe_database(engine):
     event.listen(engine, "before_cursor_execute", before)
     event.listen(engine, "after_cursor_execute", lambda *args: account(args[4]))
     event.listen(engine, "handle_error", lambda error: account(error.execution_context))
+    from attention_router.observability.pg_pool_lifecycle import observe_pool
+
+    observe_pool(engine)
     _observed_engines.add(engine)

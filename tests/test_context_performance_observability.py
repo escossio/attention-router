@@ -124,6 +124,57 @@ def test_real_pool_exhaustion_uses_non_authority_outcome(tmp_path):
         pool.dispose()
 
 
+def test_pool_acquisition_and_return_are_observed_before_request_completes(tmp_path, monkeypatch, caplog):
+    from time import monotonic_ns
+    from attention_router.observability.context_performance import request_sample
+    from attention_router.observability.pg_pool_lifecycle import active_leases, report_progress
+
+    monkeypatch.setattr(settings, "context_performance_enabled", True)
+    engine = create_engine(f"sqlite:///{tmp_path / 'lease.sqlite'}", pool_size=1,
+                           max_overflow=0, pool_timeout=.01)
+    path = Path(__file__).resolve().parents[1] / "ops/observability/grafana/g7/reader.py"
+    spec = importlib.util.spec_from_file_location("g7_projection", path)
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+
+    def observed():
+        return [json.loads(record.getMessage().removeprefix("g7_event ")) for record in caplog.records
+                if record.getMessage().startswith("g7_event ")]
+
+    trace = "a" * 32
+    try:
+        observe_database(engine)
+        with caplog.at_level(logging.INFO, logger="attention_router.observability.private_context"):
+            with observe_query("26faf9d5-c4d0-452f-9078-139dcf332a0c", f"00-{trace}-{'b' * 16}-01"):
+                with phase(Stage.CAPTURE), engine.begin() as connection:
+                    assert connection.execute(text("SELECT 'outside-telemetry'")).scalar() == "outside-telemetry"
+                    hold, = active_leases()
+                    report_progress(hold)
+                    during = reader.project_pool(observed(), trace)
+                    [row] = during["pool_open"]
+                    assert (row["phase"], row["state"], row["driver_active"], row["sql_count"]) == (
+                        Stage.CAPTURE.value, "ocupada", False, 1,
+                    )
+                    try:
+                        engine.connect()
+                    except PoolTimeout:
+                        pass
+                    else:
+                        raise AssertionError("expected real queue timeout")
+                    request_sample.get().disconnected = monotonic_ns()
+                finished = reader.project_pool(observed(), trace)
+                assert not finished["pool_open"]
+                [summary] = finished["pool_summary"]
+                assert (summary["free"], summary["waiting"], summary["timeouts"]) == (1, 0, 1)
+                returned, = [row for row in finished["pool_trace"] if row["event"] == "pool_checkin"]
+                assert returned["pool_begins"] == returned["pool_commits"] == 1
+                assert returned["pool_after_disconnect_ns"] > 0
+                assert returned["pool_sql_ns"] + returned["pool_outside_cursor_ns"] == returned["duration_ns"]
+                assert "outside-telemetry" not in caplog.text
+    finally:
+        engine.dispose()
+
+
 def test_inference_wait_and_work_are_measured_separately(monkeypatch, caplog):
     from threading import Event, Lock, Thread
     from time import sleep

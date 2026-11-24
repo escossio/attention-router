@@ -7,13 +7,14 @@ import os
 from pathlib import Path
 import resource
 import socket
+from threading import Event, Thread
 from time import time_ns
 from uuid import uuid4
 
 from attention_router.config import settings
 from attention_router.observability.tracing import configure_tracing, flush_tracing, reset_tracing
 
-VERSION = "1"
+VERSION = "2"
 
 
 def digest(value):
@@ -42,7 +43,7 @@ class EventFile(logging.FileHandler):
 
 
 class Experiment:
-    def __init__(self, directory):
+    def __init__(self, directory, instrumented):
         self.application = logging.getLogger("attention_router.observability.private_context")
         self.application.setLevel(logging.INFO)
         self.client = logging.getLogger("andy.m1.client")
@@ -52,6 +53,45 @@ class Experiment:
         self.client.setLevel(logging.INFO)
         for logger in (self.application, self.client):
             logger.addHandler(self.sink)
+        self.pool_sampler = None
+        if instrumented:
+            self.stop_pool_sampler = Event()
+            self.pool_sampler = Thread(target=self.sample_pool, daemon=True)
+            self.pool_sampler.start()
+
+    def sample_pool(self):
+        import psycopg
+        from sqlalchemy.engine import make_url
+        from attention_router.observability.pg_pool_lifecycle import (
+            active_leases, report_driver_wait, report_progress,
+        )
+
+        target = make_url(os.environ["DATABASE_URL"])
+        if target.host != "127.0.0.1" or target.database != "attention_router_test":
+            self.event("pool_sampler", sampler_state="unexpected_database")
+            return
+        try:
+            with psycopg.connect(
+                dbname=target.database, user=target.username, password=target.password,
+                host=target.host, port=target.port, connect_timeout=2, autocommit=True,
+                options="-c statement_timeout=350",
+            ) as observer:
+                self.event("pool_sampler", sampler_state="available")
+                while not self.stop_pool_sampler.wait(0.2):
+                    leases = active_leases()
+                    for lease in leases:
+                        report_progress(lease)
+                    active = [(lease, lease.sql_started) for lease in leases
+                              if lease.backend_pid and lease.sql_started is not None]
+                    if active:
+                        rows = dict(observer.execute(
+                            "SELECT pid, wait_event_type FROM pg_stat_activity WHERE pid = ANY(%s)",
+                            ([lease.backend_pid for lease, _ in active],),
+                        ).fetchall())
+                        for lease, started in active:
+                            report_driver_wait(lease, started, rows.get(lease.backend_pid))
+        except psycopg.Error:
+            self.event("pool_sampler", sampler_state="unavailable")
 
     def event(self, event, **fields):
         self.client.info("g7_event %s", json.dumps({
@@ -75,6 +115,9 @@ class Experiment:
                    output_blocks=usage.ru_oublock)
 
     def finish(self):
+        if self.pool_sampler is not None:
+            self.stop_pool_sampler.set()
+            self.pool_sampler.join(timeout=2)
         self.event("load_complete")
         flush_tracing()
         # Keep recording through the enclosing test's re-open/revocation.
@@ -124,4 +167,4 @@ def experiment(bodies, controls, order, cases, segment_count):
     }
     (folder / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"M1_EXPERIMENT_ID={run_id}", flush=True)
-    return Experiment(folder)
+    return Experiment(folder, metadata["mode"] == "instrumented")
