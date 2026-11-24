@@ -313,7 +313,6 @@ def test_pg_consent_e5_asgi_full_chain(Session, consent_clients, provider, monke
     from attention_router.application import conversation_evidence_staged as staged_e5
     from attention_router.application import conversation_vectors as vectors
     from attention_router.application.conversation_evidence_staged import StagedConversationEvidenceReader
-    from test_postgres_conversation_evidence import _STAGED_SOURCE_LOCK_TABLES
 
     args, writer, staged, decision, _ = consent_clients
     # The older cognitive fixture archives MEDIA captions. E5 intentionally
@@ -353,9 +352,13 @@ def test_pg_consent_e5_asgi_full_chain(Session, consent_clients, provider, monke
         consent=None, epoch=baseline._epoch, read=baseline._read,
         clock=baseline._clock, auth_clock=baseline._auth_clock,
     )
-    tables = ", ".join(_STAGED_SOURCE_LOCK_TABLES)
+    # The context reader fixture already grants the narrow row-lock
+    # privileges. This path only needs to read the vector index as well.
     with Session.begin() as admin:
-        admin.execute(text(f"GRANT SELECT, UPDATE ON {tables} TO {baseline._role}"))
+        admin.execute(text(
+            "GRANT SELECT ON conversation_vector_segments, conversation_vector_memberships, "
+            f"conversation_embeddings TO {baseline._role}"
+        ))
 
     reader = StagedConversationEvidenceReader(
         original,
