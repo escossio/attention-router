@@ -34,6 +34,9 @@ class SemanticEpisodeRow(Base):
     semantic_key: Mapped[str] = mapped_column(String(128), nullable=False)
     scope_type: Mapped[str] = mapped_column(String(24), nullable=False)
     scope_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    evidence_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="CURRENT", server_default="CURRENT"
+    )
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     sensitivity_class: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -58,6 +61,8 @@ class SemanticEpisodeRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
+        CheckConstraint("evidence_status IN ('CURRENT','EVIDENCE_REVOKED')",
+                        name="ck_episode_evidence_status"),
         PrimaryKeyConstraint("id", name="pk_semantic_episodes"),
         UniqueConstraint(
             "tenant_id",

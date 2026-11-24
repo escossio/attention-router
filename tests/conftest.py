@@ -63,6 +63,7 @@ def legacy_inline_test_context(request, monkeypatch):
 
 @pytest.fixture()
 def session():
+    from attention_router.infrastructure import human_identity_models  # noqa: F401
     from attention_router.infrastructure.db import Base
     from attention_router.infrastructure.repository import seed_policies
 

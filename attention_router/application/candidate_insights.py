@@ -190,6 +190,7 @@ def _source_evidence(
     tenant_id: str,
     evidence_type: str,
     source_ref: str,
+    now: datetime | None,
 ) -> tuple[datetime, str]:
     if evidence_type == "SEMANTIC_EPISODE":
         row = session.get(SemanticEpisodeRow, source_ref)
@@ -200,11 +201,16 @@ def _source_evidence(
         return _utc(row.last_activity_at), _sensitivity(row.sensitivity_class)
 
     if evidence_type == "TIMELINE_EVENT":
-        row = session.get(TimelineEventRow, source_ref)
+        row = session.get(TimelineEventRow, source_ref, populate_existing=True)
         if row is None:
             raise CandidateInsightError("CANDIDATE_INSIGHT_EVENT_NOT_FOUND")
         if row.tenant_id != tenant_id:
             raise CandidateInsightError("CANDIDATE_INSIGHT_TENANT_MISMATCH")
+        if row.event_type == "ATTACHMENT_OBSERVED":
+            from attention_router.application.cognitive_observation import observation_event_is_current
+
+            if not observation_event_is_current(session, row, now=now):
+                raise CandidateInsightError("CANDIDATE_INSIGHT_EVIDENCE_REVOKED")
         return _utc(row.occurred_at), _event_sensitivity(row)
 
     if evidence_type == "CONVERSATION_MESSAGE":
@@ -223,6 +229,7 @@ def _normalize_evidence(
     *,
     tenant_id: str,
     evidence: list[CandidateEvidenceInput],
+    now: datetime | None,
 ) -> tuple[list[dict], str, list[str]]:
     if not evidence:
         raise CandidateInsightError("CANDIDATE_INSIGHT_EVIDENCE_REQUIRED")
@@ -266,6 +273,7 @@ def _normalize_evidence(
             tenant_id=tenant_id,
             evidence_type=evidence_type,
             source_ref=source_ref,
+            now=now,
         )
         max_sensitivity = _max_sensitivity(
             max_sensitivity,
@@ -369,6 +377,7 @@ def propose_candidate_insight(
             session,
             tenant_id=tenant_id,
             evidence=evidence,
+            now=now,
         )
     )
     candidate_sensitivity = _max_sensitivity(
@@ -594,6 +603,82 @@ def consolidate_episode_scope(
     )
 
 
+
+def candidate_insight_source_is_current(
+    session: Session, candidate: CandidateInsightRow, *, now: datetime | None = None
+) -> bool:
+    """Revalidate the supporting rows before a candidate is used."""
+    candidate = session.get(CandidateInsightRow, candidate.id, populate_existing=True)
+    if candidate is None or candidate.evidence_status == "EVIDENCE_REVOKED":
+        return False
+    evidence_rows = session.scalars(
+        select(CandidateInsightEvidenceRow).where(
+            CandidateInsightEvidenceRow.tenant_id == candidate.tenant_id,
+            CandidateInsightEvidenceRow.candidate_id == candidate.id,
+            CandidateInsightEvidenceRow.evidence_role == "SUPPORT",
+        )
+    ).all()
+    if not evidence_rows:
+        return False
+    for item in evidence_rows:
+        if item.evidence_type == "TIMELINE_EVENT":
+            event = session.get(TimelineEventRow, item.source_ref, populate_existing=True)
+            if (
+                event is None
+                or event.tenant_id != candidate.tenant_id
+                or (event.metadata_json or {}).get("technical_evidence_revoked")
+            ):
+                return False
+            if event.event_type == "ATTACHMENT_OBSERVED":
+                from attention_router.application.cognitive_observation import observation_event_is_current
+
+                if not observation_event_is_current(session, event, now=now):
+                    return False
+        elif item.evidence_type == "SEMANTIC_EPISODE":
+            episode = session.get(SemanticEpisodeRow, item.source_ref, populate_existing=True)
+            if (
+                episode is None
+                or episode.tenant_id != candidate.tenant_id
+                or episode.evidence_status == "EVIDENCE_REVOKED"
+            ):
+                return False
+            if episode.episode_type.startswith("ATTACHMENT_OBSERVED:"):
+                from attention_router.application.cognitive_observation import observation_event_is_current
+
+                members = session.scalars(
+                    select(SemanticEpisodeMembershipRow).where(
+                        SemanticEpisodeMembershipRow.tenant_id == candidate.tenant_id,
+                        SemanticEpisodeMembershipRow.episode_id == episode.id,
+                        SemanticEpisodeMembershipRow.ambiguous.is_(False),
+                    ).limit(1001)
+                ).all()
+                if not members or len(members) > 1000:
+                    return False
+                for member in members:
+                    if member.member_type != "TIMELINE_EVENT":
+                        return False
+                    event = session.get(TimelineEventRow, member.member_ref, populate_existing=True)
+                    if (
+                        event is None
+                        or event.tenant_id != candidate.tenant_id
+                        or not observation_event_is_current(session, event, now=now)
+                    ):
+                        return False
+        elif item.evidence_type == "CONVERSATION_MESSAGE":
+            message = session.get(ConversationMessageRow, item.source_ref, populate_existing=True)
+            if (
+                message is None
+                or message.tenant_id != candidate.tenant_id
+                or not message.searchable
+                or (message.metadata_json or {}).get("context_evidence_withdrawn") is True
+            ):
+                return False
+        else:
+            return False
+    return True
+
+
+
 def admit_candidate_insight(
     session: Session,
     *,
@@ -607,9 +692,13 @@ def admit_candidate_insight(
     if row is None:
         raise CandidateInsightError("CANDIDATE_INSIGHT_NOT_FOUND")
     if row.state == "ADMITTED":
+        if not candidate_insight_source_is_current(session, row, now=now):
+            raise CandidateInsightError("CANDIDATE_INSIGHT_EVIDENCE_REVOKED")
         return row
     if row.state not in {"PROPOSED", "NEEDS_REVIEW"}:
         raise CandidateInsightError("CANDIDATE_INSIGHT_NOT_ADMISSIBLE")
+    if not candidate_insight_source_is_current(session, row, now=now):
+        raise CandidateInsightError("CANDIDATE_INSIGHT_EVIDENCE_REVOKED")
     if row.contradiction_refs:
         raise CandidateInsightError(
             "CANDIDATE_INSIGHT_CONTRADICTION_REQUIRES_REVIEW"
@@ -757,6 +846,7 @@ __all__ = [
     "SUPPORTED_EVIDENCE_TYPES",
     "SUPPORTED_INSIGHT_TYPES",
     "admit_candidate_insight",
+    "candidate_insight_source_is_current",
     "consolidate_episode_scope",
     "propose_candidate_insight",
     "reject_candidate_insight",

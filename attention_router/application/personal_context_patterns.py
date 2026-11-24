@@ -183,6 +183,7 @@ def detect_temporal_recurrence_hypotheses(
     lookback_days: int = 60,
     event_limit: int = 300,
     result_limit: int = 20,
+    timeline_event_ids: tuple[str, ...] | None = None,
 ) -> tuple[ContextPatternHypothesis, ...]:
     """Detect bounded recurrence hypotheses from canonical timeline evidence.
 
@@ -201,9 +202,12 @@ def detect_temporal_recurrence_hypotheses(
 
     stamp = _utc(now or datetime.now(UTC))
     window_start = stamp - timedelta(days=lookback_days)
+    query = select(TimelineEventRow)
+    if timeline_event_ids is not None:
+        query = query.where(TimelineEventRow.id.in_(timeline_event_ids))
     rows = list(
         session.scalars(
-            select(TimelineEventRow)
+            query
             .where(
                 TimelineEventRow.tenant_id == tenant_id,
                 TimelineEventRow.actor_id == actor_id,
@@ -216,6 +220,9 @@ def detect_temporal_recurrence_hypotheses(
         ).all()
     )
 
+    from attention_router.application.cognitive_observation import observation_event_is_current
+
+    rows = [row for row in rows if observation_event_is_current(session, row, now=stamp)]
     grouped: dict[tuple[str, str, str], list[TimelineEventRow]] = {}
     for row in rows:
         signature = _event_signature(row)

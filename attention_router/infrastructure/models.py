@@ -530,6 +530,7 @@ class ActorBindingRow(Base):
     active_context: Mapped[str | None] = mapped_column(String(120))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     binding_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JsonType, nullable=False, default=dict)
+    context_revision: Mapped[str] = mapped_column(String(36), nullable=False, server_default="legacy")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     __table_args__ = (
@@ -1259,6 +1260,7 @@ class ConversationMessageRow(Base):
     content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     sensitivity_class: Mapped[str] = mapped_column(String(20), nullable=False, default="NORMAL")
     searchable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    context_revision: Mapped[str] = mapped_column(String(36), nullable=False, server_default="legacy")
     metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JsonType, nullable=False, default=dict)
     reply_to_message_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("conversation_messages.id"))
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
