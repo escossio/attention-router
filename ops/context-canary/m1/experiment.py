@@ -44,6 +44,7 @@ class EventFile(logging.FileHandler):
 class Experiment:
     def __init__(self, directory):
         self.application = logging.getLogger("attention_router.observability.private_context")
+        self.application.setLevel(logging.INFO)
         self.client = logging.getLogger("andy.m1.client")
         self.sink = EventFile(directory / "events.log", encoding="utf-8")
         self.sink.setFormatter(logging.Formatter("%(message)s"))
