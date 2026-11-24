@@ -19,6 +19,7 @@ from attention_router.application.platform.artifacts import context_receipt_refu
 from attention_router.application.staged_read import (
     DetachedEvidence, SourceVersion, StagedRead, StagedReadRejected,
 )
+from attention_router.observability.context_performance import Outcome, Stage, emit, phase, request_sample
 from attention_router.observability.private_context import Decision, record
 from attention_router.infrastructure.artifact_models import ArtifactReceiptRow
 from attention_router.infrastructure.models import ConversationMessageRow
@@ -57,19 +58,22 @@ def _collect(context, resource_id, prepared, filters, policy, captured_at):
     if context._source_allowed is None or not vectors.authorized(session, tenant):
         raise StagedReadRejected("STAGED_CONVERSATION_SCOPE_REVOKED")
 
-    rows = evidence._pool(
-        session, prepared, prepared.vector, tenant_id=tenant, source_account=account,
-        include_versions=True, pool_limit=evidence.MAX_SEGMENTS + 1, **filters,
-    )
+    with phase(Stage.VECTOR):
+        rows = evidence._pool(
+            session, prepared, prepared.vector, tenant_id=tenant, source_account=account,
+            include_versions=True, pool_limit=evidence.MAX_SEGMENTS + 1, **filters,
+        )
+    emit("candidates", Stage.VECTOR, count=len(rows))
     if len(rows) > evidence.MAX_SEGMENTS:
         raise StagedReadRejected("CONVERSATION_EVIDENCE_NARROWER_SCOPE_REQUIRED")
-    memberships = evidence._memberships(session, rows, tenant, account)
-    if any(len(members) > 12 for members in memberships.values()):
-        raise StagedReadRejected("STAGED_CONVERSATION_MEMBERSHIP_INVALID")
-    authorized, receipts, locked = evidence._read_sources(
-        context, memberships, {key: value for key, value in filters.items() if key != "conversation_id"},
-        reuse_locked_sources=True, capture_versions=True,
-    )
+    with phase(Stage.SOURCE_FILTER):
+        memberships = evidence._memberships(session, rows, tenant, account)
+        if any(len(members) > 12 for members in memberships.values()):
+            raise StagedReadRejected("STAGED_CONVERSATION_MEMBERSHIP_INVALID")
+        authorized, receipts, locked = evidence._read_sources(
+            context, memberships, {key: value for key, value in filters.items() if key != "conversation_id"},
+            reuse_locked_sources=True, capture_versions=True,
+        )
     candidate_refs = {member[1] for members in memberships.values() for member in members}
     record(Decision.CANDIDATES, len(candidate_refs))
     record(Decision.DISCARDED, len(candidate_refs.difference(locked.get(ConversationMessageRow, {}))))
@@ -163,10 +167,11 @@ def _compile(snapshot, query, provider, *, item_budget, token_budget):
     candidates = evidence._rank_evidence(
         payload["rows"], memberships, payload["messages"], receipts, provider, query, payload["ranking_policy"],
     )
-    return compile_evidence_candidates(
-        payload["tenant"], query, candidates, item_budget=item_budget, token_budget=token_budget,
-        now=datetime.fromisoformat(payload["captured_at"]),
-    )
+    with phase(Stage.GROUND):
+        return compile_evidence_candidates(
+            payload["tenant"], query, candidates, item_budget=item_budget, token_budget=token_budget,
+            now=datetime.fromisoformat(payload["captured_at"]),
+        )
 
 
 class StagedConversationEvidenceReader:
@@ -208,14 +213,16 @@ class StagedConversationEvidenceReader:
             raise StagedReadRejected("STAGED_QUERY_INVALID")
 
         def capture(context, _epoch, _question, resource_id):
-            fence_index(context)
+            with phase(Stage.FENCE):
+                fence_index(context)
             snapshot, _ = _collect(
                 context, resource_id, prepared, self._filters, policy, context.arguments["now"],
             )
             return snapshot
 
         def verify(context, _epoch, snapshot, resource_id):
-            fence_index(context)
+            with phase(Stage.FENCE):
+                fence_index(context)
             current, locked = _collect(
                 context, resource_id, prepared, self._filters, evidence.load_policy(),
                 json.loads(snapshot.content)["captured_at"],
@@ -236,20 +243,28 @@ class StagedConversationEvidenceReader:
                 snapshot, query, prepared, item_budget=self._item_budget, token_budget=self._token_budget,
             )
             record(Decision.COMPILED, len(packet.items))
-            return _encode(self._render_packet(packet) if self._render_packet else packet.internal_payload())
+            with phase(Stage.SERIALIZE):
+                body = self._render_packet(packet) if self._render_packet else packet.internal_payload()
+                sample = request_sample.get()
+                if sample is not None and isinstance(body, dict) and isinstance(items := body.get("evidence"), list):
+                    sample.answer = Outcome.GROUNDED if items else Outcome.ABSTENTION
+                return _encode(body)
 
         authority = StagedClientContextAuthority(
             self._original, capture_fn=capture, verify_fn=verify,
             pg_consent=self._pg_consent, owner_scope_registry=self._owner_scope_registry,
         )
-        scope = authority.authorize_preparation(bearer=bearer, scope_ref=scope_ref)
-        if self._reserve_query(scope) is not True:
-            raise StagedReadRejected("STAGED_CONVERSATION_COST_DENIED")
-        record(Decision.ADMITTED)
+        with phase(Stage.ADMISSION):
+            scope = authority.authorize_preparation(bearer=bearer, scope_ref=scope_ref)
+            if self._reserve_query(scope) is not True:
+                raise StagedReadRejected("STAGED_CONVERSATION_COST_DENIED")
+            record(Decision.ADMITTED)
+            emit("admitted", Stage.ADMISSION)
         started = monotonic()
-        prepared = evidence.prepare_evidence_query(question, provider=self._provider)
-        prepared.vector = tuple(prepared.vector)
-        vectors.vector_literal(prepared.vector)
+        with phase(Stage.EMBEDDING):
+            prepared = evidence.prepare_evidence_query(question, provider=self._provider)
+            prepared.vector = tuple(prepared.vector)
+            vectors.vector_literal(prepared.vector)
         if monotonic() - started > 15:
             raise StagedReadRejected("STAGED_CONVERSATION_ENCODE_EXPIRED")
         policy = evidence.load_policy()

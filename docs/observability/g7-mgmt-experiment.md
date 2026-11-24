@@ -1,0 +1,45 @@
+# G7 · Bancada M1 no MGMT
+
+O MGMT é o Andy Ops Live Supervisor, servido pelo vhost operacional de Apache com autenticação Basic. A ROC-E2E é a camada usada para investigação de topologia, fluxo e traces. Grafana mantém autenticação de sessão e acesso anônimo desabilitado. O inventário observado em novembro de 2026 inclui Grafana 13.2.2, Infinity 4.0.0 para projeções, Zabbix 7.4.14 para inventário, recursos e estado operacional, OpenTelemetry Collector Contrib 0.161.0 para OTLP e Tempo 3.0.2 para traces. A fonte Tempo operacional tem UID `roc-tempo`. Os logs de decisão do leitor privado já têm correlação UUID e tempos monotônicos acumulados. O SDK já tem allowlist, W3C Trace Context, exportação em lote e proteção contra mensagens de exceção.
+
+A métrica Prometheus interna do Collector descreve o próprio Collector. O contrato versionado do Tempo não provisiona metrics-generator ou Prometheus para séries contextuais. O Zabbix cobre infraestrutura e métricas operacionais gerais. A lacuna é a duração de trechos reais do leitor e a associação dessas durações com cada oferta e execução M1.
+
+## Caminho e limites do diagnóstico
+
+1. Uvicorn aplica concorrência antes do ASGI. O cliente experimental contabiliza 503 do transporte, timeout de cliente e latência por oferta. ASGI lê e valida o corpo, observa a espera pelo pool AnyIO e tem watcher de desconexão.
+2. A thread resolve identidade e escopo, abre as transações do leitor, confirma consentimento e epoch e aplica o orçamento existente. O encoder local serializa acesso via lock e roda ONNX na mesma thread. O tempo do lock de `encode` e o tempo de inferência são etapas distintas.
+3. A captura verifica a cerca, lista o pool vetorial, lê vínculos e fontes, filtra consentimento e separa evidência. A compilação reconstrói segmentos, aplica ranking, fundamenta e serializa. Todos os parâmetros de autoridade são os existentes.
+4. A revalidação abre novas transações, repete a coleta da janela e valida todas as dependências antes do envio autorizado. A fronteira de envio mede o callback real. Uma desconexão pode cancelar o envio enquanto a thread ainda trabalha. O tempo pós-desconexão é observado separadamente.
+5. Os relógios monotônicos medem durações dentro de cada processo. O painel de etapas apresenta tempos inclusivos. Em TRACE, o exclusivo observado desconta a união das fases integralmente contidas e exclui a marca de pós-desconexão do cálculo. As lacunas da coleta permanecem no residual. O painel de trace calcula a união dos intervalos das esperas conhecidas, com o residual explicitamente marcado como processamento ou espera sem evidência. Consultar os spans, de forma aninhada, para localizar os trechos. Tempo SQL do driver inclui espera PostgreSQL e processamento. SQLSTATE 55P03 identifica expiração de lock. 57014 permanece cancelamento ou deadline de SQL. Esgotamento de pool, timeout de aplicação, recusa por autoridade, evidência insuficiente, saturação de transporte e cancelamento têm categorias próprias. A aquisição de conexão bem-sucedida e parte dos locks entram no tempo residual. Triagem de um timeout que não chegou ao ASGI depende do cliente.
+6. Corpo, consulta, trechos, embeddings, SQL e parâmetros, bearer, IDs de tenant e conteúdo de exceção ficam fora dos spans e da projeção. O cliente sintético cria um W3C traceparent aleatório por oferta. Apenas transporte loopback pode fornecer esse pai no perfil experimental. Correlation ID e trace são usados para investigação, nunca como dimensões da agregação. A projeção expõe contagens e histogramas por nomes fixos de etapa e resultado.
+
+## Aba permanente do Live Supervisor
+
+A entrada no MGMT é **CONTEXT / PERFORMANCE**. LIVE usa a projeção same-origin
+na cadência existente de 1,5 s e reaproveita a amostra de COMPUTE já carregada.
+TRACE liga a decomposição e logs correlacionados ao Explore autenticado do
+Tempo. COMPARE exibe execuções identificadas e sinaliza quando o histórico
+não contém as mesmas evidências ou configurações. A aba preserva o tema do
+Supervisor e o fluxo de autenticação Apache/Grafana. A configuração nativa
+continua opt-in.
+
+A disponibilidade considera ofertas já concluídas e exclui somente recusas
+de autoridade observadas no cliente e correlacionadas com o servidor. A
+exatidão entre respostas HTTP 200 inclui abstenções válidas. As contagens
+de respostas com evidência, abstenções e recusas são exibidas separadamente.
+
+## MGMT isolado
+
+
+A projeção experimental segue o padrão dos readers Infinity do ROC-E2E. O dashboard `roc-g7-contextual-m1` entra na pasta ROC-E2E via provisionamento, com UID Tempo igual ao operacional. Compatibilidade com o perfil isolado depende de Grafana e Infinity das versões acima. A cópia de laboratório usa Tempo e Grafana nas mesmas versões, sem publicar no MGMT de produção. O leitor M1 envia OTLP HTTP apenas ao Tempo descartável, por loopback ou túnel SSH. Grafana consulta a projeção somente leitura por HTTP restrito via loopback e lê Tempo pelo datasource existente. Operador acessa Grafana com autenticação e túnel. A projeção processa os registros que a bancada já conserva em seu diretório privado. Não há nova base persistente ou portal. A réplica isolada de Tempo existe para separar o fluxo experimental da base de produção. Nenhum serviço exige IP dedicado ou estático.
+
+- `ops/observability/grafana/g7/reader.py --runs <diretório privado> --baseline <baseline-m1-199.json>` serve JSON read-only. O dashboard usa o provisionamento `provider.lab.yaml` e `datasource.lab.yaml`. A URL precisa resolver para o mesmo serviço loopback na visão de Grafana.
+- Inicie o M1 no CI02 através de `run-ci02.sh <stage privado existente> <SHA publicado> 6 instrumented`, com `M1_RUN_ROOT`, `M1_OTLP_ENDPOINT` e `M1_CONDITION` fixados. Reusa o PostgreSQL descartável, modelo e dependências verificados do laboratório anterior. Use `control` para desligar spans e eventos do processo servidor. Ambos os modos guardam as mesmas métricas de oferta do cliente, os mesmos manifestos e recursos de processo. A bancada não é um endpoint administrativo do MGMT.
+- Abra a pasta ROC-E2E e selecione a execução pelo ID e SHA. O refresh é 5 s. A aba de saúde mostra oferta e conclusão à medida que chegam. Localização ordena etapas por p95 e distingue esperas de segmentos inclusivos. A investigação oferece o trace no Tempo e o recorte de eventos correlacionados.
+- O manifesto guarda SHA, árvore, worker, imagem PostgreSQL, execução Python nativa, corpus, lista de queries codificada por digest, configuração, horário e versão da instrumentação. O manifesto histórico parcial é marcado como tal. O painel explicita diferenças entre ensaios. Compare overhead por perfil e medidas pareadas. Diferença de latência em um sistema já saturado exige múltiplas repetições para inferência causal.
+
+O M1 preserva a baseline 49/120 em 199 segmentos, 42 timeouts da aplicação, 29 do cliente e p95 10,02 s. Registros históricos seguem em custódia. O perfil de seis ondas conserva carga, orçamento, índices, algoritmo, concorrência, pool, cache e timeout. Os braços diagnósticos de uma onda admitem `M1_SEGMENTS=63|128|199` e `M1_BURST=1|2|4`. A taxa total e as capacidades configuradas permanecem fixas. São observações exploratórias. Compare volumes com a mesma rajada e rajadas com o mesmo volume.
+
+A condição padrão `fresh_process_after_endpoint_warmup` executa dois probes HTTP autorizados antes da carga. Em ensaio de uma onda, `fresh_read_path_before_endpoint_warmup` oferece a carga antes do primeiro probe HTTP. A segunda condição mede o início frio da leitura, com corpus já indexado e modelo usado pelo indexador. O manifesto permite distinguir esse caso de uma inicialização a frio de todos os componentes. O modo COMPARE sinaliza a diferença de condição.
+
+Falhas de contrato são reproduzidas com dados sintéticos e descartáveis. Se uma recusa de outro componente anteceder a falha injetada, registre a interferência no resultado do braço. Em caso de indisponibilidade OTLP, os logs locais preservam a evidência de duração. [Trilha G7](https://github.com/escossio/attention-router/issues/459) · [Baseline #428](https://github.com/escossio/attention-router/issues/428#issuecomment-7135078309)
