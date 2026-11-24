@@ -14,7 +14,7 @@ O Compose dá ao processo UID 65532, sistema de arquivos somente leitura e names
 
 ## Promoção e reversão
 
-O executor `private_runtime_release.py` exige o comentário de autorização na #428 e o digest do artefato. Antes do Compose, ele confere G5/G6, checkout, checks, atestação, digest, label de revisão e entrypoint da imagem local. Passe o arquivo baixado com `--archive`. O pré-voo verifica o atestado do arquivo pelo workflow privado em main, no SHA integrado, e compara o manifesto do arquivo ao digest da aprovação. O operador carrega o mesmo arquivo após o pré-voo autorizado. O executor confere o ID local pelo digest da configuração e usa esse ID no Compose com `--pull never`. As operações de aplicar e reverter conservam suas autorizações próprias.
+O executor `private_runtime_release.py` exige o comentário de autorização na #428 e o digest do artefato. Antes do Compose, ele confere G5/G6, checkout, checks, atestação, digest, label de revisão e entrypoint da imagem local. Passe o arquivo baixado com `--archive`. O pré-voo verifica o atestado do arquivo pelo workflow privado em main, no SHA integrado, e compara o manifesto do arquivo ao digest da aprovação. O operador carrega o mesmo arquivo após o pré-voo autorizado. O executor confere o ID local pelo digest da configuração ou, no armazenamento containerd, pelo manifesto OCI e seu Descriptor. Ele usa o ID conferido no Compose com `--pull never`. As operações de aplicar e reverter conservam suas autorizações próprias.
 
 | Operação | Alvo | Resultado |
 | --- | --- | --- |
