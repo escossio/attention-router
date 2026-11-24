@@ -4,7 +4,9 @@ from sqlalchemy import text
 from test_passive_vectors import drain, NOW
 
 from attention_router.application import conversation_hybrid as h
-from attention_router.application.conversation_relevance import features, evidence_reason, terms
+from attention_router.application.conversation_relevance import (
+    evidence_reason, features, order_candidates, prepare_candidate_features, terms,
+)
 
 pytest_plugins = ("test_passive_vectors",)
 
@@ -57,6 +59,22 @@ def test_not_question_matching_or_missing_answer_type(query, content, reason):
     assert (
         evidence_reason(features(query, content) | {"similarity": 0.99}, h.load_policy()) == reason
     )
+
+
+@pytest.mark.parametrize("query", [
+    "Há menção a uma gravação sonora?", "Qual foi a duração de 20 minutos?",
+    "Quanto foi o pagamento?", "O pagamento foi confirmado?",
+])
+def test_prepared_scores_preserve_lexical_vector_and_rrf_order(query):
+    candidates = [
+        {"id": "a", "content_text": "Autor 1: O áudio durou 20 minutos.", "similarity": 0.84},
+        {"id": "b", "content_text": "Autor 2: O pagamento foi confirmado?", "similarity": 0.67},
+        {"id": "c", "content_text": "Autor 2: O pagamento de 35 reais foi confirmado.", "similarity": 0.67},
+    ]
+    prepared = prepare_candidate_features(query)
+    for strategy in ("vector", "lexical", "hybrid"):
+        args = dict(strategy=strategy, config=h.load_policy())
+        assert order_candidates(candidates, query, prepared=prepared, **args) == order_candidates(candidates, query, **args)
 
 
 @pytest.mark.postgres
@@ -320,6 +338,7 @@ def test_large_neighbor_is_bounded_and_offsets_verifiable(db, provider):
             t,
             "default",
             provider,
+            {r["id"]: h.v._source_version(r) for r in h.v.sources(s, t, "default", c)},
         )
         neighbor = next(m for m in result["messages"] if m["id"] == previous)
         assert neighbor["context_truncated"] and neighbor["char_start"] > 0

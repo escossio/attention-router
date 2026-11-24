@@ -7,6 +7,7 @@ from typing import Any, Final
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from attention_router.application.context_claim_support import claim_timeline_support_is_current
 from attention_router.application.platform.registry import capability_and_version
 from attention_router.core.capabilities import CapabilityAvailability
 from attention_router.infrastructure.hashing import stable_hash
@@ -153,6 +154,8 @@ def _recommendation_from_claim(
     value = claim.object_json or {}
     context = claim.context or {}
 
+    if not claim_timeline_support_is_current(session, claim, tenant_id=tenant_id, now=now, for_action=True):
+        return None
     if claim_is_owner_private(session, claim=claim):
         return None
     if claim_is_owner_non_actionable(session, claim=claim):

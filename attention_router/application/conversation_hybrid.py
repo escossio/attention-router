@@ -54,14 +54,22 @@ def _pool(
     message_type=None,
     start_at=None,
     end_at=None,
+    include_versions=False,
+    pool_limit=5001,
     **unused,
 ):
+    versions = (
+        ", g.generation AS segment_generation, g.updated_at AS segment_updated_at"
+        ", g.policy_version AS segment_policy, e.created_at AS embedding_created_at"
+        ", e.embedding::text AS indexed_embedding"
+        if include_versions else ""
+    )
     return [
         dict(r)
         for r in v.sql(
             s,
-            """SELECT g.id,g.content_text,g.conversation_id,g.content_hash,g.source_hash,g.start_at,g.end_at,
-      1-(e.embedding <=> CAST(:vector AS vector)) AS similarity
+            f"""SELECT g.id,g.content_text,g.conversation_id,g.content_hash,g.source_hash,g.start_at,g.end_at,
+      1-(e.embedding <=> CAST(:vector AS vector)) AS similarity{versions}
       FROM conversation_vector_segments g JOIN conversation_embeddings e ON e.segment_id=g.id AND e.tenant_id=g.tenant_id AND e.source_account=g.source_account AND e.content_hash=g.content_hash
       WHERE g.tenant_id=:tenant AND g.source_account=:account AND g.state='READY' AND e.model=:model AND e.model_revision=:revision
       AND (CAST(:conversation AS varchar) IS NULL OR g.conversation_id=:conversation)
@@ -72,7 +80,7 @@ def _pool(
         AND (CAST(:kind AS varchar) IS NULL OR m.message_type=:kind)
         AND (CAST(:start AS timestamptz) IS NULL OR m.sent_at>=:start)
         AND (CAST(:end AS timestamptz) IS NULL OR m.sent_at<=:end))
-      ORDER BY g.id LIMIT 5001""",
+      ORDER BY g.id LIMIT :pool_limit""",
             tenant=tenant_id,
             account=source_account,
             conversation=conversation_id,
@@ -84,18 +92,19 @@ def _pool(
             model=provider.model,
             revision=provider.revision,
             vector=v.vector_literal(vector),
+            pool_limit=pool_limit,
         ).mappings()
     ]
 
 
-def _context(session, result, tenant, account, provider):
-    rows = v.sources(session, tenant, account, result["conversation_id"])
+def _context(session, result, tenant, account, provider, versions):
+    rows = v.sources(session, tenant, account, result["conversation_id"], require_current_receipts=True)
     positions = {m["id"]: i for i, m in enumerate(rows)}
     selected = {m["id"] for m in result["messages"]}
     present = [positions[mid] for mid in selected if mid in positions]
     if len(present) != len(selected):
         return None
-    if any(rows[positions[m["id"]]]["index_text"] != m["text"] for m in result["messages"]):
+    if any(v._source_version(rows[positions[mid]]) != versions[mid] for mid in selected):
         return None
     additions = []
     for index, boundary, side in [
@@ -138,6 +147,7 @@ def _context(session, result, tenant, account, provider):
         )
         fragments = provider.fragments(neighbor["index_text"])
         lo, hi = fragments[-1] if side == "PREVIOUS" else fragments[0]
+        versions[neighbor["id"]] = v._source_version(neighbor)
         additions.append(
             {k: neighbor.get(k) for k in fields}
             | {
@@ -243,6 +253,7 @@ def search(
         if not reasons:
             reasons["NO_ELIGIBLE_EVIDENCE"] = 1
         return response([], "INSUFFICIENT_EVIDENCE")
+    versions = {}
     raw = v.search(
         session,
         tenant_id=tenant_id,
@@ -251,6 +262,7 @@ def search(
         limit=50,
         provider=QueryProvider(provider, query, vector),
         _candidate_ids=[r["id"] for r in selected],
+        _source_versions=versions,
         **filters,
     )
     valid = {r["segment_id"]: r for r in raw["results"]}
@@ -274,27 +286,14 @@ def search(
             else ["SOURCE_HASH_REVALIDATED", "DIAGNOSTIC_NEIGHBOR_NOT_SUFFICIENCY"],
             relevance_policy=POLICY_VERSION,
         )
-        contextual = _context(session, result, tenant_id, source_account, provider)
+        contextual = _context(session, result, tenant_id, source_account, provider, versions[row["id"]])
         if contextual is None:
             reasons["SOURCE_CHANGED_OR_REVOKED"] = reasons.get("SOURCE_CHANGED_OR_REVOKED", 0) + 1
             continue
         results.append(contextual)
         if len(results) >= limit:
             break
-    # Membership revocation during the request also fails closed.
-    if not v.authorized(session, tenant_id):
-        raise PermissionError("VECTOR_SCOPE_REVOKED")
-    current = {
-        r["id"]: (r["content_hash"], r["source_hash"])
-        for r in v.sql(
-            session,
-            "SELECT id,content_hash,source_hash FROM conversation_vector_segments WHERE id=ANY(:ids) AND state='READY'",
-            ids=[r["segment_id"] for r in results],
-        ).mappings()
-    }
-    fresh = [
-        r for r in results if current.get(r["segment_id"]) == (r["content_hash"], r["source_hash"])
-    ]
+    fresh = v.revalidated_results(session, tenant_id, source_account, results, versions)
     if len(fresh) != len(results):
         reasons["SOURCE_CHANGED_OR_REVOKED"] = (
             reasons.get("SOURCE_CHANGED_OR_REVOKED", 0) + len(results) - len(fresh)
