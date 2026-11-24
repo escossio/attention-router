@@ -56,6 +56,7 @@ def test_ci_image_reproduces_versioned_dispatcher_without_host_package():
     assert "COPY ops/provisioning/distributed-ci-lab/control-plane/parse-postgres-discovery.py " in image
     assert "COPY ops/provisioning/github-app-control-plane/distributed_postgres_check.py " in image
     assert "COPY ops/provisioning/github-app-control-plane/distributed_shadow_checks.py " in image
+    assert "COPY ops/provisioning/github-app-control-plane/merged_main_evidence.py " in image
     assert "COPY ops/provisioning/github-app-control-plane/probe.py " in image
     assert "COPY ops/provisioning/github-app-control-plane/publisher-containers/preflight.py " in image
     assert "useradd -u 10001 -g 10001 -d /home/ci" in image

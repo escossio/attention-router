@@ -12,6 +12,8 @@ import types
 
 import pytest
 
+from test_merged_main_evidence import HEAD, NEXT, GitHub
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLISHER = (
@@ -80,27 +82,37 @@ def test_manual_merged_main_cli_uses_exact_commit_and_real_execution(tmp_path, m
     postgres = suite == "postgres"
     module = load_publisher(PUBLISHER.with_name("distributed_postgres_check.py") if postgres else PUBLISHER)
     sha, other = "a" * 40, "b" * 40
-    repo = module.TARGET_REPO
-    pr = {"number": 18 if case == "wrong_number" else 17,
-          "state": "open" if case in {"open", "ordinary_pr"} else "closed", "merged": case != "unmerged",
-          "merge_commit_sha": other if case == "wrong_sha" else sha, "head": {"sha": sha},
-          "base": {"ref": "other" if case == "wrong_base" else "main",
-                   "repo": {"full_name": "other/project" if case == "wrong_repo" else repo}}}
+    api = GitHub(number=17)
+    api.credentials(monkeypatch)
+    api.pr.update(
+        number=18 if case == "wrong_number" else 17,
+        state="open" if case in {"open", "ordinary_pr"} else "closed",
+        merged=case != "unmerged",
+        merge_commit_sha=other if case == "wrong_sha" else sha,
+    )
+    if case in {"ordinary_pr", "closed_without_flag"}:
+        api.pr["head"]["sha"] = sha
+    if case == "wrong_repo":
+        api.pr["base"]["repo"]["full_name"] = "other/project"
+    if case == "wrong_base":
+        api.pr["base"]["ref"] = "other"
+    api.main = NEXT if case == "main_advanced" else sha
     comparisons = []
 
-    def read_github(path, token):
-        if path == f"/repos/{repo}/pulls/17":
-            return 200, pr
-        assert path == f"/repos/{repo}/compare/{sha}...main?per_page=1"
-        comparisons.append(path)
-        if case == "unreadable":
-            return 503, {}
-        if case == "transport_error":
-            raise OSError("connection unavailable")
-        status = "ahead" if case == "main_advanced" else "identical"
-        if case == "diverged" or case == "moved_during_run" and len(comparisons) == 2:
-            status = "diverged"
-        return 200, {"status": status, "merge_base_commit": {"sha": other if case == "wrong_ancestor" else sha}}
+    def read_github(path, token, **kwargs):
+        if case in {"ordinary_pr", "closed_without_flag"}:
+            return 200, api.pr
+        if "/compare/" in path:
+            comparisons.append(path)
+            if case == "unreadable":
+                return 503, {}
+            if case == "transport_error":
+                raise OSError("connection unavailable")
+            if case == "diverged" or (case == "moved_during_run" and len(comparisons) == 2):
+                return 200, {"status": "diverged", "merge_base_commit": {"sha": sha}}
+            if case == "wrong_ancestor":
+                return 200, {"status": "identical", "merge_base_commit": {"sha": HEAD}}
+        return api.transport(path, token, **kwargs)
 
     published, created, executed, impacts = [], [], [], []
     monkeypatch.setattr(module, "installation_token", lambda: "synthetic")

@@ -110,6 +110,7 @@ Install the generic scheduler and shadow publisher only after the branch has pas
 
 ```bash
 install -m 0755 andy-ci-distributed-suite /usr/local/lib/andy-ci/bin/andy-ci-distributed-suite
+install -m 0644 merged_main_evidence.py /usr/local/lib/andy-github-app/merged_main_evidence.py
 install -m 0755 distributed_shadow_checks.py /usr/local/lib/andy-github-app/distributed_shadow_checks.py
 install -m 0644 andy-github-distributed-shadow-ci.service /etc/systemd/system/andy-github-distributed-shadow-ci.service
 systemctl daemon-reload
@@ -127,7 +128,29 @@ python distributed_shadow_checks.py run --merged-main --suite python --pr "$PR_N
 python distributed_postgres_check.py run --merged-main --pr "$PR_NUMBER" --sha "$MERGE_SHA"
 ```
 
-Each command validates the closed, merged PR in `escossio/attention-router`, its base branch and merge SHA, and GitHub's comparison with current `main`. It runs the full requested suite, verifies the worker receipt and checks main ancestry again before publishing success. Inspect both check-run IDs on that merge SHA. A refused target exits nonzero before check creation. This explicit path uses the existing App credentials and worker schedulers. Daemons continue to consume open-PR events through their existing queue.
+Add `--preflight` to either command to exercise the same App and
+target validation without creating a check, accessing the queue or dispatching.
+The existing provisioning credential mints a short-lived token in memory.
+GraphQL uses a read query. The preflight shows only the validation outcome and
+public identifiers.
+
+The gate validates the App ID, repository installation and permissions,
+then confirms the PR and merged target with authenticated REST and GraphQL.
+If REST omits `merge_commit_sha` or returns null, the PR timeline must
+corroborate the GraphQL merge commit. A non-null REST or timeline value that
+disagrees refuses the operation. Git objects must agree with the exact PR
+head tree. A merge commit must have the certified head as its second parent.
+A squash or rebase may have one parent and must still preserve the certified
+tree and authenticated PR-to-commit link. Integrations that combine a different
+tree require a new approved head before promotion.
+
+The requested integration commit must be an ancestor of a pinned, stable main
+ref. The active rules must bind both distributed checks to the official App.
+The latest required checks on the exact PR head must pass. The PR, main ref
+and integration evidence are rechecked before the publisher reports success.
+An ambiguous check write is reconciled by check ID, SHA, App and terminal status
+when possible. If it remains unreconciled, inspect the official check on GitHub
+before making another attempt. Daemons continue to consume open-PR events.
 
 ## Event-driven continuation stages
 

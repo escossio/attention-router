@@ -16,7 +16,10 @@ from pathlib import Path
 sys.path.insert(0, "/usr/local/lib/andy-github-app")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from probe import CONFIG, INSTALLATION_CONFIG, load_env, make_jwt, request_json
-from ci_impact_policy import get_pr_impact, merged_main_target
+from ci_impact_policy import get_pr_impact
+from merged_main_evidence import (
+    APP_ID, EvidenceError, PublicationUncertain, authenticate, finalize, validate,
+)
 
 DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
 TARGET_REPO = "escossio/attention-router"
@@ -357,25 +360,43 @@ def execute_exact_sha(
 ) -> tuple[str, str, int | None]:
     if merged_main and (repo != TARGET_REPO or suite != "python"):
         return "REFUSED", "Merged-main certification requires attention-router/python.", None
-    token = installation_token()
-    request = partial(request_json, token=token)
     if merged_main:
-        if not merged_main_target(repo, pr_number, sha, request):
-            return "REFUSED", "Merged PR and main ancestry did not verify.", None
+        try:
+            app = authenticate(request_json)
+            integration = validate(app, repo, pr_number, sha)
+        except EvidenceError as error:
+            return "REFUSED", str(error), None
+        token = app.token
     else:
+        token = installation_token()
         pr = current_pr(token, repo, pr_number)
         current_sha = ((pr.get("head") or {}).get("sha") or "").lower()
         if pr.get("state") != "open" or current_sha != sha.lower():
             return "STALE", "PR is closed or head SHA moved before execution.", None
 
-    check_id = create_check(token, repo, sha, pr_number, suite)
+    request = partial(request_json, token=token)
+    try:
+        check_id = create_check(token, repo, sha, pr_number, suite)
+    except (OSError, RuntimeError, ValueError):
+        if not merged_main:
+            raise
+        return "UNRECONCILED", "MERGED_MAIN_CHECK_CREATION_UNRECONCILED", None
+
+    def finish(conclusion, title, detail):
+        def publish():
+            complete_check(token, repo, check_id, conclusion, title, detail)
+
+        if merged_main:
+            finalize(app, check_id, sha, REPOSITORIES[repo]["suites"][suite], conclusion, publish)
+        else:
+            publish()
+
     try:
         if repo == TARGET_REPO and not merged_main:
             impact = get_pr_impact(repo, pr_number, sha, request)
             if not impact.required(suite):
                 detail = impact.summary(suite)
-                complete_check(token, repo, check_id, "success",
-                               f"NOT APPLICABLE: distributed-{suite} (no test run)", detail)
+                finish("success", f"NOT APPLICABLE: distributed-{suite} (no test run)", detail)
                 return "NOT_APPLICABLE", detail, check_id
         project = REPOSITORIES[repo]["project"]
         result = run_command([CI_RUN, project, sha, suite])
@@ -390,41 +411,25 @@ def execute_exact_sha(
             if merged_main:
                 if not verified_main_python(summary, sha, result.stdout):
                     raise RuntimeError("MERGED_MAIN_PYTHON_RECEIPT_INVALID")
-                if not merged_main_target(repo, pr_number, sha, request):
-                    raise RuntimeError("MERGED_MAIN_ANCESTRY_CHANGED")
-            complete_check(
-                token,
-                repo,
-                check_id,
-                "success",
-                f"Distributed {suite} shadow gate passed",
-                detail,
-            )
+                if integration != validate(app, repo, pr_number, sha):
+                    raise EvidenceError("CONTRADICTION", "integration_changed_during_run")
+            finish("success", f"Distributed {suite} shadow gate passed", detail)
             return "PASS", detail, check_id
 
         detail += "\n\n" + result.stdout[-12000:]
-        complete_check(
-            token,
-            repo,
-            check_id,
-            "failure",
-            f"Distributed {suite} shadow gate failed",
-            detail,
-        )
+        finish("failure", f"Distributed {suite} shadow gate failed", detail)
         return "FAIL", detail, check_id
+    except PublicationUncertain as error:
+        return "UNRECONCILED", str(error), check_id
     except Exception as exc:
         detail = f"{type(exc).__name__}: {exc}"
         try:
-            complete_check(
-                token,
-                repo,
-                check_id,
-                "failure",
-                f"Distributed {suite} shadow gate error",
-                detail,
-            )
-        finally:
+            finish("failure", f"Distributed {suite} shadow gate error", detail)
+        except PublicationUncertain as error:
+            return "UNRECONCILED", str(error), check_id
+        except Exception:
             return "FAIL", detail, check_id
+        return "FAIL", detail, check_id
 
 
 def run_job(job: dict) -> None:
@@ -476,11 +481,23 @@ def main() -> None:
     run.add_argument("--suite", required=True)
     run.add_argument("--merged-main", action="store_true", help="Certify the integrated commit of a merged main PR.")
 
+    run.add_argument("--preflight", action="store_true", help="Validate merged main and App authority without publishing or dispatching.")
     sub.add_parser("daemon")
     args = parser.parse_args()
 
     if args.command == "daemon":
         daemon()
+        return
+    if args.preflight:
+        if not args.merged_main or args.suite != "python" or args.repo != TARGET_REPO:
+            parser.error("--preflight requires the canonical --merged-main target")
+        try:
+            result = validate(authenticate(request_json), args.repo, args.pr, args.sha.lower())
+        except EvidenceError as error:
+            print(f"PREFLIGHT=REFUSED {error}")
+            raise SystemExit(1) from None
+        print(f"PREFLIGHT=PASS app={APP_ID} pr={result.number} head={result.head} "
+              f"commit={result.commit} tree={result.tree} strategy={result.strategy} head_checks={len(result.checks)}")
         return
     if not args.merged_main:
         ensure_tables()
