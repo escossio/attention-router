@@ -1,5 +1,6 @@
 """Local textual support, not entailment, truth probability or action authority."""
 
+from dataclasses import dataclass
 import math
 import re
 from attention_router.application.context_retrieval import _normalize, _tokens, _candidate_score
@@ -49,19 +50,13 @@ def lexical_score(query, content):
     )[0]
 
 
-def features(query, content):
-    wanted, present = terms(query), terms(content)
-    hit = wanted & present
-    numbers = {t for t in wanted if t.isdigit()}
-    lookup_query = bool(
+def _is_lookup_query(query):
+    return bool(
         re.search(r"\b(mencao|referencia|mencionad\w*|citad\w*)\b", _normalize(query))
     ) or "aparece imediatamente depois" in _normalize(query)
-    question_only_support = False
-    if not lookup_query and wanted and wanted <= present and "?" in content:
-        pieces = re.split(r"(?m)^Autor\s+\d+:\s*|(?<=[.!?])\s+", content)
-        question_only_support = not any(
-            wanted <= terms(piece) and "?" not in piece for piece in pieces
-        )
+
+
+def _required_answer_type(query, lookup_query):
     normalized_query = _normalize(query)
     required = None
     if not lookup_query:
@@ -73,6 +68,61 @@ def features(query, content):
             required = "DURATION"
         elif re.search(r"\b(quanto|qual valor|qual preco)\b", normalized_query):
             required = "AMOUNT"
+    return required
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCandidateFeatures:
+    """Pure query information, scoped to one retrieval call."""
+
+    query: str
+    wanted: frozenset[str]
+    numbers: frozenset[str]
+    lexical_tokens: frozenset[str]
+    lookup_query: bool
+    required: str | None
+    substitutions: tuple[tuple[re.Pattern[str], str], ...]
+
+    def content_terms(self, content):
+        content = _normalize(re.sub(r"(?m)^Autor\s+\d+:\s*", "", content))
+        for pattern, replacement in self.substitutions:
+            content = pattern.sub(replacement, content)
+        return _tokens(content) - GENERIC
+
+
+def prepare_candidate_features(query: str) -> PreparedCandidateFeatures:
+    wanted = frozenset(terms(query))
+    lookup = _is_lookup_query(query)
+    return PreparedCandidateFeatures(
+        query, wanted, frozenset(t for t in wanted if t.isdigit()),
+        frozenset(_tokens(query)), lookup, _required_answer_type(query, lookup),
+        tuple((re.compile(r"\b" + re.escape(phrase) + r"\b"), key)
+              for key, phrases in CONCEPTS.items()
+              for phrase in sorted(phrases, key=len, reverse=True)),
+    )
+
+
+def features(query, content, *, prepared=None):
+    if prepared is None:
+        wanted, present = terms(query), terms(content)
+        numbers = {t for t in wanted if t.isdigit()}
+        lookup_query = _is_lookup_query(query)
+        content_terms = terms
+    else:
+        wanted, numbers, lookup_query = prepared.wanted, prepared.numbers, prepared.lookup_query
+        content_terms = prepared.content_terms
+        present = content_terms(content)
+    hit = wanted & present
+    question_only_support = False
+    if not lookup_query and wanted and wanted <= present and "?" in content:
+        pieces = re.split(r"(?m)^Autor\s+\d+:\s*|(?<=[.!?])\s+", content)
+        question_only_support = not any(
+            wanted <= content_terms(piece) and "?" not in piece for piece in pieces
+        )
+    if prepared is None:
+        required = _required_answer_type(query, lookup_query)
+    else:
+        required = prepared.required
     patterns = {
         "TIME": r"\b(?:hoje|amanha|ontem|segunda|terca|quarta|quinta|sexta|sabado|domingo)\b|\b\d{1,2}(?:[:/]\d{1,2}|h\b)",
         "DURATION": r"\b\d+(?:[.,]\d+)?\s*(?:segundos?|minutos?|horas?|dias?)\b",
@@ -82,7 +132,7 @@ def features(query, content):
     if required in patterns:
         pieces = re.split(r"(?m)^Autor\s+\d+:\s*|(?<=[.!?])\s+", content)
         answer_type_supported = any(
-            wanted <= terms(piece)
+            wanted <= content_terms(piece)
             and "?" not in piece
             and re.search(patterns[required], _normalize(piece))
             for piece in pieces
@@ -96,12 +146,19 @@ def features(query, content):
         "matched_anchor_count": len(hit),
         "coverage": len(hit) / max(1, len(wanted)),
         "missing_query_value": bool(numbers - present),
-        "lexical_score": lexical_score(query, content),
+        "lexical_score": lexical_score(query, content) if prepared is None else _candidate_score(
+            query_tokens=prepared.lexical_tokens, predicate="", searchable_value=content, confidence=0
+        )[0],
     }
 
 
-def order_candidates(candidates, query, *, strategy, config):
-    rows = [dict(r, **features(query, r["content_text"])) for r in candidates]
+def order_candidates(candidates, query, *, strategy, config, prepared=None):
+    if prepared is None:
+        rows = [dict(r, **features(query, r["content_text"])) for r in candidates]
+    else:
+        if prepared.query != query:
+            raise ValueError("PREPARED_RANK_QUERY_MISMATCH")
+        rows = [dict(r, **features(query, r["content_text"], prepared=prepared)) for r in candidates]
     by_vector = sorted(rows, key=lambda r: (-r["similarity"], r["id"]))
     by_lexical = sorted(rows, key=lambda r: (-r["lexical_score"], r["id"]))
     # Expanded lexical coverage is separately observable, never replaces raw vector similarity.

@@ -120,3 +120,52 @@ Quando houver conflito entre aceleração e rastreabilidade, reduza a velocidade
 - capacidade de retomada.
 
 Uma sessão mais lenta que mantém o trilho é preferível a uma sessão rápida que exige reconstrução posterior.
+
+## Promoção do contexto da Andy
+
+O [gate #428](https://github.com/escossio/attention-router/issues/428) guarda a
+decisão por operação. O registro é um comentário de aprovação do mantenedor
+`escossio` na issue, em um bloco JSON. Campos obrigatórios incluem `version`
+(1), `gate`, `operation`, `pr`, `sha`, `approval_ref` e `expires_at`
+com fuso UTC, além de `artifact_sha256`. Use uma referência opaca para a autorização privada. Mantenha
+catálogo, ACL, backup, identificadores produtivos e credenciais em guarda
+privada.
+
+O pré-voo confere a aprovação, uma revisão favorável no head final do PR, a
+integração à main, os checks obrigatórios, as execuções distribuídas Python e PostgreSQL e o checkout limpo no SHA aprovado.
+Os checks do commit resultante precisam ter sido executados sobre ele, mesmo
+quando o PR foi homologado antes do merge. A decisão na issue registra a
+evidência de execução dos workers ao lado dos checks obrigatórios.
+
+`release_schema.py` e `release_roles.py` exigem `--github-comment-id` em
+`apply` e `rollback`. O documento privado desses runners deve conter o mesmo
+`approval_ref`. Use uma autorização própria por operação. O pré-voo é
+executado antes da abertura da conexão PostgreSQL e se soma à verificação de
+catálogo, backup e exclusão de execução concorrente. Use um checkout
+dedicado, sem arquivos locais ou ignorados. Execute a partir da raiz com
+`PYTHONPATH=. python -B` para carregar a aplicação local e preservar a árvore
+limpa. Mantenha configuração e artefatos privados fora do checkout.
+
+G5/G6 exigem `artifact_sha256` no registro e a imagem OCI identificada pelo
+digest no pré-voo. O GitHub CLI precisa oferecer `gh attestation verify` para
+validar a proveniência do workflow oficial no SHA aprovado. O entrypoint
+do runtime deve chamar o verificador e consumir a mesma referência OCI sem
+substituir o digest. Registre o resultado saneado na #428.
+
+
+### Ensaio e janela G3/G4
+
+1. Registre na #428 o SHA integrado e as evidências de revisão e CI desse SHA. Em G3/G4, `artifact_sha256` é o SHA-256 retornado por `source_digest(root)` do runner no checkout aprovado. Um rebase ou novo merge exige nova verificação.
+2. Em janela autorizada, o operador usa o mecanismo institucional de backup e testa a restauração do mesmo arquivo em destino isolado. Confere a revisão, catálogo, ACL e integridade da restauração. Arquivo e prova ficam em guarda privada. O runner confere o hash do arquivo, o horário e o registro privado da restauração. A cópia e a restauração são anteriores à aprovação da janela.
+3. Capture o catálogo e a ACL com `audit_live_readonly.py --output <nova-pasta-privada>` e a conexão de auditoria autorizada. G3 requer o catálogo de 0067. G4 requer nova captura em 0072, antes da instalação dos papéis. O rollback de cada gate usa o catálogo anterior à respectiva aplicação. `check` verifica em transação somente leitura. Guarde identificadores, ACL e material de backup fora do GitHub.
+4. Drene os escritores na janela. Use o runner aprovado e `APP_ENV=production` com a conexão do alvo fornecida pelo mecanismo de credenciais. G3 usa `release_schema.py` e G4 usa `release_roles.py` com um arquivo de escopo privado contendo `tenant`, `owner`, `account` e a lista `indexer_roles` dos indexadores legados que receberão a projeção limitada. O rollback deve referenciar o mesmo escopo. Os limites por instrução são 1,5 s para lock e 20 s para execução. Contenção, drift, aprovação expirada ou veto da ferramenta encerram a janela e retornam à #428. O procedimento de recuperação usa esse mesmo canal autorizado.
+5. G3 avança de 0067 a 0072 com a tabela de inscrição e os consentimentos vazios. G4 instala papéis sem senha e com RLS, e concede aos indexadores aprovados acesso à projeção e à função exclusiva do escritor. Conferir isolamento, leitura da conta correta e progresso real de um escritor legado antes de autorizar o próximo gate.
+6. O caminho inverso requer drenar os processos, verificar a ausência de inscrições e consentimentos, reverter G4 e depois G3, com aprovações distintas. O retorno a 0067 preserva tabelas, índice e linhas de Contacts. Tombstones ou histórico de autoridade podem impedir downgrade. Nesse caso preserve os dados, encerre a transação e leve a decisão de recuperação ao proprietário com o backup já restaurado em ambiente isolado.
+
+O formato privado dos campos de aprovação está em `verify_approval` de
+`release_schema.py`. A confirmação e o campo `operation` identificam a
+ação exata. A aprovação GitHub associa o mesmo `approval_ref` ao digest,
+ao PR e ao prazo. A entrega de credenciais, inscrição de tenant e ativação
+do canário exigem suas próprias decisões posteriores.
+
+Na homologação descartável, o executor de CI deve criar e identificar seu próprio banco antes de selecionar a configuração de teste. O harness versionado faz essa associação apenas no contêiner efêmero.

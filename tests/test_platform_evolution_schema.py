@@ -269,6 +269,8 @@ def test_platform_evolution_migration_waves_form_one_chain():
         "0068_google_contacts_cache": "0067_vector_lock_order",
         "0069_cognitive_revocation_v0": "0068_google_contacts_cache",
         "0070_context_integrity": "0069_cognitive_revocation_v0",
+        "0071_context_source_consent": "0070_context_integrity",
+        "0072_context_index_fence": "0071_context_source_consent",
     }
     for revision, expected_parent in operational_parents.items():
         assert revisions[revision].down_revision == expected_parent
