@@ -103,7 +103,7 @@ def project_pool(events, selected_trace=""):
     durations = defaultdict(list)
     selected_events = []
     metrics = Counter()
-    capacity = occupied = latest_mono = None
+    capacity = latest_mono = None
     sampler_state = "unavailable"
     for row in events:
         event, trace = row["event"], row.get("trace")
@@ -129,8 +129,6 @@ def project_pool(events, selected_trace=""):
             selected_events.append(row)
         if type(row.get("pool_limit")) is int:
             capacity = row["pool_limit"]
-        if type(row.get("pool_used")) is int:
-            occupied = row["pool_used"]
         if event == "pool_request":
             waiting[lease] = row
         elif event == "pool_checkout":
@@ -171,6 +169,7 @@ def project_pool(events, selected_trace=""):
     open_rows = [open_row(record["checkout"], "ocupada", record["checkout"].get("monotonic_ns"),
                           record["last"], record["lock_samples"]) for record in active.values()]
     open_rows.extend(open_row(row, "aguardando", row.get("monotonic_ns"), row) for row in waiting.values())
+    occupied = len(active) if capacity is not None else None
     return {
         "pool_summary": [{"capacity": capacity, "occupied": occupied,
                           "free": max(0, capacity - occupied) if capacity is not None and occupied is not None else None,

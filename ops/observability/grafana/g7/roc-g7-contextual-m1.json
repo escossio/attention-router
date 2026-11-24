@@ -735,7 +735,7 @@
     {
       "id": 13,
       "type": "table",
-      "title": "Pool PostgreSQL · ciclo observado",
+      "title": "Pool PostgreSQL · posses contextuais e livres estimadas",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "roc-g7"

@@ -79,7 +79,7 @@ def build():
           numbers=("count",))
     panel("Amostras de ocupação. Pool PostgreSQL e executor AnyIO", "capacity",
           strings=("resource",), numbers=("time", "used", "limit", "waiting"), height=6)
-    panel("Pool PostgreSQL · ciclo observado", "pool_summary", strings=("sampler_state",),
+    panel("Pool PostgreSQL · posses contextuais e livres estimadas", "pool_summary", strings=("sampler_state",),
           numbers=("capacity", "occupied", "free", "waiting", "timeouts", "lock_samples", "pool_lock_timeouts"))
     panel("Aquisições e posses abertas · fase inferida pelo trace", "pool_open",
           strings=("state", "phase", "trace"), numbers=("age_ms", "sql_count", "outside_cursor_ms", "lock_samples"))

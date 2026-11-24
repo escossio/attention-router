@@ -162,7 +162,11 @@ def test_pool_acquisition_and_return_are_observed_before_request_completes(tmp_p
                     else:
                         raise AssertionError("expected real queue timeout")
                     request_sample.get().disconnected = monotonic_ns()
-                finished = reader.project_pool(observed(), trace)
+                events = observed()
+                # Two overlapping checkins may both sample a remaining checkout
+                # before SQLAlchemy returns their records to the queue.
+                next(row for row in events if row["event"] == "pool_checkin")["pool_used"] = 1
+                finished = reader.project_pool(events, trace)
                 assert not finished["pool_open"]
                 [summary] = finished["pool_summary"]
                 assert (summary["free"], summary["waiting"], summary["timeouts"]) == (1, 0, 1)

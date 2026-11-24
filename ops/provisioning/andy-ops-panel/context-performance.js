@@ -86,7 +86,7 @@
   function renderPool(payload) {
     const summary = payload.pool_summary?.[0];
     table(find("pool-summary"), "Pool PostgreSQL · amostras e contagens observadas", [
-      ["capacity", "Capacidade"], ["occupied", "Ocupadas"], ["free", "Livres"],
+      ["capacity", "Capacidade"], ["occupied", "Posses contextuais abertas"], ["free", "Livres estimadas"],
       ["waiting", "Aquisições abertas"], ["timeouts", "Timeouts de aquisição"],
       ["sampler_state", "Amostragem PostgreSQL"], ["lock_samples", "Amostras Lock"],
       ["pool_lock_timeouts", "Locks com timeout"],
@@ -147,7 +147,7 @@
       ["p95_ms", "p95 ms"], ["p99_ms", "p99 ms"], ["driver_ms", "SQL agregado ms"],
     ], payload.components);
     const latest = new Map((payload.capacity || []).map((row) => [row.resource, row]));
-    table(find("capacity"), "Ocupação observada", [
+    table(find("capacity"), "Ocupação amostrada nos callbacks", [
       ["resource", "Recurso"], ["used", "Ocupado na amostra"], ["limit", "Limite"], ["waiting", "Fila observada"],
     ], Array.from(latest.values()).map((row) => row.resource === "pool_capacity" ? {...row, waiting:null} : row));
     renderPool(payload);
