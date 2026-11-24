@@ -232,3 +232,31 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 1.4rem 2rem; }
 .network-table th, .network-table td { padding: 11px 9px; text-align: left; border-bottom: 1px solid #25362f; white-space: nowrap; }
 .network-table th { color: #91a99b; font-size: 11px; letter-spacing: .06em; }
 @media (max-width: 760px) { .network-summary { grid-template-columns: 1fr; } .network-content { padding: 8px; } }
+
+/* Context performance uses the supervisor's existing tokens and cards. */
+#context-health {grid-template-columns:repeat(auto-fit,minmax(156px,1fr));}
+.context-header {flex-wrap: wrap;}
+.context-toolbar {display:flex; flex-wrap:wrap; align-items:end; gap:.65rem; margin:.8rem 0;}
+.context-toolbar label {display:grid; gap:.35rem; color:var(--muted); font-size:.78rem; min-width:0;}
+.context-modes {display:flex; flex-wrap:wrap; gap:.35rem;}
+.context-mode, .context-toolbar select {
+  background:var(--panel); color:var(--text); border:1px solid var(--line);
+  border-radius:.42rem; padding:.55rem .7rem; min-height:42px; font:inherit;
+}
+.context-mode {cursor:pointer; font-size:.75rem; font-weight:800; letter-spacing:.04em;}
+.context-mode.is-active {color:var(--green); box-shadow:inset 0 2px var(--green);}
+.context-toolbar select {max-width:min(100%, 50ch); text-overflow:ellipsis;}
+.context-mode:focus-visible, .context-toolbar select:focus-visible {outline:2px solid var(--green); outline-offset:2px;}
+.context-body[hidden] {display:none;}
+.context-table {overflow-x:auto; margin-top:.65rem;}
+.context-table table {border-collapse:collapse; text-align:left; width:100%; font-size:.82rem;}
+.context-table th, .context-table td {padding:.55rem; border-bottom:1px solid var(--line); white-space:nowrap;}
+.context-table th {color:var(--muted);}
+.context-worker .node-card {margin-top:.65rem; max-width:48rem;}
+.context-table .muted {margin:.7rem 0;}
+.context-worker [data-context-unavailable] {display:block; margin:.65rem 0;}
+@media (max-width:580px) {
+  .context-toolbar {align-items:stretch;}
+  .context-toolbar label {width:100%;}
+  .context-toolbar select {max-width:100%;}
+}

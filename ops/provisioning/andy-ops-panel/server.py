@@ -16,6 +16,7 @@ import time
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from context_performance import context_performance
 from message_tracing import sample_message_traces
 from transport_observability import sample_transport_observability
 
@@ -46,6 +47,7 @@ def _observability_url(name: str) -> str | None:
 GOACCESS_URL = _observability_url("ANDY_OPS_GOACCESS_URL")
 DOZZLE_URL = _observability_url("ANDY_OPS_DOZZLE_URL")
 NETWORK_OSI_URL = _observability_url("ANDY_OPS_NETWORK_OSI_URL")
+CONTEXT_TEMPO_URL = _observability_url("ANDY_OPS_CONTEXT_TEMPO_URL")
 OBSERVABILITY_CONFIG = {
     "goaccess_url": GOACCESS_URL,
     "dozzle_url": DOZZLE_URL,
@@ -801,8 +803,15 @@ class OpsHandler(SimpleHTTPRequestHandler):
                 payload = json.loads(json.dumps(_state))
             self._json(payload)
             return
+        if path in ("/api/context-performance/runs", "/api/context-performance/view"):
+            route = path.rsplit("/", 1)[-1]
+            payload, status = context_performance(route, urlsplit(self.path).query)
+            self._json(payload, status)
+            return
         if path == "/api/config":
-            self._json({"observability": OBSERVABILITY_CONFIG})
+            self._json({"observability": {
+                **OBSERVABILITY_CONFIG, "context_tempo_url": CONTEXT_TEMPO_URL,
+            }})
             return
         super().do_GET()
 

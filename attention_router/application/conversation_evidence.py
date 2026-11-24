@@ -20,6 +20,7 @@ from attention_router.application.conversation_segments import segment_messages
 from attention_router.application.platform.artifacts import context_receipt_refusal
 from attention_router.application.context_canary_gate import canary_configured
 from attention_router.config import settings  # noqa: F401 - test compatibility
+from attention_router.observability.context_performance import Stage, phase
 from attention_router.infrastructure.artifact_models import ArtifactReceiptRow
 from attention_router.infrastructure.models import InboundEventRow, VoiceTranscriptionRow
 
@@ -216,9 +217,10 @@ def _content_matches(plan, row):
 def _rank_evidence(
     rows, memberships, authorized, receipts, provider, query, policy, *, prepared_features=None,
 ):
-    plans = {
-        plan["id"]: plan for messages in authorized.values() for plan in segment_messages(messages, provider)
-    }
+    with phase(Stage.REBUILD):
+        plans = {
+            plan["id"]: plan for messages in authorized.values() for plan in segment_messages(messages, provider)
+        }
     eligible = []
     for row in rows:
         plan = plans.get(row["id"])
@@ -233,7 +235,8 @@ def _rank_evidence(
             continue
         eligible.append({**row, "content_text": plan["text"]})
 
-    ranked = order_candidates(eligible, query, strategy="hybrid", config=policy, prepared=prepared_features)
+    with phase(Stage.RANK):
+        ranked = order_candidates(eligible, query, strategy="hybrid", config=policy, prepared=prepared_features)
     topic = contrast_topic_query(query)
     prepared_topic = prepare_candidate_features(topic) if topic is not None else None
     result = []

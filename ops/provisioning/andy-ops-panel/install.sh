@@ -17,6 +17,8 @@ install -m 0644 "$ROOT_DIR/transport_observability.py" "$INSTALL_DIR/transport_o
 install -m 0644 "$ROOT_DIR/message_tracing.py" "$INSTALL_DIR/message_tracing.py"
 install -m 0644 "$ROOT_DIR/index.html" "$INSTALL_DIR/index.html"
 install -m 0644 "$ROOT_DIR/app.js" "$INSTALL_DIR/app.js"
+install -m 0644 "$ROOT_DIR/context-performance.js" "$INSTALL_DIR/context-performance.js"
+install -m 0644 "$ROOT_DIR/context_performance.py" "$INSTALL_DIR/context_performance.py"
 install -m 0644 "$ROOT_DIR/styles.css" "$INSTALL_DIR/styles.css"
 install -m 0644 "$ROOT_DIR/README.md" "$INSTALL_DIR/README.md"
 install -m 0644 "$ROOT_DIR/andy-ops-panel.service" "$SERVICE_PATH"
@@ -28,9 +30,11 @@ fi
 
 python3 -m py_compile \
   "$INSTALL_DIR/server.py" \
+  "$INSTALL_DIR/context_performance.py" \
   "$INSTALL_DIR/transport_observability.py" \
   "$INSTALL_DIR/message_tracing.py"
 node --check "$INSTALL_DIR/app.js" >/dev/null
+node --check "$INSTALL_DIR/context-performance.js" >/dev/null
 
 systemctl daemon-reload
 systemctl enable --now andy-ops-panel.service

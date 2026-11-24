@@ -149,3 +149,26 @@ The original V1 was validated on the engineering control plane with live CPU sam
 ## WhatsApp container observability
 
 Andy Ops reads the Transport `/status`, the Observer bind-mounted `status.json`, and read-only `docker inspect`/`docker logs` for the three WhatsApp containers. The panel process needs read access to Docker and `/var/lib/attention-router/whatsapp-observer/status.json`. Host CDP and retired systemd units are not operational sensors. Missing page evidence is reported as `OBSERVABILITY_GAP`, never as a measured zero. Docker logs are projected to a fixed event-name allowlist; message bodies and credentials are not returned. The boot/AppArmor orchestration issue remains a separate follow-up.
+
+## Context / Performance
+
+A aba **CONTEXT / PERFORMANCE** conserva os estilos, componentes, navegação e
+estados do Live Supervisor. É configurada por
+`ANDY_OPS_CONTEXT_PERFORMANCE_SOURCE`, uma origem HTTP loopback com porta
+explícita. Os endpoints same-origin da aba fazem somente leitura. O Apache e
+seus controles de autenticação continuam na frente do painel. A URL opcional
+`ANDY_OPS_CONTEXT_TEMPO_URL` abre o Explore autenticado no Grafana existente.
+Sem essa URL, a aba usa a origem de NETWORK / OSI, quando disponível.
+
+- **LIVE** atualiza durante o ensaio, apropria a amostra de COMPUTE do worker já
+  presente em `/api/status` e distingue cadência, execução, esperas conhecidas
+  e resultados. Memória do host fica como indisponível quando COMPUTE não a
+  recolhe. Memória do processo de bancada tem fonte própria e rótulo explícito.
+- **TRACE** exibe as etapas, correlação e intervalos observados, e permite abrir
+  o trace nativo no Tempo. Tempos inclusivos de etapas aninhadas não são somados.
+- **COMPARE** usa Run ID, SHA e fingerprints do experimento. Resultados com
+  condições incompatíveis ou metadados parciais são sinalizados.
+
+O operador inicia a bancada descartável no worker e acompanha a aba. A aba
+não dispõe de API de execução, reprocessamento, autoridade ou publicação.
+Veja o [contrato experimental](../../observability/g7-mgmt-experiment.md).

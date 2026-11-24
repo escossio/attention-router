@@ -22,6 +22,7 @@
 
   <nav class="tabs" aria-label="Painéis">
     <button class="tab is-active" data-tab="compute" type="button">COMPUTE</button>
+    <button class="tab" data-tab="context-performance" type="button">CONTEXT / PERFORMANCE</button>
     <button class="tab" data-tab="chat" type="button">CHAT / CONSOLE</button>
     <button class="tab" data-tab="transport" type="button">AGENT / TRANSPORT</button>
     <button class="tab" data-tab="goaccess" type="button">HTTP / GOACCESS</button>
@@ -251,9 +252,56 @@
       </div>
     </section>
 
+    <section id="context-performance-view" class="view" aria-labelledby="context-performance-heading">
+      <section class="dispatch-strip context-header">
+        <div>
+          <span class="section-label">CONTEXT / PERFORMANCE</span>
+          <h2 id="context-performance-heading">Desempenho contextual</h2>
+          <small id="context-freshness" class="muted">Aguardando telemetria</small>
+        </div>
+        <span id="context-state" class="source-state" role="status">AGUARDANDO</span>
+      </section>
+      <div class="context-toolbar">
+        <div class="context-modes" role="group" aria-label="Modos de desempenho contextual">
+          <button type="button" class="context-mode is-active" data-context-mode="live" aria-pressed="true">LIVE</button>
+          <button type="button" class="context-mode" data-context-mode="trace" aria-pressed="false">TRACE</button>
+          <button type="button" class="context-mode" data-context-mode="compare" aria-pressed="false">COMPARE</button>
+        </div>
+        <label>Execução <select id="context-run"><option value="">Aguardando execução</option></select></label>
+        <button class="context-mode" type="button" id="context-compute">VER COMPUTE</button>
+      </div>
+      <section id="context-live" class="context-body">
+        <div id="context-health" class="chat-grid"></div>
+        <div id="context-worker" class="context-worker"></div>
+        <div id="context-components"></div>
+        <div id="context-capacity"></div>
+        <div id="context-outcomes"></div>
+      </section>
+      <section id="context-trace" class="context-body" hidden>
+        <div class="context-toolbar">
+          <label>Consulta <select id="context-trace-select"><option value="">Escolha uma consulta</option></select></label>
+          <a class="observability-open" id="context-tempo" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR NO TEMPO</a>
+        </div>
+        <div id="context-critical"></div>
+        <div id="context-timeline"></div>
+      </section>
+      <section id="context-compare" class="context-body" hidden>
+        <div class="context-toolbar">
+          <label>Baseline <select id="context-baseline"><option value="historical">M1 histórico · 199 segmentos</option></select></label>
+          <span id="context-comparability" class="source-state"></span>
+        </div>
+        <div id="context-summary-comparison"></div>
+        <div id="context-distribution"></div>
+        <div id="context-stage-comparison"></div>
+        <div id="context-resource-comparison"></div>
+        <div id="context-identities"></div>
+      </section>
+    </section>
+
     <section id="error-panel" class="error-panel" hidden></section>
   </main>
 
   <script src="app.js" defer></script>
+  <script src="context-performance.js" defer></script>
 </body>
 </html>

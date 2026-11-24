@@ -14,6 +14,8 @@ from hashlib import sha256
 from time import monotonic
 from typing import Callable, Protocol
 
+from attention_router.observability.context_performance import Stage, phase
+
 
 class StagedReadRejected(ValueError):
     """A request failed closed before disclosure."""
@@ -119,7 +121,7 @@ class StagedRead:
         if not callable(deliver):
             raise ValueError("STAGED_DELIVERY_CALLBACK_REQUIRED")
 
-        with self._authority.capture(
+        with phase(Stage.CAPTURE), self._authority.capture(
             bearer=bearer, scope_ref=scope_ref, question=question,
         ) as snapshot:
             if not isinstance(snapshot, AuthorizedSnapshot):
@@ -131,7 +133,8 @@ class StagedRead:
 
         # No consent, row, session, or database lock should be held here.
         started = monotonic()
-        body = self._compute(snapshot.evidence, question)
+        with phase(Stage.COMPILE):
+            body = self._compute(snapshot.evidence, question)
         if monotonic() - started > self._budget:
             raise StagedReadRejected("STAGED_COMPUTE_EXPIRED")
         if type(body) is not bytes or len(body) > self._max_body:
@@ -139,7 +142,7 @@ class StagedRead:
 
         # The delivery callback executes *within* final authorization.
         # Final source/receipt/version/epoch/expiry verification belongs to the adapter.
-        with self._authority.delivery_gate(
+        with phase(Stage.REVALIDATE), self._authority.delivery_gate(
             bearer=bearer, scope_ref=scope_ref, question=question,
             snapshot=snapshot,
         ):
