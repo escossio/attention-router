@@ -227,6 +227,7 @@ class Projection:
         metadata, folder = self.metadata(run)
         events = events_in(folder)
         result = summarize(events)
+        result["run_state"] = "complete" if any(row["event"] == "load_complete" for row in events) else "running"
         result["metadata"] = [{"field": key, "value": str(value)} for key, value in
                               (metadata | metadata["config"]).items() if key != "config"]
         baseline = query.get("baseline", ["historical"])[0]

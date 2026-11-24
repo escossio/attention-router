@@ -13,7 +13,18 @@ A métrica Prometheus interna do Collector descreve o próprio Collector. O cont
 5. Os relógios monotônicos medem durações dentro de cada processo. O painel de etapas apresenta tempos inclusivos. O painel de trace calcula a união dos intervalos das esperas conhecidas, com o residual explicitamente marcado como processamento ou espera sem evidência. Consultar os spans, de forma aninhada, para localizar os trechos. Tempo SQL do driver inclui espera PostgreSQL e processamento. SQLSTATE 55P03 identifica expiração de lock. 57014 permanece cancelamento ou deadline de SQL. Esgotamento de pool, timeout de aplicação, recusa por autoridade, evidência insuficiente, saturação de transporte e cancelamento têm categorias próprias. A aquisição de conexão bem-sucedida e parte dos locks entram no tempo residual. Triagem de um timeout que não chegou ao ASGI depende do cliente.
 6. Corpo, consulta, trechos, embeddings, SQL e parâmetros, bearer, IDs de tenant e conteúdo de exceção ficam fora dos spans e da projeção. O cliente sintético cria um W3C traceparent aleatório por oferta. Apenas transporte loopback pode fornecer esse pai no perfil experimental. Correlation ID e trace são usados para investigação, nunca como dimensões da agregação. A projeção expõe contagens e histogramas por nomes fixos de etapa e resultado.
 
+## Aba permanente do Live Supervisor
+
+A entrada no MGMT é **CONTEXT / PERFORMANCE**. LIVE usa a projeção same-origin
+na cadência existente de 1,5 s e reaproveita a amostra de COMPUTE já carregada.
+TRACE liga a decomposição e logs correlacionados ao Explore autenticado do
+Tempo. COMPARE exibe execuções identificadas e sinaliza quando o histórico
+não contém as mesmas evidências ou configurações. A aba preserva o tema do
+Supervisor e o fluxo de autenticação Apache/Grafana. A configuração nativa
+continua opt-in.
+
 ## MGMT isolado
+
 
 A projeção experimental segue o padrão dos readers Infinity do ROC-E2E. O dashboard `roc-g7-contextual-m1` entra na pasta ROC-E2E via provisionamento, com UID Tempo igual ao operacional. Compatibilidade com o perfil isolado depende de Grafana e Infinity das versões acima. A cópia de laboratório usa Tempo e Grafana nas mesmas versões, sem publicar no MGMT de produção. O leitor M1 envia OTLP HTTP apenas ao Tempo descartável, por loopback ou túnel SSH. Grafana consulta a projeção somente leitura por HTTP restrito via loopback e lê Tempo pelo datasource existente. Operador acessa Grafana com autenticação e túnel. A projeção processa os registros que a bancada já conserva em seu diretório privado. Não há nova base persistente ou portal. A réplica isolada de Tempo existe para separar o fluxo experimental da base de produção. Nenhum serviço exige IP dedicado ou estático.
 
