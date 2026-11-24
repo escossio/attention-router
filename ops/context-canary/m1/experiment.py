@@ -9,7 +9,8 @@ import resource
 import socket
 from threading import Event, Thread
 from time import time_ns
-from uuid import uuid4
+from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
 from attention_router.config import settings
 from attention_router.observability.tracing import configure_tracing, flush_tracing, reset_tracing
@@ -130,7 +131,10 @@ def experiment(bodies, controls, order, cases, segment_count):
         return Inactive()
     if os.environ["M1_TELEMETRY_MODE"] == "instrumented":
         endpoint = os.environ["M1_TRACE_ENDPOINT"]
-        if endpoint != "http://127.0.0.1:19418/v1/traces":
+        target = urlsplit(endpoint)
+        if (target.scheme != "http" or target.hostname != "127.0.0.1" or not target.port
+                or target.path != "/v1/traces" or target.username or target.password
+                or target.query or target.fragment):
             raise ValueError("M1 loopback telemetry endpoint required")
         # The generic pytest fixture intentionally disables telemetry for all tests.
         # Re-enable only after this synthetic, opted-in trial has reached M1.
@@ -144,7 +148,10 @@ def experiment(bodies, controls, order, cases, segment_count):
         finally:
             readiness.end()
     root = Path(configured)
-    run_id = str(uuid4())
+    identity = os.environ.get("M1_RUN_ID")
+    run_id = str(UUID(identity)) if identity else str(uuid4())
+    if identity is not None and (identity != run_id or UUID(run_id).version != 4):
+        raise ValueError("M1 supervised run ID must be a canonical UUIDv4")
     folder = root / run_id
     folder.mkdir(mode=0o700, parents=True)
     config = {
