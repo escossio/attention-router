@@ -66,6 +66,16 @@ def _claim(
     )
     session.add(actor)
     session.flush()
+    from tests.test_personal_context_sequences import _event
+
+    evidence = [
+        _event(
+            session, occurred_at=now - timedelta(days=days), event_type="LOCATION_ARRIVAL",
+            pattern_key="gym-arrival", provenance="android-location",
+            tenant_id=actor.tenant_id, actor_id=actor.actor_key,
+        )
+        for days in (2, 1, 0)
+    ]
     row = MemoryClaimRow(
         id=new_id(),
         subject_actor_id=actor.id,
@@ -89,7 +99,7 @@ def _claim(
         context={
             "hypothesis_id": "pattern-gym",
             "snapshot_fingerprint": "sha256:test",
-            "evidence_timeline_event_ids": ["evt-1", "evt-2", "evt-3"],
+            "evidence_timeline_event_ids": [event.id for event in evidence],
             "source_provenance": ["android-location", "calendar"],
             "occurrence_count": 3,
             "anomaly_count": 0,
@@ -313,3 +323,18 @@ def test_relationship_scoped_recurrence_stays_non_actionable(session):
         actor_key=ACTOR,
         now=stamp,
     ) == ()
+
+
+def test_recommendation_disappears_when_one_support_is_withdrawn(session):
+    from attention_router.infrastructure.models import TimelineEventRow
+
+    stamp = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    _ensure_tenant(session)
+    sync_capability_definitions(session)
+    claim = _claim(session, now=stamp)
+    scope = dict(tenant_id=DEFAULT_TENANT_ID, actor_key=ACTOR, now=stamp)
+    assert len(build_context_recommendations(session, **scope)) == 1
+    event = session.get(TimelineEventRow, claim.context["evidence_timeline_event_ids"][1])
+    event.metadata_json = {"technical_evidence_revoked": True}
+    session.flush()
+    assert build_context_recommendations(session, **scope) == ()

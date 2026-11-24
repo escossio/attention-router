@@ -1,12 +1,17 @@
 """Passive vector indexing/search. Does not call cognition, decision, ingress or transport."""
 
+from datetime import UTC, datetime
 import json
 import math
 import time
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from attention_router.application.context_index_fence import fence_index_writer_if_installed
 from attention_router.application.conversation_segments import digest, segment_messages, POLICY
 from attention_router.application.conversation_embedding import DIMENSIONS, get_provider
 from attention_router.application.memory import _redact
+from attention_router.application.platform.artifacts import context_receipt_refusal
+from attention_router.infrastructure.vector_attachment_provenance import VECTOR_ATTACHMENT_PROVENANCE
 
 KIND = "conversation_vector_v1"
 
@@ -46,7 +51,54 @@ def stat(session, name, amount=1):
     )
 
 
-def sources(session, tenant, account, conversation):
+def _current_attachment_receipts(session, rows):
+    linked = {
+        r["id"]: r for r in rows if "artifact_id" in (r["metadata"] or {})
+        or "artifact_receipt_id" in (r["metadata"] or {})
+    }
+    if not linked:
+        return set()
+    has_projection, can_read_sources = sql(session, """
+        SELECT has_table_privilege(to_regclass('public.andy_vector_attachment_provenance'), 'SELECT'),
+               has_table_privilege('public.artifact_receipts', 'SELECT')
+               AND has_table_privilege('public.artifacts', 'SELECT')
+               AND has_table_privilege('public.inbound_events', 'SELECT')
+    """).one()
+    if has_projection:
+        relation = "public.andy_vector_attachment_provenance"
+    elif can_read_sources:
+        # Preserve the caller's own RLS policies, including contextual readers.
+        relation = f"({VECTOR_ATTACHMENT_PROVENANCE}) AS provenance"
+    else:
+        return set()
+    receipts = sql(session, f"SELECT * FROM {relation} WHERE message_id=ANY(:ids)", ids=list(linked))
+    now = datetime.now(UTC)
+    valid = set()
+    for proof in receipts.mappings():
+        source = linked[proof["message_id"]]
+        meta = source["metadata"]
+        deadline = {"context_expires_at": proof["expires_at"]} if proof["has_expiry"] else {}
+        if (
+            proof["receipt_id"] == meta.get("artifact_receipt_id")
+            and proof["artifact_id"] == meta.get("artifact_id")
+            and proof["source_message_id"] == source["source_message_id"]
+            and proof["inbound_id"] == meta.get("source_inbound_event_id")
+            and (source["message_type"] != "VOICE" or proof["transcription_id"] == source["transcription_id"])
+            and context_receipt_refusal(deadline, now=now) is None
+        ):
+            valid.add(source["id"])
+    return valid
+
+
+def sources(session, tenant, account, conversation, *, require_current_receipts=False):
+    return sources_for_conversations(
+        session, tenant, account, (conversation,), require_current_receipts=require_current_receipts,
+    )
+
+
+def sources_for_conversations(
+    session, tenant, account, conversations, *, require_current_receipts=False, message_ids=None,
+):
     scope(session, tenant, account)
     if not authorized(session, tenant):
         return []
@@ -56,16 +108,19 @@ def sources(session, tenant, account, conversation):
             """SELECT m.*,v.id AS transcription_id,v.status AS stt_status,v.transcript_text
       FROM conversation_messages m JOIN conversation_threads t ON t.id=m.conversation_id AND t.tenant_id=m.tenant_id AND t.source_account=m.source_account
       LEFT JOIN voice_transcriptions v ON v.inbound_event_id=m.metadata->>'source_inbound_event_id' AND v.tenant_id=m.tenant_id
-      WHERE m.tenant_id=:t AND m.source_account=:a AND m.conversation_id=:c AND m.source='wwebjs'
+      WHERE m.tenant_id=:t AND m.source_account=:a AND m.conversation_id=ANY(:conversations) AND m.source='wwebjs'
+      AND (CAST(:message_ids AS varchar[]) IS NULL OR m.id=ANY(:message_ids))
       AND m.searchable AND m.sensitivity_class<>'SECRET' AND m.message_type IN ('TEXT','VOICE')
       ORDER BY m.sent_at,m.source_message_id,m.id""",
             t=tenant,
             a=account,
-            c=conversation,
+            conversations=list(conversations),
+            message_ids=list(message_ids) if message_ids is not None else None,
         )
         .mappings()
         .all()
     )
+    receipts = _current_attachment_receipts(session, rows) if require_current_receipts else set()
     result = []
     for original in rows:
         r = dict(original)
@@ -73,7 +128,13 @@ def sources(session, tenant, account, conversation):
         if (
             meta.get("deleted") is True
             or meta.get("revoked") is True
+            or meta.get("context_evidence_withdrawn") is True
             or meta.get("content_state") in ("DELETED", "REVOKED")
+        ):
+            continue
+        if (
+            require_current_receipts and r["id"] not in receipts
+            and ("artifact_receipt_id" in meta or "artifact_id" in meta or meta.get("attachment_state") == "READY")
         ):
             continue
         if r["message_type"] == "VOICE":
@@ -108,6 +169,44 @@ def vector_literal(value):
     if len(value) != DIMENSIONS or not all(math.isfinite(v) for v in value):
         raise ValueError("VECTOR_INVALID")
     return "[" + ",".join(format(float(v), ".9g") for v in value) + "]"
+
+
+
+def _retry_fence_contended_job(session_factory, job_id, claimed):
+    """Release only our matching lease after an index-fence lock conflict.
+
+    The claim was already committed, but no derived index write from this
+    attempt committed. Restoring it to PENDING avoids 180s lease starvation.
+    A generation/lease compare prevents overwriting another worker's claim.
+    """
+    with session_factory() as session:
+        sql(session, "SET LOCAL lock_timeout='100ms'")
+        row = sql(
+            session, "SELECT status,payload FROM queue WHERE id=:id FOR UPDATE",
+            id=job_id,
+        ).mappings().first()
+        if (
+            row is None or row["status"] != "PROCESSING"
+            or row["payload"].get("generation") != claimed.get("generation")
+            or row["payload"].get("lease_until") != claimed.get("lease_until")
+            or row["payload"].get("attempts") != claimed.get("attempts")
+        ):
+            session.rollback()
+            return False
+        payload = dict(row["payload"])
+        payload.update(
+            lease_until=0,
+            next_at=time.time() + 1,
+            attempts=max(0, int(payload["attempts"]) - 1),
+        )
+        sql(
+            session,
+            "UPDATE queue SET status='PENDING',payload=CAST(:payload AS jsonb) WHERE id=:id",
+            payload=json.dumps(payload),
+            id=job_id,
+        )
+        session.commit()
+        return True
 
 
 def cycle(session_factory, provider=None, batch_size=4):
@@ -147,6 +246,7 @@ def cycle(session_factory, provider=None, batch_size=4):
         )
         with session_factory() as s:
             sql(s, "SET LOCAL lock_timeout='100ms'")
+            fence_index_writer_if_installed(s, tenant)
             rows = sources(s, tenant, account, conversation)
             plans = segment_messages(rows, provider)
             # Generation lock follows source reads; a concurrently committed mutation wins.
@@ -246,6 +346,7 @@ def cycle(session_factory, provider=None, batch_size=4):
         with session_factory() as s:
             sql(s, "SET LOCAL lock_timeout='100ms'")
             scope(s, tenant, account)
+            fence_index_writer_if_installed(s, tenant)
             current = sql(
                 s, "SELECT payload FROM queue WHERE id=:id FOR UPDATE", id=job["id"]
             ).scalar()
@@ -296,8 +397,19 @@ def cycle(session_factory, provider=None, batch_size=4):
             s.commit()
         return len(pending)
     except Exception as exc:
+        if (
+            isinstance(exc, DBAPIError) and getattr(exc.orig, "sqlstate", None) == "55P03"
+            and getattr(getattr(exc.orig, "diag", None), "message_primary", None) == "CONTEXT_INDEX_FENCE_BUSY"
+        ):
+            # Index writes were rolled back. Requeue only our own still-current
+            # job claim, keeping contention separate from actual worker failure.
+            # The existing lease remains a bounded fallback if requeue fails.
+            _retry_fence_contended_job(session_factory, job["id"], payload)
+            return 0
         with session_factory() as s:
             sql(s, "SET LOCAL lock_timeout='100ms'")
+            if payload["attempts"] >= 5:
+                fence_index_writer_if_installed(s, payload["tenant_id"])
             current = sql(
                 s, "SELECT payload FROM queue WHERE id=:id FOR UPDATE", id=job["id"]
             ).scalar()
@@ -328,6 +440,38 @@ def cycle(session_factory, provider=None, batch_size=4):
         raise
 
 
+def _source_version(row):
+    metadata = row["metadata"] or {}
+    return (
+        row.get("context_revision"), row["source_fingerprint"], row["transcription_id"],
+        metadata.get("source_inbound_event_id"), metadata.get("artifact_id"), metadata.get("artifact_receipt_id"),
+    )
+
+
+def revalidated_results(session, tenant, account, results, versions):
+    """Recheck the original and any context-only neighbors at materialization."""
+    if not authorized(session, tenant):
+        raise PermissionError("VECTOR_SCOPE_REVOKED")
+    if not results:
+        return []
+    current = {
+        row["id"]: (row["content_hash"], row["source_hash"])
+        for row in sql(session, """
+            SELECT id,content_hash,source_hash FROM conversation_vector_segments
+            WHERE tenant_id=:tenant AND source_account=:account AND id=ANY(:ids) AND state='READY'
+        """, tenant=tenant, account=account, ids=[r["segment_id"] for r in results]).mappings()
+    }
+    rows = sources_for_conversations(
+        session, tenant, account, {r["conversation_id"] for r in results}, require_current_receipts=True,
+        message_ids={m["id"] for r in results for m in r["messages"]},
+    )
+    live = {row["id"]: _source_version(row) for row in rows}
+    return [
+        r for r in results if current.get(r["segment_id"]) == (r["content_hash"], r["source_hash"])
+        and all(live.get(m["id"]) == versions[r["segment_id"]][m["id"]] for m in r["messages"])
+    ]
+
+
 def search(
     session,
     *,
@@ -343,6 +487,7 @@ def search(
     limit=10,
     provider=None,
     _candidate_ids=None,
+    _source_versions=None,
 ):
     started = time.monotonic()
     scope(session, tenant_id, source_account)
@@ -394,11 +539,12 @@ def search(
         .all()
     )
     results = []
+    versions = {} if _source_versions is None else _source_versions
     cache = {}
     for c in candidates:
         cid = c["conversation_id"]
         if cid not in cache:
-            live = sources(session, tenant_id, source_account, cid)
+            live = sources(session, tenant_id, source_account, cid, require_current_receipts=True)
             cache[cid] = (
                 {r["id"]: r for r in live},
                 {p["id"]: p for p in segment_messages(live, provider)},
@@ -407,13 +553,16 @@ def search(
         plan = plans.get(c["id"])
         if (
             not plan
+            or plan["text"] != c["content_text"]
             or plan["source_hash"] != c["source_hash"]
             or plan["content_hash"] != c["content_hash"]
         ):
             continue
         members = []
+        versions[c["id"]] = {}
         for f in plan["members"]:
             m = live[f["message"]["id"]]
+            versions[c["id"]][m["id"]] = _source_version(m)
             members.append(
                 {
                     k: m.get(k)
@@ -457,6 +606,9 @@ def search(
                 "trust": "UNTRUSTED_RETRIEVED_CONTENT_NO_EXECUTION_AUTHORITY",
             }
         )
+    # The hybrid caller will also validate context-only neighbors after expanding them.
+    if _source_versions is None:
+        results = revalidated_results(session, tenant_id, source_account, results, versions)
     # Read-only endpoint: query timing is returned, not persisted with query text.
     return {
         "strategy": "PASSIVE_VECTOR_V1",
