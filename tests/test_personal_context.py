@@ -205,3 +205,35 @@ def test_personal_context_fails_closed_for_missing_or_ambiguous_owner(session):
 def test_personal_context_limit_is_bounded(session):
     with pytest.raises(ValueError, match="PERSONAL_CONTEXT_LIMIT_OUT_OF_RANGE"):
         build_personal_context(session, DEFAULT_TENANT_ID, limit=0)
+
+
+@pytest.mark.parametrize("withdrawal", ["deleted", "revoked", "foreign_tenant", "parent_lost"])
+def test_personal_context_rechecks_explicit_support(session, withdrawal):
+    from tests.test_personal_context_sequences import _event
+
+    stamp = now_utc()
+    upsert_actor_binding(session, "test", "synthetic-owner", "owner", "owner", metadata={"owner": True})
+    actor = _memory_actor(session, DEFAULT_TENANT_ID, "synthetic-owner")
+    retained = _claim(session, actor, "owner.alias", "fixture")
+    derived = _claim(session, actor, "context.observation", "fixture")
+    source = _event(session, occurred_at=stamp, event_type="LOCATION_ARRIVAL",
+                    pattern_key="site", provenance="fixture", actor_id=actor.actor_key)
+    derived.context = {"evidence_timeline_event_ids": [source.id]}
+    session.flush()
+    def ids():
+        return {row.claim_id for row in build_personal_context(session, DEFAULT_TENANT_ID).claims}
+
+    assert {derived.id, retained.id} == ids()
+    if withdrawal == "deleted":
+        session.delete(source)
+    elif withdrawal == "foreign_tenant":
+        _tenant(session, "fixture-other")
+        source.tenant_id = "fixture-other"
+    elif withdrawal == "parent_lost":
+        parent = _claim(session, actor, "context.parent", "fixture")
+        parent.status = "SUPERSEDED"
+        derived.context = {"source_claim_id": parent.id}
+    else:
+        source.metadata_json = {"technical_evidence_revoked": True}
+    session.flush()
+    assert ids() == {retained.id}

@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from attention_router.application.context_claim_support import claim_timeline_support_is_current
 from attention_router.infrastructure.models import (
     ActorBindingRow,
     FactRow,
@@ -160,6 +161,8 @@ def build_personal_context(
             if row.predicate == CONTEXT_CONTROL_PREDICATE:
                 continue
             if claim_is_owner_private(session, claim=row):
+                continue
+            if not claim_timeline_support_is_current(session, row, tenant_id=tenant_id, now=stamp):
                 continue
             claims.append(
                 PersonalContextClaim(
