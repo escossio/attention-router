@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -17,11 +18,13 @@ sys.path.insert(0, "/usr/local/lib/andy-github-app")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from probe import CONFIG, INSTALLATION_CONFIG, load_env, make_jwt, request_json
 from ci_impact_policy import get_pr_impact
+from ci_job_lifecycle import Lifecycle, serve
 from merged_main_evidence import (
     APP_ID, EvidenceError, PublicationUncertain, authenticate, finalize, validate,
 )
 
 DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
+QUEUE_TABLE = "distributed_shadow_jobs"
 TARGET_REPO = "escossio/attention-router"
 CI_RUN = "/usr/local/lib/andy-ci/bin/andy-ci-distributed-suite"
 ACTIONS = {"opened", "synchronize", "reopened", "ready_for_review"}
@@ -43,6 +46,10 @@ REPOSITORIES = {
 }
 DEBOUNCE_SECONDS = 5
 MAX_PARALLEL = max(len(item["suites"]) for item in REPOSITORIES.values())
+
+
+def lifecycle() -> Lifecycle:
+    return Lifecycle(DB_PATH, QUEUE_TABLE, request_json)
 
 
 def now_iso() -> str:
@@ -96,6 +103,8 @@ def ensure_tables() -> None:
             )"""
         )
         db.commit()
+        lifecycle().install(db)
+        db.commit()
 
 
 def bootstrap_cursor() -> None:
@@ -145,8 +154,8 @@ def enqueue_new_deliveries() -> int:
             for suite in REPOSITORIES[repo]["suites"]:
                 cur = db.execute(
                     """INSERT OR IGNORE INTO distributed_shadow_jobs
-                       (delivery_id,repository,pr_number,head_sha,suite,state,created_at,updated_at)
-                       VALUES (?,?,?,?,?,'PENDING',?,?)""",
+                       (delivery_id,repository,pr_number,head_sha,suite,state,created_at,updated_at,not_before)
+                       VALUES (?,?,?,?,?,'PENDING',?,?,?)""",
                     (
                         delivery_id,
                         repo,
@@ -155,6 +164,7 @@ def enqueue_new_deliveries() -> int:
                         suite,
                         stamp,
                         stamp,
+                        int(time.time()) + DEBOUNCE_SECONDS,
                     ),
                 )
                 created += cur.rowcount
@@ -164,7 +174,7 @@ def enqueue_new_deliveries() -> int:
                    SET state='STALE',
                        detail='superseded before execution',
                        updated_at=?
-                   WHERE repository=? AND pr_number=? AND state='PENDING'
+                   WHERE repository=? AND pr_number=? AND state='PENDING' AND check_run_id IS NULL AND phase IS NULL
                      AND head_sha<>?""",
                 (stamp, repo, pr_number, normalized_sha),
             )
@@ -179,46 +189,7 @@ def enqueue_new_deliveries() -> int:
 
 
 def claim_jobs(limit: int = MAX_PARALLEL) -> list[dict]:
-    with sqlite3.connect(DB_PATH) as db:
-        db.row_factory = sqlite3.Row
-        db.execute("BEGIN IMMEDIATE")
-        rows = db.execute(
-            """SELECT * FROM distributed_shadow_jobs
-               WHERE state='PENDING'
-               ORDER BY id
-               LIMIT ?""",
-            (limit,),
-        ).fetchall()
-        if not rows:
-            db.commit()
-            return []
-
-        stamp = now_iso()
-        ids = [int(row["id"]) for row in rows]
-        db.executemany(
-            """UPDATE distributed_shadow_jobs
-               SET state='RUNNING',updated_at=?
-               WHERE id=? AND state='PENDING'""",
-            [(stamp, job_id) for job_id in ids],
-        )
-        db.commit()
-        return [dict(row) for row in rows]
-
-
-def finish_job(
-    job_id: int,
-    state: str,
-    detail: str,
-    check_run_id: int | None,
-) -> None:
-    with sqlite3.connect(DB_PATH) as db:
-        db.execute(
-            """UPDATE distributed_shadow_jobs
-               SET state=?,detail=?,check_run_id=?,updated_at=?
-               WHERE id=?""",
-            (state, detail[:2000], check_run_id, now_iso(), job_id),
-        )
-        db.commit()
+    return lifecycle().claim(limit)
 
 
 def current_pr(token: str, repo: str, pr_number: int) -> dict:
@@ -234,6 +205,8 @@ def create_check(
     sha: str,
     pr_number: int,
     suite: str,
+    *,
+    external_id: str | None = None,
 ) -> int:
     check_name = REPOSITORIES[repo]["suites"][suite]
     status, check = request_json(
@@ -243,8 +216,8 @@ def create_check(
         body={
             "name": check_name,
             "head_sha": sha,
-            "status": "in_progress",
-            "started_at": now_iso(),
+            **({"external_id": external_id} if external_id is not None else {}),
+            **({"status": "queued"} if external_id is not None else {"status": "in_progress", "started_at": now_iso()}),
             "output": {
                 "title": f"Distributed {suite} shadow gate running",
                 "summary": (
@@ -285,7 +258,7 @@ def complete_check(
         raise RuntimeError(f"CHECK_UPDATE_FAILED status={status}")
 
 
-def run_command(argv: list[str]) -> subprocess.CompletedProcess:
+def run_command(argv: list[str], *, persistent: bool = False) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         text=True,
@@ -293,6 +266,7 @@ def run_command(argv: list[str]) -> subprocess.CompletedProcess:
         stderr=subprocess.STDOUT,
         timeout=1800,
         check=False,
+        env=dict(os.environ, ANDY_CI_PERSISTENT_JOB="1") if persistent else None,
     )
 
 
@@ -334,11 +308,11 @@ def render_summary(summary: dict | None, suite: str) -> str:
     return "\n".join(parts)
 
 
-def verified_main_python(summary: dict, sha: str, output: str) -> bool:
+def verified_shadow(summary: dict, project: str, sha: str, suite: str, output: str) -> bool:
     worker = summary.get("selected_worker")
     attempts = summary.get("attempts")
-    if (summary.get("sha") != sha or summary.get("repository") != "attention-router"
-            or summary.get("suite") != "python" or not isinstance(worker, str)
+    if (summary.get("sha") != sha or summary.get("repository") != project
+            or summary.get("suite") != suite or not isinstance(worker, str)
             or not re.fullmatch(r"[a-z][a-z0-9_-]*", worker) or worker == "none"
             or not isinstance(attempts, list) or not attempts
             or not all(isinstance(row, dict) for row in attempts)):
@@ -357,10 +331,13 @@ def execute_exact_sha(
     suite: str,
     *,
     merged_main: bool = False,
+    queued=None,
 ) -> tuple[str, str, int | None]:
     if merged_main and (repo != TARGET_REPO or suite != "python"):
         return "REFUSED", "Merged-main certification requires attention-router/python.", None
-    if merged_main:
+    if queued is not None:
+        token, check_id, stage = queued
+    elif merged_main:
         try:
             app = authenticate(request_json)
             integration = validate(app, repo, pr_number, sha)
@@ -375,14 +352,19 @@ def execute_exact_sha(
             return "STALE", "PR is closed or head SHA moved before execution.", None
 
     request = partial(request_json, token=token)
-    try:
-        check_id = create_check(token, repo, sha, pr_number, suite)
-    except (OSError, RuntimeError, ValueError):
-        if not merged_main:
-            raise
-        return "UNRECONCILED", "MERGED_MAIN_CHECK_CREATION_UNRECONCILED", None
+    if queued is None:
+        try:
+            check_id = create_check(token, repo, sha, pr_number, suite)
+        except (OSError, RuntimeError, ValueError):
+            if not merged_main:
+                raise
+            return "UNRECONCILED", "MERGED_MAIN_CHECK_CREATION_UNRECONCILED", None
 
     def finish(conclusion, title, detail):
+        if queued is not None:
+            stage(conclusion, title, detail)
+            return
+
         def publish():
             complete_check(token, repo, check_id, conclusion, title, detail)
 
@@ -390,6 +372,12 @@ def execute_exact_sha(
             finalize(app, check_id, sha, REPOSITORIES[repo]["suites"][suite], conclusion, publish)
         else:
             publish()
+
+    def schedule(command):
+        return run_command(command) if queued is None else run_command(command, persistent=True)
+
+    def deferred(result):
+        return queued is not None and result.returncode == 75 and "CI_DISTRIBUTED_ADMISSION=WAITING_CAPACITY" in result.stdout.splitlines()
 
     try:
         if repo == TARGET_REPO and not merged_main:
@@ -399,7 +387,9 @@ def execute_exact_sha(
                 finish("success", f"NOT APPLICABLE: distributed-{suite} (no test run)", detail)
                 return "NOT_APPLICABLE", detail, check_id
         project = REPOSITORIES[repo]["project"]
-        result = run_command([CI_RUN, project, sha, suite])
+        result = schedule([CI_RUN, project, sha, suite])
+        if deferred(result):
+            return "WAITING_CAPACITY", "No eligible worker admitted the suite", check_id
         summary = extract_summary(result.stdout)
         detail = render_summary(summary, suite)
 
@@ -408,20 +398,25 @@ def execute_exact_sha(
             and summary
             and summary.get("status") == "PASS"
         ):
+            if (merged_main or queued is not None) and not verified_shadow(summary, project, sha, suite, result.stdout):
+                raise RuntimeError("SHADOW_EXECUTION_RECEIPT_INVALID")
             if merged_main:
-                if not verified_main_python(summary, sha, result.stdout):
-                    raise RuntimeError("MERGED_MAIN_PYTHON_RECEIPT_INVALID")
                 if integration != validate(app, repo, pr_number, sha):
                     raise EvidenceError("CONTRADICTION", "integration_changed_during_run")
             finish("success", f"Distributed {suite} shadow gate passed", detail)
             return "PASS", detail, check_id
 
         detail += "\n\n" + result.stdout[-12000:]
+        if queued is not None and (summary or {}).get("failure_class") != "TEST_FAILURE":
+            finish("action_required", f"Distributed {suite} infrastructure failed", detail)
+            return "INFRA_EXHAUSTED", detail, check_id
         finish("failure", f"Distributed {suite} shadow gate failed", detail)
         return "FAIL", detail, check_id
     except PublicationUncertain as error:
         return "UNRECONCILED", str(error), check_id
     except Exception as exc:
+        if queued is not None:
+            raise RuntimeError("CI_DISPATCH_UNRECONCILED") from None
         detail = f"{type(exc).__name__}: {exc}"
         try:
             finish("failure", f"Distributed {suite} shadow gate error", detail)
@@ -433,41 +428,27 @@ def execute_exact_sha(
 
 
 def run_job(job: dict) -> None:
-    state, detail, check_id = execute_exact_sha(
-        job["repository"],
-        int(job["pr_number"]),
-        job["head_sha"],
-        job["suite"],
+    repo, number, sha = job["repository"], int(job["pr_number"]), job["head_sha"]
+    name = REPOSITORIES[repo]["suites"][job["suite"]]
+
+    def current(token):
+        pr = current_pr(token, repo, number)
+        return pr.get("state") == "open" and ((pr.get("head") or {}).get("sha") or "").lower() == sha
+
+    lifecycle().run(
+        job, name=name, authenticate=installation_token, current=current,
+        create=lambda token, external: create_check(token, repo, number, sha, job["suite"], external_id=external),
+        complete=lambda token, *result: complete_check(token, repo, *result),
+        execute=lambda token, check, stage: execute_exact_sha(repo, number, sha, job["suite"], queued=(token, check, stage)),
     )
-    finish_job(int(job["id"]), state, detail, check_id)
-    print(
-        f"JOB={job['id']} PR={job['pr_number']} "
-        f"SHA={job['head_sha'][:12]} SUITE={job['suite']} "
-        f"STATE={state} CHECK={check_id}",
-        flush=True,
-    )
+    print(f"JOB={job['id']} PR={number} SHA={sha[:12]} STATE={job['state']} CHECK={job['check_run_id']}", flush=True)
 
 
 def daemon() -> None:
     ensure_tables()
     bootstrap_cursor()
     print("DISTRIBUTED_SHADOW_CI_DAEMON=READY", flush=True)
-    while True:
-        try:
-            enqueue_new_deliveries()
-            jobs = claim_jobs()
-            if not jobs:
-                time.sleep(1)
-                continue
-
-            time.sleep(DEBOUNCE_SECONDS)
-            with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-                futures = [pool.submit(run_job, job) for job in jobs]
-                for future in futures:
-                    future.result()
-        except Exception as exc:
-            print(f"DAEMON_ERROR={type(exc).__name__}:{exc}", flush=True)
-            time.sleep(3)
+    serve(lifecycle(), enqueue_new_deliveries, run_job, MAX_PARALLEL)
 
 
 def main() -> None:
@@ -507,13 +488,15 @@ def main() -> None:
     if args.suite not in REPOSITORIES[args.repo]["suites"]:
         raise SystemExit("invalid repository/suite pair")
 
-    state, detail, check_id = execute_exact_sha(
-        args.repo,
-        args.pr,
-        args.sha.lower(),
-        args.suite,
-        merged_main=args.merged_main,
-    )
+    priority = lifecycle().main_priority() if args.merged_main and DB_PATH.is_file() else nullcontext()
+    with priority:
+        state, detail, check_id = execute_exact_sha(
+            args.repo,
+            args.pr,
+            args.sha.lower(),
+            args.suite,
+            merged_main=args.merged_main,
+        )
     print(f"STATE={state}")
     print(f"CHECK_RUN_ID={check_id or ''}")
     print(detail)

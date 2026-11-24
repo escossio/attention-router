@@ -9,6 +9,13 @@ REGISTRY_DB="${ANDY_CI_HOST_REGISTRY_DB:-/var/lib/andy-ci/host-registry.sqlite3}
 CAPACITY="${ANDY_CI_CAPACITY_FILE:-$BASE/worker-capacity.json}"
 SSH_BIN="${ANDY_CI_SSH_BIN:-ssh}"
 CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
+PERSISTENT_JOB="${ANDY_CI_PERSISTENT_JOB:-0}"
+if [[ "$PERSISTENT_JOB" == 1 ]]; then CAPACITY_WAIT_SECONDS=0; fi
+
+capacity_pending() {
+  echo 'CI_DISTRIBUTED_ADMISSION=WAITING_CAPACITY'
+  exit 75
+}
 POSTGRES_WORKER="${ANDY_CI_POSTGRES_WORKER:-ci03}"
 
 SHA="${1:-}"
@@ -115,9 +122,10 @@ DISCOVERY_DONE=0
 DISCOVERY_DEADLINE=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))
 DISCOVERY_COMMAND="ANDY_CI_DISCOVER_POSTGRES=1 /srv/andy-ci/bin/andy-ci-run '${SHA}' postgres"
 
-while (( $(date +%s) < DISCOVERY_DEADLINE )); do
+while [[ "$PERSISTENT_JOB" == 1 ]] || (( $(date +%s) < DISCOVERY_DEADLINE )); do
   refresh_pool
   if ((${#READY_WORKERS[@]} == 0)); then
+    [[ "$PERSISTENT_JOB" != 1 ]] || capacity_pending
     echo 'CI_REPROFILE_STATUS=WAITING_FOR_DISCOVERY_CAPACITY'
     sleep 3
     continue
@@ -150,6 +158,7 @@ while (( $(date +%s) < DISCOVERY_DEADLINE )); do
   done < <(ordered_workers "${READY_WORKERS[@]}")
 
   (( DISCOVERY_DONE == 1 )) && break
+  [[ "$PERSISTENT_JOB" != 1 ]] || capacity_pending
   sleep 3
 done
 
@@ -173,9 +182,10 @@ fi
 
 PROFILE_OK=0
 PROFILE_DEADLINE=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))
-while (( $(date +%s) < PROFILE_DEADLINE )); do
+while [[ "$PERSISTENT_JOB" == 1 ]] || (( $(date +%s) < PROFILE_DEADLINE )); do
   refresh_pool
   if (( ${#READY_WORKERS[@]} == 0 )); then
+    [[ "$PERSISTENT_JOB" != 1 ]] || capacity_pending
     echo 'CI_REPROFILE_STATUS=WAITING_FOR_PROFILE_CAPACITY'
     sleep 3
     continue
@@ -194,11 +204,13 @@ while (( $(date +%s) < PROFILE_DEADLINE )); do
   if (( rc != 0 )); then
     if (( rc == 75 )) && grep -Fxq CI_WORKER_BUSY "$stdout"; then
       set_health "$worker" DEGRADED worker_busy
+      [[ "$PERSISTENT_JOB" != 1 ]] || capacity_pending
       sleep 3
       continue
     fi
     if (( rc == 255 )); then
       set_health "$worker" UNAVAILABLE profiling_worker_lost
+      [[ "$PERSISTENT_JOB" != 1 ]] || exit "$rc"
       sleep 3
       continue
     fi

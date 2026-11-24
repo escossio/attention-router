@@ -104,13 +104,14 @@ The GitHub App publishes exact-SHA checks that execute existing CI suites on the
 
 The daemon consumes the same signed Pull Request deliveries already stored by the webhook receiver, binds every job to the exact PR head SHA, and creates one independent check-run per suite. `distributed-python` is now part of the repository merge authority alongside the independently required `distributed-postgres`. The transport and Docker distributed checks remain non-required until their migrations are separately approved.
 
-For each new PR head, the daemon enqueues the three suites and claims up to three jobs concurrently. The generic scheduler then selects an eligible Host Registry worker and invokes the already-installed `andy-ci-run <sha> <suite>` executor. Worker lock contention causes a retry on another eligible host; a real suite failure is terminal.
+For each new PR head, the daemon enqueues the three suites and claims up to three jobs across distinct PRs. The scheduler selects an eligible Host Registry worker and the existing `andy-ci-run <sha> <suite>` executor owns admission. Contended admission returns to the same persisted job and check-run. See [capacity and lifecycle](../../../docs/operations/distributed-ci-capacity-lifecycle.md) for policy, audit, installation and rollback.
 
 Install the generic scheduler and shadow publisher only after the branch has passed repository CI:
 
 ```bash
 install -m 0755 andy-ci-distributed-suite /usr/local/lib/andy-ci/bin/andy-ci-distributed-suite
 install -m 0644 merged_main_evidence.py /usr/local/lib/andy-github-app/merged_main_evidence.py
+install -m 0644 ci_job_lifecycle.py /usr/local/lib/andy-github-app/ci_job_lifecycle.py
 install -m 0755 distributed_shadow_checks.py /usr/local/lib/andy-github-app/distributed_shadow_checks.py
 install -m 0644 andy-github-distributed-shadow-ci.service /etc/systemd/system/andy-github-distributed-shadow-ci.service
 systemctl daemon-reload
