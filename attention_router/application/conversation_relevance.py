@@ -19,6 +19,9 @@ CONCEPTS = {
     "pagamento": ("quitacao financeira", "pagamentos", "pagamento"),
     "contrato": ("acordo contratual", "instrumento contratual", "contratos", "contrato"),
     "projeto": ("projetos", "projeto"),
+    "reserva": ("reservaram", "reservou", "reservado", "reservada", "reserva"),
+    "duracao": ("duracao", "duraram", "durou"),
+    "inspecao": ("inspecao", "verificacao"),
     "conversa": ("dialogos", "dialogo", "conversas", "conversa"),
     "horario": ("marcacao horaria", "horarios", "horario"),
     "problema": ("dificuldades", "dificuldade", "problemas", "problema"),
@@ -33,6 +36,15 @@ GENERIC = set(
     "ha houve existe existem mencao mencoes referencia referencias mencionado mencionada mencionados mencionadas citado citada citados citadas aparece aparecem consta constam algum alguma alguma algo conteudo informacao informacoes registro registros mensagem mensagens trecho trechos procure localizar encontrar registrado registrada registrados registradas literalmente explicitamente indique mostre foi foram esta estao estava estavam ser sendo qual quais quero gostaria saber texto textos nessa nesse nesta neste nessa desta deste deles delas antes depois imediatamente pergunta perguntas resposta respostas sequencia anterior posterior seguinte enviada enviado ocorreu ocorre falou falar dito disse contem sobre esse essa isso isto aquilo ele ela la ai aqui nesse".split()
 )
 DEICTIC = re.compile(r"\b(isso|isto|aquilo|ele|ela|la|ai)\b")
+_NAMED_TIME = re.compile(
+    r"\b(?:em|até|desde|para)\s+(?:janeiro|fevereiro|março|abril|maio|junho|julho|"
+    r"agosto|setembro|outubro|novembro|dezembro)\b"
+    r"|\bàs\s+(?:uma|duas|três|quatro|cinco|seis|sete|oito|nove|dez|onze|doze)\s+horas?\b",
+    re.IGNORECASE,
+)
+_CONTRAST = re.compile(r"\bcontradit[oó]ri[ao]s?\b", re.IGNORECASE)
+_INSPECTION_OUTCOME = re.compile(r"(?P<subject>inspecao .+?) foi (?P<outcome>aprovad[ao]|recusad[ao])\b")
+CONTRAST_NEEDS_PAIR = "CONTRAST_REQUIRES_CORROBORATION"
 
 
 def terms(value):
@@ -64,7 +76,7 @@ def _required_answer_type(query, lookup_query):
             required = "UNRESOLVED_IDENTITY_OR_LOCATION"
         elif re.search(r"\b(quando|que dia|qual data|que horas|qual horario)\b", normalized_query):
             required = "TIME"
-        elif re.search(r"\b(quanto tempo|qual duracao)\b", normalized_query):
+        elif re.search(r"\b(quanto tempo|qual (?:a )?duracao)\b", normalized_query):
             required = "DURATION"
         elif re.search(r"\b(quanto|qual valor|qual preco)\b", normalized_query):
             required = "AMOUNT"
@@ -134,7 +146,8 @@ def features(query, content, *, prepared=None):
         answer_type_supported = any(
             wanted <= content_terms(piece)
             and "?" not in piece
-            and re.search(patterns[required], _normalize(piece))
+            and (re.search(patterns[required], _normalize(piece))
+                 or required == "TIME" and _NAMED_TIME.search(piece))
             for piece in pieces
         )
     return {
@@ -193,6 +206,25 @@ def evidence_reason(row, config):
     if not math.isfinite(row["similarity"]) or row["similarity"] < config["min_similarity"]:
         return "SEMANTIC_SUPPORT_INSUFFICIENT"
     return None
+
+
+def contrast_topic_query(query):
+    if not _is_lookup_query(query) or "inspecao" not in terms(query):
+        return None
+    topic, markers = _CONTRAST.subn("", query)
+    return topic if markers == 1 else None
+
+
+def inspection_outcome(excerpt, topic_query):
+    if not terms(topic_query) <= terms(excerpt):
+        return None
+    # Only a whole affirmative clause can witness one side of the contrast.
+    sentence = _normalize(excerpt.strip().rstrip(".!"))
+    sentence = re.sub(r"^a ", "", sentence)
+    match = _INSPECTION_OUTCOME.fullmatch(sentence)
+    if match is None:
+        return None
+    return match["subject"], match["outcome"][:-1]
 
 
 def ambiguous(query, *, conversation_id=None, participant=None):

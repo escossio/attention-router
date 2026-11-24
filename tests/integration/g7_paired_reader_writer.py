@@ -7,6 +7,7 @@ import json
 from math import ceil
 from pathlib import Path
 from resource import RUSAGE_SELF, getrusage
+from sqlite3 import Error as SQLiteError
 from threading import Barrier, Event
 from time import monotonic, process_time, sleep
 
@@ -50,6 +51,7 @@ def _burst(fetch, cases, engine, Session, marker_id, arm):
         key, category, question, expected = case
         gate.wait()
         start = monotonic()
+        diagnostics = {}
         try:
             candidates, delivered = fetch(index, question)
             status = "ok"
@@ -64,11 +66,20 @@ def _burst(fetch, cases, engine, Session, marker_id, arm):
                                 "CONTEXT_EPOCH_ANCHOR_UNAVAILABLE", "CONTEXT_INDEX_FENCE_BUSY"):
                 raise
             candidates, delivered, status = [], [], str(exc)
+            if status == "CONTEXT_CONSENT_UNAVAILABLE" and isinstance(exc.__cause__, SQLiteError):
+                diagnostics["sqlite_error_code"] = getattr(exc.__cause__, "sqlite_errorcode", None)
+            if status == "STAGED_CONVERSATION_SUPPORT_CHANGED":
+                diagnostics["changed_components"] = [
+                    note.removeprefix("g7_support_component=")
+                    for note in getattr(exc, "__notes__", ())
+                    if note.startswith("g7_support_component=")
+                ]
         candidate_refs = list(dict.fromkeys(entry[0] for entry in candidates))
         found = list(dict.fromkeys(entry[0] for entry in delivered))
         hits = set(found).intersection(expected)
         return {
             "case": key, "category": category, "status": status, "milliseconds": (monotonic()-start)*1000,
+            "diagnostics": diagnostics,
             "expected": expected, "candidates": candidate_refs, "evidence": found, "hits": len(hits),
             "complete_support": status == "ok" and (bool(expected) and hits == set(expected) or not expected and not found),
         }

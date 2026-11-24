@@ -1,5 +1,7 @@
 # Project status
 
+Candidata G7 de suporte textual. Exercita flexão de reserva e duração, formas temporais explícitas e contraste de inspeção com dois recibos distintos. O benchmark registra componentes alterados e códigos SQLite sem conteúdo. Autoridade final e revisões seguem validadas.
+
 ## Comparação sintética G7 sob #425/#428
 
 A candidata de benchmark exercita 200 segmentos e 16 consultas simultâneas em dois caminhos autenticados sob o mesmo escopo. Registra referências, precisão, rejeições, latências, recursos e progresso de escritor. O gabarito inclui ausência de suporte, contradição, correção, revogação e dois controles de isolamento. O protocolo e o corpus estão em `evals/governed-retrieval/`.

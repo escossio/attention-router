@@ -119,3 +119,39 @@ def test_oci_boundaries_and_release_refuses_before_execution(monkeypatch, tmp_pa
     with pytest.raises(ValueError, match="provenance"):
         release("canary_enable", 1, "ghcr.io/escossio/attention-router@sha256:"+"a"*64, root=root)
     assert len(operations) == 2
+
+
+@pytest.mark.parametrize(("rows", "expected"), [
+    ([("a", "A inspeção do moinho foi aprovada."),
+      ("b", "A inspeção do moinho foi recusada.")], ["a", "b"]),
+    ([("a", "A inspeção do moinho foi aprovada.")], []),
+    ([("a", "A inspeção do moinho foi aprovada."),
+      ("a", "A inspeção do moinho foi recusada.")], []),
+    ([("a", "A inspeção do moinho foi aprovada."),
+      ("b", "A inspeção da caldeira do moinho foi recusada.")], []),
+    ([("a", "A inspeção do moinho foi aprovada."),
+      ("b", "A inspeção do moinho foi recusada?")], []),
+    ([("a", "A inspeção do moinho foi aprovada."),
+      ("b", "A inspeção do moinho não foi recusada.")], []),
+])
+def test_inspection_contrast_requires_two_explicit_scoped_witnesses(rows, expected):
+    from attention_router.application.conversation_relevance import CONTRAST_NEEDS_PAIR
+
+    packet = SimpleNamespace(
+        query="Existe referência à verificação contraditória do moinho?",
+        items=[
+            SimpleNamespace(
+                attributes={"excerpts": [{
+                    "source_ref": source, "char_start": 0, "char_end": len(excerpt),
+                    "observed_at": "synthetic", "text": excerpt,
+                }]},
+                provenance={"single_excerpt_heuristic": CONTRAST_NEEDS_PAIR},
+            )
+            for source, excerpt in rows
+        ],
+    )
+    with query_trace():
+        response = runtime.owner_answer(packet)
+    assert [item["source_ref"] for item in response["evidence"]] == expected
+    assert response["conclusion"] is None
+    assert response["kind"] == ("OBSERVATION" if expected else "INSUFFICIENT_EVIDENCE")
