@@ -29,9 +29,10 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/private-output"
           python3 ops/context-canary/build_private_oci.py fetch-wheels "$GITHUB_SHA" "$RUNNER_TEMP/wheels"
-          manifest=$(python3 ops/context-canary/build_private_oci.py build "$GITHUB_SHA" "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/private-output/private-context.oci.tar")
+          python3 ops/context-canary/build_private_oci.py fetch-debs "$GITHUB_SHA" "$RUNNER_TEMP/debs"
+          manifest=$(python3 ops/context-canary/build_private_oci.py build "$GITHUB_SHA" "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/private-output/private-context.oci.tar" --debs "$RUNNER_TEMP/debs")
           [[ "$manifest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          rebuilt=$(python3 ops/context-canary/build_private_oci.py build "$GITHUB_SHA" "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/rebuilt.oci.tar" --no-cache)
+          rebuilt=$(python3 ops/context-canary/build_private_oci.py build "$GITHUB_SHA" "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/rebuilt.oci.tar" --debs "$RUNNER_TEMP/debs" --no-cache)
           test "$manifest" = "$rebuilt"
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$manifest" > "$RUNNER_TEMP/private-output/manifest.digest"

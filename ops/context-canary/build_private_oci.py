@@ -2,7 +2,7 @@
 
 import argparse
 import contextlib
-from hashlib import sha256
+from hashlib import file_digest, sha256
 import json
 import os
 from pathlib import Path
@@ -10,10 +10,13 @@ import re
 import subprocess
 import tarfile
 import tempfile
+from urllib.parse import urlsplit
+from urllib.request import urlretrieve
 
 OPS = "ops/context-canary"
 LOCK = f"{OPS}/requirements.linux-amd64.lock"
 BASE = f"{OPS}/python-base.txt"
+DEBS = f"{OPS}/debian-security.lock"
 
 
 def git(root, *args):
@@ -44,6 +47,32 @@ def fetch_wheels(*, root, sha, wheelhouse):
                         "--no-cache-dir", "--only-binary=:all:", "--no-deps", "--require-hashes",
                         "--index-url=https://pypi.org/simple", "-r", "/requirements.lock", "-d", "/wheels"],
                        check=True)
+
+
+def debian_packages(root, sha):
+    for line in git(root, "show", f"{sha}:{DEBS}").splitlines():
+        digest, url = line.split()
+        parts = urlsplit(url)
+        name = Path(parts.path).name
+        if (parts.scheme != "https" or parts.netloc != "deb.debian.org"
+                or not parts.path.startswith("/debian/pool/main/")
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9.+~_-]+_amd64\.deb", name)):
+            raise ValueError("invalid Debian package lock")
+        yield name, digest, url
+
+
+def fetch_debs(*, root, sha, output):
+    pinned_base(root, sha)
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output) as temp:
+        for name, digest, url in debian_packages(root, sha):
+            path = Path(temp) / name
+            urlretrieve(url, path)
+            with path.open("rb") as stream:
+                if file_digest(stream, "sha256").hexdigest() != digest:
+                    raise ValueError(f"Debian package hash mismatch: {name}")
+            (output / name).hardlink_to(path)
 
 
 def inspect_image(archive, sha):
@@ -88,12 +117,21 @@ def inspect_image(archive, sha):
         return descriptor["digest"]
 
 
-def build(*, root, sha, wheelhouse, output, no_cache=False):
+def build(*, root, sha, wheelhouse, output, debs=None, no_cache=False):
     base = pinned_base(root, sha)
     if output.exists() or "," in str(output) or not wheelhouse.is_dir():
         raise ValueError("existing wheelhouse and new OCI output path required")
+    if debs is None or not debs.is_dir():
+        raise ValueError("a hash-locked Debian package directory is required")
     stamp = git(root, "show", "-s", "--format=%ct", sha)
     with tempfile.TemporaryDirectory(dir=output.parent) as temp:
+        packages = Path(temp) / "debs"
+        packages.mkdir()
+        for name, digest, _ in debian_packages(root, sha):
+            package = (debs / name).read_bytes()
+            if sha256(package).hexdigest() != digest:
+                raise ValueError(f"Debian package hash mismatch: {name}")
+            (packages / name).write_bytes(package)
         source = Path(temp) / "source.tar"
         image = Path(temp) / "image.tar"
         subprocess.run(["git", "-C", root, "archive", "-o", source, sha, "attention_router",
@@ -103,7 +141,8 @@ def build(*, root, sha, wheelhouse, output, no_cache=False):
             subprocess.run(["docker", "buildx", "build", "--platform", "linux/amd64", "--network=none",
                             "--provenance=false", "--sbom=false", *(["--no-cache"] if no_cache else []),
                             "-f", f"{OPS}/Dockerfile.private",
-                            "--build-context", f"wheels={wheelhouse.resolve()}", "--tag", "andy-private-review:" + sha,
+                            "--build-context", f"wheels={wheelhouse.resolve()}",
+                            "--build-context", f"debs={packages}", "--tag", "andy-private-review:" + sha,
                             "--build-arg", "BUILD_SHA=" + sha, "--build-arg", "PYTHON_BASE=" + base,
                             "--build-arg", "SOURCE_DATE_EPOCH=" + stamp,
                             "--output", f"type=oci,rewrite-timestamp=true,dest={image}", "-"],
@@ -116,17 +155,20 @@ def build(*, root, sha, wheelhouse, output, no_cache=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
-    for action in ("fetch-wheels", "build"):
+    for action in ("fetch-wheels", "fetch-debs", "build"):
         command = commands.add_parser(action)
         command.add_argument("sha")
-        command.add_argument("wheelhouse", type=Path)
+        command.add_argument("inputs", type=Path)
         if action == "build":
             command.add_argument("output", type=Path)
+            command.add_argument("--debs", type=Path, required=True)
             command.add_argument("--no-cache", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     if args.action == "fetch-wheels":
-        fetch_wheels(root=root, sha=args.sha, wheelhouse=args.wheelhouse)
+        fetch_wheels(root=root, sha=args.sha, wheelhouse=args.inputs)
+    elif args.action == "fetch-debs":
+        fetch_debs(root=root, sha=args.sha, output=args.inputs)
     else:
-        print(build(root=root, sha=args.sha, wheelhouse=args.wheelhouse, output=args.output.absolute(),
-                    no_cache=args.no_cache))
+        print(build(root=root, sha=args.sha, wheelhouse=args.inputs, output=args.output.absolute(),
+                    debs=args.debs, no_cache=args.no_cache))

@@ -8,6 +8,9 @@ ENV PYTHONPATH=/opt/private-context PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
     ADMIN_AUTH_ENABLED=false APP_ENV=production STAGED_CONTEXT_PRIVATE_CANARY_ENABLED=false \
     CLIENT_SESSION_ENABLED=false CONTEXT_EPOCH_AUTHORITY_CANARY_ENABLED=false \
     HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 TOKENIZERS_PARALLELISM=false
+RUN --mount=type=bind,from=debs,source=.,target=/debs,readonly \
+    dpkg -i /debs/*.deb \
+    && rm -f /var/log/dpkg.log /var/log/alternatives.log /var/cache/ldconfig/aux-cache
 WORKDIR /opt/private-context
 COPY ops/context-canary/requirements.linux-amd64.lock ./requirements.lock
 RUN --mount=type=bind,from=wheels,source=.,target=/wheels,readonly \
