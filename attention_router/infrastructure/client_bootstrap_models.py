@@ -35,6 +35,7 @@ class ClientTenantMembershipRow(Base):
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    context_revision: Mapped[str] = mapped_column(String(36), nullable=False, server_default="legacy")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

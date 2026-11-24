@@ -577,6 +577,7 @@ def compile_graph_context(
     lexical_candidate_limit: int = 200,
     relation_filters: Iterable[CognitiveRelationKind | str] | None = None,
     now: datetime | None = None,
+    projected_graph: CognitiveGraphSlice | None = None,
 ) -> CompiledContextPacket:
     """Compile bounded graph context, falling back to lexical V0 without authority."""
     if max_hops < 0 or max_hops > MAX_HOPS:
@@ -601,7 +602,9 @@ def compile_graph_context(
     stamp = _utc(now or datetime.now(UTC))
     normalized_filters = _normalize_relation_filters(relation_filters)
 
-    graph = build_cognitive_graph_slice(
+    if projected_graph is not None and projected_graph.tenant_id != tenant_id:
+        raise ContextCompilerError("CONTEXT_COMPILER_GRAPH_SCOPE")
+    graph = projected_graph if projected_graph is not None else build_cognitive_graph_slice(
         session,
         tenant_id,
         limit_per_kind=graph_limit_per_kind,
@@ -610,7 +613,7 @@ def compile_graph_context(
     )
     visible_nodes, visible_edges = _visible_subgraph(graph)
     seeds = _seed_candidates(graph, query, max_seeds=max_seeds)
-    if not seeds:
+    if not seeds and projected_graph is None:
         return _compile_lexical_fallback(
             session,
             tenant_id,

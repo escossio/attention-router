@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attention_router.application.context_claim_support import claim_timeline_support_is_current
 from attention_router.application.personal_context_controls import (
     CONTEXT_CONTROL_PREDICATE,
     claim_is_owner_private,
@@ -163,7 +164,10 @@ def build_cognitive_graph_slice(
     limit_per_kind: int = 200,
     include_secret: bool = False,
     timeline_lineage: str | None = None,
+    timeline_event_ids: tuple[str, ...] | None = None,
+    timeline_projection_only: bool = False,
     now: datetime | None = None,
+    _locked_observation_ids: frozenset[str] = frozenset(),
 ) -> CognitiveGraphSlice:
     """Project one bounded tenant graph without mutating source-of-truth rows."""
     if session.get(TenantRow, tenant_id) is None:
@@ -176,6 +180,29 @@ def build_cognitive_graph_slice(
 
     nodes: dict[str, CognitiveNode] = {}
     edges: dict[str, CognitiveEdge] = {}
+
+    # ContextValidity may reuse proof only for the bounded timeline selected
+    # and locked in this transaction. Other graph consumers validate normally.
+    observation_validity = {
+        event_id: True for event_id in (timeline_event_ids or ()) if event_id in _locked_observation_ids
+    }
+
+    def projection() -> CognitiveGraphSlice:
+        result = CognitiveGraphSlice(
+            tenant_id=tenant_id,
+            nodes=tuple(sorted(nodes.values(), key=lambda item: item.node_id)),
+            edges=tuple(sorted(edges.values(), key=lambda item: item.edge_id)),
+            generated_at=stamp,
+        )
+        result.validate()
+        return result
+
+    def observation_is_current(event: TimelineEventRow) -> bool:
+        if event.id not in observation_validity:
+            from attention_router.application.cognitive_observation import observation_event_is_current
+
+            observation_validity[event.id] = observation_event_is_current(session, event, now=stamp)
+        return observation_validity[event.id]
 
     def put_node(node: CognitiveNode) -> None:
         if node.tenant_id != tenant_id:
@@ -402,9 +429,16 @@ def build_cognitive_graph_slice(
         timeline_query = timeline_query.where(
             TimelineEventRow.visibility != "SECRET"
         )
+    if timeline_event_ids is not None:
+        timeline_query = timeline_query.where(TimelineEventRow.id.in_(timeline_event_ids))
     timeline_query = timeline_query.limit(limit_per_kind)
     timeline_events = list(session.scalars(timeline_query).all())
     for row in timeline_events:
+        if row.event_type == "ATTACHMENT_OBSERVED":
+            # Pilot sources must be revalidated even before a reconciliation cycle.
+
+            if not observation_is_current(row):
+                continue
         event_node_id = _event_node_id(row.id)
         put_node(
             CognitiveNode(
@@ -478,6 +512,9 @@ def build_cognitive_graph_slice(
                 )
             )
 
+    if timeline_projection_only:
+        return projection()
+
     claim_query = (
         select(MemoryClaimRow)
         .join(
@@ -500,6 +537,7 @@ def build_cognitive_graph_slice(
         for row in session.scalars(claim_query).all()
         if row.predicate != CONTEXT_CONTROL_PREDICATE
         and not claim_is_owner_private(session, claim=row)
+        and claim_timeline_support_is_current(session, row, tenant_id=tenant_id, now=stamp)
     ]
 
     for row in claims:
@@ -751,7 +789,10 @@ def build_cognitive_graph_slice(
 
     episode_query = (
         select(SemanticEpisodeRow)
-        .where(SemanticEpisodeRow.tenant_id == tenant_id)
+        .where(
+            SemanticEpisodeRow.tenant_id == tenant_id,
+            SemanticEpisodeRow.evidence_status != "EVIDENCE_REVOKED",
+        )
         .order_by(
             SemanticEpisodeRow.last_activity_at.desc(),
             SemanticEpisodeRow.id,
@@ -763,6 +804,33 @@ def build_cognitive_graph_slice(
             SemanticEpisodeRow.sensitivity_class != "SECRET"
         )
     episodes = list(session.scalars(episode_query).all())
+    # The pilot must not expose an episode supported only by revoked receipts,
+    # including in the interval before an explicit reconciliation cycle.
+    current_episodes = []
+    for episode in episodes:
+        if episode.episode_type.startswith("ATTACHMENT_OBSERVED:"):
+
+            members = session.scalars(
+                select(SemanticEpisodeMembershipRow).where(
+                    SemanticEpisodeMembershipRow.tenant_id == tenant_id,
+                    SemanticEpisodeMembershipRow.episode_id == episode.id,
+                ).limit(1001)
+            ).all()
+            marker = (episode.provenance or {}).get("technical_evidence_reconciliation") or {}
+            excluded = set(marker.get("invalid_member_refs", ()))
+            active_members = [member for member in members if member.member_ref not in excluded and not member.ambiguous]
+            if not active_members or len(members) > 1000:
+                continue
+            if not all(
+                member.member_type == "TIMELINE_EVENT"
+                and (event := session.get(TimelineEventRow, member.member_ref)) is not None
+                and event.tenant_id == tenant_id
+                and observation_is_current(event)
+                for member in active_members
+            ):
+                continue
+        current_episodes.append(episode)
+    episodes = current_episodes
     episode_ids = {row.id for row in episodes}
 
     for row in episodes:
@@ -863,6 +931,13 @@ def build_cognitive_graph_slice(
 
         target_node_id: str | None = None
         if row.member_type == "TIMELINE_EVENT":
+            event_for_membership = session.get(TimelineEventRow, row.member_ref)
+            if event_for_membership is None or event_for_membership.tenant_id != tenant_id:
+                continue
+            if event_for_membership.event_type == "ATTACHMENT_OBSERVED":
+
+                if not observation_is_current(event_for_membership):
+                    continue
             target_node_id = _event_node_id(row.member_ref)
             if target_node_id not in nodes:
                 event = session.get(TimelineEventRow, row.member_ref)
@@ -1151,6 +1226,10 @@ def build_cognitive_graph_slice(
             continue
         if not include_secret and event.visibility == "SECRET":
             continue
+        if event.event_type == "ATTACHMENT_OBSERVED":
+
+            if not observation_is_current(event):
+                continue
         event_node_id = _event_node_id(event.id)
         if event_node_id not in nodes:
             put_node(
@@ -1196,14 +1275,7 @@ def build_cognitive_graph_slice(
             )
         )
 
-    result = CognitiveGraphSlice(
-        tenant_id=tenant_id,
-        nodes=tuple(sorted(nodes.values(), key=lambda item: item.node_id)),
-        edges=tuple(sorted(edges.values(), key=lambda item: item.edge_id)),
-        generated_at=stamp,
-    )
-    result.validate()
-    return result
+    return projection()
 
 
 __all__ = [

@@ -46,6 +46,9 @@ class CandidateInsightRow(Base):
         nullable=False,
         default=list,
     )
+    evidence_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="CURRENT", server_default="CURRENT"
+    )
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     supersedes_insight_id: Mapped[str | None] = mapped_column(
         String(64),
@@ -63,6 +66,8 @@ class CandidateInsightRow(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
+        CheckConstraint("evidence_status IN ('CURRENT','EVIDENCE_REVOKED')",
+                        name="ck_candidate_evidence_status"),
         PrimaryKeyConstraint("id", name="pk_candidate_insights"),
         UniqueConstraint(
             "tenant_id",

@@ -12,6 +12,7 @@ from attention_router.core.tenancy import TenantScopeError
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.artifact_models import ArtifactReceiptRow, ArtifactRow
 from attention_router.infrastructure.models import ResourceRow, TenantRow
+from attention_router.platform.transaction_locks import acquire_artifact_registration_gate
 
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -148,6 +149,11 @@ def register_artifact_receipt(
     if session.get(TenantRow, item.tenant_id) is None:
         raise TenantScopeError("TENANT_NOT_FOUND:artifact")
 
+    acquire_artifact_registration_gate(
+        session, tenant_id=item.tenant_id, content_sha256=item.content_sha256,
+        source_channel=item.source_channel, source_account=item.source_account,
+        external_receipt_id=item.external_receipt_id,
+    )
     existing_receipt = _receipt_for_source(
         session,
         tenant_id=item.tenant_id,
@@ -259,3 +265,111 @@ __all__ = [
     "ArtifactRegistrationResult",
     "register_artifact_receipt",
 ]
+
+
+def withdraw_context_artifact(validity, artifact_id: str):
+    """Withdraw a canonical artifact within an authenticated pilot transaction.
+
+    Every receipt must belong to this exact account and tenant. Multi-account
+    evidence needs coordinated scope locks and is rejected here.
+    """
+    validity._check()
+    session = validity.session
+    artifact = session.get(ArtifactRow, artifact_id, populate_existing=True, with_for_update=True)
+    if artifact is None or artifact.tenant_id != validity.arguments["tenant_id"]:
+        raise ArtifactRegistrationError("ARTIFACT_WITHDRAWAL_SCOPE")
+    receipts = session.scalars(select(ArtifactReceiptRow).where(
+        ArtifactReceiptRow.tenant_id == artifact.tenant_id,
+        ArtifactReceiptRow.artifact_id == artifact.id,
+    ).order_by(ArtifactReceiptRow.id).with_for_update(read=True).execution_options(populate_existing=True)).all()
+    if not receipts or any(
+        row.source_account != validity.arguments["source_account"]
+        or row.source_channel != "channel.whatsapp" for row in receipts
+    ):
+        raise ArtifactRegistrationError("ARTIFACT_WITHDRAWAL_MULTISCOPE_UNPROVEN")
+    if artifact.status != "DELETED":
+        artifact.status = "DELETED"
+        validity._advance("CANONICAL_ARTIFACT_WITHDRAWN", artifact.id)
+    from attention_router.application.cognitive_observation import _reconcile_observation_support
+
+    _reconcile_observation_support(
+        session, tenant_id=artifact.tenant_id, binding_id=validity.binding.id,
+        source_account=validity.arguments["source_account"],
+        start=validity.arguments["start"], stamp=validity.arguments["now"],
+    )
+    return validity.token()
+
+
+def context_receipt_refusal(metadata: dict, *, now: datetime) -> str | None:
+    """Check the technical withdrawal and explicit deadline of a proven receipt."""
+    if not isinstance(metadata, dict) or metadata.get("context_evidence_withdrawn") is True:
+        return "ARTIFACT_RECEIPT_UNPROVEN"
+    if "context_expires_at" not in metadata:
+        return None
+    try:
+        expires_at = datetime.fromisoformat(metadata["context_expires_at"])
+    except (TypeError, ValueError):
+        return "ARTIFACT_RECEIPT_DEADLINE_INVALID"
+    if expires_at.utcoffset() is None:
+        return "ARTIFACT_RECEIPT_DEADLINE_INVALID"
+    if now >= expires_at:
+        return "ARTIFACT_RECEIPT_EXPIRED"
+    return None
+
+
+def withdraw_context_receipt(validity, receipt_id: str, *, expires_at: datetime | None = None):
+    """Withdraw only the authenticated account's receipt of a shared artifact."""
+    from attention_router.application.cognitive_observation import _reconcile_observation_support
+    from attention_router.infrastructure.models import ConversationMessageRow
+
+    validity._check()
+    session = validity.session
+    tenant_id = validity.arguments["tenant_id"]
+    account = validity.arguments["source_account"]
+    receipt = session.get(
+        ArtifactReceiptRow, receipt_id, populate_existing=True, with_for_update=True,
+    )
+    if (
+        receipt is None or receipt.tenant_id != tenant_id
+        or receipt.source_channel != "channel.whatsapp" or receipt.source_account != account
+    ):
+        raise ArtifactRegistrationError("ARTIFACT_WITHDRAWAL_RECEIPT_SCOPE")
+
+    metadata = receipt.metadata_json or {}
+    if expires_at is not None:
+        if expires_at.utcoffset() is None:
+            raise ArtifactRegistrationError("ARTIFACT_WITHDRAWAL_DEADLINE_INVALID")
+        previous = metadata.get("context_expires_at")
+        if previous and expires_at > datetime.fromisoformat(previous):
+            raise ArtifactRegistrationError("ARTIFACT_WITHDRAWAL_DEADLINE_EXTENSION")
+        if previous != expires_at.isoformat():
+            metadata = {**metadata, "context_expires_at": expires_at.isoformat()}
+            receipt.metadata_json = metadata
+            validity._advance("CANONICAL_RECEIPT_DEADLINE_SET", receipt.id)
+        if expires_at > validity.arguments["now"]:
+            return validity.token()
+
+    if metadata.get("context_evidence_withdrawn") is not True:
+        key = receipt.external_receipt_id
+        if not (key.startswith("whatsapp:") and key.endswith(":media")):
+            raise ArtifactRegistrationError("ARTIFACT_WITHDRAWAL_RECEIPT_SCOPE")
+        source_message_id = key.removeprefix("whatsapp:").removesuffix(":media")
+        messages = session.scalars(select(ConversationMessageRow).where(
+            ConversationMessageRow.tenant_id == tenant_id,
+            ConversationMessageRow.source == "wwebjs",
+            ConversationMessageRow.source_account == account,
+            ConversationMessageRow.source_message_id == source_message_id,
+            ConversationMessageRow.metadata_json["artifact_id"].as_string() == receipt.artifact_id,
+            ConversationMessageRow.metadata_json["artifact_receipt_id"].as_string() == receipt.id,
+        ).with_for_update().execution_options(populate_existing=True)).all()
+        receipt.metadata_json = {**metadata, "context_evidence_withdrawn": True}
+        for message in messages:
+            message.searchable = False
+            message.metadata_json = {**(message.metadata_json or {}), "context_evidence_withdrawn": True}
+        validity._advance("CANONICAL_RECEIPT_WITHDRAWN", receipt.id)
+
+    _reconcile_observation_support(
+        session, tenant_id=tenant_id, binding_id=validity.binding.id, source_account=account,
+        start=validity.arguments["start"], stamp=validity.arguments["now"],
+    )
+    return validity.token()

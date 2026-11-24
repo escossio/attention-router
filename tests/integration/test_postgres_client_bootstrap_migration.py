@@ -33,9 +33,13 @@ def test_client_device_bootstrap_migration_schema():
                 "tenant_id",
                 "role",
                 "status",
+                "context_revision",
                 "created_at",
                 "updated_at",
             }
+            assert isinstance(membership_columns["context_revision"]["type"], String)
+            assert membership_columns["context_revision"]["type"].length == 36
+            assert membership_columns["context_revision"]["nullable"] is False
             assert {
                 item["name"]: item["column_names"]
                 for item in schema.get_unique_constraints("client_tenant_memberships")

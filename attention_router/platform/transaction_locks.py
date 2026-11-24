@@ -33,3 +33,15 @@ def acquire_meta_provider_gate(session: Session, provider_message_id: str) -> No
     """Serialize durable receipt and API acceptance for one provider message."""
 
     _advisory_xact_lock(session, "meta-provider", provider_message_id)
+
+
+def acquire_artifact_registration_gate(
+    session: Session, *, tenant_id: str, content_sha256: str,
+    source_channel: str, source_account: str, external_receipt_id: str,
+) -> None:
+    """Serialize equal content or equal receipt coordinates before registry writes."""
+    import json
+
+    source = json.dumps([tenant_id, source_channel, source_account, external_receipt_id])
+    _advisory_xact_lock(session, "artifact-receipt", source)
+    _advisory_xact_lock(session, "artifact-content", f"{tenant_id}:{content_sha256}")
