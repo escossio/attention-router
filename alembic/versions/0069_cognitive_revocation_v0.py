@@ -16,6 +16,7 @@ def upgrade():
 
 
 def downgrade():
+    op.execute("LOCK TABLE candidate_insights, semantic_episodes IN ACCESS EXCLUSIVE MODE")
     for table in ("semantic_episodes", "candidate_insights"):
         if op.get_bind().execute(sa.text(
             f"SELECT 1 FROM {table} WHERE evidence_status <> 'CURRENT' LIMIT 1"
