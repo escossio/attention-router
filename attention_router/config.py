@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     device_bootstrap_enabled: bool = False
     device_bootstrap_challenge_ttl_seconds: int = 300
     client_session_enabled: bool = False
+    context_source_consent_api_enabled: bool = False
     context_epoch_authority_canary_enabled: bool = False
     staged_context_private_canary_enabled: bool = False
     staged_context_canary_owner_id: str | None = None

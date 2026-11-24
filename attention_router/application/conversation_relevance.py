@@ -19,6 +19,9 @@ CONCEPTS = {
     "pagamento": ("quitacao financeira", "pagamentos", "pagamento"),
     "contrato": ("acordo contratual", "instrumento contratual", "contratos", "contrato"),
     "projeto": ("projetos", "projeto"),
+    "reserva": ("reservaram", "reservou", "reservado", "reservada", "reserva"),
+    "duracao": ("duracao", "duraram", "durou"),
+    "inspecao": ("inspecao", "verificacao"),
     "conversa": ("dialogos", "dialogo", "conversas", "conversa"),
     "horario": ("marcacao horaria", "horarios", "horario"),
     "problema": ("dificuldades", "dificuldade", "problemas", "problema"),
@@ -33,6 +36,16 @@ GENERIC = set(
     "ha houve existe existem mencao mencoes referencia referencias mencionado mencionada mencionados mencionadas citado citada citados citadas aparece aparecem consta constam algum alguma alguma algo conteudo informacao informacoes registro registros mensagem mensagens trecho trechos procure localizar encontrar registrado registrada registrados registradas literalmente explicitamente indique mostre foi foram esta estao estava estavam ser sendo qual quais quero gostaria saber texto textos nessa nesse nesta neste nessa desta deste deles delas antes depois imediatamente pergunta perguntas resposta respostas sequencia anterior posterior seguinte enviada enviado ocorreu ocorre falou falar dito disse contem sobre esse essa isso isto aquilo ele ela la ai aqui nesse".split()
 )
 DEICTIC = re.compile(r"\b(isso|isto|aquilo|ele|ela|la|ai)\b")
+_NAMED_TIME = re.compile(
+    r"\b(?:em|até|desde|para)\s+(?:janeiro|fevereiro|março|abril|maio|junho|julho|"
+    r"agosto|setembro|outubro|novembro|dezembro)\b"
+    r"|\bàs\s+(?:uma|duas|três|quatro|cinco|seis|sete|oito|nove|dez|onze|doze)\s+horas?\b",
+    re.IGNORECASE,
+)
+_CONTRAST = re.compile(r"\bcontradit[oó]ri[ao]s?\b", re.IGNORECASE)
+_INSPECTION_RESULT = re.compile(r"\bqual (?:foi )?o resultado d[ae] (?:inspecao|verificacao)\b")
+_INSPECTION_OUTCOME = re.compile(r"(?P<subject>inspecao .+?) foi (?P<outcome>aprovad[ao]|recusad[ao])\b")
+CONTRAST_NEEDS_PAIR = "CONTRAST_REQUIRES_CORROBORATION"
 
 
 def terms(value):
@@ -62,13 +75,22 @@ def _required_answer_type(query, lookup_query):
     if not lookup_query:
         if re.match(r"^(quem|onde)\b", normalized_query):
             required = "UNRESOLVED_IDENTITY_OR_LOCATION"
+        elif _INSPECTION_RESULT.search(normalized_query):
+            required = "INSPECTION_OUTCOME"
         elif re.search(r"\b(quando|que dia|qual data|que horas|qual horario)\b", normalized_query):
             required = "TIME"
-        elif re.search(r"\b(quanto tempo|qual duracao)\b", normalized_query):
+        elif re.search(r"\b(quanto tempo|qual (?:a )?duracao)\b", normalized_query):
             required = "DURATION"
         elif re.search(r"\b(quanto|qual valor|qual preco)\b", normalized_query):
             required = "AMOUNT"
     return required
+
+
+def _query_terms(query, required):
+    wanted = terms(query)
+    if required == "INSPECTION_OUTCOME":
+        wanted.discard("resultado")
+    return wanted
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,11 +113,12 @@ class PreparedCandidateFeatures:
 
 
 def prepare_candidate_features(query: str) -> PreparedCandidateFeatures:
-    wanted = frozenset(terms(query))
     lookup = _is_lookup_query(query)
+    required = _required_answer_type(query, lookup)
+    wanted = frozenset(_query_terms(query, required))
     return PreparedCandidateFeatures(
         query, wanted, frozenset(t for t in wanted if t.isdigit()),
-        frozenset(_tokens(query)), lookup, _required_answer_type(query, lookup),
+        frozenset(_tokens(query)), lookup, required,
         tuple((re.compile(r"\b" + re.escape(phrase) + r"\b"), key)
               for key, phrases in CONCEPTS.items()
               for phrase in sorted(phrases, key=len, reverse=True)),
@@ -104,12 +127,14 @@ def prepare_candidate_features(query: str) -> PreparedCandidateFeatures:
 
 def features(query, content, *, prepared=None):
     if prepared is None:
-        wanted, present = terms(query), terms(content)
-        numbers = {t for t in wanted if t.isdigit()}
         lookup_query = _is_lookup_query(query)
+        required = _required_answer_type(query, lookup_query)
+        wanted, present = _query_terms(query, required), terms(content)
+        numbers = {t for t in wanted if t.isdigit()}
         content_terms = terms
     else:
         wanted, numbers, lookup_query = prepared.wanted, prepared.numbers, prepared.lookup_query
+        required = prepared.required
         content_terms = prepared.content_terms
         present = content_terms(content)
     hit = wanted & present
@@ -119,22 +144,24 @@ def features(query, content, *, prepared=None):
         question_only_support = not any(
             wanted <= content_terms(piece) and "?" not in piece for piece in pieces
         )
-    if prepared is None:
-        required = _required_answer_type(query, lookup_query)
-    else:
-        required = prepared.required
     patterns = {
         "TIME": r"\b(?:hoje|amanha|ontem|segunda|terca|quarta|quinta|sexta|sabado|domingo)\b|\b\d{1,2}(?:[:/]\d{1,2}|h\b)",
         "DURATION": r"\b\d+(?:[.,]\d+)?\s*(?:segundos?|minutos?|horas?|dias?)\b",
         "AMOUNT": r"r\$\s*\d|\b\d+(?:[.,]\d+)?\s*reais\b",
     }
     answer_type_supported = required is None
-    if required in patterns:
+    if required == "INSPECTION_OUTCOME":
+        answer_type_supported = any(
+            wanted <= content_terms(piece) and _inspection_claim(piece) is not None
+            for piece in re.split(r"(?m)^Autor\s+\d+:\s*|(?<=[.!?])\s+", content)
+        )
+    elif required in patterns:
         pieces = re.split(r"(?m)^Autor\s+\d+:\s*|(?<=[.!?])\s+", content)
         answer_type_supported = any(
             wanted <= content_terms(piece)
             and "?" not in piece
-            and re.search(patterns[required], _normalize(piece))
+            and (re.search(patterns[required], _normalize(piece))
+                 or required == "TIME" and _NAMED_TIME.search(piece))
             for piece in pieces
         )
     return {
@@ -193,6 +220,30 @@ def evidence_reason(row, config):
     if not math.isfinite(row["similarity"]) or row["similarity"] < config["min_similarity"]:
         return "SEMANTIC_SUPPORT_INSUFFICIENT"
     return None
+
+
+def contrast_topic_query(query):
+    if not _is_lookup_query(query) or "inspecao" not in terms(query):
+        return None
+    topic, markers = _CONTRAST.subn("", query)
+    return topic if markers == 1 else None
+
+
+def inspection_outcome(excerpt, topic_query):
+    if not terms(topic_query) <= terms(excerpt):
+        return None
+    return _inspection_claim(excerpt)
+
+
+def _inspection_claim(excerpt):
+    # Only a whole affirmative clause can witness an outcome.
+    sentence = _normalize(excerpt.strip().rstrip(".!"))
+    sentence = re.sub(r"^a ", "", sentence)
+    sentence = re.sub(r"^verificacao ", "inspecao ", sentence)
+    match = _INSPECTION_OUTCOME.fullmatch(sentence)
+    if match is None:
+        return None
+    return match["subject"], match["outcome"][:-1]
 
 
 def ambiguous(query, *, conversation_id=None, participant=None):
