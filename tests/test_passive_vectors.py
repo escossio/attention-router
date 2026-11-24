@@ -567,6 +567,8 @@ def test_restricted_service_role_indexes_and_searches(db, provider):
     with f() as s:
         s.execute(text(f"CREATE ROLE {role} NOLOGIN NOSUPERUSER NOBYPASSRLS"))
         s.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
+        if s.scalar(text("SELECT to_regprocedure('public.andy_context_index_writer_lock(text)') IS NOT NULL")):
+            s.execute(text(f"GRANT EXECUTE ON FUNCTION public.andy_context_index_writer_lock(text) TO {role}"))
         s.execute(text(f"GRANT SELECT ON conversation_threads,conversation_messages,voice_transcriptions,client_tenant_memberships,queue TO {role}"))
         s.execute(text(f"GRANT UPDATE(status,payload,processed_at) ON queue TO {role}"))
         s.execute(text(f"GRANT SELECT,INSERT,UPDATE,DELETE ON conversation_vector_segments,conversation_vector_memberships,conversation_embeddings,conversation_vector_stats TO {role}"))
@@ -649,3 +651,168 @@ def test_index_lock_contention_does_not_abort_source_writer(db, provider):
             assert 'corrigido' in result['results'][0]['text']
     finally:
         event.remove(engine,'before_cursor_execute',before_execute)
+
+
+@pytest.fixture
+def vector_reader(db):
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    from attention_router.infrastructure.vector_attachment_provenance import CREATE_VECTOR_ATTACHMENT_PROVENANCE
+
+    factory = db[0]
+    role = "vector_reader_" + uuid.uuid4().hex
+    with factory.begin() as admin:
+        install = admin.scalar(text("SELECT to_regclass('public.andy_vector_attachment_provenance') IS NULL"))
+        if install:
+            # U2 can exercise the actual G3 projection on a disposable pre-0072 database.
+            admin.execute(text(CREATE_VECTOR_ATTACHMENT_PROVENANCE))
+            admin.execute(text("REVOKE ALL ON public.andy_vector_attachment_provenance FROM PUBLIC"))
+        admin.execute(text(f"CREATE ROLE {role} NOLOGIN NOSUPERUSER NOBYPASSRLS"))
+        admin.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
+        admin.execute(text(f"""GRANT SELECT ON conversation_threads, conversation_messages,
+            voice_transcriptions, client_tenant_memberships, conversation_vector_segments,
+            conversation_vector_memberships, conversation_embeddings,
+            public.andy_vector_attachment_provenance TO {role}"""))
+
+    class Reader(Session):
+        pass
+
+    @event.listens_for(Reader, "after_begin")
+    def set_role(session, transaction, connection):
+        connection.exec_driver_sql(f"SET LOCAL ROLE {role}")
+
+    try:
+        yield sessionmaker(bind=factory.kw["bind"], class_=Reader)
+    finally:
+        with factory.begin() as admin:
+            admin.execute(text(f"DROP OWNED BY {role}"))
+            admin.execute(text(f"DROP ROLE {role}"))
+            if install:
+                admin.execute(text("DROP VIEW public.andy_vector_attachment_provenance"))
+
+
+VOICE_QUERY = "A reunião para revisar o orçamento foi marcada para a próxima semana."
+
+
+@pytest.fixture
+def receipt_voices(db, provider):
+    from attention_router.application.platform.artifacts import ArtifactReceiptInput, register_artifact_receipt
+    from attention_router.infrastructure.artifact_models import ArtifactReceiptRow, ArtifactRow
+    from attention_router.infrastructure.models import ResourceRow
+
+    factory, tenant, conversation, message = db
+    one, two = tenant(), tenant()
+    fixtures = []
+    artifact_ids, resource_ids = set(), set()
+    try:
+        for tenant_id, account in ((one, "fixture-a"), (one, "fixture-b"), (two, "fixture-a")):
+            conversation_id = conversation(tenant_id, account=account)
+            message_id, inbound_id = message(tenant_id, conversation_id, VOICE_QUERY, account=account, voice=True)
+            with factory.begin() as session:
+                result = register_artifact_receipt(session, ArtifactReceiptInput(
+                    tenant_id=tenant_id, content_sha256="a" * 64, artifact_kind="AUDIO",
+                    mime_type="audio/ogg", size_bytes=16, storage_provider="fixture",
+                    storage_reference="audio-fixture", source_channel="channel.whatsapp",
+                    source_account=account, external_receipt_id=f"whatsapp:{message_id}:media",
+                    received_at=NOW,
+                ))
+                source = session.get(ConversationMessageRow, message_id)
+                source.metadata_json = {
+                    **source.metadata_json, "artifact_receipt_id": result.receipt.id,
+                    "artifact_id": result.artifact.id, "attachment_state": "READY",
+                }
+                inbound = session.get(InboundEventRow, inbound_id)
+                inbound.external_event_id = message_id
+                inbound.payload = {"metadata": {"source_account": account}}
+                stt = session.scalar(text("SELECT id FROM voice_transcriptions WHERE inbound_event_id=:id"),
+                                     {"id": inbound_id})
+                fixtures.append((tenant_id, account, message_id, result.receipt.id, stt, inbound_id))
+                artifact_ids.add(result.artifact.id)
+                resource_ids.add(result.artifact.resource_id)
+        drain(factory, provider)
+        yield fixtures
+    finally:
+        with factory.begin() as session:
+            for model, ids in (
+                (ArtifactReceiptRow, [row[3] for row in fixtures]), (ArtifactRow, artifact_ids), (ResourceRow, resource_ids),
+            ):
+                for row_id in ids:
+                    session.delete(session.get(model, row_id))
+                session.flush()
+
+
+def voice_matches(reader, provider, scope, mode):
+    from attention_router.application import conversation_hybrid
+
+    tenant, account, *_ = scope
+    with reader() as session:
+        params = dict(tenant_id=tenant, source_account=account, query=VOICE_QUERY, provider=provider)
+        result = (v.search(session, **params) if mode == "vector"
+                  else conversation_hybrid.search(session, search_mode=mode, **params))
+        return {(m["id"], m["transcription_id"]) for r in result["results"] for m in r["messages"]}
+
+
+def test_voice_receipt_validity_and_scope_with_read_only_role(db, provider, receipt_voices, vector_reader):
+    from attention_router.infrastructure.artifact_models import ArtifactReceiptRow
+
+    first, second, foreign = receipt_voices
+    modes = ("vector", "lexical", "hybrid")
+    with vector_reader() as reader:
+        for table in ("artifacts", "artifact_receipts", "inbound_events", "queue"):
+            assert not reader.scalar(text("SELECT has_any_column_privilege(current_user,:table,'SELECT')"),
+                                     {"table": table})
+        assert not reader.scalar(text("SELECT has_table_privilege('conversation_messages','UPDATE')"))
+        assert not reader.scalar(text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user"))
+        for tenant, account, message, *_ in receipt_voices:
+            v.scope(reader, tenant, account)
+            assert set(reader.scalars(text("SELECT message_id FROM public.andy_vector_attachment_provenance"))) == {message}
+
+    for row in receipt_voices:
+        for mode in modes:
+            assert voice_matches(vector_reader, provider, row, mode) == {(row[2], row[4])}
+
+    with db[0].begin() as admin:
+        expired = admin.get(ArtifactReceiptRow, first[3])
+        expired.metadata_json = {**expired.metadata_json, "context_expires_at": (datetime.now(timezone.utc)
+                                  - timedelta(minutes=1)).isoformat()}
+        withdrawn = admin.get(ArtifactReceiptRow, second[3])
+        withdrawn.metadata_json = {**withdrawn.metadata_json, "context_evidence_withdrawn": True}
+    for mode in modes:
+        assert not voice_matches(vector_reader, provider, first, mode)
+        assert not voice_matches(vector_reader, provider, second, mode)
+        assert voice_matches(vector_reader, provider, foreign, mode) == {(foreign[2], foreign[4])}
+
+
+@pytest.mark.parametrize("mode", ["vector", "hybrid"])
+def test_receipt_source_revision_at_materialization(db, provider, receipt_voices, vector_reader, monkeypatch, mode):
+    first, *_ = receipt_voices
+    check = v.revalidated_results
+    changed = []
+
+    def update_source_then_check(session, tenant, account, results, versions):
+        assert results and not changed
+        with db[0].begin() as admin:
+            source = admin.get(ConversationMessageRow, first[2])
+            previous = source.context_revision
+            # The text and segment hashes stay identical. The source revision changes.
+            source.metadata_json = {**source.metadata_json, "capture_contract": "synthetic-revision-two"}
+            admin.flush()
+            admin.refresh(source)
+            assert source.context_revision != previous
+        changed.append(True)
+        return check(session, tenant, account, results, versions)
+
+    monkeypatch.setattr(v, "revalidated_results", update_source_then_check)
+    assert not voice_matches(vector_reader, provider, first, mode)
+    assert changed
+
+
+def test_voice_rejects_stt_from_another_account(db, provider, receipt_voices, vector_reader):
+    first, second, _ = receipt_voices
+    with db[0].begin() as admin:
+        msg = admin.get(ConversationMessageRow, first[2])
+        msg.metadata_json = {**msg.metadata_json, "source_inbound_event_id": second[5]}
+    drain(db[0], provider)
+    assert not voice_matches(vector_reader, provider, first, "vector")
+    assert voice_matches(vector_reader, provider, second, "vector") == {(second[2], second[4])}

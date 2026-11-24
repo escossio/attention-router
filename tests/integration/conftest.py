@@ -51,6 +51,10 @@ def Session(pg_url):
             "AND tablename <> 'alembic_version' ORDER BY tablename"
         )).all()
         if tables:
+            # This database belongs exclusively to the disposable fixture. Clear
+            # opted-in test tenants before truncation so all ALWAYS triggers stay active.
+            if "andy_context_fenced_tenants" in tables:
+                connection.execute(text("DELETE FROM public.andy_context_fenced_tenants"))
             quoted = ', '.join('"' + name.replace('"', '""') + '"' for name in tables)
             connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)

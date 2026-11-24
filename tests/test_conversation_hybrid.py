@@ -4,7 +4,9 @@ from sqlalchemy import text
 from test_passive_vectors import drain, NOW
 
 from attention_router.application import conversation_hybrid as h
-from attention_router.application.conversation_relevance import features, evidence_reason, terms
+from attention_router.application.conversation_relevance import (
+    evidence_reason, features, order_candidates, prepare_candidate_features, terms,
+)
 
 pytest_plugins = ("test_passive_vectors",)
 
@@ -57,6 +59,22 @@ def test_not_question_matching_or_missing_answer_type(query, content, reason):
     assert (
         evidence_reason(features(query, content) | {"similarity": 0.99}, h.load_policy()) == reason
     )
+
+
+@pytest.mark.parametrize("query", [
+    "Há menção a uma gravação sonora?", "Qual foi a duração de 20 minutos?",
+    "Quanto foi o pagamento?", "O pagamento foi confirmado?",
+])
+def test_prepared_scores_preserve_lexical_vector_and_rrf_order(query):
+    candidates = [
+        {"id": "a", "content_text": "Autor 1: O áudio durou 20 minutos.", "similarity": 0.84},
+        {"id": "b", "content_text": "Autor 2: O pagamento foi confirmado?", "similarity": 0.67},
+        {"id": "c", "content_text": "Autor 2: O pagamento de 35 reais foi confirmado.", "similarity": 0.67},
+    ]
+    prepared = prepare_candidate_features(query)
+    for strategy in ("vector", "lexical", "hybrid"):
+        args = dict(strategy=strategy, config=h.load_policy())
+        assert order_candidates(candidates, query, prepared=prepared, **args) == order_candidates(candidates, query, **args)
 
 
 @pytest.mark.postgres
@@ -320,9 +338,37 @@ def test_large_neighbor_is_bounded_and_offsets_verifiable(db, provider):
             t,
             "default",
             provider,
+            {r["id"]: h.v._source_version(r) for r in h.v.sources(s, t, "default", c)},
         )
         neighbor = next(m for m in result["messages"] if m["id"] == previous)
         assert neighbor["context_truncated"] and neighbor["char_start"] > 0
         assert provider.count(neighbor["text"]) <= 350
         assert neighbor["text"] == body[neighbor["char_start"] : neighbor["char_end"]]
         assert neighbor["role"] == "CHRONOLOGICAL_CONTEXT_NOT_CONFIRMED_REPLY"
+
+
+@pytest.mark.parametrize(("query", "content", "reason"), [
+    ("Há menção à sala Marfim na reserva de cerâmica?",
+     "A equipe de cerâmica reservou a sala Marfim.", None),
+    ("Qual a duração do ensaio do quarteto de cordas?",
+     "O ensaio do quarteto de cordas durou 45 minutos.", None),
+    ("Qual a duração do ensaio do quarteto de cordas?",
+     "O ensaio do quarteto de cordas durou muito.", "ANSWER_TYPE_NOT_ESTABLISHED"),
+    ("Quando terminou o inventário do viveiro de lírios?",
+     "O inventário do viveiro de lírios terminou em março.", None),
+    ("Quando terminou o inventário do viveiro de lírios?",
+     "O inventário do viveiro de lírios terminou em um marco importante.",
+     "ANSWER_TYPE_NOT_ESTABLISHED"),
+    ("Qual foi o resultado da inspeção do moinho?",
+     "A inspeção do moinho foi aprovada.", None),
+    ("Qual foi o resultado da inspeção do moinho?",
+     "A inspeção do moinho foi agendada.", "ANSWER_TYPE_NOT_ESTABLISHED"),
+    ("Que horas abre a biblioteca do farol?",
+     "A biblioteca do farol abre às nove horas.", None),
+    ("Que horas abre a biblioteca do farol?",
+     "A biblioteca do farol abre por nove horas.", "ANSWER_TYPE_NOT_ESTABLISHED"),
+])
+def test_grounded_portuguese_lookup_forms(query, content, reason):
+    for prepared in (None, prepare_candidate_features(query)):
+        row = features(query, content, prepared=prepared) | {"similarity": 0.95}
+        assert evidence_reason(row, h.load_policy()) == reason
