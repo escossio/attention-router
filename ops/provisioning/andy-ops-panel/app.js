@@ -8,6 +8,8 @@ const state = {
 };
 
 const observabilitySources = {
+  "flow-e2e": {key: "flow_e2e_url", frame: "#flow-e2e-frame", status: "#flow-e2e-state", open: "#flow-e2e-open"},
+  "live-message": {key: "live_message_url", frame: "#live-message-frame", status: "#live-message-state", open: "#live-message-open"},
   network: {
     key: "network_osi_url",
     frame: "#network-frame",
@@ -145,13 +147,37 @@ function nodeCard(node) {
   task.className = "task-box " + (node.task ? "" : "idle");
   const taskTitle = document.createElement("span");
   taskTitle.className = "task-title";
-  taskTitle.textContent = node.task ? node.task.label : "Nenhum trabalho atribuído";
+  taskTitle.textContent = node.task ? node.task.label : "Nenhum teste detectado agora";
   const taskTime = document.createElement("span");
   taskTime.className = "task-time";
-  taskTime.textContent = node.task ? fmtDuration(node.task.elapsed_seconds) : "IDLE";
+  taskTime.textContent = node.task ? fmtDuration(node.task.elapsed_seconds) : "SEM JOB";
   task.append(taskTitle, taskTime);
 
   article.append(head, overall, blocks, cores, meta, task);
+  if (node.id !== "agt") {
+    const last = node.last_job;
+    const history = document.createElement("div");
+    history.className = "last-job";
+    const heading = document.createElement("span");
+    heading.className = "last-job-label";
+    heading.textContent = "ÚLTIMA EXECUÇÃO REGISTRADA";
+    const detail = document.createElement("strong");
+    const caption = document.createElement("span");
+    caption.className = "last-job-caption";
+    if (last) {
+      detail.textContent = (last.suite || "teste").toUpperCase()
+        + " · " + (last.status || "—");
+      detail.className = last.status === "PASS" ? "good" : (last.status === "FAIL" ? "bad" : "warn");
+      caption.textContent = "Fim " + fmtTime(last.finished_at)
+        + (last.worker_duration_seconds == null ? "" : " · execução " + fmtDuration(last.worker_duration_seconds))
+        + (last.busy_count ? " · " + last.busy_count + " ocupado(s)" : "");
+    } else {
+      detail.textContent = "Sem registro recente";
+      caption.textContent = "Não significa ausência de trabalho histórico.";
+    }
+    history.append(heading, detail, caption);
+    article.append(history);
+  }
   return article;
 }
 
@@ -165,6 +191,9 @@ function renderDispatch(payload) {
   const dispatch = payload.dispatch;
   const title = $("#dispatch-title");
   const meta = $("#dispatch-meta");
+  const stripLabel = document.querySelector(".dispatch-strip .section-label");
+  if (stripLabel) stripLabel.textContent =
+    dispatch && dispatch.status === "RUNNING" ? "EXECUÇÃO ATUAL" : "ÚLTIMO DESPACHO";
 
   ["ci01", "ci02", "ci03"].forEach((id) => {
     const el = $("#flow-" + id);
@@ -185,7 +214,10 @@ function renderDispatch(payload) {
     meta.textContent = "Em execução · " + fmtDuration(dispatch.elapsed_seconds);
   } else {
     title.textContent = "Último despacho: " + String(dispatch.status || "—");
-    meta.textContent = (dispatch.sha_short || "sem SHA") + " · " + fmtDuration(dispatch.elapsed_seconds);
+    const worker = dispatch.selected_worker ? " · " + dispatch.selected_worker.toUpperCase() : "";
+    meta.textContent = "Fim registrado " + fmtTime(dispatch.finished_at) + worker
+      + " · teste " + fmtDuration(dispatch.worker_duration_seconds)
+      + " · total " + fmtDuration(dispatch.elapsed_seconds);
   }
 }
 
@@ -200,24 +232,54 @@ function renderDispatchHistory(recent) {
     const row = document.createElement("div");
     row.className = "history-row";
     const statusClass = item.status === "PASS" ? "good" : (item.status === "FAIL" ? "bad" : "warn");
-    const workers = Object.entries(item.workers || {}).map(([name, info]) => {
-      const result = info && info.status ? info.status : "—";
-      return name.toUpperCase() + ":" + result;
-    }).join(" · ");
-    const cells = [
-      fmtTime(item.started_at),
-      item.sha_short || "—",
-      item.suite || "—",
-      fmtDuration(item.wall_seconds),
-      workers || (item.status || "—"),
-    ];
-    cells.forEach((value, index) => {
-      const span = document.createElement("span");
-      span.textContent = value;
-      if (index === 1 || index === 3) span.classList.add("mono");
-      if (index === 4) span.classList.add(statusClass);
-      row.append(span);
-    });
+
+    const timestamps = document.createElement("span");
+    timestamps.className = "history-times";
+    const finished = document.createElement("strong");
+    finished.className = "history-main";
+    finished.textContent = "Fim registrado " + fmtTime(item.finished_at);
+    const dispatched = document.createElement("small");
+    dispatched.className = "history-sub";
+    dispatched.textContent = "Despacho AGT " + fmtTime(item.dispatch_created_at || item.started_at);
+    const actualStart = document.createElement("small");
+    actualStart.className = "history-sub";
+    actualStart.textContent = "Início worker " + fmtTime(item.worker_started_at);
+    timestamps.append(finished, dispatched, actualStart);
+
+    const sha = document.createElement("span");
+    sha.className = "mono";
+    sha.textContent = item.sha_short || "—";
+
+    const suite = document.createElement("span");
+    suite.textContent = item.suite || "—";
+
+    const duration = document.createElement("span");
+    duration.className = "history-duration";
+    const useful = document.createElement("strong");
+    useful.className = "history-main";
+    useful.textContent = "Teste " + fmtDuration(item.worker_duration_seconds);
+    const total = document.createElement("small");
+    total.className = "history-sub";
+    total.textContent = "Total " + fmtDuration(item.wall_seconds);
+    const overhead = document.createElement("small");
+    overhead.className = "history-sub";
+    overhead.textContent = item.dispatch_overhead_seconds == null
+      ? "Fila/coord. —" : "Fila/coord. " + fmtDuration(item.dispatch_overhead_seconds);
+    duration.append(useful, total, overhead);
+
+    const result = document.createElement("span");
+    result.className = "history-result " + statusClass;
+    const who = item.selected_worker
+      ? item.selected_worker.toUpperCase()
+      : Object.keys(item.workers || {}).map((x) => x.toUpperCase()).join(", ");
+    const status = document.createElement("strong");
+    status.textContent = (who ? who + " · " : "") + String(item.status || "—");
+    const busy = document.createElement("small");
+    busy.className = "history-sub";
+    busy.textContent = item.busy_count ? item.busy_count + " tentativa(s) WORKER_BUSY" : "";
+    result.append(status, busy);
+
+    row.append(timestamps, sha, suite, duration, result);
     root.append(row);
   });
 }
@@ -521,6 +583,74 @@ function renderMessageTraces(tracePayload) {
   });
 }
 
+const investigatorEventNames = {
+  started: "Investigação iniciada",
+  heartbeat: "Sinal de atividade",
+  query_requested: "Consulta solicitada",
+  query_observed: "Observação recebida",
+  query_denied: "Consulta negada",
+  query_failed: "Consulta falhou",
+  query_limited: "Limite de consulta",
+  completed: "Investigação concluída",
+  blocked: "Investigação bloqueada",
+  failed: "Investigação falhou",
+  limited: "Orçamento atingido",
+  cancelled: "Investigação cancelada",
+  timeout: "Tempo esgotado",
+};
+
+function renderInvestigator(obs) {
+  obs = obs || {};
+  const stateName = obs.enabled === false ? "DISABLED" : String(obs.state || "UNKNOWN");
+  const names = {
+    DISABLED: "DESABILITADO", NOT_CONFIGURED: "SEM CONFIGURAÇÃO",
+    AWAITING_EVENTS: "AGUARDANDO EVENTOS", UNAVAILABLE: "SEM TELEMETRIA",
+    STARTING: "INICIADA · AGUARDANDO CONSULTA",
+    RUNNING: "EM EXECUÇÃO", STALE: "SEM SINAL RECENTE",
+    COMPLETED: "CONCLUÍDO", FAILED: "FALHA", BLOCKED: "BLOQUEADO",
+    LIMITED: "LIMITE ATINGIDO", CANCELLED: "CANCELADO", TIMEOUT: "TEMPO ESGOTADO",
+  };
+  const indicator = $("#investigator-state");
+  indicator.textContent = names[stateName] || "ESTADO DESCONHECIDO";
+  indicator.className = "source-state " + (
+    stateName === "RUNNING" || stateName === "COMPLETED" ? "live"
+      : ["FAILED", "BLOCKED", "TIMEOUT", "UNAVAILABLE"].includes(stateName) ? "offline" : "ready"
+  );
+  $("#investigator-run").textContent = obs.run_id
+    ? String(obs.run_id).slice(0, 8) + "…"
+    : "—";
+  $("#investigator-age").textContent = obs.age_seconds === null || obs.age_seconds === undefined
+    ? "—" : fmtAge(obs.age_seconds);
+  $("#investigator-query-count").textContent = Number.isInteger(obs.queries) ? String(obs.queries) : "—";
+  const timeline = $("#investigator-timeline");
+  timeline.replaceChildren();
+  const events = Array.isArray(obs.events) ? obs.events : [];
+  if (!events.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = stateName === "DISABLED"
+      ? "Ative o journal privado no MGMT para acompanhar o primeiro ensaio."
+      : "Nenhum evento de investigação recebido até agora.";
+    timeline.append(empty);
+    return;
+  }
+  events.forEach((event) => {
+    const row = document.createElement("div");
+    row.className = "investigator-event";
+    const time = document.createElement("span");
+    time.className = "mono muted";
+    time.textContent = fmtTime(event.timestamp);
+    const title = document.createElement("strong");
+    title.textContent = investigatorEventNames[event.event] || "Evento";
+    const description = document.createElement("span");
+    const step = Number.isInteger(event.ordinal) ? "#" + event.ordinal + " · " : "";
+    description.textContent = step + (event.source && event.operation
+      ? event.source + " / " + event.operation : "metadados de execução");
+    row.append(time, title, description);
+    timeline.append(row);
+  });
+}
+
 function render(payload) {
   state.lastPayload = payload;
   renderNodes(payload.nodes || []);
@@ -529,6 +659,7 @@ function render(payload) {
   renderChat(payload.chat || {});
   renderTransport(payload.transport_observability || {});
   renderMessageTraces(payload.message_traces || {});
+  renderInvestigator(payload.investigator_activity || { enabled: false });
 
   $("#live-label").textContent = "AO VIVO";
   $("#last-update").textContent = "Atualizado " + fmtTime(payload.generated_at);
@@ -552,14 +683,24 @@ function configureObservability(config) {
 
     link.href = url;
     link.hidden = false;
+    if (name === "goaccess") {
+      const domainLink = $("#goaccess-domain-open");
+      try {
+        domainLink.href = new URL("dominios/index.html", url).href;
+        domainLink.hidden = false;
+      } catch (_error) {
+        domainLink.hidden = true;
+      }
+    }
     status.textContent = "PRONTO";
     status.className = "source-state ready";
 
     const frame = $(source.frame);
     if (!frame.dataset.loadBound) {
       frame.addEventListener("load", () => {
-        status.textContent = "AO VIVO";
-        status.className = "source-state live";
+        // A successful iframe load event does not prove its application authenticated.
+        status.textContent = "CARREGADO · VERIFICAR LOGIN";
+        status.className = "source-state ready";
       });
       frame.dataset.loadBound = "1";
     }
