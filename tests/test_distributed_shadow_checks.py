@@ -176,6 +176,34 @@ def test_merged_main_cli_limits_shadow_publisher_to_canonical_python(monkeypatch
     assert state == "REFUSED" and check_id is None
 
 
+@pytest.mark.parametrize("suite", ["postgres", "python", "transport", "docker"])
+def test_queued_publisher_posts_check_for_exact_head(monkeypatch, suite):
+    path = PUBLISHER.with_name("distributed_postgres_check.py") if suite == "postgres" else PUBLISHER
+    module = load_publisher(path)
+    repo = module.TARGET_REPO
+    sha = "a" * 40
+    external = "queue-job-1"
+    job = {"id": 1, "repository": repo, "pr_number": 17, "head_sha": sha,
+           "suite": suite, "state": "PENDING", "check_run_id": None}
+
+    def post(path, token, *, method, body):
+        assert (path, token, method) == (f"/repos/{repo}/check-runs", "test-token", "POST")
+        assert body["head_sha"] == sha
+        assert body["name"] == f"distributed-{suite}"
+        assert body["external_id"] == external
+        assert body["status"] == "queued"
+        assert f"PR #17 exact SHA {sha}" in body["output"]["summary"]
+        return 201, {"id": 42}
+
+    def start(queued, *, create, **_callbacks):
+        assert queued is job
+        assert create("test-token", external) == 42
+
+    monkeypatch.setattr(module, "request_json", post)
+    monkeypatch.setattr(module, "lifecycle", lambda: types.SimpleNamespace(run=start))
+    module.run_job(job)
+
+
 def test_shadow_publisher_enqueues_three_suites_per_exact_head(tmp_path):
     module = load_publisher()
     module.DEBOUNCE_SECONDS = 0
