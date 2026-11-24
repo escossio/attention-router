@@ -205,6 +205,7 @@ class Settings(BaseSettings):
     local_transport_outbound_timeout_seconds: float = 5.0
     synthetic_transport_status_url: str | None = None
     synthetic_transport_status_timeout_seconds: float = 5.0
+    context_performance_enabled: bool = False
     otel_tracing_enabled: bool = False
     otel_service_name: str = "attention-router-api"
     otel_service_version: str = "0.1.0"

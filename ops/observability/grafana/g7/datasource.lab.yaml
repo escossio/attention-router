@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: G7 M1 experimental
+    type: yesoreyeram-infinity-datasource
+    uid: roc-g7
+    access: proxy
+    editable: false
+    jsonData:
+      allowedHosts:
+        - http://127.0.0.1:19491
+  - name: ROC Tempo isolado
+    type: tempo
+    uid: roc-tempo
+    url: http://127.0.0.1:19420
+    access: proxy
+    editable: false

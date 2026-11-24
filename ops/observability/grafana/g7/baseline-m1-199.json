@@ -1,0 +1,16 @@
+{
+  "description": "Baseline histórica M1 pareada do checkpoint #428, preservada sem reconstruir a distribuição",
+  "worker": "ci02",
+  "sha": "b6f630800df18bcf140ef41657461cf1e6680418",
+  "segments": 199,
+  "summary": {
+    "offered": 120,
+    "grounded": 38,
+    "abstained": 11,
+    "client_timeout": 29,
+    "server_empty": 42,
+    "p95_ms": 10017.9,
+    "availability_pct": 40.83
+  },
+  "source": "https://github.com/escossio/attention-router/issues/428#issuecomment-7135078309"
+}

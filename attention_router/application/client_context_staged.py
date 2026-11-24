@@ -23,6 +23,7 @@ from attention_router.application.staged_read import (
     AuthorizedSnapshot, DetachedEvidence, StagedRead, StagedReadRejected,
 )
 from attention_router.config import settings
+from attention_router.observability.context_performance import Stage, phase
 from attention_router.observability.private_context import Decision, record
 from attention_router.infrastructure import client_session_repository as sessions
 from attention_router.infrastructure.client_bootstrap_models import ClientDeviceRow
@@ -44,11 +45,12 @@ class VerifyEvidence(Protocol):
 
 
 def _prepare_transaction(reader, session, bearer, scope, *, pg_consent):
-    require_context_database(session, reader_role=reader._role, require_pg_consent=pg_consent,
-                             require_fence=pg_consent and settings.app_env == "production")
-    session.execute(text("SET LOCAL lock_timeout = '4s'"))
-    session.execute(text("SET LOCAL statement_timeout = '8s'"))
-    reader._require_owner(session, bearer, scope)
+    with phase(Stage.IDENTITY):
+        require_context_database(session, reader_role=reader._role, require_pg_consent=pg_consent,
+                                 require_fence=pg_consent and settings.app_env == "production")
+        session.execute(text("SET LOCAL lock_timeout = '4s'"))
+        session.execute(text("SET LOCAL statement_timeout = '8s'"))
+        reader._require_owner(session, bearer, scope)
 
 
 def _authorized_context(reader, session, bearer, scope, permits):
@@ -114,7 +116,8 @@ class StagedClientContextAuthority:
         else:
             with reader._sessions.begin() as session:
                 _prepare_transaction(reader, session, bearer, scope, pg_consent=True)
-                revision, permits = self._pg_consent.current(session, scope, expected_revision)
+                with phase(Stage.CONSENT):
+                    revision, permits = self._pg_consent.current(session, scope, expected_revision)
                 yield revision, _authorized_context(reader, session, bearer, scope, permits), permits
 
     def _scope(self, scope_ref, bearer):
@@ -123,9 +126,10 @@ class StagedClientContextAuthority:
             # authority at each phase. The PgConsent transaction must then
             # revalidate the exact persisted fields before disclosing.
             with self._reader._sessions.begin() as session:
-                return self._owner_scope_registry.resolve(
-                    session, bearer=bearer, scope_ref=scope_ref,
-                )
+                with phase(Stage.IDENTITY):
+                    return self._owner_scope_registry.resolve(
+                        session, bearer=bearer, scope_ref=scope_ref,
+                    )
         scope = self._reader._scopes.get(scope_ref)
         if scope is None:
             raise ClientSessionAuthorityRejected()

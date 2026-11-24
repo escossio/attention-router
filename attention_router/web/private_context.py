@@ -34,6 +34,7 @@ from attention_router.application.conversation_relevance import (
 )
 from attention_router.config import settings
 from attention_router.infrastructure.context_epoch_durable import DurableEpochAuthority
+from attention_router.observability.context_performance import observe_database
 from attention_router.observability.private_context import correlation_id, record_failure
 
 
@@ -153,6 +154,8 @@ def _prepare():
 
 
 def query_endpoint(original, provider, registry):
+    if settings.context_performance_enabled:
+        observe_database(original._sessions.kw["bind"])
     reader = StagedConversationEvidenceReader(
         original, provider=provider, reserve_query=QueryBudget().reserve,
         owner_scope_registry=registry, pg_consent=PgSourceConsent(), render_packet=owner_answer,

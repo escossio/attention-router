@@ -17,6 +17,7 @@ from stat import S_ISDIR, S_ISREG
 
 from attention_router.application.context_epoch import EpochState, sign_state
 from attention_router.config import settings
+from attention_router.observability.context_performance import Stage, phase
 from attention_router.infrastructure.hashing import stable_json
 
 
@@ -96,7 +97,7 @@ class DurableEpochAuthority:
         if not domain or not challenge:
             raise OSError("CONTEXT_EPOCH_DURABLE_INVALID_CHALLENGE")
         try:
-            with closing(self._connect(read_only=True)) as conn:
+            with phase(Stage.ANCHOR), closing(self._connect(read_only=True)) as conn:
                 row = conn.execute("SELECT state FROM epochs WHERE domain=?", (domain,)).fetchone()
             if row is None:
                 raise OSError("CONTEXT_EPOCH_DURABLE_DOMAIN_UNKNOWN")

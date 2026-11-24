@@ -1,0 +1,1173 @@
+{
+  "uid": "roc-g7-contextual-m1",
+  "title": "G7 / Bancada M1 de contexto",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "5s",
+  "tags": [
+    "ROC-E2E",
+    "G7",
+    "experiment"
+  ],
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "1 · Saúde do ensaio M1",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Oferta, admissão e concorrência",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 24,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "summary",
+          "columns": [
+            {
+              "selector": "offered",
+              "text": "offered",
+              "type": "number"
+            },
+            {
+              "selector": "admitted",
+              "text": "admitted",
+              "type": "number"
+            },
+            {
+              "selector": "in_progress",
+              "text": "in_progress",
+              "type": "number"
+            },
+            {
+              "selector": "executor_waiting",
+              "text": "executor_waiting",
+              "type": "number"
+            },
+            {
+              "selector": "worker_active",
+              "text": "worker_active",
+              "type": "number"
+            },
+            {
+              "selector": "completed",
+              "text": "completed",
+              "type": "number"
+            },
+            {
+              "selector": "throughput_per_min",
+              "text": "throughput_per_min",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        },
+        "textMode": "value_and_name",
+        "orientation": "horizontal",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Disponibilidade, fundamentação e latência acumulada",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "summary",
+          "columns": [
+            {
+              "selector": "availability_pct",
+              "text": "availability_pct",
+              "type": "number"
+            },
+            {
+              "selector": "grounding_pct",
+              "text": "grounding_pct",
+              "type": "number"
+            },
+            {
+              "selector": "grounded",
+              "text": "grounded",
+              "type": "number"
+            },
+            {
+              "selector": "abstained",
+              "text": "abstained",
+              "type": "number"
+            },
+            {
+              "selector": "p50_ms",
+              "text": "p50_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p95_ms",
+              "text": "p95_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p99_ms",
+              "text": "p99_ms",
+              "type": "number"
+            },
+            {
+              "selector": "client_timeout",
+              "text": "client_timeout",
+              "type": "number"
+            },
+            {
+              "selector": "server_empty",
+              "text": "server_empty",
+              "type": "number"
+            },
+            {
+              "selector": "disconnects",
+              "text": "disconnects",
+              "type": "number"
+            },
+            {
+              "selector": "cancelled",
+              "text": "cancelled",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        },
+        "textMode": "value_and_name",
+        "orientation": "horizontal",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Comparação por execução",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "comparison",
+          "columns": [
+            {
+              "selector": "metric",
+              "text": "metric",
+              "type": "string"
+            },
+            {
+              "selector": "selected",
+              "text": "selected",
+              "type": "number"
+            },
+            {
+              "selector": "baseline",
+              "text": "baseline",
+              "type": "number"
+            },
+            {
+              "selector": "delta",
+              "text": "delta",
+              "type": "number"
+            },
+            {
+              "selector": "delta_pct",
+              "text": "delta_pct",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Comparabilidade de ambiente e configuração",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 3
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "comparability",
+          "columns": [
+            {
+              "selector": "comparable",
+              "text": "comparable",
+              "type": "string"
+            },
+            {
+              "selector": "differences",
+              "text": "differences",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Cadência de ofertas, admissões e conclusões",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "evolution",
+          "columns": [
+            {
+              "selector": "time",
+              "text": "time",
+              "type": "timestamp"
+            },
+            {
+              "selector": "offered",
+              "text": "offered",
+              "type": "number"
+            },
+            {
+              "selector": "admitted",
+              "text": "admitted",
+              "type": "number"
+            },
+            {
+              "selector": "completed",
+              "text": "completed",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "2 · Localização",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Componentes por p95. Tempos inclusivos, espera e driver SQL",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "components",
+          "columns": [
+            {
+              "selector": "stage",
+              "text": "stage",
+              "type": "string"
+            },
+            {
+              "selector": "kind",
+              "text": "kind",
+              "type": "string"
+            },
+            {
+              "selector": "samples",
+              "text": "samples",
+              "type": "number"
+            },
+            {
+              "selector": "p50_ms",
+              "text": "p50_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p95_ms",
+              "text": "p95_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p99_ms",
+              "text": "p99_ms",
+              "type": "number"
+            },
+            {
+              "selector": "driver_ms",
+              "text": "driver_ms",
+              "type": "number"
+            },
+            {
+              "selector": "sql_count",
+              "text": "sql_count",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Mudança de p95 por componente",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "component_comparison",
+          "columns": [
+            {
+              "selector": "stage",
+              "text": "stage",
+              "type": "string"
+            },
+            {
+              "selector": "kind",
+              "text": "kind",
+              "type": "string"
+            },
+            {
+              "selector": "selected_ms",
+              "text": "selected_ms",
+              "type": "number"
+            },
+            {
+              "selector": "baseline_ms",
+              "text": "baseline_ms",
+              "type": "number"
+            },
+            {
+              "selector": "delta_ms",
+              "text": "delta_ms",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Distribuição acumulada de latência",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "distribution",
+          "columns": [
+            {
+              "selector": "upper_ms",
+              "text": "upper_ms",
+              "type": "number"
+            },
+            {
+              "selector": "cumulative",
+              "text": "cumulative",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "baseline_distribution",
+          "columns": [
+            {
+              "selector": "upper_ms",
+              "text": "upper_ms",
+              "type": "number"
+            },
+            {
+              "selector": "cumulative",
+              "text": "cumulative",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Desfechos do servidor, incl. contenção e autoridade",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "outcomes",
+          "columns": [
+            {
+              "selector": "outcome",
+              "text": "outcome",
+              "type": "string"
+            },
+            {
+              "selector": "count",
+              "text": "count",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "CPU, pico de RSS e I/O do processo de bancada",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "resources",
+          "columns": [
+            {
+              "selector": "time",
+              "text": "time",
+              "type": "number"
+            },
+            {
+              "selector": "cpu_seconds",
+              "text": "cpu_seconds",
+              "type": "number"
+            },
+            {
+              "selector": "rss_peak_kib",
+              "text": "rss_peak_kib",
+              "type": "number"
+            },
+            {
+              "selector": "input_blocks",
+              "text": "input_blocks",
+              "type": "number"
+            },
+            {
+              "selector": "output_blocks",
+              "text": "output_blocks",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "baseline_resources",
+          "columns": [
+            {
+              "selector": "time",
+              "text": "time",
+              "type": "number"
+            },
+            {
+              "selector": "cpu_seconds",
+              "text": "cpu_seconds",
+              "type": "number"
+            },
+            {
+              "selector": "rss_peak_kib",
+              "text": "rss_peak_kib",
+              "type": "number"
+            },
+            {
+              "selector": "input_blocks",
+              "text": "input_blocks",
+              "type": "number"
+            },
+            {
+              "selector": "output_blocks",
+              "text": "output_blocks",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "3 · Investigação por consulta",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 58,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "type": "table",
+      "title": "Caminho observado e espera sem sobreposição",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 59,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "traces",
+          "columns": [
+            {
+              "selector": "trace",
+              "text": "trace",
+              "type": "string"
+            },
+            {
+              "selector": "result",
+              "text": "result",
+              "type": "string"
+            },
+            {
+              "selector": "server_ms",
+              "text": "server_ms",
+              "type": "number"
+            },
+            {
+              "selector": "observed_wait_ms",
+              "text": "observed_wait_ms",
+              "type": "number"
+            },
+            {
+              "selector": "unknown_or_processing_ms",
+              "text": "unknown_or_processing_ms",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Ver eventos correlacionados",
+                    "url": "/d/roc-g7-contextual-m1?var-run=${run:percentencode}&var-baseline=${baseline:percentencode}&var-trace=${__value.raw}"
+                  },
+                  {
+                    "title": "Abrir trace no Tempo",
+                    "url": "/explore?schemaVersion=1&panes=%7B%22g7%22%3A%7B%22datasource%22%3A%22roc-tempo%22%2C%22queries%22%3A%5B%7B%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22${__value.raw}%22%2C%22refId%22%3A%22A%22%7D%5D%7D%7D"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "Eventos correlacionados e SQL agregado da consulta",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "timeline",
+          "columns": [
+            {
+              "selector": "event",
+              "text": "event",
+              "type": "string"
+            },
+            {
+              "selector": "stage",
+              "text": "stage",
+              "type": "string"
+            },
+            {
+              "selector": "outcome",
+              "text": "outcome",
+              "type": "string"
+            },
+            {
+              "selector": "correlation",
+              "text": "correlation",
+              "type": "string"
+            },
+            {
+              "selector": "timestamp_ns",
+              "text": "timestamp_ns",
+              "type": "number"
+            },
+            {
+              "selector": "duration_ns",
+              "text": "duration_ns",
+              "type": "number"
+            },
+            {
+              "selector": "sql_count",
+              "text": "sql_count",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 16,
+      "type": "table",
+      "title": "Identidade e configuração efetiva do ensaio",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 76,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "metadata",
+          "columns": [
+            {
+              "selector": "field",
+              "text": "field",
+              "type": "string"
+            },
+            {
+              "selector": "value",
+              "text": "value",
+              "type": "string"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "Último evento visto pela projeção",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 84,
+        "w": 24,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "summary",
+          "columns": [
+            {
+              "selector": "latest_event_ns",
+              "text": "latest_event_ns",
+              "type": "number"
+            },
+            {
+              "selector": "latest_event_age_ms",
+              "text": "latest_event_age_ms",
+              "type": "number"
+            },
+            {
+              "selector": "read_ns",
+              "text": "read_ns",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "run",
+        "label": "Execução",
+        "type": "query",
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "roc-g7"
+        },
+        "refresh": 2,
+        "query": {
+          "queryType": "infinity",
+          "refId": "variable",
+          "infinityQuery": {
+            "refId": "A",
+            "datasource": {
+              "type": "yesoreyeram-infinity-datasource",
+              "uid": "roc-g7"
+            },
+            "type": "json",
+            "source": "url",
+            "format": "table",
+            "parser": "backend",
+            "url": "http://127.0.0.1:19491/runs",
+            "root_selector": "runs",
+            "columns": [
+              {
+                "selector": "id",
+                "text": "id",
+                "type": "string"
+              },
+              {
+                "selector": "label",
+                "text": "label",
+                "type": "string"
+              }
+            ],
+            "url_options": {
+              "method": "GET"
+            },
+            "filters": []
+          },
+          "meta": {
+            "textField": "label",
+            "valueField": "id"
+          }
+        },
+        "current": {}
+      },
+      {
+        "name": "baseline",
+        "label": "Comparar com",
+        "type": "query",
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "roc-g7"
+        },
+        "refresh": 2,
+        "query": {
+          "queryType": "infinity",
+          "refId": "variable",
+          "infinityQuery": {
+            "refId": "A",
+            "datasource": {
+              "type": "yesoreyeram-infinity-datasource",
+              "uid": "roc-g7"
+            },
+            "type": "json",
+            "source": "url",
+            "format": "table",
+            "parser": "backend",
+            "url": "http://127.0.0.1:19491/runs",
+            "root_selector": "baselines",
+            "columns": [
+              {
+                "selector": "id",
+                "text": "id",
+                "type": "string"
+              },
+              {
+                "selector": "label",
+                "text": "label",
+                "type": "string"
+              }
+            ],
+            "url_options": {
+              "method": "GET"
+            },
+            "filters": []
+          },
+          "meta": {
+            "textField": "label",
+            "valueField": "id"
+          }
+        },
+        "current": {
+          "text": "M1 histórico",
+          "value": "historical"
+        }
+      },
+      {
+        "name": "trace",
+        "label": "Trace para investigação",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  }
+}
