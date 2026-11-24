@@ -213,6 +213,15 @@
     indicator.textContent = compatibility?.comparable ? "AMBIENTES EQUIVALENTES" :
       "COMPARABILIDADE LIMITADA" + (compatibility?.differences ? " · " + compatibility.differences : "");
     indicator.className = "source-state " + (compatibility?.comparable ? "ready" : "offline");
+    const comparisonBasis = {
+      same_code_repeat: "Mesma árvore e modo de medição. Diferenças observadas compõem a variabilidade do ensaio.",
+      measurement_change: "Mesma árvore, modo ou versão de medição diferente. Comparação do custo da instrumentação.",
+      code_change: "Árvores diferentes, mesma medição. Atribuição ao código exige repetição em condições equivalentes.",
+      mixed_change: "Código e medição variaram. O par não isola o efeito de uma alteração.",
+      incomplete_identity: "Identidade experimental incompleta.",
+      different_conditions: "As condições limitam a comparação entre execuções.",
+    };
+    find("comparison-basis").textContent = comparisonBasis[compatibility?.basis] || "";
     table(find("summary-comparison"), "Comparação de disponibilidade e latência", [
       ["metric", "Indicador"], ["selected", "Selecionado"], ["baseline", "Baseline"],
       ["delta", "Δ absoluto"], ["delta_pct", "Δ relativo", percent],
@@ -235,7 +244,9 @@
       ["metric", "Indicador"], ["selected", "Selecionado"], ["baseline", "Baseline"],
       ["delta", "Δ absoluto"], ["delta_pct", "Δ relativo", percent],
     ], resources);
-    table(find("identities"), "Identidade experimental", [["field", "Campo"], ["value", "Valor"]], payload.metadata);
+    table(find("identities"), "Identidades experimentais", [
+      ["field", "Campo"], ["selected", "Selecionado"], ["baseline", "Baseline"],
+    ], payload.comparison_identity);
   }
 
   async function request(endpoint) {
@@ -251,6 +262,27 @@
     find("freshness").textContent = detail;
   }
 
+  function renderOtlp(coverage) {
+    const state = coverage?.state;
+    const descriptions = {
+      disabled: "OTLP desligado neste controle",
+      not_verified: "OTLP sem verificação",
+      invalid: "Evidência OTLP inválida",
+      stale: "Eventos novos desde a última verificação OTLP",
+      unavailable: "Consulta OTLP indisponível na verificação",
+      no_closed_spans: "Nenhum span encerrado no recorte verificado",
+      partial: "Cobertura OTLP parcial no recorte",
+      verified_sample: "Recorte OTLP verificado durante a execução",
+      verified_final: "Cobertura OTLP verificada no encerramento",
+    };
+    const at = coverage?.checked_ns;
+    const counts = coverage?.expected_traces ? " · " + fmt(coverage.received_traces) + "/" +
+      fmt(coverage.expected_traces) + " traces · " +
+      fmt(coverage.expected_spans - coverage.missing_spans) + "/" +
+      fmt(coverage.expected_spans) + " spans · " + time(at) : "";
+    find("otlp").textContent = descriptions[state] ? descriptions[state] + counts : "";
+  }
+
   async function refresh() {
     if (state.tab !== "context-performance" || loading) return;
     loading = true;
@@ -260,6 +292,7 @@
       choose(baseline, listed.baselines);
       if (!select.value) {
         status("AGUARDANDO", "loading", "Aguardando primeira execução contextual");
+        renderOtlp();
         return;
       }
       const params = new URLSearchParams({run:select.value, baseline:baseline.value||"historical"});
@@ -275,12 +308,14 @@
              finished ? "ready" : live ? "live" : stale ? "offline" : "loading",
              hasEvent ? "Último evento " + time(summary.latest_event_ns) +
              " · idade na origem " + fmt(summary.latest_event_age_ms) + " ms" : "Atualização ainda indisponível");
+      renderOtlp(payload.otlp);
       ({live:renderLive,trace:renderTrace,compare:renderCompare})[mode](payload);
       view.dataset.run = params.get("run");
       view.dataset.offered = String(summary?.offered ?? "");
       view.dataset.completed = String(summary?.completed ?? "");
       view.dataset.latestEventNs = String(summary?.latest_event_ns ?? "");
     } catch (error) {
+      renderOtlp();
       status("INDISPONÍVEL","offline", error.message === "NOT_CONFIGURED" ?
              "Fonte contextual ainda não configurada neste ambiente" : "Falha ao atualizar a fonte contextual");
     } finally {

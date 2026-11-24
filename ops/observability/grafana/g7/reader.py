@@ -3,6 +3,7 @@
 from argparse import ArgumentParser
 from collections import Counter, defaultdict
 from functools import lru_cache
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from math import ceil
@@ -88,6 +89,47 @@ def events_in(folder):
         return []
     stat = path.stat()
     return read_events(path, stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=8)
+def event_hash(path, _mtime_ns, _size):
+    return sha256(path.read_bytes()).hexdigest()
+
+
+def otlp_evidence(folder, metadata):
+    if metadata["mode"] == "control":
+        return {"state": "disabled"}
+    proof = folder / "otlp-coverage.json"
+    if not proof.exists():
+        return {"state": "not_verified"}
+    keys = ("checked_ns", "expected_traces", "received_traces", "expected_spans", "missing_spans", "query_errors")
+    try:
+        if proof.is_symlink() or proof.stat().st_size > 2_000_000:
+            return {"state": "invalid"}
+        value = json.loads(proof.read_text())
+        if (value.get("version") != 1 or value["run"] != metadata["id"]
+                or value["sha"] != metadata["sha"] or value["tree"] != metadata["tree"]
+                or any(type(value[k]) is not int or value[k] < 0 for k in keys)
+                or type(value["run_complete"]) is not bool
+                or value["received_traces"] + value["query_errors"] > value["expected_traces"]
+                or value["missing_spans"] > value["expected_spans"]):
+            return {"state": "invalid"}
+        events = folder / "events.log"
+        stat = events.stat()
+        if value["events_sha256"] != event_hash(events, stat.st_mtime_ns, stat.st_size):
+            return {"state": "stale"}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {"state": "invalid"}
+    if not value["expected_traces"]:
+        state = "no_closed_spans"
+    elif value["query_errors"] == value["expected_traces"]:
+        state = "unavailable"
+    elif (value["missing_spans"] or value["query_errors"]
+          or value["received_traces"] != value["expected_traces"]):
+        state = "partial"
+    else:
+        state = "verified_final" if value["run_complete"] else "verified_sample"
+    return {"state": state, **{key: value[key] for key in keys}}
 
 
 def major_latency(events, kind, outcomes=None):
@@ -299,9 +341,24 @@ def summarize(events, workload="load"):
 
 
 def compare(current, baseline, meta, prior):
-    compatible_fields = ("worker", "db_image", "corpus_digest", "queries_digest", "config", "condition")
+    compatible_fields = ("worker", "db_image", "app_image", "corpus_digest", "queries_digest",
+                         "segments", "config", "condition")
     differences = [key for key in compatible_fields if meta.get(key) != prior.get(key)]
     comparable = bool(prior.get("config")) and not differences
+    basis = "different_conditions"
+    if comparable:
+        if not all(meta.get(key) and prior.get(key) for key in ("tree", "mode", "instrumentation")):
+            basis = "incomplete_identity"
+        else:
+            code_changed = meta["tree"] != prior["tree"]
+            measurement_changed = (meta["mode"], meta["instrumentation"]) != (
+                prior["mode"], prior["instrumentation"])
+            basis = {
+                (False, False): "same_code_repeat",
+                (False, True): "measurement_change",
+                (True, False): "code_change",
+                (True, True): "mixed_change",
+            }[code_changed, measurement_changed]
     fields = ("p95_ms", "p50_ms", "p99_ms", "throughput_per_min", "grounded", "abstained",
               "client_timeout", "server_empty", "availability_pct", "grounding_pct")
     rows = []
@@ -312,7 +369,7 @@ def compare(current, baseline, meta, prior):
         rows.append({"metric": field, "selected": value, "baseline": base,
                      "delta": round(value - base, 3),
                      "delta_pct": round(100 * (value - base) / base, 2) if base else None})
-    return rows, [{"comparable": comparable, "differences": ", ".join(differences) or
+    return rows, [{"comparable": comparable, "basis": basis, "differences": ", ".join(differences) or
                    ("none" if comparable else "historical run has partial manifest")}]
 
 
@@ -347,6 +404,7 @@ class Projection:
         result = summarize(events)
         result["fault_traces"] = summarize(events, "fault")["traces"]
         result["run_state"] = "complete" if any(row["event"] == "load_complete" for row in events) else "running"
+        result["otlp"] = otlp_evidence(folder, metadata)
         result["metadata"] = [{"field": key, "value": str(value)} for key, value in
                               (metadata | metadata["config"]).items() if key != "config"]
         baseline = query.get("baseline", ["historical"])[0]
@@ -359,6 +417,12 @@ class Projection:
         result["comparison"], result["comparability"] = compare(
             result["summary"][0], before["summary"][0], metadata, base,
         )
+        result["comparison_identity"] = [
+            {"field": key, "selected": metadata.get(key), "baseline": base.get(key)} for key in (
+                "id", "sha", "tree", "worker", "mode", "instrumentation", "condition", "segments",
+                "corpus_digest", "queries_digest",
+            )
+        ]
         result["baseline_distribution"] = before["distribution"]
         old_stages = {row["stage"]: row for row in before["components"]}
         result["component_comparison"] = [

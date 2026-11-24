@@ -91,7 +91,14 @@ def test_projection_uses_interval_union_and_flags_different_environment():
     assert values[0] == {"metric": "p95_ms", "selected": 200, "baseline": 100,
                          "delta": 100, "delta_pct": 100}
     assert values[1]["delta_pct"] is None
-    assert flags == [{"comparable": False, "differences": "worker"}]
+    assert flags == [{"comparable": False, "basis": "different_conditions", "differences": "worker"}]
+    comparison = cfg | {"tree": "a" * 40, "mode": "instrumented", "instrumentation": "2"}
+    for other, basis in ((comparison, "same_code_repeat"),
+                         (comparison | {"mode": "control"}, "measurement_change"),
+                         (comparison | {"tree": "b" * 40}, "code_change"),
+                         (comparison | {"tree": "b" * 40, "mode": "control"}, "mixed_change")):
+        _, [flag] = reader.compare(selected, baseline, comparison, other)
+        assert flag["basis"] == basis
 
     traces = ("grounded", "abstention", "refused", "disconnected", "pending")
     events = [{"event": "client_offer", "trace": trace, "timestamp_ns": i, "workload": "load"}
@@ -107,6 +114,74 @@ def test_projection_uses_interval_union_and_flags_different_environment():
     assert (counts["offered"], counts["completed"], counts["legitimate_refusals"]) == (5, 4, 2)
     assert (counts["grounded"], counts["abstained"], counts["grounding_pct"]) == (1, 1, 100)
     assert counts["availability_pct"] == 66.67
+
+
+def test_otlp_projection_distinguishes_export_gaps_from_live_local_events(tmp_path):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    paths = Path(__file__).resolve().parents[1] / "ops/observability/grafana/g7"
+    modules = []
+    for name in ("audit_otlp", "reader"):
+        spec = importlib.util.spec_from_file_location(name, paths / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules.append(module)
+    audit, reader = modules
+    run = "11111111-1111-1111-1111-111111111111"
+    folder = tmp_path / run
+    folder.mkdir()
+    info = {"id": run, "mode": "instrumented", "sha": "3" * 40, "tree": "4" * 40}
+    (folder / "metadata.json").write_text(json.dumps(info))
+    log = folder / "events.log"
+    traces = ["a" * 32, "b" * 32]
+    events = []
+    for trace in traces:
+        events.extend({"event": event, "trace": trace, "stage": "context.request"}
+                      for event in ("client_offer", "end"))
+    events.append({"event": "end", "trace": traces[0], "stage": "context.after_disconnect"})
+    log.write_text("".join("g7_event " + json.dumps(row) + "\n" for row in events))
+    assert reader.otlp_evidence(folder, info)["state"] == "not_verified"
+    missing = {traces[1]}
+
+    class Tempo(BaseHTTPRequestHandler):
+        def do_GET(self):
+            trace = self.path.rsplit("/", 1)[-1]
+            self.send_response(404 if trace in missing else 200)
+            self.end_headers()
+            if trace not in missing:
+                self.wfile.write(json.dumps({
+                    "batches": [{"scopeSpans": [{"spans": [{"name": "context.request"}]}]}],
+                }).encode())
+
+        def log_message(self, *_args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Tempo) as server:
+        thread = Thread(target=server.serve_forever, kwargs={"poll_interval": .02})
+        thread.start()
+        try:
+            endpoint = f"http://127.0.0.1:{server.server_port}"
+            proof = folder / "otlp-coverage.json"
+            proof.write_text(json.dumps(audit.audit(folder, endpoint)))
+            value = reader.otlp_evidence(folder, info)
+            assert (value["state"], value["expected_spans"], value["missing_spans"]) == ("partial", 2, 1)
+            missing.clear()
+            proof.write_text(json.dumps(audit.audit(folder, endpoint)))
+            assert reader.otlp_evidence(folder, info)["state"] == "verified_sample"
+            with log.open("a") as stream:
+                stream.write('g7_event {"event":"load_complete"}\n')
+            assert reader.otlp_evidence(folder, info)["state"] == "stale"
+            proof.write_text(json.dumps(audit.audit(folder, endpoint)))
+            assert reader.otlp_evidence(folder, info)["state"] == "verified_final"
+            assert reader.otlp_evidence(folder, info | {"tree": "5" * 40})["state"] == "invalid"
+        finally:
+            server.shutdown()
+            thread.join()
+
+    proof.write_text(json.dumps(audit.audit(folder, endpoint)))
+    assert reader.otlp_evidence(folder, info)["state"] == "unavailable"
+    assert reader.otlp_evidence(folder, info | {"mode": "control"})["state"] == "disabled"
 
 
 def test_real_pool_exhaustion_uses_non_authority_outcome(tmp_path):
