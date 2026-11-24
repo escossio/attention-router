@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import threading
 
+from attention_router.observability.context_performance import Stage, inference_lock, phase
+
 MODEL = "intfloat/multilingual-e5-small"
 REVISION = "614241f622f53c4eeff9890bdc4f31cfecc418b3:onnx-qint8-v1"
 DIMENSIONS = 384
@@ -57,7 +59,7 @@ class LocalEmbeddingProvider:
 
         if not texts or len(texts) > 8:
             raise ValueError("EMBEDDING_BATCH_INVALID")
-        with self.lock:
+        with inference_lock(self.lock):
             batch = self.tokenizer.encode_batch(
                 [("query: " if query else "passage: ") + t for t in texts]
             )
@@ -68,9 +70,10 @@ class LocalEmbeddingProvider:
                 "attention_mask": np.array([e.attention_mask for e in batch], dtype=np.int64),
                 "token_type_ids": np.array([e.type_ids for e in batch], dtype=np.int64),
             }
-            outputs = self.session.run(
-                None, {i.name: inputs[i.name] for i in self.session.get_inputs()}
-            )[0]
+            with phase(Stage.INFERENCE):
+                outputs = self.session.run(
+                    None, {i.name: inputs[i.name] for i in self.session.get_inputs()}
+                )[0]
             mask = inputs["attention_mask"][..., None]
             vectors = (
                 (outputs * mask).sum(axis=1) / mask.sum(axis=1) if outputs.ndim == 3 else outputs

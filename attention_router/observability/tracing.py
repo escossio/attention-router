@@ -39,6 +39,29 @@ _SPAN_NAMES = frozenset({
     "ingress.accept", "scheduler.fire", "lab.delivery.consume", "lab.delivery.reserve",
     "lab.delivery.validate",
     "lab.session.claim_inbound",
+    "context.request",
+    "context.input",
+    "context.executor_wait",
+    "context.worker",
+    "context.identity",
+    "context.consent",
+    "context.admission",
+    "context.embedding",
+    "context.inference_wait",
+    "context.inference",
+    "context.capture",
+    "context.anchor",
+    "context.fence",
+    "context.vector",
+    "context.source_filter",
+    "context.compile",
+    "context.segment_rebuild",
+    "context.rank",
+    "context.ground",
+    "context.serialize",
+    "context.revalidate",
+    "context.send",
+    "context.after_disconnect",
 })
 _OUTCOMES = frozenset({
     "OK", "DELIVERED", "BOUND", "UNKNOWN", "SELECTED", "EVALUATED", "GENERATED",
@@ -53,6 +76,26 @@ _REPETITION_REASONS = frozenset({
     "SEMANTIC_REPEAT_NO_STATE_CHANGE", "SEMANTIC_REPEAT_OBJECTIVE_ALREADY_SATISFIED",
 })
 _ENUM_ATTRIBUTES = {
+    "g7.outcome": frozenset({
+        "ok",
+        "grounded",
+        "insufficient_evidence",
+        "invalid_request",
+        "authority_refusal",
+        "authority_changed",
+        "admission_budget",
+        "client_disconnected",
+        "cancelled",
+        "application_timeout",
+        "compute_deadline",
+        "pool_exhausted",
+        "database_lock_timeout",
+        "sql_cancel_or_deadline",
+        "anchor_lock",
+        "dependency_unavailable",
+        "inference_failure",
+        "internal_error",
+    }),
     "attention.outcome": _OUTCOMES,
     "attention.final_outcome": _OUTCOMES,
     "roc.result": _OUTCOMES,
@@ -95,6 +138,7 @@ _BOOL_ATTRIBUTES = frozenset({
     "attention.context.presence_effective", "roc.execution_allowed", "roc.external_delivery_allowed",
 })
 _COUNT_ATTRIBUTES = frozenset({
+    "g7.duration_ms",
     "attention.message_length", "attention.response_text_length", "attention.candidate_count",
     "attention.memory.candidate_count", "attention.policy_candidate_count", "attention.outbox_count",
     "attention.missing_information_count", "attention.agent.context_turn_count",
@@ -114,7 +158,7 @@ _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 _RESOURCE_SERVICES = frozenset({
     "attention-router-api", "attention-router-worker", "attention-router-ingress",
     "attention-router-test", "attention-router-trace-demo",
-    "attention-router-platform-matrix-candidate",
+    "attention-router-platform-matrix-candidate", "attention-router-private-context",
 })
 _RESOURCE_ENVIRONMENTS = frozenset({"test", "development", "production", "private"})
 _VERSION = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}")
