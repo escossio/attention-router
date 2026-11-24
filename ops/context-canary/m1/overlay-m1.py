@@ -4,17 +4,30 @@ path=Path('tests/integration/test_postgres_owner_scope_registry.py')
 source=path.read_text()
 changes={
     '    key = b"synthetic-owner-e5-anchor-key-for-ci-only-32"': '''    if prod_canary:
+        import os as m1_os
         import m1_owner
         m1_owner.trace_failures(monkeypatch)
         m1_world = m1_owner.seed(Session, lab, owner_writer, args["bearer"], scope_ref, decision)
 
     key = b"synthetic-owner-e5-anchor-key-for-ci-only-32"''',
     '    for _ in range(40):': '    for _ in range(280 if prod_canary else 40):',
+    '''        first = client.post(
+            path, headers=headers, json=payload,
+        )''': '''        m1_before_warmup = prod_canary and (
+            m1_os.environ["M1_CONDITION"] == "fresh_read_path_before_endpoint_warmup"
+        )
+        if m1_before_warmup:
+            m1_owner.run(client, path, headers, scope_ref, tmp_path / "scope-anchor.sqlite",
+                         caplog, Session, monkeypatch, m1_world)
+        first = client.post(
+            path, headers=headers, json=payload,
+        )''',
     '''            _probe_runtime_contention(
                 client, path, headers, scope_ref, decision("confirm")["message_id"],
                 tmp_path / "scope-anchor.sqlite", runtime_engine, caplog,
-            )''': '''            m1_owner.run(client, path, headers, scope_ref, tmp_path / "scope-anchor.sqlite",
-                         caplog, Session, monkeypatch, m1_world)''',
+            )''': '''            if not m1_before_warmup:
+                m1_owner.run(client, path, headers, scope_ref, tmp_path / "scope-anchor.sqlite",
+                             caplog, Session, monkeypatch, m1_world)''',
 }
 for before,after in changes.items():
     assert source.count(before)==1, before

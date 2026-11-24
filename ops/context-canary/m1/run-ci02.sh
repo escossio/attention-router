@@ -7,7 +7,13 @@ waves=${3:?wave count}
 mode=${4:-instrumented}
 worker=$(hostname -s)
 export M1_SEGMENTS="${M1_SEGMENTS:-199}" M1_BURST="${M1_BURST:-4}"
+export M1_CONDITION="${M1_CONDITION:-fresh_process_after_endpoint_warmup}"
 [[ $mode =~ ^(control|instrumented)$ && $M1_SEGMENTS =~ ^(63|128|199)$ && $M1_BURST =~ ^(1|2|4)$ ]]
+case "$M1_CONDITION" in
+    fresh_process_after_endpoint_warmup) ;;
+    fresh_read_path_before_endpoint_warmup) [[ $waves == 1 ]] ;;
+    *) echo M1_UNKNOWN_CONDITION >&2; exit 2 ;;
+esac
 if [[ $waves == 6 ]]; then
     [[ $worker == ci02 && $M1_SEGMENTS == 199 && $M1_BURST == 4 ]]
 fi
@@ -88,7 +94,7 @@ image='pgvector/pgvector@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8
 docker image inspect "$image" >/dev/null
 export M1_SHA="$sha" M1_TREE="$(git rev-parse HEAD^{tree})" M1_DB_IMAGE="$image"
 export M1_OWNER_FIXTURE_BLOB="$(git rev-parse HEAD:tests/integration/test_postgres_owner_scope_registry.py)"
-export M1_CONDITION="${M1_CONDITION:-fresh_process}" M1_TELEMETRY_MODE="$mode"
+export M1_TELEMETRY_MODE="$mode"
 if [[ $mode == instrumented ]]; then
     export CONTEXT_PERFORMANCE_ENABLED=true OTEL_TRACING_ENABLED=true
     export M1_TRACE_ENDPOINT="${M1_OTLP_ENDPOINT:-http://127.0.0.1:19418/v1/traces}"
