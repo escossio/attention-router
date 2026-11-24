@@ -146,6 +146,10 @@ class StagedContextEndpoint:
                 if sample is not None:
                     queued_at = monotonic_ns()
                     emit("begin", Stage.EXECUTOR_WAIT)
+                    limiter = anyio.to_thread.current_default_thread_limiter().statistics()
+                    emit("executor_capacity", Stage.EXECUTOR_WAIT, capacity=(
+                        limiter.borrowed_tokens, limiter.total_tokens, limiter.tasks_waiting,
+                    ))
                 await anyio.to_thread.run_sync(read)
             except Exception as error:
                 if sample is not None:

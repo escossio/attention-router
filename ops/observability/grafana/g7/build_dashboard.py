@@ -77,6 +77,8 @@ def build():
                                        [("upper_ms", NUMBER), ("cumulative", NUMBER)], ref="B"))
     panel("Desfechos do servidor, incl. contenção e autoridade", "outcomes", strings=("outcome",),
           numbers=("count",))
+    panel("Amostras de ocupação. Pool PostgreSQL e executor AnyIO", "capacity",
+          strings=("resource",), numbers=("time", "used", "limit", "waiting"), height=6)
     panel("CPU, pico de RSS e I/O do processo de bancada", "resources",
           numbers=("time", "cpu_seconds", "rss_peak_kib", "input_blocks", "output_blocks"), height=6)
     panels[-1]["targets"].append(target("baseline_resources", [

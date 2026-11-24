@@ -171,6 +171,9 @@ def summarize(events):
         "evolution": [{"time": time, "offered": counter["client_offer"], "admitted": counter["admitted"],
                        "completed": counter["client_result"]} for time, counter in sorted(evolution.items())],
         "outcomes": [{"outcome": name, "count": n} for name, n in sorted(servers.items())],
+        "capacity": [{"time": row["timestamp_ns"] // 1_000_000, "resource": row["event"],
+                      "used": row["used"], "limit": row["limit"], "waiting": row["waiting"]}
+                     for row in rows if row["event"] in ("pool_capacity", "executor_capacity") and "used" in row],
         "resources": [{"time": row["timestamp_ns"] // 1_000_000, **{
             k: row[k] for k in ("cpu_seconds", "rss_peak_kib", "input_blocks", "output_blocks")
         }} for row in events if row["event"] == "resources"],
@@ -248,6 +251,7 @@ class Projection:
         trace = query.get("trace", [""])[0]
         result["timeline"] = [{key: row[key] for key in (
             "event", "stage", "timestamp_ns", "duration_ns", "outcome", "correlation", "sql_count",
+            "used", "limit", "waiting",
         ) if key in row} for row in events if TRACE.fullmatch(trace) and row.get("trace") == trace]
         result["read_ns"] = time_ns()
         result["summary"][0]["read_ns"] = result["read_ns"]

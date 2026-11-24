@@ -671,7 +671,7 @@
     {
       "id": 12,
       "type": "table",
-      "title": "CPU, pico de RSS e I/O do processo de bancada",
+      "title": "Amostras de ocupação. Pool PostgreSQL e executor AnyIO",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "roc-g7"
@@ -679,6 +679,70 @@
       "gridPos": {
         "x": 0,
         "y": 52,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "capacity",
+          "columns": [
+            {
+              "selector": "resource",
+              "text": "resource",
+              "type": "string"
+            },
+            {
+              "selector": "time",
+              "text": "time",
+              "type": "number"
+            },
+            {
+              "selector": "used",
+              "text": "used",
+              "type": "number"
+            },
+            {
+              "selector": "limit",
+              "text": "limit",
+              "type": "number"
+            },
+            {
+              "selector": "waiting",
+              "text": "waiting",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "CPU, pico de RSS e I/O do processo de bancada",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 58,
         "w": 24,
         "h": 6
       },
@@ -777,20 +841,20 @@
       }
     },
     {
-      "id": 13,
+      "id": 14,
       "type": "row",
       "title": "3 · Investigação por consulta",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 58,
+        "y": 64,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 14,
+      "id": 15,
       "type": "table",
       "title": "Caminho observado e espera sem sobreposição",
       "datasource": {
@@ -799,7 +863,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 59,
+        "y": 65,
         "w": 24,
         "h": 9
       },
@@ -880,7 +944,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 16,
       "type": "table",
       "title": "Eventos correlacionados e SQL agregado da consulta",
       "datasource": {
@@ -889,7 +953,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 68,
+        "y": 74,
         "w": 24,
         "h": 8
       },
@@ -954,7 +1018,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 17,
       "type": "table",
       "title": "Identidade e configuração efetiva do ensaio",
       "datasource": {
@@ -963,7 +1027,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 76,
+        "y": 82,
         "w": 24,
         "h": 8
       },
@@ -1003,7 +1067,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 18,
       "type": "table",
       "title": "Último evento visto pela projeção",
       "datasource": {
@@ -1012,7 +1076,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 84,
+        "y": 90,
         "w": 24,
         "h": 4
       },

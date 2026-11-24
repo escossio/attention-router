@@ -88,7 +88,7 @@ _observed_engines = WeakSet()
 logger = logging.getLogger("attention_router.observability.private_context")
 
 
-def emit(kind, stage, *, duration=None, outcome=None, count=None, sql=None):
+def emit(kind, stage, *, duration=None, outcome=None, count=None, sql=None, capacity=None):
     sample = request_sample.get()
     if sample is None:
         return
@@ -102,6 +102,10 @@ def emit(kind, stage, *, duration=None, outcome=None, count=None, sql=None):
         fields["outcome"] = outcome.value
     if type(count) is int and 0 <= count <= 1_000_000:
         fields["count"] = count
+    if capacity is not None:
+        used, limit, waiting = capacity
+        if all(type(value) is int and 0 <= value <= 1_000_000 for value in capacity):
+            fields.update(used=used, limit=limit, waiting=waiting)
     if sql is not None and sql.sql_count:
         fields.update(sql_ns=sql.sql_ns, sql_count=sql.sql_count)
     try:
@@ -256,6 +260,17 @@ def observe_database(engine):
             stats.sql_count += 1
             stats.sql_ns += monotonic_ns() - started
 
+    def pool_event(*_):
+        if request_sample.get() is None:
+            return
+        try:
+            pool = engine.pool
+            emit("pool_capacity", Stage.IDENTITY, capacity=(pool.checkedout(), pool.size(), 0))
+        except Exception:
+            pass
+
+    event.listen(engine.pool, "checkout", pool_event)
+    event.listen(engine.pool, "checkin", pool_event)
     event.listen(engine, "before_cursor_execute", before)
     event.listen(engine, "after_cursor_execute", lambda *args: account(args[4]))
     event.listen(engine, "handle_error", lambda error: account(error.execution_context))
