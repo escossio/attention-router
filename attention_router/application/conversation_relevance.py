@@ -43,6 +43,7 @@ _NAMED_TIME = re.compile(
     re.IGNORECASE,
 )
 _CONTRAST = re.compile(r"\bcontradit[oó]ri[ao]s?\b", re.IGNORECASE)
+_INSPECTION_RESULT = re.compile(r"\bqual (?:foi )?o resultado d[ae] (?:inspecao|verificacao)\b")
 _INSPECTION_OUTCOME = re.compile(r"(?P<subject>inspecao .+?) foi (?P<outcome>aprovad[ao]|recusad[ao])\b")
 CONTRAST_NEEDS_PAIR = "CONTRAST_REQUIRES_CORROBORATION"
 
@@ -74,6 +75,8 @@ def _required_answer_type(query, lookup_query):
     if not lookup_query:
         if re.match(r"^(quem|onde)\b", normalized_query):
             required = "UNRESOLVED_IDENTITY_OR_LOCATION"
+        elif _INSPECTION_RESULT.search(normalized_query):
+            required = "INSPECTION_OUTCOME"
         elif re.search(r"\b(quando|que dia|qual data|que horas|qual horario)\b", normalized_query):
             required = "TIME"
         elif re.search(r"\b(quanto tempo|qual (?:a )?duracao)\b", normalized_query):
@@ -81,6 +84,13 @@ def _required_answer_type(query, lookup_query):
         elif re.search(r"\b(quanto|qual valor|qual preco)\b", normalized_query):
             required = "AMOUNT"
     return required
+
+
+def _query_terms(query, required):
+    wanted = terms(query)
+    if required == "INSPECTION_OUTCOME":
+        wanted.discard("resultado")
+    return wanted
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,11 +113,12 @@ class PreparedCandidateFeatures:
 
 
 def prepare_candidate_features(query: str) -> PreparedCandidateFeatures:
-    wanted = frozenset(terms(query))
     lookup = _is_lookup_query(query)
+    required = _required_answer_type(query, lookup)
+    wanted = frozenset(_query_terms(query, required))
     return PreparedCandidateFeatures(
         query, wanted, frozenset(t for t in wanted if t.isdigit()),
-        frozenset(_tokens(query)), lookup, _required_answer_type(query, lookup),
+        frozenset(_tokens(query)), lookup, required,
         tuple((re.compile(r"\b" + re.escape(phrase) + r"\b"), key)
               for key, phrases in CONCEPTS.items()
               for phrase in sorted(phrases, key=len, reverse=True)),
@@ -116,12 +127,14 @@ def prepare_candidate_features(query: str) -> PreparedCandidateFeatures:
 
 def features(query, content, *, prepared=None):
     if prepared is None:
-        wanted, present = terms(query), terms(content)
-        numbers = {t for t in wanted if t.isdigit()}
         lookup_query = _is_lookup_query(query)
+        required = _required_answer_type(query, lookup_query)
+        wanted, present = _query_terms(query, required), terms(content)
+        numbers = {t for t in wanted if t.isdigit()}
         content_terms = terms
     else:
         wanted, numbers, lookup_query = prepared.wanted, prepared.numbers, prepared.lookup_query
+        required = prepared.required
         content_terms = prepared.content_terms
         present = content_terms(content)
     hit = wanted & present
@@ -131,17 +144,18 @@ def features(query, content, *, prepared=None):
         question_only_support = not any(
             wanted <= content_terms(piece) and "?" not in piece for piece in pieces
         )
-    if prepared is None:
-        required = _required_answer_type(query, lookup_query)
-    else:
-        required = prepared.required
     patterns = {
         "TIME": r"\b(?:hoje|amanha|ontem|segunda|terca|quarta|quinta|sexta|sabado|domingo)\b|\b\d{1,2}(?:[:/]\d{1,2}|h\b)",
         "DURATION": r"\b\d+(?:[.,]\d+)?\s*(?:segundos?|minutos?|horas?|dias?)\b",
         "AMOUNT": r"r\$\s*\d|\b\d+(?:[.,]\d+)?\s*reais\b",
     }
     answer_type_supported = required is None
-    if required in patterns:
+    if required == "INSPECTION_OUTCOME":
+        answer_type_supported = any(
+            wanted <= content_terms(piece) and _inspection_claim(piece) is not None
+            for piece in re.split(r"(?m)^Autor\s+\d+:\s*|(?<=[.!?])\s+", content)
+        )
+    elif required in patterns:
         pieces = re.split(r"(?m)^Autor\s+\d+:\s*|(?<=[.!?])\s+", content)
         answer_type_supported = any(
             wanted <= content_terms(piece)
@@ -218,9 +232,14 @@ def contrast_topic_query(query):
 def inspection_outcome(excerpt, topic_query):
     if not terms(topic_query) <= terms(excerpt):
         return None
-    # Only a whole affirmative clause can witness one side of the contrast.
+    return _inspection_claim(excerpt)
+
+
+def _inspection_claim(excerpt):
+    # Only a whole affirmative clause can witness an outcome.
     sentence = _normalize(excerpt.strip().rstrip(".!"))
     sentence = re.sub(r"^a ", "", sentence)
+    sentence = re.sub(r"^verificacao ", "inspecao ", sentence)
     match = _INSPECTION_OUTCOME.fullmatch(sentence)
     if match is None:
         return None

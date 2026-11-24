@@ -216,6 +216,17 @@ def test_governed_paired_readers_and_writer(Session, evidence_world, context_rea
             assert (ref, digest(sources[ref])) in delivered
     report = {arm: _burst(fetch, cases, engine, Session, ids["d000"], arm) for arm, fetch in runs}
 
+    serial_ids = {"q03", "q04", "q06", "q07", "q09", "q10", "q12", "q16"}
+    serial = {}
+    for slot, (case, _, question, expected) in enumerate(cases):
+        if case not in serial_ids:
+            continue
+        candidates, delivered = staged(slot, question)
+        serial[case] = sorted({ref for ref, _ in delivered})
+        assert not forbidden.intersection(ref for ref, _ in candidates + delivered)
+        assert serial[case] == sorted(expected), case
+    report["governed"]["focused_serial"] = serial
+
     corrected = "A caixa de amostras de quartzo chegou na terça-feira."
     with Session.begin() as db:
         db.get(ConversationMessageRow, ids["s11"]).text = corrected
