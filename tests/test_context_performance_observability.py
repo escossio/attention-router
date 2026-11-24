@@ -93,6 +93,21 @@ def test_projection_uses_interval_union_and_flags_different_environment():
     assert values[1]["delta_pct"] is None
     assert flags == [{"comparable": False, "differences": "worker"}]
 
+    traces = ("grounded", "abstention", "refused", "disconnected", "pending")
+    events = [{"event": "client_offer", "trace": trace, "timestamp_ns": i, "workload": "load"}
+              for i, trace in enumerate(traces)]
+    events.extend({"event": "client_result", "trace": trace, "outcome": outcome, "timestamp_ns": 10 + i}
+                  for i, (trace, outcome) in enumerate(zip(
+                      traces, ("grounded", "abstention", "empty_response", "client_timeout"),
+                  )))
+    events.extend({"event": "end", "trace": trace, "stage": "context.request",
+                   "outcome": "authority_refusal", "timestamp_ns": 20, "duration_ns": 4}
+                  for trace in ("refused", "disconnected"))
+    counts = reader.summarize(events)["summary"][0]
+    assert (counts["offered"], counts["completed"], counts["legitimate_refusals"]) == (5, 4, 2)
+    assert (counts["grounded"], counts["abstained"], counts["grounding_pct"]) == (1, 1, 100)
+    assert counts["availability_pct"] == 66.67
+
 
 def test_real_pool_exhaustion_uses_non_authority_outcome(tmp_path):
     pool = create_engine(f"sqlite:///{tmp_path / 'pool.sqlite'}", pool_size=1,

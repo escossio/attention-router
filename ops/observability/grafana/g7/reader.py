@@ -21,6 +21,7 @@ FAILURES = {
     "sql_cancel_or_deadline", "anchor_lock", "dependency_unavailable", "inference_failure",
     "request_input_timeout", "internal_error",
 }
+AUTHORITY_REFUSALS = {"authority_refusal", "authority_changed"}
 
 
 def percentile(values, p):
@@ -104,6 +105,8 @@ def summarize(events, workload="load"):
     active = Counter()
     clients = Counter()
     servers = Counter()
+    empty_responses = set()
+    authority_refusals = set()
     admitted = 0
     candidates = []
     for row in rows:
@@ -112,6 +115,8 @@ def summarize(events, workload="load"):
         stage = row.get("stage")
         if event == "client_result":
             clients[row["outcome"]] += 1
+            if row["outcome"] == "empty_response":
+                empty_responses.add(trace)
         elif event == "admitted":
             admitted += 1
         elif event == "candidates":
@@ -125,6 +130,8 @@ def summarize(events, workload="load"):
                 stages[stage].append(row)
                 if stage == "context.request":
                     servers[row.get("outcome")] += 1
+                    if row.get("outcome") in AUTHORITY_REFUSALS:
+                        authority_refusals.add(trace)
     duration = major_latency(rows, "client_result")
     summary = {
         "offered": len(offers), "admitted": admitted, "completed": sum(clients.values()),
@@ -136,19 +143,16 @@ def summarize(events, workload="load"):
         "worker_active": max(0, active["context.worker"]),
         "disconnects": servers["client_disconnected"], "cancelled": servers["cancelled"],
         "application_failures": sum(servers[key] for key in FAILURES),
-        "legitimate_refusals": servers["authority_refusal"] + servers["authority_changed"],
+        "legitimate_refusals": len(authority_refusals),
         "candidates_p95": percentile(candidates, .95),
         "p50_ms": percentile(duration, .50), "p95_ms": percentile(duration, .95),
         "p99_ms": percentile(duration, .99),
     }
-    eligible_offers = len(offers) - summary["legitimate_refusals"]
-    summary["availability_pct"] = round(100 * (summary["grounded"] + summary["abstained"]
-                                                 + summary["semantic_mismatch"]) / eligible_offers, 2) if (
-                                                     eligible_offers > 0) else None
-    summary["grounding_pct"] = round(100 * (summary["grounded"] + summary["abstained"]) /
-                                    sum(clients[k] for k in ("grounded", "abstention", "semantic_mismatch")), 2) if (
-                                        summary["grounded"] + summary["abstained"] + summary["semantic_mismatch"]
-                                    ) else None
+    eligible_completed = summary["completed"] - len(empty_responses & authority_refusals)
+    exact = summary["grounded"] + summary["abstained"]
+    successful = exact + summary["semantic_mismatch"]
+    summary["availability_pct"] = round(100 * successful / eligible_completed, 2) if eligible_completed else None
+    summary["grounding_pct"] = round(100 * exact / successful, 2) if successful else None
     minutes = (max(row["timestamp_ns"] for row in rows) -
                min(row["timestamp_ns"] for row in rows)) / 60_000_000_000 if rows else 0
     summary["throughput_per_min"] = round(summary["completed"] / minutes, 2) if minutes > 0 else None
@@ -208,8 +212,8 @@ def compare(current, baseline, meta, prior):
     compatible_fields = ("worker", "db_image", "corpus_digest", "queries_digest", "config", "condition")
     differences = [key for key in compatible_fields if meta.get(key) != prior.get(key)]
     comparable = bool(prior.get("config")) and not differences
-    fields = ("p95_ms", "throughput_per_min", "grounded", "abstained", "client_timeout",
-              "server_empty", "availability_pct")
+    fields = ("p95_ms", "p50_ms", "p99_ms", "throughput_per_min", "grounded", "abstained",
+              "client_timeout", "server_empty", "availability_pct", "grounding_pct")
     rows = []
     for field in fields:
         value, base = current.get(field), baseline.get(field)

@@ -23,6 +23,11 @@ não contém as mesmas evidências ou configurações. A aba preserva o tema do
 Supervisor e o fluxo de autenticação Apache/Grafana. A configuração nativa
 continua opt-in.
 
+A disponibilidade considera ofertas já concluídas e exclui somente recusas
+de autoridade observadas no cliente e correlacionadas com o servidor. A
+exatidão entre respostas HTTP 200 inclui abstenções válidas. As contagens
+de respostas com evidência, abstenções e recusas são exibidas separadamente.
+
 ## MGMT isolado
 
 
