@@ -1,0 +1,34 @@
+{
+  "sources": {
+    "s01": "A inspeção da ponte de basalto ocorrerá na sexta-feira.",
+    "s02": "O laboratório de cedro recebeu doze filtros azuis.",
+    "s03": "A biblioteca do farol abre às nove horas.",
+    "s04": "A equipe de cerâmica reservou a sala Marfim.",
+    "s05": "O mapa do jardim de orquídeas está na gaveta verde.",
+    "s06": "O ensaio do quarteto de cordas durou 45 minutos.",
+    "s07": "O barco de pesquisa atracou no cais de mármore.",
+    "s08": "A manutenção do telescópio foi marcada para quarta-feira.",
+    "s09": "A inspeção do moinho foi aprovada.",
+    "s10": "A inspeção do moinho foi recusada.",
+    "s11": "A caixa de amostras de quartzo chegou na segunda-feira.",
+    "s12": "O inventário do viveiro de lírios terminou em março."
+  },
+  "queries": [
+    ["q01", "supported", "Quando ocorrerá a inspeção da ponte de basalto?", ["s01"]],
+    ["q02", "supported", "Que filtros o laboratório de cedro recebeu?", ["s02"]],
+    ["q03", "supported", "Que horas abre a biblioteca do farol?", ["s03"]],
+    ["q04", "supported", "Há menção à sala Marfim na reserva de cerâmica?", ["s04"]],
+    ["q05", "supported", "Há menção ao mapa do jardim de orquídeas?", ["s05"]],
+    ["q06", "supported", "Qual a duração do ensaio do quarteto de cordas?", ["s06"]],
+    ["q07", "supported", "Há menção ao cais de mármore e ao barco de pesquisa?", ["s07"]],
+    ["q08", "supported", "Quando foi marcada a manutenção do telescópio?", ["s08"]],
+    ["q09", "conflict", "Qual foi o resultado da inspeção do moinho?", ["s09", "s10"]],
+    ["q10", "paraphrase", "Existe referência à verificação contraditória do moinho?", ["s09", "s10"]],
+    ["q11", "correction", "Quando chegou a caixa de amostras de quartzo?", ["s11"]],
+    ["q12", "withdrawal", "Quando terminou o inventário do viveiro de lírios?", ["s12"]],
+    ["q13", "unsupported", "Quem entregou o guindaste lunar de titânio?", []],
+    ["q14", "unsupported", "Qual o preço do balão estratosférico?", []],
+    ["q15", "other_account", "Qual o código do cofre de safira?", []],
+    ["q16", "other_tenant", "Qual a altitude do planador de jade?", []]
+  ]
+}
