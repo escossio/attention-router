@@ -116,6 +116,7 @@ class StagedContextEndpoint:
                     await send({"type": "http.response.body", "body": body, "more_body": False})
                     record(Decision.SENT)
                     if sample is not None:
+                        sample.delivered = True
                         result(sample.answer)
             if send_scope.cancel_called:
                 raise OSError("STAGED_SEND_CANCELLED")
@@ -160,7 +161,7 @@ class StagedContextEndpoint:
             try:
                 while (await receive())["type"] != "http.disconnect":
                     pass
-                if sample is not None and not finished.is_set():
+                if sample is not None and not sample.delivered and not finished.is_set():
                     sample.disconnected = monotonic_ns()
                     result(Outcome.DISCONNECT)
                     emit("disconnect", Stage.REQUEST, outcome=Outcome.DISCONNECT)

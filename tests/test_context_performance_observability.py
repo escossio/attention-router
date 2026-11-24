@@ -88,3 +88,51 @@ def test_projection_uses_interval_union_and_flags_different_environment():
                          "delta": 100, "delta_pct": 100}
     assert values[1]["delta_pct"] is None
     assert flags == [{"comparable": False, "differences": "worker"}]
+
+
+def test_real_pool_exhaustion_uses_non_authority_outcome(tmp_path):
+    pool = create_engine(f"sqlite:///{tmp_path / 'pool.sqlite'}", pool_size=1,
+                         max_overflow=0, pool_timeout=.01)
+    try:
+        with pool.connect():
+            try:
+                pool.connect()
+            except PoolTimeout as error:
+                assert classify(error) is Outcome.POOL
+            else:
+                raise AssertionError("expected exhaustion of the only slot")
+    finally:
+        pool.dispose()
+
+
+def test_inference_wait_and_work_are_measured_separately(monkeypatch, caplog):
+    from threading import Event, Lock, Thread
+    from time import sleep
+    from attention_router.observability.context_performance import inference_lock
+
+    monkeypatch.setattr(settings, "context_performance_enabled", True)
+    exporter = InMemorySpanExporter()
+    configure_test_tracing(exporter)
+    lock = Lock()
+    acquired = Event()
+
+    def hold_lock():
+        with lock:
+            acquired.set()
+            sleep(.04)
+
+    worker = Thread(target=hold_lock)
+    worker.start()
+    assert acquired.wait(.5)
+    try:
+        with caplog.at_level(logging.INFO, logger="attention_router.observability.private_context"):
+            with observe_query("26faf9d5-c4d0-452f-9078-139dcf332a0c", None):
+                with inference_lock(lock), phase(Stage.INFERENCE):
+                    sleep(.01)
+        spans = {span.name: span for span in exporter.get_finished_spans()}
+        wait, run = (spans[name] for name in ("context.inference_wait", "context.inference"))
+        assert wait.end_time <= run.start_time
+        assert wait.attributes["g7.duration_ms"] > run.attributes["g7.duration_ms"] >= 8
+    finally:
+        worker.join(.5)
+        reset_tracing()

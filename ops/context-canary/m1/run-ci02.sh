@@ -81,7 +81,7 @@ export M1_OWNER_FIXTURE_BLOB="$(git rev-parse HEAD:tests/integration/test_postgr
 export M1_CONDITION="${M1_CONDITION:-fresh_process}" M1_TELEMETRY_MODE="$mode"
 if [[ $mode == instrumented ]]; then
     export CONTEXT_PERFORMANCE_ENABLED=true OTEL_TRACING_ENABLED=true
-    export OTEL_EXPORTER_OTLP_ENDPOINT="${M1_OTLP_ENDPOINT:-http://127.0.0.1:19418/v1/traces}"
+    export M1_TRACE_ENDPOINT="${M1_OTLP_ENDPOINT:-http://127.0.0.1:19418/v1/traces}"
     export OTEL_SERVICE_NAME=attention-router-private-context
     export M1_TELEMETRY_DIR="${M1_RUN_ROOT:?experimental run root}"
 else

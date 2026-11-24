@@ -11,6 +11,7 @@ import sqlite3
 from time import monotonic_ns, time_ns
 from weakref import WeakSet
 
+from opentelemetry import trace
 from sqlalchemy import event
 from sqlalchemy.exc import DBAPIError, TimeoutError as PoolTimeout
 
@@ -70,6 +71,7 @@ class RequestSample:
     correlation: str
     trace: str | None = None
     disconnected: int | None = None
+    delivered: bool = False
     result: Outcome = Outcome.OK
     answer: Outcome = Outcome.OK
 
@@ -114,10 +116,12 @@ def observe_query(correlation, traceparent):
     if not settings.context_performance_enabled:
         yield
         return
-    sample = RequestSample(correlation)
+    parent = extract_trace_context({"traceparent": traceparent})
+    upstream = trace.get_current_span(parent).get_span_context()
+    sample = RequestSample(correlation, trace=f"{upstream.trace_id:032x}" if upstream.is_valid else None)
     token = request_sample.set(sample)
     try:
-        with phase(Stage.REQUEST, parent=extract_trace_context({"traceparent": traceparent})):
+        with phase(Stage.REQUEST, parent=parent):
             yield
     finally:
         request_sample.reset(token)
@@ -196,7 +200,8 @@ def phase(stage, *, parent=None):
         }) as span:
             if stage is Stage.REQUEST:
                 context = span.get_span_context()
-                sample.trace = f"{context.trace_id:032x}" if context.is_valid else None
+                if context.is_valid:
+                    sample.trace = f"{context.trace_id:032x}"
             emit("begin", stage)
             try:
                 yield
