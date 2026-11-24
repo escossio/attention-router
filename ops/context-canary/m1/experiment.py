@@ -84,20 +84,21 @@ def experiment(bodies, controls, order, cases, segment_count):
     configured = os.environ.get("M1_TELEMETRY_DIR")
     if not configured:
         return Inactive()
-    endpoint = os.environ["M1_TRACE_ENDPOINT"]
-    if endpoint != "http://127.0.0.1:19418/v1/traces":
-        raise ValueError("M1 loopback telemetry endpoint required")
-    # The generic pytest fixture intentionally disables telemetry for all tests.
-    # Re-enable only after this synthetic, opted-in trial has reached M1.
-    settings.otel_tracing_enabled = True
-    settings.otel_exporter_otlp_endpoint = endpoint
-    settings.otel_service_name = "attention-router-private-context"
-    reset_tracing()
-    readiness = configure_tracing().start_span("context.request")
-    try:
-        assert readiness.is_recording(), "M1 trace recording unavailable"
-    finally:
-        readiness.end()
+    if os.environ["M1_TELEMETRY_MODE"] == "instrumented":
+        endpoint = os.environ["M1_TRACE_ENDPOINT"]
+        if endpoint != "http://127.0.0.1:19418/v1/traces":
+            raise ValueError("M1 loopback telemetry endpoint required")
+        # The generic pytest fixture intentionally disables telemetry for all tests.
+        # Re-enable only after this synthetic, opted-in trial has reached M1.
+        settings.otel_tracing_enabled = True
+        settings.otel_exporter_otlp_endpoint = endpoint
+        settings.otel_service_name = "attention-router-private-context"
+        reset_tracing()
+        readiness = configure_tracing().start_span("context.request")
+        try:
+            assert readiness.is_recording(), "M1 trace recording unavailable"
+        finally:
+            readiness.end()
     root = Path(configured)
     run_id = str(uuid4())
     folder = root / run_id

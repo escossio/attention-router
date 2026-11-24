@@ -83,11 +83,10 @@ if [[ $mode == instrumented ]]; then
     export CONTEXT_PERFORMANCE_ENABLED=true OTEL_TRACING_ENABLED=true
     export M1_TRACE_ENDPOINT="${M1_OTLP_ENDPOINT:-http://127.0.0.1:19418/v1/traces}"
     export OTEL_SERVICE_NAME=attention-router-private-context
-    export M1_TELEMETRY_DIR="${M1_RUN_ROOT:?experimental run root}"
 else
     export CONTEXT_PERFORMANCE_ENABLED=false OTEL_TRACING_ENABLED=false
-    unset M1_TELEMETRY_DIR
 fi
+export M1_TELEMETRY_DIR="${M1_RUN_ROOT:?experimental run root}"
 secret=$(openssl rand -hex 24)
 printf 'POSTGRES_DB=attention_router_test\nPOSTGRES_USER=ar_test\nPOSTGRES_PASSWORD=%s\n' "$secret" > "$job/db.env"
 docker run --rm -d --name "$pg" --label "andy.test-sha=$sha" --env-file "$job/db.env" \
