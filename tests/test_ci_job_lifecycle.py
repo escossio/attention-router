@@ -1,16 +1,19 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import sqlite3
 import subprocess
 import time
+from threading import Thread
 
 import pytest
 
 from test_distributed_shadow_checks import (
     POSTGRES_REPROFILE,
     POSTGRES_SCHEDULER,
+    PUBLISHER,
     SCHEDULER,
     init_deliveries,
     load_publisher,
@@ -18,6 +21,103 @@ from test_distributed_shadow_checks import (
 
 
 SHA = "a" * 40
+
+
+@pytest.mark.parametrize("suite", ["postgres", "python", "transport", "docker"])
+def test_publishers_reconcile_real_http_payload_after_lost_replies(tmp_path, monkeypatch, suite):
+    import probe
+
+    path = PUBLISHER.with_name("distributed_postgres_check.py") if suite == "postgres" else PUBLISHER
+    module = load_publisher(path)
+    module.DB_PATH = tmp_path / "wire.sqlite3"
+    module.DEBOUNCE_SECONDS = 0
+    init_deliveries(module.DB_PATH)
+    module.ensure_tables()
+    repo = "escossio/attention-router"
+    remote = {}
+    wire = []
+
+    class API(BaseHTTPRequestHandler):
+        def respond(self, status, payload):
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(json.dumps(payload).encode())
+
+        def do_GET(self):
+            if self.path == f"/repos/{repo}/pulls/17":
+                self.respond(200, {"state": "open", "head": {"sha": SHA}})
+            elif self.path == f"/repos/{repo}/commits/{SHA}/check-runs?filter=all&per_page=100&page=1":
+                self.respond(200, {"total_count": int(bool(remote)), "check_runs": [remote] if remote else []})
+            elif self.path == f"/repos/{repo}/check-runs/42":
+                self.respond(200, remote)
+            else:
+                self.respond(404, {})
+
+        def capture(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            with sqlite3.connect(module.DB_PATH) as db:
+                phase, check, publication = db.execute(
+                    f"SELECT phase, check_run_id, publication FROM {module.QUEUE_TABLE} WHERE id=1"
+                ).fetchone()
+            wire.append((self.command, self.path, payload, phase, check, publication))
+            return payload
+
+        def do_POST(self):
+            remote.update(self.capture(), app={"id": 4982054}, id=42)
+            self.respond(503, {})
+
+        def do_PATCH(self):
+            remote.update(self.capture())
+            self.respond(503, {})
+
+        def log_message(self, *_):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), API) as server:
+        worker = Thread(target=server.serve_forever, kwargs={"poll_interval": .02}, daemon=True)
+        worker.start()
+        try:
+            monkeypatch.setattr(probe, "API", f"http://127.0.0.1:{server.server_port}")
+            monkeypatch.setattr(module, "request_json", probe.request_json)
+            monkeypatch.setattr(module, "installation_token", lambda: "test-token")
+            executions = []
+
+            def execute(*args, queued):
+                executions.append((args, queued[1]))
+                queued[2]("success", "Verified", "receipt")
+                return "PASS", "receipt", queued[1]
+
+            monkeypatch.setattr(module, "execute_exact_sha", execute)
+            with sqlite3.connect(module.DB_PATH) as db:
+                columns = "repository,pr_number,head_sha,state,created_at,updated_at"
+                fields = [repo, 17, SHA, "PENDING", module.now_iso(), module.now_iso()]
+                if suite != "postgres":
+                    columns += ",suite"
+                    fields.append(suite)
+                params = ",".join("?" for _ in fields)
+                db.execute(f"INSERT INTO {module.QUEUE_TABLE} ({columns}) VALUES ({params})", fields)
+            job, = module.lifecycle().claim(1)
+            module.run_job(job)
+        finally:
+            server.shutdown()
+            worker.join()
+
+    create, publish = wire
+    assert create[:2] == ("POST", f"/repos/{repo}/check-runs")
+    assert create[3:] == ("creating", None, None)
+    assert {k: create[2][k] for k in ("head_sha", "name", "external_id", "status")} == {
+        "head_sha": SHA, "name": f"distributed-{suite}",
+        "external_id": f"andy-ci:17:{SHA}:{suite}", "status": "queued",
+    }
+    assert publish[:2] == ("PATCH", f"/repos/{repo}/check-runs/42")
+    assert publish[3:5] == ("publication", 42)
+    assert json.loads(publish[5])["conclusion"] == publish[2]["conclusion"] == "success"
+    assert publish[2]["status"] == "completed"
+    assert executions == [((repo, 17, SHA) if suite == "postgres" else (repo, 17, SHA, suite), 42)]
+    with sqlite3.connect(module.DB_PATH) as db:
+        assert db.execute(f"SELECT state,check_run_id,phase,publication FROM {module.QUEUE_TABLE}").fetchall() == [
+            ("PASS", 42, None, None),
+        ]
 
 
 class GitHub:
