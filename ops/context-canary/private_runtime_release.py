@@ -13,22 +13,29 @@ PROFILES = {"runtime_apply": ("dark", "up"), "runtime_rollback": ("dark", "stop"
             "canary_enable": ("owner", "up"), "canary_disable": ("owner", "stop")}
 
 
-def run(operation, comment, image, *, root):
+def run(operation, comment, image, *, root, archive=None):
     if not re.fullmatch(r"ghcr\.io/escossio/attention-router@sha256:[0-9a-f]{64}", image):
         raise ValueError("immutable repository manifest digest required")
+    if archive is None:
+        raise ValueError("attested OCI archive required")
     ops = root / "ops/context-canary"
     verified = subprocess.check_output([sys.executable, ops / "verify_github_promotion.py", operation,
-                                       str(comment), "--root", root, "--artifact", image], text=True)
-    sha = verified.strip().split()[-1]
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise ValueError("invalid promotion SHA")
-    actual = json.loads(subprocess.check_output(["docker", "image", "inspect", image]))
-    if (len(actual) != 1 or image not in (actual[0].get("RepoDigests") or [])
-            or actual[0]["Config"]["Labels"].get("org.opencontainers.image.revision") != sha
+                                       str(comment), "--root", root, "--artifact", image, "--archive", archive],
+                                       text=True).splitlines()
+    if len(verified) != 2:
+        raise ValueError("invalid promotion receipt")
+    promotion = re.fullmatch(rf"PREFLIGHT_APROVADO {operation} #428 PR #[1-9][0-9]* ([0-9a-f]{{40}})", verified[0])
+    config = re.fullmatch(r"OCI_IMAGE_ID=(sha256:[0-9a-f]{64})", verified[1])
+    if promotion is None or config is None:
+        raise ValueError("invalid promotion receipt")
+    sha, image_id = promotion[1], config[1]
+    actual = json.loads(subprocess.check_output(["docker", "image", "inspect", image_id]))
+    if (len(actual) != 1 or actual[0].get("Id") != image_id
+            or (actual[0]["Config"].get("Labels") or {}).get("org.opencontainers.image.revision") != sha
             or actual[0]["Config"]["Entrypoint"] != ["python", "-m", "attention_router.private_context_entrypoint"]):
         raise ValueError("local OCI provenance mismatch")
     profile, action = PROFILES[operation]
-    env = dict(os.environ, CONTEXT_IMAGE=image)
+    env = dict(os.environ, CONTEXT_IMAGE=image_id)
     compose = ["docker", "compose", "--project-name", "andy-private-context", "--env-file", os.devnull,
                "-f", ops / "compose.private.yaml", "--profile", profile]
     # Refuse replacement/stopping of an instance running a different authorized digest.
@@ -51,5 +58,6 @@ if __name__ == "__main__":
     parser.add_argument("operation", choices=tuple(PROFILES))
     parser.add_argument("comment_id", type=int)
     parser.add_argument("artifact")
+    parser.add_argument("--archive", required=True, type=Path)
     args = parser.parse_args()
-    run(args.operation, args.comment_id, args.artifact, root=Path(__file__).resolve().parents[2])
+    run(args.operation, args.comment_id, args.artifact, root=Path(__file__).resolve().parents[2], archive=args.archive)

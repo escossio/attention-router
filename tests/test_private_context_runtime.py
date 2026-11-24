@@ -109,15 +109,21 @@ def test_oci_boundaries_and_release_refuses_before_execution(monkeypatch, tmp_pa
     with pytest.raises(ValueError, match="immutable"):
         release("canary_enable", 1, "image:latest", root=root)
     operations = []
+    archive = tmp_path / "private-context.oci.tar"
+    image_id = f"sha256:{'b' * 64}"
+
     def invoke(args, **kw):
         operations.append(args)
         if len(operations) == 1:
-            return "PREFLIGHT_APROVADO canary_enable #428 PR #1 " + "a"*40
-        return json.dumps([{"RepoDigests": [], "Config": {"Labels": {}}}])
+            assert args[-2:] == ["--archive", archive]
+            return f"PREFLIGHT_APROVADO canary_enable #428 PR #1 {'a' * 40}\nOCI_IMAGE_ID={image_id}\n"
+        assert args == ["docker", "image", "inspect", image_id]
+        return json.dumps([{"Id": f"sha256:{'c' * 64}", "Config": {"Labels": {}}}])
+
     monkeypatch.setattr(subprocess, "check_output", invoke)
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("unverified OCI executed"))
     with pytest.raises(ValueError, match="provenance"):
-        release("canary_enable", 1, "ghcr.io/escossio/attention-router@sha256:"+"a"*64, root=root)
+        release("canary_enable", 1, "ghcr.io/escossio/attention-router@sha256:"+"a"*64, root=root, archive=archive)
     assert len(operations) == 2
 
 
@@ -151,6 +157,7 @@ def test_oci_reader_verifies_each_blob_and_revision(tmp_path):
                 tar.addfile(entry, io.BytesIO(value))
     write_tar()
     assert inspect_image(archive, sha) == manifest["digest"]
+    assert inspect_image(archive, sha, with_config=True) == (manifest["digest"], config["digest"])
     with pytest.raises(ValueError, match="unexpected"):
         inspect_image(archive, "b" * 40)
     objects["blobs/sha256/" + layer["digest"].split(":")[1]] = b"tampered layer!"
