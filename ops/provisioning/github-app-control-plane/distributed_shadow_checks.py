@@ -437,7 +437,9 @@ def run_job(job: dict) -> None:
 
     lifecycle().run(
         job, name=name, authenticate=installation_token, current=current,
-        create=lambda token, external: create_check(token, repo, number, sha, job["suite"], external_id=external),
+        create=lambda token, external: create_check(
+            token, repo, sha=sha, pr_number=number, suite=job["suite"], external_id=external,
+        ),
         complete=lambda token, *result: complete_check(token, repo, *result),
         execute=lambda token, check, stage: execute_exact_sha(repo, number, sha, job["suite"], queued=(token, check, stage)),
     )
