@@ -1,0 +1,26 @@
+ARG PYTHON_BASE
+FROM ${PYTHON_BASE}
+ARG BUILD_SHA
+LABEL org.opencontainers.image.revision=${BUILD_SHA} \
+      org.opencontainers.image.source=https://github.com/escossio/attention-router \
+      org.opencontainers.image.title="Andy private context reader"
+ENV PYTHONPATH=/opt/private-context PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    ADMIN_AUTH_ENABLED=false APP_ENV=production STAGED_CONTEXT_PRIVATE_CANARY_ENABLED=false \
+    CLIENT_SESSION_ENABLED=false CONTEXT_EPOCH_AUTHORITY_CANARY_ENABLED=false \
+    HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 TOKENIZERS_PARALLELISM=false
+RUN --mount=type=bind,from=debs,source=.,target=/debs,readonly \
+    dpkg -i /debs/*.deb \
+    && rm -f /var/log/dpkg.log /var/log/alternatives.log /var/cache/ldconfig/aux-cache
+WORKDIR /opt/private-context
+COPY ops/context-canary/requirements.linux-amd64.lock ./requirements.lock
+RUN --mount=type=bind,from=wheels,source=.,target=/wheels,readonly \
+    python -m pip --isolated install --disable-pip-version-check --no-cache-dir --no-compile \
+        --only-binary=:all: --require-hashes --no-index --find-links=/wheels -r requirements.lock \
+    && python -m pip check \
+    && python -c "import numpy, onnxruntime, psycopg, tokenizers"
+COPY attention_router ./attention_router
+COPY ops/reconciliation/model-manifest.json ./ops/reconciliation/model-manifest.json
+USER 65532:65532
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD ["python","-c","from urllib.request import urlopen; urlopen('http://127.0.0.1:18110/health/live', timeout=2).close()"]
+ENTRYPOINT ["python","-m","attention_router.private_context_entrypoint"]
+CMD []

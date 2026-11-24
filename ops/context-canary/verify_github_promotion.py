@@ -3,7 +3,9 @@
 import argparse
 import json
 import re
+import runpy
 import subprocess
+import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,7 +13,7 @@ REPO = "escossio/attention-router"
 OWNER = "escossio"
 ISSUE = 428
 IMAGE = f"ghcr.io/{REPO}"
-PUBLISH_WORKFLOW = f"{REPO}/.github/workflows/publish-container.yml"
+PUBLISH_WORKFLOW = f"{REPO}/.github/workflows/private-context-oci.yml"
 OPERATIONS = {
     "schema_apply": "G3",
     "schema_rollback": "G3",
@@ -166,7 +168,27 @@ def verify_checks(sha, checks, expected):
             verify_distributed_execution(name, sha, latest.get("output"))
 
 
-def verify(comment_id, operation, root, artifact, *, approval_ref=None, fetch=github, now=None, return_record=False):
+def verify_private_oci(root, archive, sha, digest):
+    require(archive is not None, "arquivo OCI necessário para a atestação")
+    path = Path(archive)
+    require(path.is_file() and not path.is_symlink(), "arquivo OCI ausente ou inválido")
+    try:
+        run("gh", "attestation", "verify", str(path.resolve()), "--repo", REPO,
+            "--signer-workflow", PUBLISH_WORKFLOW, "--source-ref", "refs/heads/main",
+            "--source-digest", sha, "--deny-self-hosted-runners")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PromotionBlocked("atestado OCI ausente, divergente ou CLI incompatível") from exc
+    inspect = runpy.run_path(str(root / "ops/context-canary/build_private_oci.py"))["inspect_image"]
+    try:
+        manifest, image_id = inspect(path, sha, with_config=True)
+    except (OSError, ValueError, KeyError, TypeError, tarfile.TarError) as exc:
+        raise PromotionBlocked("conteúdo do arquivo OCI inválido") from exc
+    require(manifest == f"sha256:{digest}", "manifesto OCI diverge da aprovação")
+    return image_id
+
+
+def verify(comment_id, operation, root, artifact, *, archive=None, approval_ref=None, fetch=github, now=None,
+           return_record=False):
     comment = fetch(f"issues/comments/{comment_id}")
     record = approval_record(comment, operation, now or datetime.now(UTC))
     if approval_ref is not None:
@@ -194,6 +216,7 @@ def verify(comment_id, operation, root, artifact, *, approval_ref=None, fetch=gi
     verify_checkout(root, sha, commit["tree"]["sha"])
 
     expected_digest = record.get("artifact_sha256", "")
+    image_id = None
     if record["gate"] in {"G3", "G4"}:
         require(re.fullmatch(r"[0-9a-f]{64}", expected_digest) and artifact == expected_digest,
                 "digest do runner diverge da aprovação")
@@ -201,16 +224,13 @@ def verify(comment_id, operation, root, artifact, *, approval_ref=None, fetch=gi
         require(re.fullmatch(r"[0-9a-f]{64}", expected_digest)
                 and artifact == f"{IMAGE}@sha256:{expected_digest}",
                 "imagem OCI ausente ou digest divergente da aprovação")
-        try:
-            run("gh", "attestation", "verify", f"oci://{artifact}", "--repo", REPO,
-                "--signer-workflow", PUBLISH_WORKFLOW, "--source-digest", sha,
-                "--deny-self-hosted-runners")
-        except subprocess.SubprocessError as exc:
-            raise PromotionBlocked("atestado OCI ausente, divergente ou CLI incompatível") from exc
+        image_id = verify_private_oci(root, archive, sha, expected_digest)
     if now is None:
         require(datetime.now(UTC) < datetime.fromisoformat(record["expires_at"]),
                 "autorização expirou durante o pré-voo")
-    return record if return_record else (sha, number)
+    if return_record:
+        return record if image_id is None else {**record, "oci_image_id": image_id}
+    return sha, number
 
 
 def main():
@@ -218,15 +238,19 @@ def main():
     parser.add_argument("operation", choices=OPERATIONS)
     parser.add_argument("comment_id", type=int)
     parser.add_argument("--root", required=True, type=Path)
-    parser.add_argument("--artifact", help="imagem OCI imutável com digest")
+    parser.add_argument("--artifact", help="digest do runner ou referência ao manifesto OCI aprovado")
+    parser.add_argument("--archive", type=Path, help="arquivo OCI atestado pelo workflow privado")
     args = parser.parse_args()
     try:
-        sha, number = verify(args.comment_id, args.operation, args.root, args.artifact)
+        record = verify(args.comment_id, args.operation, args.root, args.artifact,
+                        archive=args.archive, return_record=True)
     except PromotionBlocked as exc:
         parser.exit(1, f"PROMOÇÃO BLOQUEADA: {exc}\n")
     except (OSError, subprocess.SubprocessError, KeyError, TypeError, ValueError):
         parser.exit(1, "PROMOÇÃO BLOQUEADA: falha de leitura ou formato inválido\n")
-    print(f"PREFLIGHT_APROVADO {args.operation} #{ISSUE} PR #{number} {sha}")
+    print(f"PREFLIGHT_APROVADO {args.operation} #{ISSUE} PR #{record['pr']} {record['sha']}")
+    if image_id := record.get("oci_image_id"):
+        print(f"OCI_IMAGE_ID={image_id}")
 
 
 if __name__ == "__main__":
