@@ -3,7 +3,10 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,11 +89,60 @@ def test_early_failure_summary_is_terminal_in_panel(tmp_path):
     assert recent[0]["wall_seconds"] == 41
 
 
-def test_scheduler_persists_early_failure_summary():
-    content = SCHEDULER.read_text()
-
-    assert "trap finalize_on_exit EXIT" in content
-    assert '"failure_class": reason' in content
-    assert '"return_code": rc' in content
-    assert "TERMINAL_REASON=NO_DISCOVERY_CAPACITY" in content
-    assert "TERMINAL_REASON=REPROFILE_REQUIRED" in content
+@pytest.mark.parametrize(("reason", "code"), [
+    ("NO_DISCOVERY_CAPACITY", 69),
+    ("DISCOVERY_MANIFEST_INVALID", 70),
+    ("REPROFILE_REQUIRED", 66),
+])
+def test_scheduler_persists_early_failure_summary(tmp_path, monkeypatch, reason, code):
+    sha = "c" * 40
+    digest = "d" * 64
+    registry = tmp_path / "registry.py"
+    registry.write_text(
+        "import sys\n"
+        "if sys.argv[3] == 'list-workers': print('ci03')\n"
+        "if sys.argv[3] == 'field': print('synthetic-worker')\n",
+    )
+    capacity = tmp_path / "capacity.json"
+    capacity.write_text('{"pytest_full_seconds":{"ci03":1}}')
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "parse-postgres-discovery.py").symlink_to(
+        SCHEDULER.with_name("parse-postgres-discovery.py"),
+    )
+    ssh = tmp_path / "ssh"
+    discovery = (
+        f"CI_SHA={sha}\nCI_POSTGRES_DISCOVERY_SHA={sha}\n"
+        "CI_SUITE=postgres\nCI_POSTGRES_FILE=tests/test_example.py\n"
+        "CI_POSTGRES_FILE_COUNT=1\nCI_POSTGRES_TEST_COUNT=1\n"
+        f"CI_POSTGRES_SELECTION_SHA256={digest}\nCI_STATUS=PASS\n"
+    )
+    if reason == "DISCOVERY_MANIFEST_INVALID":
+        discovery = discovery.replace("CI_POSTGRES_FILE_COUNT=1", "CI_POSTGRES_FILE_COUNT=2")
+    ssh.write_text(
+        '#!/bin/bash\nif [[ "${*: -1}" == ANDY_CI_DISCOVER_POSTGRES=* ]]; then\n'
+        "cat <<'DISCOVERY'\n" + discovery + "DISCOVERY\nfi\n",
+    )
+    ssh.chmod(0o700)
+    for name, value in {
+        "ANDY_CI_BASE": tmp_path,
+        "ANDY_CI_LOG_ROOT": tmp_path / "logs",
+        "ANDY_CI_PROFILE_ROOT": tmp_path / "profiles",
+        "ANDY_CI_HOST_REGISTRY_CLI": registry,
+        "ANDY_CI_REPLAN_POSTGRES": SCHEDULER.with_name("replan-postgres.py"),
+        "ANDY_CI_CAPACITY_FILE": capacity,
+        "ANDY_CI_SSH_BIN": ssh,
+        "ANDY_CI_CAPACITY_WAIT_SECONDS": "0" if reason == "NO_DISCOVERY_CAPACITY" else "5",
+    }.items():
+        monkeypatch.setenv(name, str(value))
+    result = subprocess.run(
+        ["bash", str(SCHEDULER), sha, "postgres"],
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    assert result.returncode == code, result.stdout + result.stderr
+    summaries = [line.split("=", 1)[1] for line in result.stdout.splitlines()
+                 if line.startswith("CI_DISTRIBUTED_SUMMARY=")]
+    assert len(summaries) == 1
+    summary = json.loads(Path(summaries[0]).read_text())
+    assert summary["sha"] == sha and summary["suite"] == "postgres"
+    assert summary["status"] == "FAIL" and summary["failure_class"] == reason
+    assert summary["return_code"] == code and summary["total_passed_tests"] == 0

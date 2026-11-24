@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -72,11 +73,12 @@ def test_docs_only_publisher_records_not_applicable_without_worker(monkeypatch, 
     assert "CI_IMPACT=NOT_APPLICABLE" in captured[0][5]
 
 
-@pytest.mark.parametrize("module_name,suite", [
-    ("distributed_shadow_checks.py", "python"),
-    ("distributed_postgres_check.py", "postgres"),
+@pytest.mark.parametrize("module_name,suite,receipt_sha", [
+    ("distributed_shadow_checks.py", "python", SHA),
+    ("distributed_postgres_check.py", "postgres", SHA),
+    ("distributed_postgres_check.py", "postgres", "d" * 40),
 ])
-def test_api_unavailable_must_run_suites(monkeypatch, module_name, suite):
+def test_api_unavailable_must_run_suites(monkeypatch, tmp_path, module_name, suite, receipt_sha):
     mod=load(module_name)
     monkeypatch.setattr(mod, "installation_token", lambda: "token")
     monkeypatch.setattr(mod, "current_pr", lambda *_a: {"state":"open", "head":{"sha":SHA}})
@@ -85,11 +87,32 @@ def test_api_unavailable_must_run_suites(monkeypatch, module_name, suite):
     captured=[]
     monkeypatch.setattr(mod, "complete_check", lambda *args: captured.append(args))
     dispatched=[]
-    monkeypatch.setattr(mod, "run_command", lambda args: (dispatched.append(args), subprocess.CompletedProcess(args,0,"PASSED"))[1])
-    monkeypatch.setattr(mod, "extract_summary", lambda _output: {"status": "PASS", "sha": SHA})
+    summary = {"status": "PASS", "sha": receipt_sha, "suite": suite}
+    if suite == "postgres":
+        digest = "e" * 64
+        summary.update(
+            schema_version=5, selection_sha256=digest, profile_key=f"nodes-{digest}",
+            configured_workers=["ci03"], selected_file_count=2, selected_test_count=3,
+            total_passed_tests=3, workers={
+                "ci03": {"status": "PASS", "rc": 0, "target_files": 2, "passed_tests": 3},
+            },
+        )
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(json.dumps(summary))
+    output = f"CI_DISTRIBUTED_SUMMARY={summary_path}\nCI_DISTRIBUTED_STATUS=PASS\n"
+
+    def run(args):
+        dispatched.append(args)
+        return subprocess.CompletedProcess(args, 0, output)
+
+    monkeypatch.setattr(mod, "run_command", run)
     if suite == "postgres":
         result=mod.execute_exact_sha(REPO,19,SHA)
     else:
         result=mod.execute_exact_sha(REPO,19,SHA,suite)
-    assert result[0]=="PASS" and len(dispatched)==1
-    assert len(captured)==1 and captured[0][3]=="success"
+    assert len(dispatched) == 1 and dispatched[0][-2:] == [SHA, suite]
+    assert len(captured) == 1
+    if receipt_sha == SHA:
+        assert result[0] == "PASS" and captured[0][3] == "success"
+    else:
+        assert result[0] == "FAIL" and captured[0][3] == "failure"
