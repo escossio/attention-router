@@ -1,5 +1,9 @@
 # Project status
 
+## Pré-voo CI pós-merge · #428
+
+Validação autenticada do App e do vínculo PR/commit nos dois publishers, com pré-voo somente leitura. Uma integração futura preserva a árvore do head certificado. Ativação requer novo pacote autorizado.
+
 ## WhatsApp inbound media and visitor PTT modality, PR #398 (13/11/2026)
 
 - Commit d5c414b pins whatsapp-web.js 1.34.8, verifies inbound media-cache resolution and outbound media-ID compatibility and repairs non-root transport image file permissions.
