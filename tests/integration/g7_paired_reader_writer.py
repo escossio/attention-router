@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import event, text
 from sqlalchemy.exc import DBAPIError
 
-from attention_router.application import conversation_hybrid, conversation_vectors
+from attention_router.application import conversation_evidence_staged, conversation_hybrid, conversation_vectors
 from attention_router.application.client_context import ClientContextReader, ClientContextScope
 from attention_router.application.context_validity import ContextValidity
 from attention_router.application.conversation_evidence_staged import StagedConversationEvidenceReader
@@ -132,7 +132,7 @@ def _burst(fetch, cases, engine, Session, marker_id, arm):
 
 
 @pytest.mark.parametrize("lab", ["client-query"], indirect=True)
-def test_governed_paired_readers_and_writer(Session, evidence_world, context_reader, lab, provider, capsys):  # noqa: F811
+def test_governed_paired_readers_and_writer(Session, evidence_world, context_reader, lab, provider, capsys, monkeypatch):  # noqa: F811
     fixture = json.loads(DATA.read_text())
     sources, cases = fixture["sources"], fixture["queries"]
     assert len(cases) == 16 and len({q[0] for q in cases}) == 16
@@ -226,6 +226,29 @@ def test_governed_paired_readers_and_writer(Session, evidence_world, context_rea
         assert not forbidden.intersection(ref for ref, _ in candidates + delivered)
         assert serial[case] == sorted(expected), case
     report["governed"]["focused_serial"] = serial
+
+    slot, question = next((slot, row[2]) for slot, row in enumerate(cases) if row[0] == "q09")
+    original_compile = conversation_evidence_staged._compile
+
+    def update_dependency_after_capture(*args, **kwargs):
+        packet = original_compile(*args, **kwargs)
+        with Session.begin() as db:
+            row = db.get(ConversationMessageRow, ids["s09"])
+            row.metadata_json = {**row.metadata_json, "benchmark_arm": "q09-control"}
+        return packet
+
+    with monkeypatch.context() as patch:
+        patch.setattr(conversation_evidence_staged, "_compile", update_dependency_after_capture)
+        with pytest.raises(StagedReadRejected, match="STAGED_CONVERSATION_SUPPORT_CHANGED") as changed:
+            with query_trace():
+                governed.query_and_deliver(
+                    bearer=devices[slot].session_token, scope_ref=scope_ref, question=question,
+                    deliver=lambda _: pytest.fail("disclosed after support changed"),
+                )
+    assert changed.value.__notes__ == ["g7_support_component=dependencies"]
+    _, delivered = staged(slot, question)
+    assert {ref for ref, _ in delivered} == {"s09", "s10"}
+    report["governed"]["q09_support_change"] = {"failed_closed": True, "changed_components": ["dependencies"]}
 
     corrected = "A caixa de amostras de quartzo chegou na terça-feira."
     with Session.begin() as db:

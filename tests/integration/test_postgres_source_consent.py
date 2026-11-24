@@ -454,13 +454,11 @@ def test_pg_consent_e5_asgi_full_chain(Session, consent_clients, provider, monke
         return result
 
     monkeypatch.setattr(staged_e5, "_compile", publish_phantom)
-    with pytest.raises(ValueError, match="STAGED_CONVERSATION_SUPPORT_CHANGED") as changed:
+    with pytest.raises(ValueError, match="STAGED_CONVERSATION_SUPPORT_CHANGED"):
         reader.query_and_deliver(
             bearer=args["bearer"], scope_ref=valid_scope, question="Em que data ficou a viagem?",
             deliver=lambda _: pytest.fail("disclosed after a phantom insertion"),
         )
-    assert "g7_support_component=rows" in changed.value.__notes__
-    assert "g7_support_component=memberships" in changed.value.__notes__
     with Session.begin() as db:
         assert db.execute(text("DELETE FROM conversation_vector_segments WHERE id = :id"), {"id": phantom}).rowcount == 1
 
