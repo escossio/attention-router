@@ -1,5 +1,9 @@
 # Project status
 
+## Dependências do processo privado de #440
+
+O scan direto do OCI de #440 em 24/11/2026 encontrou Starlette 0.38.6 com o aviso conhecido pela CISA CVE-2026-48710 e três avisos de alta gravidade com correção. O lock do processo ASGI privado passa a declarar Starlette 1.3.1 diretamente. A revisão das bibliotecas Debian e a confirmação do digest de uma nova imagem continuam pendentes.
+
 ## Correção e persistência no runtime privado de #435
 
 Novos anchors usam o modo de journal compatível com o mount somente leitura após encerrar o escritor. A prova descartável do leitor E5 privado agora fecha a sessão, reabre no mesmo dispositivo em um processo novo e verifica correção explícita por outro recibo e retirada durante a entrega. O build OCI fixa a imagem Python oficial por digest e 49 wheels por hash, verifica a instalação offline, manifesto, plataforma e entrada privada. O workflow proposto prevê reconstrução sem cache, SBOM e atestação sem push de imagem. Execução no SHA e decisão G5 seguem em revisão.
