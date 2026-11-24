@@ -16,8 +16,10 @@ import time
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from investigator_observability import sample_investigator_activity
 from context_performance import context_performance
 from message_tracing import sample_message_traces
+from ar1001_observability import cached_sample
 from transport_observability import sample_transport_observability
 
 
@@ -34,6 +36,8 @@ def _observability_url(name: str) -> str | None:
     raw = os.environ.get(name, "").strip()
     if not raw:
         return None
+    if raw in {"/observability/goaccess/", "/observability/dozzle/"}:
+        return raw
     parsed = urlsplit(raw)
     if (parsed.scheme not in {"http", "https"} or not parsed.netloc
             or parsed.username or parsed.password
@@ -47,17 +51,20 @@ def _observability_url(name: str) -> str | None:
 GOACCESS_URL = _observability_url("ANDY_OPS_GOACCESS_URL")
 DOZZLE_URL = _observability_url("ANDY_OPS_DOZZLE_URL")
 NETWORK_OSI_URL = _observability_url("ANDY_OPS_NETWORK_OSI_URL")
-CONTEXT_TEMPO_URL = _observability_url("ANDY_OPS_CONTEXT_TEMPO_URL")
+FLOW_E2E_URL = _observability_url("ANDY_OPS_FLOW_E2E_URL")
+LIVE_MESSAGE_URL = _observability_url("ANDY_OPS_LIVE_MESSAGE_URL")
 OBSERVABILITY_CONFIG = {
     "goaccess_url": GOACCESS_URL,
     "dozzle_url": DOZZLE_URL,
     "network_osi_url": NETWORK_OSI_URL,
+    "flow_e2e_url": FLOW_E2E_URL,
+    "live_message_url": LIVE_MESSAGE_URL,
 }
 FRAME_SOURCES = sorted(
     {
         f"{parsed.scheme}://{parsed.netloc}"
         for value in OBSERVABILITY_CONFIG.values()
-        if value
+        if value and urlsplit(value).netloc
         for parsed in [urlsplit(value)]
     }
 )
@@ -83,7 +90,7 @@ for f in /sys/class/hwmon/hwmon*/temp*_input; do
   printf '%s|%s|%s|%s\n' "$name" "$metric" "$label" "$value"
 done
 printf '__TASK__\n'
-ps -eo pid=,etimes=,args= | grep -E 'andy-ci-(run|distributed|reprofile)|python -m pytest -m postgres' | grep -v -E 'grep -E|andy-ops-panel' | head -20 || true
+ps -eo pid=,etimes=,args= | grep -E 'andy-ci-(run|distributed|reprofile)|python[0-9.]* -m pytest|pytest -q|node --test' | grep -v -E 'grep -E|andy-ops-panel' | head -20 || true
 """
 
 _state_lock = threading.Lock()
@@ -268,16 +275,24 @@ def _parse_task(lines: list[str], node_id: str) -> dict[str, Any] | None:
                 "label": f"{repository} · {suite} · {sha[:12]}",
             }
 
+    # Other local runners may bypass andy-ci-run entirely. Detect their real
+    # test process without claiming a Codex/AGT assignment or inventing a SHA.
     for pid, elapsed, args in candidates:
-        if "python -m pytest -m postgres" in args:
+        python_test = re.search(
+            r"(?:^|[ /])python(?:[0-9]+(?:\.[0-9]+)*)?\s+-m\s+pytest(?:\s|$)",
+            args,
+        ) or re.search(r"(?:^|[ /])pytest(?:\s|$)", args)
+        node_test = re.search(r"(?:^|[ /])node\s+--test(?:\s|$)", args)
+        if python_test or node_test:
+            suite = "node" if node_test else "pytest"
             return {
-                "kind": "PYTEST",
+                "kind": "TEST_PROCESS_UNATTRIBUTED",
                 "pid": pid,
                 "elapsed_seconds": elapsed,
                 "sha": None,
                 "sha_short": None,
-                "suite": "postgres",
-                "label": "PostgreSQL test shard",
+                "suite": suite,
+                "label": f"Teste {suite} detectado · origem não atribuída",
             }
     return None
 
@@ -318,8 +333,100 @@ def _sample_node(node_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+def _worker_start_from_log(log_path: Path) -> str | None:
+    # The CI runner writes CI_STARTED_AT before any test content. Read at most
+    # its first 12 lines; never return any command line or private log text.
+    if not log_path.is_file() or log_path.is_symlink():
+        return None
+    try:
+        with log_path.open("r", encoding="utf-8", errors="replace") as stream:
+            for _ in range(12):
+                line = stream.readline()
+                if not line:
+                    break
+                if not line.startswith("CI_STARTED_AT="):
+                    continue
+                timestamp = datetime.fromisoformat(line.split("=", 1)[1].strip().replace("Z", "+00:00"))
+                if timestamp.tzinfo is None:
+                    return None
+                return timestamp.astimezone(timezone.utc).isoformat()
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _dispatch_worker_details(path: Path, summary: dict[str, Any]) -> dict[str, Any]:
+    # Normalize supported summary formats without inventing timing.
+    raw_workers = summary.get("workers")
+    workers: dict[str, dict[str, Any]] = {}
+    if isinstance(raw_workers, dict):
+        for name, data in raw_workers.items():
+            if name in NODES and name != "agt" and isinstance(data, dict):
+                workers[name] = {"status": str(data.get("status") or "UNKNOWN")[:32]}
+
+    attempts = summary.get("attempts")
+    if not isinstance(attempts, list):
+        attempts = []
+    busy_count = sum(
+        a.get("classification") == "WORKER_BUSY"
+        for a in attempts if isinstance(a, dict)
+    )
+    selected = summary.get("selected_worker")
+    if selected not in {"ci01", "ci02", "ci03"}:
+        selected = next(iter(workers)) if len(workers) == 1 else None
+
+    duration = None
+    worker_start = None
+    if selected:
+        workers.setdefault(selected, {"status": str(summary.get("status") or "UNKNOWN")[:32]})
+        valid_attempts = [
+            a for a in attempts
+            if isinstance(a, dict) and a.get("worker") == selected
+            and isinstance(a.get("duration_seconds"), (int, float))
+            and a["duration_seconds"] >= 0
+        ]
+        chosen = next(
+            (a for a in reversed(valid_attempts) if a.get("rc") == 0),
+            valid_attempts[-1] if valid_attempts else None,
+        )
+        if chosen is not None:
+            duration = chosen["duration_seconds"]
+            attempt_number = chosen.get("attempt")
+            if isinstance(attempt_number, int) and 0 < attempt_number <= 100:
+                worker_start = _worker_start_from_log(path / f"{attempt_number}-{selected}.log")
+
+        if isinstance(raw_workers, dict) and isinstance(raw_workers.get(selected), dict):
+            data = raw_workers[selected]
+            if isinstance(data.get("duration_seconds"), (int, float)) and data["duration_seconds"] >= 0:
+                duration = data["duration_seconds"]
+            if duration is not None and worker_start is None:
+                # A single worker might have multiple PostgreSQL waves; the
+                # first log is evidence of its start, never an inferred time.
+                for log in sorted(path.glob(f"wave-*/{selected}.log"))[:12]:
+                    worker_start = _worker_start_from_log(log)
+                    if worker_start:
+                        break
+
+    total = summary.get("wall_seconds")
+    overhead = (
+        max(0, int(total - duration))
+        if isinstance(total, (int, float)) and isinstance(duration, (int, float))
+        and len(workers) == 1
+        else None
+    )
+    return {
+        "selected_worker": selected,
+        "workers": workers,
+        "busy_count": busy_count,
+        "attempt_count": len(attempts),
+        "worker_duration_seconds": duration,
+        "worker_started_at": worker_start,
+        "dispatch_overhead_seconds": overhead,
+    }
+
+
 def _recent_dispatches(
-    limit: int = 7,
+    limit: int = 35,
     active_sha_shorts: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     if not LOG_ROOT.exists():
@@ -359,13 +466,19 @@ def _recent_dispatches(
             repository = "attention-router"
 
         try:
+            # These scheduler directory names are UTC, regardless of host TZ.
             started_at = datetime.strptime(
                 stamp,
                 "%Y%m%dT%H%M%S",
-            ).astimezone().isoformat()
+            ).replace(tzinfo=timezone.utc).isoformat()
         except ValueError:
             started_at = None
         age = int(time.time() - path.stat().st_mtime)
+        finished_at = (
+            datetime.fromtimestamp(summary_file.stat().st_mtime, timezone.utc).isoformat()
+            if isinstance(summary, dict) else None
+        )
+        detail = _dispatch_worker_details(path, summary) if isinstance(summary, dict) else {}
         active = active_sha_shorts or set()
         status = (
             summary.get("status")
@@ -378,8 +491,12 @@ def _recent_dispatches(
             "sha_short": sha_short,
             "sha": sha,
             "suite": suite,
-            "started_at": started_at,
+            "started_at": started_at,  # backward-compatible dispatch creation
+            "dispatch_created_at": started_at,
+            "finished_at": finished_at,  # summary receipt time, not a guessed worker timestamp
+            "finished_at_source": "summary_mtime" if finished_at else None,
             "status": status,
+            **detail,
             "wall_seconds": (
                 summary.get("wall_seconds")
                 if isinstance(summary, dict)
@@ -394,11 +511,6 @@ def _recent_dispatches(
                 summary.get("total_passed_tests")
                 if isinstance(summary, dict)
                 else None
-            ),
-            "workers": (
-                summary.get("workers", {})
-                if isinstance(summary, dict)
-                else {}
             ),
         })
     return result
@@ -453,6 +565,11 @@ def _dispatch(nodes: list[dict[str, Any]], recent: list[dict[str, Any]]) -> dict
             "sha_short": latest.get("sha_short"),
             "suite": latest.get("suite"),
             "elapsed_seconds": latest.get("wall_seconds"),
+            "finished_at": latest.get("finished_at"),
+            "selected_worker": latest.get("selected_worker"),
+            "worker_duration_seconds": latest.get("worker_duration_seconds"),
+            "dispatch_overhead_seconds": latest.get("dispatch_overhead_seconds"),
+            "busy_count": latest.get("busy_count"),
             "source": "last-dispatch",
         }
     return None
@@ -741,7 +858,27 @@ def _sample_loop() -> None:
             for node in nodes
             if (task := node.get("task")) and task.get("sha_short")
         }
-        recent = _recent_dispatches(active_sha_shorts=active_sha_shorts)
+        history = _recent_dispatches(active_sha_shorts=active_sha_shorts)
+        for node in nodes:
+            if node["id"] == "agt":
+                continue
+            node["last_job"] = next(
+                (
+                    {
+                        "sha_short": job["sha_short"],
+                        "suite": job["suite"],
+                        "status": job["workers"][node["id"]]["status"],
+                        "finished_at": job.get("finished_at"),
+                        "worker_started_at": job.get("worker_started_at"),
+                        "worker_duration_seconds": job.get("worker_duration_seconds"),
+                        "busy_count": job.get("busy_count", 0),
+                    }
+                    for job in history
+                    if node["id"] in job.get("workers", {})
+                ),
+                None,
+            )
+        recent = history[:7]
         payload = {
             "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
             "nodes": nodes,
@@ -750,6 +887,7 @@ def _sample_loop() -> None:
             "chat": _chat_status(),
             "transport_observability": transport_observability,
             "message_traces": message_traces,
+            "investigator_activity": sample_investigator_activity(),
         }
         with _state_lock:
             _state.clear()
@@ -803,6 +941,9 @@ class OpsHandler(SimpleHTTPRequestHandler):
                 payload = json.loads(json.dumps(_state))
             self._json(payload)
             return
+        if path == "/api/ar1001":
+            self._json(cached_sample())
+            return
         if path in ("/api/context-performance/runs", "/api/context-performance/view"):
             route = path.rsplit("/", 1)[-1]
             payload, status = context_performance(route, urlsplit(self.path).query)
@@ -810,7 +951,7 @@ class OpsHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/config":
             self._json({"observability": {
-                **OBSERVABILITY_CONFIG, "context_tempo_url": CONTEXT_TEMPO_URL,
+                **OBSERVABILITY_CONFIG, "context_tempo_url": _observability_url("ANDY_OPS_CONTEXT_TEMPO_URL"),
             }})
             return
         super().do_GET()

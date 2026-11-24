@@ -735,7 +735,7 @@
     {
       "id": 13,
       "type": "table",
-      "title": "CPU, pico de RSS e I/O do processo de bancada",
+      "title": "Pool PostgreSQL · ciclo observado",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "roc-g7"
@@ -743,6 +743,228 @@
       "gridPos": {
         "x": 0,
         "y": 58,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "pool_summary",
+          "columns": [
+            {
+              "selector": "sampler_state",
+              "text": "sampler_state",
+              "type": "string"
+            },
+            {
+              "selector": "capacity",
+              "text": "capacity",
+              "type": "number"
+            },
+            {
+              "selector": "occupied",
+              "text": "occupied",
+              "type": "number"
+            },
+            {
+              "selector": "free",
+              "text": "free",
+              "type": "number"
+            },
+            {
+              "selector": "waiting",
+              "text": "waiting",
+              "type": "number"
+            },
+            {
+              "selector": "timeouts",
+              "text": "timeouts",
+              "type": "number"
+            },
+            {
+              "selector": "lock_samples",
+              "text": "lock_samples",
+              "type": "number"
+            },
+            {
+              "selector": "pool_lock_timeouts",
+              "text": "pool_lock_timeouts",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 14,
+      "type": "table",
+      "title": "Aquisições e posses abertas · fase inferida pelo trace",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "pool_open",
+          "columns": [
+            {
+              "selector": "state",
+              "text": "state",
+              "type": "string"
+            },
+            {
+              "selector": "phase",
+              "text": "phase",
+              "type": "string"
+            },
+            {
+              "selector": "trace",
+              "text": "trace",
+              "type": "string"
+            },
+            {
+              "selector": "age_ms",
+              "text": "age_ms",
+              "type": "number"
+            },
+            {
+              "selector": "sql_count",
+              "text": "sql_count",
+              "type": "number"
+            },
+            {
+              "selector": "outside_cursor_ms",
+              "text": "outside_cursor_ms",
+              "type": "number"
+            },
+            {
+              "selector": "lock_samples",
+              "text": "lock_samples",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "Distribuição de aquisição e posse",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 70,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "roc-g7"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "http://127.0.0.1:19491/view?run=${run:percentencode}&baseline=${baseline:percentencode}&trace=${trace:percentencode}",
+          "root_selector": "pool_distribution",
+          "columns": [
+            {
+              "selector": "measure",
+              "text": "measure",
+              "type": "string"
+            },
+            {
+              "selector": "samples",
+              "text": "samples",
+              "type": "number"
+            },
+            {
+              "selector": "p50_ms",
+              "text": "p50_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p95_ms",
+              "text": "p95_ms",
+              "type": "number"
+            },
+            {
+              "selector": "p99_ms",
+              "text": "p99_ms",
+              "type": "number"
+            },
+            {
+              "selector": "max_ms",
+              "text": "max_ms",
+              "type": "number"
+            }
+          ],
+          "url_options": {
+            "method": "GET"
+          },
+          "filters": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 16,
+      "type": "table",
+      "title": "CPU, pico de RSS e I/O do processo de bancada",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "roc-g7"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 76,
         "w": 24,
         "h": 6
       },
@@ -841,20 +1063,20 @@
       }
     },
     {
-      "id": 14,
+      "id": 17,
       "type": "row",
       "title": "3 · Investigação por consulta",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 64,
+        "y": 82,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 15,
+      "id": 18,
       "type": "table",
       "title": "Caminho observado e espera sem sobreposição",
       "datasource": {
@@ -863,7 +1085,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 65,
+        "y": 83,
         "w": 24,
         "h": 9
       },
@@ -944,7 +1166,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 19,
       "type": "table",
       "title": "Eventos correlacionados e SQL agregado da consulta",
       "datasource": {
@@ -953,7 +1175,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 74,
+        "y": 92,
         "w": 24,
         "h": 8
       },
@@ -1023,7 +1245,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 20,
       "type": "table",
       "title": "Identidade e configuração efetiva do ensaio",
       "datasource": {
@@ -1032,7 +1254,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 82,
+        "y": 100,
         "w": 24,
         "h": 8
       },
@@ -1072,7 +1294,7 @@
       }
     },
     {
-      "id": 18,
+      "id": 21,
       "type": "table",
       "title": "Último evento visto pela projeção",
       "datasource": {
@@ -1081,7 +1303,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 90,
+        "y": 108,
         "w": 24,
         "h": 4
       },
