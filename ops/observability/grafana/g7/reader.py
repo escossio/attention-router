@@ -41,6 +41,30 @@ def union_duration(intervals):
     return total
 
 
+def trace_timeline(events):
+    """Attribute exclusive time within observed, contained monotonic intervals."""
+    intervals = {}
+    for index, row in enumerate(events):
+        duration = row.get("duration_ns")
+        stamp = row.get("monotonic_ns")
+        if (row["event"] == "end" and row.get("stage") != "context.after_disconnect"
+                and type(duration) is int and type(stamp) is int):
+            intervals[index] = (stamp - duration, stamp)
+    output = []
+    for index, row in enumerate(events):
+        view = {key: row[key] for key in (
+            "event", "stage", "timestamp_ns", "duration_ns", "outcome", "correlation",
+            "sql_count", "used", "limit", "waiting",
+        ) if key in row}
+        if index in intervals:
+            low, high = intervals[index]
+            nested = [interval for child, interval in intervals.items() if child != index
+                      and low <= interval[0] and interval[1] <= high and interval != (low, high)]
+            view["exclusive_observed_ns"] = max(0, high - low - union_duration(nested))
+        output.append(view)
+    return output
+
+
 @lru_cache(maxsize=6)
 def read_events(path, _mtime, _size):
     events = []
@@ -250,10 +274,9 @@ class Projection:
         ]
         result["baseline_resources"] = before["resources"]
         trace = query.get("trace", [""])[0]
-        result["timeline"] = [{key: row[key] for key in (
-            "event", "stage", "timestamp_ns", "duration_ns", "outcome", "correlation", "sql_count",
-            "used", "limit", "waiting",
-        ) if key in row} for row in events if TRACE.fullmatch(trace) and row.get("trace") == trace]
+        result["timeline"] = trace_timeline([
+            row for row in events if TRACE.fullmatch(trace) and row.get("trace") == trace
+        ])
         result["read_ns"] = time_ns()
         result["summary"][0]["read_ns"] = result["read_ns"]
         return result

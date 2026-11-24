@@ -101,7 +101,7 @@ def build():
                       )}]}]}]})
     panel("Eventos correlacionados e SQL agregado da consulta", "timeline",
           strings=("event", "stage", "outcome", "correlation"),
-          numbers=("timestamp_ns", "duration_ns", "sql_count"), height=8)
+          numbers=("timestamp_ns", "duration_ns", "exclusive_observed_ns", "sql_count"), height=8)
     panel("Identidade e configuração efetiva do ensaio", "metadata", strings=("field", "value"), height=8)
     panel("Último evento visto pela projeção", "summary",
           numbers=("latest_event_ns", "latest_event_age_ms", "read_ns"), height=4)

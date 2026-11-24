@@ -234,6 +234,7 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 1.4rem 2rem; }
 @media (max-width: 760px) { .network-summary { grid-template-columns: 1fr; } .network-content { padding: 8px; } }
 
 /* Context performance uses the supervisor's existing tokens and cards. */
+#context-health {grid-template-columns:repeat(auto-fit,minmax(156px,1fr));}
 .context-header {flex-wrap: wrap;}
 .context-toolbar {display:flex; flex-wrap:wrap; align-items:end; gap:.65rem; margin:.8rem 0;}
 .context-toolbar label {display:grid; gap:.35rem; color:var(--muted); font-size:.78rem; min-width:0;}

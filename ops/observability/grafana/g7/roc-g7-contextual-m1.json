@@ -1002,6 +1002,11 @@
               "type": "number"
             },
             {
+              "selector": "exclusive_observed_ns",
+              "text": "exclusive_observed_ns",
+              "type": "number"
+            },
+            {
               "selector": "sql_count",
               "text": "sql_count",
               "type": "number"

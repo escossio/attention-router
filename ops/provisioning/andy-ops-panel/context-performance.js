@@ -123,7 +123,9 @@
     traces.length ? "Escolha uma consulta para exibir o caminho." : "Spans do servidor indisponíveis para esta execução.");
     table(find("timeline"), "Decomposição temporal e logs correlacionados", [
       ["event", "Evento"], ["stage", "Etapa"], ["timestamp_ns", "Hora", time],
-      ["duration_ns", "Duração", duration], ["outcome", "Resultado"], ["correlation", "Correlation ID"],
+      ["duration_ns", "Duração inclusiva", duration],
+      ["exclusive_observed_ns", "Exclusivo observado", duration], ["outcome", "Resultado"],
+      ["correlation", "Correlation ID"],
       ["sql_count", "Operações SQL"],
     ], payload.timeline);
     const link = find("tempo");

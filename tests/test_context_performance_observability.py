@@ -80,6 +80,10 @@ def test_projection_uses_interval_union_and_flags_different_environment():
     reader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(reader)
     assert reader.union_duration([(10, 30), (20, 40), (50, 60)]) == 40
+    sample = [{"event":"end", "stage":"context.worker", "duration_ns":50, "monotonic_ns":60},
+              {"event":"end", "stage":"context.capture", "duration_ns":20, "monotonic_ns":35},
+              {"event":"end", "stage":"context.revalidate", "duration_ns":18, "monotonic_ns":45}]
+    assert reader.trace_timeline(sample)[0]["exclusive_observed_ns"] == 20
     selected = {"p95_ms": 200, "abstained": 1}
     baseline = {"p95_ms": 100, "abstained": 0}
     cfg = {"config": {"pool": 2}, "worker": "ci02"}
