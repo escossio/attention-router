@@ -75,7 +75,7 @@ def fetch_debs(*, root, sha, output):
             (output / name).hardlink_to(path)
 
 
-def inspect_image(archive, sha):
+def inspect_image(archive, sha, *, with_config=False):
     with tarfile.open(archive) as tar:
         def read(name):
             member = tar.getmember(name)
@@ -114,6 +114,8 @@ def inspect_image(archive, sha):
             raise ValueError("unexpected private runtime image")
         for layer in manifest["layers"]:
             blob(layer)
+        if with_config:
+            return descriptor["digest"], manifest["config"]["digest"]
         return descriptor["digest"]
 
 

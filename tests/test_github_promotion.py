@@ -86,9 +86,10 @@ def release(monkeypatch, tmp_path):
 
     monkeypatch.setitem(verify.__globals__, "run", command)
 
-    def check(operation="schema_apply", artifact="a" * 64):
+    def check(operation="schema_apply", artifact="a" * 64, *, archive=None, return_record=False):
         api["issues/comments/7"]["body"] = "```json\n" + json.dumps(receipt) + "\n```"
-        return verify(7, operation, tmp_path, artifact, fetch=lambda endpoint, **_: api[endpoint], now=NOW)
+        return verify(7, operation, tmp_path, artifact, archive=archive, return_record=return_record,
+                      fetch=lambda endpoint, **_: api[endpoint], now=NOW)
 
     return check, receipt, api, responses, commands
 
@@ -287,23 +288,50 @@ def test_unbound_or_conflicting_ruleset_apps_block_release(release, app_id, reas
         check()
 
 
-def test_runtime_requires_immutable_oci_attestation(release):
+def test_runtime_requires_immutable_oci_attestation(release, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
     check, receipt, _, _, commands = release
     digest = "a" * 64
+    config = f"sha256:{'b' * 64}"
+    manifest = f"{REPO}@sha256:{digest}"
+    reference = f"ghcr.io/{manifest}"
+    archive = tmp_path / "private-context.oci.tar"
+    archive.write_bytes(b"synthetic OCI fixture")
     receipt.update(gate="G5", operation="runtime_apply", artifact_sha256=digest)
+
+    def inspect(path, source, *, with_config):
+        assert path == archive and source == SHA and with_config
+        return f"sha256:{digest}", config
+
+    monkeypatch.setitem(verify.__globals__, "runpy",
+                        SimpleNamespace(run_path=lambda _: {"inspect_image": inspect}))
     with pytest.raises(Blocked, match="imagem OCI"):
-        check("runtime_apply", f"ghcr.io/{REPO}:latest")
-    assert check("runtime_apply", f"ghcr.io/{REPO}@sha256:{digest}") == (SHA, 5)
+        check("runtime_apply", f"ghcr.io/{REPO}:latest", archive=archive)
+    with pytest.raises(Blocked, match="arquivo OCI necessário"):
+        check("runtime_apply", reference)
+    result = check("runtime_apply", reference, archive=archive, return_record=True)
+    assert result == {**receipt, "oci_image_id": config}
     assert commands[-1] == (
-        "gh", "attestation", "verify", f"oci://ghcr.io/{REPO}@sha256:{digest}", "--repo", REPO,
-        "--signer-workflow", f"{REPO}/.github/workflows/publish-container.yml",
+        "gh", "attestation", "verify", str(archive), "--repo", REPO,
+        "--signer-workflow", f"{REPO}/.github/workflows/private-context-oci.yml", "--source-ref", "refs/heads/main",
         "--source-digest", SHA, "--deny-self-hosted-runners",
     )
 
+    def wrong_manifest(*args, **kwargs):
+        return f"sha256:{'c' * 64}", config
 
-def test_failed_oci_attestation_blocks_promotion(release, monkeypatch):
+    monkeypatch.setitem(verify.__globals__, "runpy",
+                        SimpleNamespace(run_path=lambda _: {"inspect_image": wrong_manifest}))
+    with pytest.raises(Blocked, match="manifesto OCI"):
+        check("runtime_apply", reference, archive=archive)
+
+
+def test_failed_oci_attestation_blocks_promotion(release, monkeypatch, tmp_path):
     check, receipt, _, _, _ = release
     receipt.update(gate="G6", operation="canary_enable")
+    archive = tmp_path / "private-context.oci.tar"
+    archive.write_bytes(b"synthetic OCI fixture")
     original = verify.__globals__["run"]
 
     def command(*args):
@@ -313,7 +341,7 @@ def test_failed_oci_attestation_blocks_promotion(release, monkeypatch):
 
     monkeypatch.setitem(verify.__globals__, "run", command)
     with pytest.raises(Blocked, match="atestado OCI"):
-        check("canary_enable", f"ghcr.io/{REPO}@sha256:{'a' * 64}")
+        check("canary_enable", f"ghcr.io/{REPO}@sha256:{'a' * 64}", archive=archive)
 
 
 @pytest.mark.parametrize(("runner", "window", "value", "options"), [
