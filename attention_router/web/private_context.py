@@ -1,6 +1,6 @@
 """Dedicated loopback process for read-only OWNER queries. No application startup hooks."""
 
-from collections import deque
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from hashlib import sha256
 import json
@@ -29,6 +29,9 @@ from attention_router.application.context_pg_consent import PgSourceConsent
 from attention_router.application.context_preactivation import require_context_database
 from attention_router.application.conversation_embedding import LocalEmbeddingProvider
 from attention_router.application.conversation_evidence_staged import StagedConversationEvidenceReader
+from attention_router.application.conversation_relevance import (
+    CONTRAST_NEEDS_PAIR, contrast_topic_query, inspection_outcome,
+)
 from attention_router.config import settings
 from attention_router.infrastructure.context_epoch_durable import DurableEpochAuthority
 from attention_router.observability.private_context import correlation_id, record_failure
@@ -42,21 +45,35 @@ SOCKET_DIRECTORY = "/run/postgresql"
 def owner_answer(packet):
     """Present supported literal excerpts, without asserting their claims as facts."""
     evidence = {}
+    outcomes = defaultdict(lambda: defaultdict(list))
+    topic = contrast_topic_query(getattr(packet, "query", ""))
     for item in packet.items:
-        if item.provenance["single_excerpt_heuristic"] is not None:
-            continue
+        reason = item.provenance["single_excerpt_heuristic"]
         for excerpt in item.attributes["excerpts"]:
             key = (excerpt["source_ref"], excerpt["char_start"], excerpt["char_end"])
-            if excerpt["text"].strip():
-                evidence[key] = {k: excerpt[k] for k in ("source_ref", "observed_at")}
-                evidence[key]["excerpt"] = excerpt["text"]
+            if topic is None and reason is None and excerpt["text"].strip():
+                evidence[key] = excerpt
+            elif topic is not None and reason == CONTRAST_NEEDS_PAIR:
+                witness = inspection_outcome(excerpt["text"], topic)
+                if witness is not None:
+                    subject, outcome = witness
+                    outcomes[subject][outcome].append((key, excerpt))
+    for group in outcomes.values():
+        for approved_key, approved in group["aprovad"]:
+            for refused_key, refused in group["recusad"]:
+                if approved_key[0] != refused_key[0]:
+                    evidence[approved_key] = approved
+                    evidence[refused_key] = refused
     return {
         "kind": "OBSERVATION" if evidence else "INSUFFICIENT_EVIDENCE",
         "conclusion": None, "date": None, "conditions": [],
         "uncertainty": ("Os trechos abaixo registram o que as fontes disseram. "
                         "A conclusão permanece em aberto." if evidence
                         else "Falta evidência vigente para responder à pergunta."),
-        "evidence": list(evidence.values()), "correlation_id": correlation_id(),
+        "evidence": [
+            {**{key: item[key] for key in ("source_ref", "observed_at")}, "excerpt": item["text"]}
+            for item in evidence.values()
+        ], "correlation_id": correlation_id(),
     }
 
 
