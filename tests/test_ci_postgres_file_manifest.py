@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 import runpy
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-collector_module = runpy.run_path(str(ROOT / "scripts/ci_postgres_manifest.py"))
+COLLECTOR = ROOT / "scripts/ci_postgres_manifest.py"
+collector_module = runpy.run_path(str(COLLECTOR))
 parser_module = runpy.run_path(str(
     ROOT / "ops/provisioning/distributed-ci-lab/control-plane/parse-postgres-discovery.py"
 ))
@@ -73,3 +76,52 @@ def test_empty_and_escaping_pytest_paths_are_refused():
         selected_file_paths([])
     with pytest.raises(ValueError, match="SELECTED_PATH_INVALID"):
         selected_file_paths(["../tests/test_escape.py::test_no"])
+
+
+@pytest.mark.parametrize("mode", ["run", "changed_node", "setup_plan"])
+def test_collect_and_execute_require_same_nodes_and_actual_outcomes(tmp_path, monkeypatch, mode):
+    (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers = postgres: synthetic PostgreSQL\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    integration = tests / "integration"
+    integration.mkdir()
+    (integration / "conftest.py").write_text(
+        "import pytest\n@pytest.fixture\ndef Session(): return 2\n",
+    )
+    case = integration / "test_db.py"
+    case.write_text(
+        "import pytest\n@pytest.mark.postgres\ndef test_db(Session): assert Session == 2\n",
+    )
+    (tests / "test_outside.py").write_text(
+        "import pytest\n@pytest.mark.postgres\ndef test_outside(): pass\n"
+        "def test_deselected(): assert False\n",
+    )
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    common = [sys.executable, str(COLLECTOR)]
+    discovery = subprocess.run(
+        [*common, "--output", "files.txt", "--node-output", "nodes.json"], cwd=tmp_path,
+        capture_output=True, text=True, check=True,
+    )
+    digest = next(line.partition("=")[2] for line in discovery.stdout.splitlines()
+                  if line.startswith("CI_POSTGRES_SELECTION_SHA256="))
+    assert (tmp_path / "files.txt").read_text().splitlines() == [
+        "tests/integration/test_db.py", "tests/test_outside.py",
+    ]
+    if mode == "changed_node":
+        case.write_text(case.read_text().replace("test_db(", "test_other_db("))
+    if mode == "setup_plan":
+        monkeypatch.setenv("PYTEST_ADDOPTS", "--setup-plan")
+    execution = subprocess.run(
+        [*common, "--execute", "--expected-selection", digest], cwd=tmp_path,
+        capture_output=True, text=True, check=False,
+    )
+    if mode == "run":
+        assert execution.returncode == 0, execution.stderr
+        assert "CI_POSTGRES_PASSED_TEST_COUNT=2" in execution.stdout
+    else:
+        assert execution.returncode != 0
+        expected = ("CI_POSTGRES_NODE_SELECTION_MISMATCH" if mode == "changed_node"
+                    else "CI_POSTGRES_EXECUTION_INCOMPLETE")
+        assert expected in execution.stderr
+        assert "CI_POSTGRES_PASSED_TEST_COUNT" not in execution.stdout

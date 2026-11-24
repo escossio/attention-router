@@ -16,11 +16,12 @@ SHA_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 FILE_PATTERN = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*test_[A-Za-z0-9_.-]+\.py\Z")
 
 
-def parse_discovery(log: str, *, sha: str) -> list[str]:
+def parse_discovery(log: str, *, sha: str, profile: bool = False) -> list[str]:
     if not SHA_PATTERN.fullmatch(sha):
         raise ValueError("CI_POSTGRES_DISCOVERY_INVALID_SHA")
     lines = log.splitlines()
-    for label in ("CI_SHA", "CI_POSTGRES_DISCOVERY_SHA"):
+    labels = ("CI_SHA",) if profile else ("CI_SHA", "CI_POSTGRES_DISCOVERY_SHA")
+    for label in labels:
         values = [line.split("=", 1)[1] for line in lines if line.startswith(label + "=")]
         if values != [sha]:
             raise ValueError("CI_POSTGRES_DISCOVERY_SHA_MISMATCH")
@@ -43,15 +44,43 @@ def parse_discovery(log: str, *, sha: str) -> list[str]:
     return sorted(paths)
 
 
+def parse_selection(log: str, *, profile: bool = False) -> tuple[int, str]:
+    fields = {}
+    for line in log.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator:
+            continue
+        if key in {"CI_SUITE", "CI_POSTGRES_TEST_COUNT", "CI_POSTGRES_SELECTION_SHA256",
+                   "CI_POSTGRES_PASSED_TEST_COUNT"}:
+            if key in fields:
+                raise ValueError("CI_POSTGRES_SELECTION_DUPLICATE_FIELD")
+            fields[key] = value
+    count = fields.get("CI_POSTGRES_TEST_COUNT", "")
+    digest = fields.get("CI_POSTGRES_SELECTION_SHA256", "")
+    passed = fields.get("CI_POSTGRES_PASSED_TEST_COUNT", "")
+    if (fields.get("CI_SUITE") != "postgres" or not re.fullmatch(r"[1-9][0-9]*", count)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or (profile and (not re.fullmatch(r"[1-9][0-9]*", passed) or int(passed) > int(count)))):
+        raise ValueError("CI_POSTGRES_SELECTION_INVALID")
+    return int(count), digest
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sha", required=True)
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--selection-output", required=True, type=Path)
+    parser.add_argument("--profile", action="store_true")
     args = parser.parse_args()
 
-    files = parse_discovery(args.log.read_text(errors="replace"), sha=args.sha)
+    log = args.log.read_text(errors="replace")
+    files = parse_discovery(log, sha=args.sha, profile=args.profile)
+    count, digest = parse_selection(log, profile=args.profile)
+    if count < len(files):
+        raise SystemExit("CI_POSTGRES_SELECTION_TOO_FEW_TESTS")
     args.output.write_text("\n".join(files) + "\n", encoding="utf-8")
+    args.selection_output.write_text(f"{count}\n{digest}\n", encoding="utf-8")
     print(f"CI_POSTGRES_DISCOVERY_VERIFIED_FILES={len(files)}")
 
 

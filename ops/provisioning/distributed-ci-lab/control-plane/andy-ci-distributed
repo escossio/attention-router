@@ -3,7 +3,6 @@ set -Eeuo pipefail
 
 BASE="${ANDY_CI_BASE:-/usr/local/lib/andy-ci}"
 PROFILE_ROOT="${ANDY_CI_PROFILE_ROOT:-$BASE/profiles}"
-LEGACY_PROFILE="$BASE/profile"
 LOG_ROOT="${ANDY_CI_LOG_ROOT:-/var/log/andy-ci}"
 REGISTRY_CLI="${ANDY_CI_HOST_REGISTRY_CLI:-$BASE/bin/host-registry.py}"
 REGISTRY_DB="${ANDY_CI_HOST_REGISTRY_DB:-/var/lib/andy-ci/host-registry.sqlite3}"
@@ -243,13 +242,19 @@ discover_postgres_files() {
           "$remote_cmd" >"$raw" 2>/dev/null; then
         if python3 "$BASE/bin/parse-postgres-discovery.py" \
             --sha "$SHA" --log "$raw" \
-            --output "$RUN_DIR/current-postgres-files.txt"; then
+            --output "$RUN_DIR/current-postgres-files.txt" \
+            --selection-output "$RUN_DIR/current-selection.txt"; then
           echo "CI_DISTRIBUTED_DISCOVERY_WORKER=$worker"
           return 0
         fi
         echo "CI_DISTRIBUTED_DISCOVERY_INVALID worker=$worker"
         set_health "$worker" DEGRADED invalid_discovery_manifest
-        return 1
+        TERMINAL_REASON=DISCOVERY_MANIFEST_INVALID
+        return 70
+      fi
+      if grep -q '^CI_STATUS=FAIL$' "$raw"; then
+        TERMINAL_REASON=DISCOVERY_SETUP_FAILED
+        return 70
       fi
       set_health "$worker" DEGRADED "discovery_busy_or_failed"
     done < <(ordered_workers "${READY_WORKERS[@]}")
@@ -259,29 +264,29 @@ discover_postgres_files() {
   return 1
 }
 
-if ! discover_postgres_files; then
-  TERMINAL_REASON=NO_DISCOVERY_CAPACITY
-  echo 'CI_DISTRIBUTED_STATUS=NO_DISCOVERY_CAPACITY'
+if discover_postgres_files; then
+  :
+else
+  rc=$?
+  TERMINAL_REASON="${TERMINAL_REASON:-NO_DISCOVERY_CAPACITY}"
+  echo "CI_DISTRIBUTED_STATUS=$TERMINAL_REASON"
+  if (( rc == 70 )); then exit 70; fi
   exit 69
 fi
 
-PROFILE_KEY="$(sha256sum "$RUN_DIR/current-postgres-files.txt" | awk '{print $1}')"
+mapfile -t selection < "$RUN_DIR/current-selection.txt"
+SELECTED_TESTS="${selection[0]}"
+SELECTION_SHA="${selection[1]}"
+PROFILE_KEY="nodes-$SELECTION_SHA"
 PROFILE="$PROFILE_ROOT/$PROFILE_KEY"
 echo "CI_DISTRIBUTED_PROFILE_KEY=$PROFILE_KEY"
-
-if [[ ! -d "$PROFILE" && -d "$LEGACY_PROFILE" \
-      && -f "$LEGACY_PROFILE/postgres-files.txt" ]] \
-  && cmp -s "$LEGACY_PROFILE/postgres-files.txt" \
-      "$RUN_DIR/current-postgres-files.txt"; then
-  cp -a "$LEGACY_PROFILE" "$PROFILE"
-fi
 
 if [[ ! -d "$PROFILE" ]]; then
   TERMINAL_REASON=REPROFILE_REQUIRED
   echo 'CI_DISTRIBUTED_STATUS=REPROFILE_REQUIRED'
   exit 66
 fi
-for required in postgres-files.txt manifest.json; do
+for required in postgres-files.txt selection.txt manifest.json; do
   [[ -f "$PROFILE/$required" ]] || {
     TERMINAL_REASON=PROFILE_CORRUPT
     echo 'CI_DISTRIBUTED_STATUS=PROFILE_CORRUPT'
@@ -289,7 +294,8 @@ for required in postgres-files.txt manifest.json; do
   }
 done
 if ! cmp -s "$PROFILE/postgres-files.txt" \
-    "$RUN_DIR/current-postgres-files.txt"; then
+    "$RUN_DIR/current-postgres-files.txt" \
+    || ! cmp -s "$PROFILE/selection.txt" "$RUN_DIR/current-selection.txt"; then
   TERMINAL_REASON=PROFILE_CORRUPT
   echo 'CI_DISTRIBUTED_STATUS=PROFILE_CORRUPT'
   exit 70
@@ -308,12 +314,29 @@ TERMINAL_FAILURE=0
 classify_attempt() {
   local rc="$1"
   local log="$2"
-  if (( rc == 0 )) && grep -q '^CI_STATUS=PASS$' "$log"; then
+  local files="$3"
+  local passed="$4"
+  if (( rc == 0 )); then
+    if [[ "$(grep '^CI_STATUS=' "$log")" != "CI_STATUS=PASS" \
+      || "$(grep '^CI_SHA=' "$log")" != "CI_SHA=$SHA" \
+      || "$(grep '^CI_POSTGRES_TARGET_MANIFEST_SHA=' "$log")" != "CI_POSTGRES_TARGET_MANIFEST_SHA=$SHA" \
+      || "$(grep '^CI_POSTGRES_FULL_COLLECTION_VERIFIED=' "$log")" != "CI_POSTGRES_FULL_COLLECTION_VERIFIED=$files" \
+      || "$(grep '^CI_POSTGRES_FILE_COUNT=' "$log")" != "CI_POSTGRES_FILE_COUNT=$files" \
+      || "$(grep '^CI_POSTGRES_SELECTION_SHA256=' "$log")" != "CI_POSTGRES_SELECTION_SHA256=$SELECTION_SHA" \
+      || "$(grep '^CI_POSTGRES_TEST_COUNT=' "$log")" != "CI_POSTGRES_TEST_COUNT=$SELECTED_TESTS" \
+      || ! "$passed" =~ ^[1-9][0-9]*$ || "$passed" -gt "$SELECTED_TESTS" ]]; then
+      echo MANIFEST_MISMATCH
+      return
+    fi
     echo PASS
     return
   fi
   if grep -q '^CI_WORKER_BUSY$' "$log"; then
     echo WORKER_BUSY
+    return
+  fi
+  if grep -Eq 'CI_POSTGRES_(NODE_SELECTION_MISMATCH|EXECUTION_INCOMPLETE|TARGET_MANIFEST_)' "$log"; then
+    echo MANIFEST_MISMATCH
     return
   fi
   if (( rc == 255 )) || grep -Eq \
@@ -399,8 +422,10 @@ while [[ -s "$PENDING" ]]; do
     WAVE_LOGS[$worker]="$log"
     WAVE_SHARDS[$worker]="$shard"
 
+    manifest="$WAVE_DIR/targets-$worker.txt"
+    { printf 'sha=%s\n' "$SHA"; cat "$shard"; } > "$manifest"
     if ! "$SCP_BIN" -q -o BatchMode=yes -o ConnectTimeout=5 \
-        "$shard" "$target:$remote" >/dev/null 2>&1; then
+        "$manifest" "$target:$remote" >/dev/null 2>&1; then
       set_health "$worker" UNAVAILABLE "shard_copy_failed"
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$WAVE" "$worker" WORKER_LOST 255 0 0 "$files" >> "$ATTEMPTS"
@@ -413,6 +438,7 @@ while [[ -s "$PENDING" ]]; do
       set +e
       "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
         "ANDY_CI_PYTEST_TARGETS_FILE='$remote' \
+         ANDY_CI_POSTGRES_SELECTION_SHA256='$SELECTION_SHA' \
          /srv/andy-ci/bin/andy-ci-run '$SHA' postgres" \
         >"$log" 2>&1
       rc=$?
@@ -432,11 +458,12 @@ while [[ -s "$PENDING" ]]; do
     log="${WAVE_LOGS[$worker]}"
     shard="${WAVE_SHARDS[$worker]}"
     files="$(wc -l < "$shard")"
-    classification="$(classify_attempt "$rc" "$log")"
     duration="$(awk -F= '/^CI_DURATION_SECONDS=/{v=$2} END{print v}' "$log")"
     duration="${duration:-0}"
-    passed="$(awk '/^[0-9]+ passed([, ]|$)/{v=$1} END{print v}' "$log")"
+    passed="$(sed -n 's/^CI_POSTGRES_PASSED_TEST_COUNT=//p' "$log")"
     passed="${passed:-0}"
+    classification="$(classify_attempt "$rc" "$log" "$files" "$passed")"
+    if [[ "$classification" != PASS ]]; then passed=0; fi
 
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$WAVE" "$worker" "$classification" "$rc" \
@@ -457,8 +484,8 @@ while [[ -s "$PENDING" ]]; do
         REQUEUED_FILES=$((REQUEUED_FILES + files))
         DEGRADED=1
         ;;
-      TEST_FAILURE)
-        set_health "$worker" READY "test_failure"
+      TEST_FAILURE|MANIFEST_MISMATCH)
+        set_health "$worker" READY "${classification,,}"
         TERMINAL_FAILURE=1
         ;;
     esac
@@ -489,7 +516,7 @@ fi
 
 python3 - "$RUN_DIR" "$SHA" "$WALL_SECONDS" "$PROFILE_KEY" \
   "$ATTEMPTS" "$FINAL_STATUS" "$DEGRADED" "$REQUEUED_FILES" \
-  "${CONFIGURED_WORKERS[*]}" <<'PY'
+  "${CONFIGURED_WORKERS[*]}" "$SELECTION_SHA" "$SELECTED_TESTS" <<'PY'
 import csv, json, pathlib, sys
 run_dir=pathlib.Path(sys.argv[1])
 sha=sys.argv[2]
@@ -530,10 +557,13 @@ for name in configured:
     }
 
 summary={
-    "schema_version":3,
+    "schema_version":5,
     "sha":sha,
     "suite":"postgres",
     "profile_key":profile_key,
+    "selection_sha256":sys.argv[10],
+    "selected_test_count":int(sys.argv[11]),
+    "selected_file_count":len((run_dir/"current-postgres-files.txt").read_text().splitlines()),
     "wall_seconds":wall,
     "status":status,
     "degraded":degraded,

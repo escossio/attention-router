@@ -109,6 +109,27 @@ manifest comparison and distributed sharding use this identical verified file
 set. An absent collector or mismatch **blocks CI**; it never silently falls
 back to a reduced glob.
 
+The coordinator places the target SHA in the first line of the dispatched
+manifest. CI03 compares it with the checkout SHA and compares the remaining
+paths, including multiplicity, with a fresh marker collection. A partial,
+extra, duplicate, empty or stale manifest stops the job before test execution.
+The verified job then runs `pytest -m postgres` using normal directory collection.
+The coordinator accepts successful completion only with one receipt for the
+requested SHA and exact file count. Discovery can report its own success
+before running any test and cannot satisfy that execution receipt.
+The marker collector also fingerprints sorted, unique pytest node IDs. The
+same selection must be observed by the executing pytest session. Every
+selected node needs a reported outcome and at least one test must pass.
+The profile cache key is the node-ID fingerprint. Earlier file-only profiles
+are left on disk and are ineligible for the new protocol. Reprofile verifies
+the streamed execution receipt and timing node IDs before caching results.
+The GitHub App accepts success only from the verified scheduler summary
+for the exact SHA and the CI03 worker. All test changes may affect marker
+selection, including root-level test modules and shared fixtures.
+The duration-ordered positional list can change fixture registration when
+ordinary and integration paths are interleaved. Both suites use the same
+disposable database and Alembic head.
+
 **Versioned rollout dependency:** before using this discovery, deploy the
 reviewed worker executor and helper together on the authorized PostgreSQL
 worker. Install `worker/andy-ci-run` as `/srv/andy-ci/bin/andy-ci-run`
@@ -117,8 +138,17 @@ and `scripts/ci_postgres_manifest.py` as
 scripts and `control-plane/parse-postgres-discovery.py` at
 `$ANDY_CI_BASE/bin/parse-postgres-discovery.py`; the versioned publisher
 OCI image includes the parser. Check digests against the approved SHA,
-run the marker and 67-plus-two regression, and cut over only under an
-operator-approved maintenance gate.
+verify that the publisher queue has no required active job and CI03 is idle.
+Back up the executable set and publisher state. Install the scheduler and
+worker as one release because the dispatch envelope changed. Include the
+collector, discovery parser, timing planner, reprofile, impact policy and
+PostgreSQL publisher from the reviewed tree. If the
+publisher runs in OCI, pin the candidate and rollback image IDs or digests
+and check the scheduler hashes inside the container. Check the deployed
+hashes, verify service health and re-run the official App check on
+the approved application SHA. If verification fails, restore the previous
+coherent executable set and verify the previous hashes and service health.
+Cutover and rollback require their operational authorization.
 
 No live scripts, workers, publisher containers, production PostgreSQL or
 `distributed-postgres` checks may be modified manually from this PR.

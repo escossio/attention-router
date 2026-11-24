@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 BASE=/srv/andy-ci
+RUNNER_BIN="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY=attention-router
 if [[ $# -eq 2 ]]; then
   SHA="$1"
@@ -98,6 +99,7 @@ git --git-dir="$MIRROR" cat-file -e "$SHA^{commit}"
 git --git-dir="$MIRROR" worktree prune
 git --git-dir="$MIRROR" worktree add --detach "$WORK" "$SHA"
 cd "$WORK"
+[[ "$(git rev-parse HEAD)" == "$SHA" ]] || { echo "CI_WORKER_SHA_MISMATCH" >&2; exit 70; }
 
 ensure_python() {
   export PIP_CACHE_DIR="$BASE/cache/pip"
@@ -137,6 +139,29 @@ run_python() {
   run_fast
   python scripts/test_python_integration_sdk.py
   python -m pytest -q
+}
+
+verify_postgres_target_manifest() {
+  local manifest="$1" discovered="$2"
+  local -a entries=()
+  mapfile -t entries < "$manifest"
+  if [[ "${entries[0]-}" != "sha=$SHA" ]]; then
+    echo "CI_POSTGRES_TARGET_MANIFEST_SHA_MISMATCH" >&2
+    return 70
+  fi
+  local count=$(( ${#entries[@]} - 1 ))
+  local actual expected
+  if ! actual="$(LC_ALL=C sort -- "$discovered")" || \
+     ! expected="$(printf '%s\n' "${entries[@]:1}" | LC_ALL=C sort)"; then
+    echo "CI_POSTGRES_TARGET_MANIFEST_SORT_FAILED" >&2
+    return 70
+  fi
+  if (( count == 0 )) || [[ -z "$actual" || "$actual" != "$expected" ]]; then
+    echo "CI_POSTGRES_TARGET_MANIFEST_NOT_COMPLETE" >&2
+    return 70
+  fi
+  echo "CI_POSTGRES_TARGET_MANIFEST_SHA=$SHA"
+  echo "CI_POSTGRES_FULL_COLLECTION_VERIFIED=$count"
 }
 
 run_postgres() {
@@ -182,8 +207,9 @@ run_postgres() {
     -c fsync=off -c synchronous_commit=off -c full_page_writes=off >/dev/null
   PG_PORT=$(docker port "$PG_NAME" 5432/tcp | awk -F: 'END {print $NF}')
   [[ "$PG_PORT" =~ ^[0-9]+$ ]] || { echo "invalid dynamic postgres port" >&2; return 70; }
-  export DATABASE_URL="postgresql+psycopg://ar_test:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/attention_router_test"
-  export PUBLIC_POSTGRES_TEST_URL="$DATABASE_URL"
+  local disposable_url="postgresql+psycopg://ar_test:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/attention_router_test"
+  export DATABASE_URL="$disposable_url"
+  export PUBLIC_POSTGRES_TEST_URL="$disposable_url"
   echo "CI_POSTGRES_PORT=$PG_PORT"
   echo "CI_POSTGRES_STAGE=wait_ready"
   for _ in $(seq 1 60); do
@@ -195,12 +221,13 @@ run_postgres() {
   python scripts/ci_settings_check.py --self-test
   python scripts/ci_settings_check.py
   echo "CI_POSTGRES_STAGE=alembic"
-  python -m alembic upgrade head
+  # Only the ephemeral container just created by this worker may use test DDL.
+  APP_ENV=test DATABASE_URL="$disposable_url" python -m alembic upgrade head
   if [[ "${ANDY_CI_DISCOVER_POSTGRES:-0}" == "1" ]]; then
     # Exact-SHA PostgreSQL-backed collection, not a filename heuristic.
     # It runs after schema/setup just like the normal pytest execution.
     echo "CI_POSTGRES_STAGE=collect"
-    python "$BASE/bin/ci-postgres-manifest.py" --output "$WORK/postgres-files.txt"
+    python "$RUNNER_BIN/ci-postgres-manifest.py" --output "$WORK/postgres-files.txt"
     [[ -s "$WORK/postgres-files.txt" ]] || {
       echo "CI_POSTGRES_DISCOVERY_EMPTY" >&2
       return 70
@@ -217,18 +244,28 @@ run_postgres() {
   fi
   if [[ -n "${ANDY_CI_PYTEST_TARGETS_FILE:-}" ]]; then
     [[ -f "$ANDY_CI_PYTEST_TARGETS_FILE" ]] || { echo "missing targets file" >&2; return 64; }
-    mapfile -t PYTEST_TARGETS < <(grep -vE '^[[:space:]]*(#|$)' "$ANDY_CI_PYTEST_TARGETS_FILE")
-    TARGET_COUNT=${#PYTEST_TARGETS[@]}
-    (( TARGET_COUNT > 0 )) || { echo "empty targets file" >&2; return 64; }
-    for target in "${PYTEST_TARGETS[@]}"; do
-      [[ "$target" == tests/* ]] || { echo "invalid pytest target: $target" >&2; return 64; }
-    done
-    echo "CI_POSTGRES_TARGET_COUNT=$TARGET_COUNT"
-    PYTEST_ARGS+=("${PYTEST_TARGETS[@]}")
+    # An exclusive PostgreSQL worker can run only the full selected file set.
+    # Positional files change pytest's collection order and fixture behavior.
+    local verified="$WORK/postgres-all-marked-files.txt"
+    python "$RUNNER_BIN/ci-postgres-manifest.py" --output "$verified" > "$WORK/preflight-collection.log"
+    verify_postgres_target_manifest "$ANDY_CI_PYTEST_TARGETS_FILE" "$verified"
   else
     echo "CI_POSTGRES_TARGET_COUNT=ALL"
   fi
-  python -m pytest "${PYTEST_ARGS[@]}"
+  local selection="${ANDY_CI_POSTGRES_SELECTION_SHA256:-}"
+  if [[ -n "$selection" || -n "${ANDY_CI_PYTEST_TARGETS_FILE:-}" ]]; then
+    [[ "$selection" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "CI_POSTGRES_SELECTION_REQUIRED" >&2
+      return 70
+    }
+    local -a manifest_args=(--execute --expected-selection "$selection")
+    if [[ "${ANDY_CI_PROFILE_DURATIONS:-0}" == "1" ]]; then
+      manifest_args+=(--durations)
+    fi
+    python "$RUNNER_BIN/ci-postgres-manifest.py" "${manifest_args[@]}"
+  else
+    python -m pytest "${PYTEST_ARGS[@]}"
+  fi
   docker rm -f "$PG_NAME" >/dev/null
   unset DATABASE_URL PUBLIC_POSTGRES_TEST_URL ADMIN_TOKEN INTERNAL_INGRESS_HMAC_SECRET
 }

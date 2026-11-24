@@ -10,12 +10,13 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, "/usr/local/lib/andy-github-app")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from probe import CONFIG, INSTALLATION_CONFIG, load_env, make_jwt, request_json
-from ci_impact_policy import get_pr_impact
+from ci_impact_policy import get_pr_impact, merged_main_target
 
 DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
 TARGET_REPO = "escossio/attention-router"
@@ -330,22 +331,47 @@ def render_summary(summary: dict | None, suite: str) -> str:
     return "\n".join(parts)
 
 
+def verified_main_python(summary: dict, sha: str, output: str) -> bool:
+    worker = summary.get("selected_worker")
+    attempts = summary.get("attempts")
+    if (summary.get("sha") != sha or summary.get("repository") != "attention-router"
+            or summary.get("suite") != "python" or not isinstance(worker, str)
+            or not re.fullmatch(r"[a-z][a-z0-9_-]*", worker) or worker == "none"
+            or not isinstance(attempts, list) or not attempts
+            or not all(isinstance(row, dict) for row in attempts)):
+        return False
+    passes = [row for row in attempts if row.get("classification") == "PASS"]
+    return (passes == [attempts[-1]] and passes[0].get("worker") == worker
+            and type(passes[0].get("rc")) is int and passes[0]["rc"] == 0
+            and len(re.findall(r"^CI_DISTRIBUTED_SUMMARY=.+$", output, re.M)) == 1
+            and re.findall(r"^CI_DISTRIBUTED_STATUS=(PASS|FAIL)$", output, re.M) == ["PASS"])
+
+
 def execute_exact_sha(
     repo: str,
     pr_number: int,
     sha: str,
     suite: str,
+    *,
+    merged_main: bool = False,
 ) -> tuple[str, str, int | None]:
+    if merged_main and (repo != TARGET_REPO or suite != "python"):
+        return "REFUSED", "Merged-main certification requires attention-router/python.", None
     token = installation_token()
-    pr = current_pr(token, repo, pr_number)
-    current_sha = ((pr.get("head") or {}).get("sha") or "").lower()
-    if pr.get("state") != "open" or current_sha != sha.lower():
-        return "STALE", "PR is closed or head SHA moved before execution.", None
+    request = partial(request_json, token=token)
+    if merged_main:
+        if not merged_main_target(repo, pr_number, sha, request):
+            return "REFUSED", "Merged PR and main ancestry did not verify.", None
+    else:
+        pr = current_pr(token, repo, pr_number)
+        current_sha = ((pr.get("head") or {}).get("sha") or "").lower()
+        if pr.get("state") != "open" or current_sha != sha.lower():
+            return "STALE", "PR is closed or head SHA moved before execution.", None
 
     check_id = create_check(token, repo, sha, pr_number, suite)
     try:
-        if repo == TARGET_REPO:
-            impact = get_pr_impact(repo, pr_number, sha, lambda path: request_json(path, token))
+        if repo == TARGET_REPO and not merged_main:
+            impact = get_pr_impact(repo, pr_number, sha, request)
             if not impact.required(suite):
                 detail = impact.summary(suite)
                 complete_check(token, repo, check_id, "success",
@@ -361,6 +387,11 @@ def execute_exact_sha(
             and summary
             and summary.get("status") == "PASS"
         ):
+            if merged_main:
+                if not verified_main_python(summary, sha, result.stdout):
+                    raise RuntimeError("MERGED_MAIN_PYTHON_RECEIPT_INVALID")
+                if not merged_main_target(repo, pr_number, sha, request):
+                    raise RuntimeError("MERGED_MAIN_ANCESTRY_CHANGED")
             complete_check(
                 token,
                 repo,
@@ -443,14 +474,16 @@ def main() -> None:
     run.add_argument("--pr", type=int, required=True)
     run.add_argument("--sha", required=True)
     run.add_argument("--suite", required=True)
+    run.add_argument("--merged-main", action="store_true", help="Certify the integrated commit of a merged main PR.")
 
     sub.add_parser("daemon")
     args = parser.parse_args()
 
-    ensure_tables()
     if args.command == "daemon":
         daemon()
         return
+    if not args.merged_main:
+        ensure_tables()
 
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.sha):
         raise SystemExit("invalid SHA")
@@ -462,6 +495,7 @@ def main() -> None:
         args.pr,
         args.sha.lower(),
         args.suite,
+        merged_main=args.merged_main,
     )
     print(f"STATE={state}")
     print(f"CHECK_RUN_ID={check_id or ''}")

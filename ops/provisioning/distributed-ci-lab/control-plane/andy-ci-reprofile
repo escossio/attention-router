@@ -8,7 +8,6 @@ REGISTRY_CLI="${ANDY_CI_HOST_REGISTRY_CLI:-$BASE/bin/host-registry.py}"
 REGISTRY_DB="${ANDY_CI_HOST_REGISTRY_DB:-/var/lib/andy-ci/host-registry.sqlite3}"
 CAPACITY="${ANDY_CI_CAPACITY_FILE:-$BASE/worker-capacity.json}"
 SSH_BIN="${ANDY_CI_SSH_BIN:-ssh}"
-SCP_BIN="${ANDY_CI_SCP_BIN:-scp}"
 CAPACITY_WAIT_SECONDS="${ANDY_CI_CAPACITY_WAIT_SECONDS:-300}"
 POSTGRES_WORKER="${ANDY_CI_POSTGRES_WORKER:-ci03}"
 
@@ -103,21 +102,6 @@ refresh_pool() {
   done
 }
 
-wait_for_capacity() {
-  local waited=0 delay=5
-  while true; do
-    refresh_pool
-    ((${#READY_WORKERS[@]} > 0)) && return 0
-    (( waited >= CAPACITY_WAIT_SECONDS )) && return 1
-    echo "CI_REPROFILE_STATUS=WAITING_FOR_CAPACITY waited=${waited}s"
-    local remaining=$((CAPACITY_WAIT_SECONDS - waited)) sleep_for=$delay
-    (( sleep_for > remaining )) && sleep_for=$remaining
-    sleep "$sleep_for"
-    waited=$((waited + sleep_for))
-    (( delay < 60 )) && delay=$((delay * 2))
-    (( delay > 60 )) && delay=60
-  done
-}
 ordered_workers() {
   python3 - "$CAPACITY" "$@" <<'PY'
 import json,pathlib,sys
@@ -147,14 +131,20 @@ while (( $(date +%s) < DISCOVERY_DEADLINE )); do
     if "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
         "$DISCOVERY_COMMAND" >"$raw" 2>/dev/null; then
       if python3 "$BASE/bin/parse-postgres-discovery.py" \
-          --sha "$SHA" --log "$raw" --output "$RUN_DIR/postgres-files.txt"; then
+          --sha "$SHA" --log "$raw" --output "$RUN_DIR/postgres-files.txt" \
+          --selection-output "$RUN_DIR/selection.txt"; then
         DISCOVERY_DONE=1
         echo "CI_REPROFILE_DISCOVERY_WORKER=$worker"
         break
       fi
       echo "CI_REPROFILE_DISCOVERY_INVALID worker=$worker"
       set_health "$worker" DEGRADED invalid_discovery_manifest
-      break
+      exit 70
+    fi
+    if grep -q '^CI_STATUS=FAIL$' "$raw"; then
+      echo 'CI_REPROFILE_STATUS=DISCOVERY_SETUP_FAILED'
+      tail -n 100 "$raw"
+      exit 70
     fi
     set_health "$worker" DEGRADED discovery_busy_or_failed
   done < <(ordered_workers "${READY_WORKERS[@]}")
@@ -167,75 +157,76 @@ done
   echo 'CI_REPROFILE_STATUS=NO_DISCOVERY_CAPACITY'
   exit 69
 }
-PROFILE_KEY="$(sha256sum "$RUN_DIR/postgres-files.txt" | awk '{print $1}')"
+SELECTION_SHA="$(sed -n '2p' "$RUN_DIR/selection.txt")"
+PROFILE_KEY="nodes-$SELECTION_SHA"
 PROFILE="$PROFILE_ROOT/$PROFILE_KEY"
 echo "CI_REPROFILE_SHA=$SHA"
 echo "CI_REPROFILE_PROFILE_KEY=$PROFILE_KEY"
 
-if [[ -d "$PROFILE" && -f "$PROFILE/postgres-files.txt" ]] \
-  && cmp -s "$PROFILE/postgres-files.txt" "$RUN_DIR/postgres-files.txt"; then
+if [[ -f "$PROFILE/manifest.json" ]] \
+  && cmp -s "$PROFILE/postgres-files.txt" "$RUN_DIR/postgres-files.txt" \
+  && cmp -s "$PROFILE/selection.txt" "$RUN_DIR/selection.txt"; then
   echo 'CI_REPROFILE_STATUS=CACHED'
   echo "CI_REPROFILE_MANIFEST=$PROFILE/manifest.json"
   exit 0
 fi
 
 PROFILE_OK=0
-while IFS= read -r worker; do
-  [[ -n "$worker" ]] || continue
+PROFILE_DEADLINE=$(( $(date +%s) + CAPACITY_WAIT_SECONDS ))
+while (( $(date +%s) < PROFILE_DEADLINE )); do
+  refresh_pool
+  if (( ${#READY_WORKERS[@]} == 0 )); then
+    echo 'CI_REPROFILE_STATUS=WAITING_FOR_PROFILE_CAPACITY'
+    sleep 3
+    continue
+  fi
+  worker="${READY_WORKERS[0]}"
   target="$(host_target "$worker")"
   stdout="$RUN_DIR/${worker}-profile.stdout.log"
   set +e
   "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-    "ANDY_CI_PROFILE_DURATIONS=1 /srv/andy-ci/bin/andy-ci-run '$SHA' postgres" \
+    "ANDY_CI_PROFILE_DURATIONS=1 ANDY_CI_POSTGRES_SELECTION_SHA256='$SELECTION_SHA' \
+     /srv/andy-ci/bin/andy-ci-run '$SHA' postgres" \
     > "$stdout" 2>&1
   rc=$?
   set -e
 
   if (( rc != 0 )); then
+    if (( rc == 75 )) && grep -Fxq CI_WORKER_BUSY "$stdout"; then
+      set_health "$worker" DEGRADED worker_busy
+      sleep 3
+      continue
+    fi
+    if (( rc == 255 )); then
+      set_health "$worker" UNAVAILABLE profiling_worker_lost
+      sleep 3
+      continue
+    fi
     if grep -q '^CI_STATUS=FAIL$' "$stdout" \
       && grep -Eq '^CI_POSTGRES_STAGE=(settings|alembic|pytest)$' "$stdout"; then
       echo 'CI_REPROFILE_STATUS=TEST_FAILURE'
       tail -n 100 "$stdout"
       exit "$rc"
     fi
-    set_health "$worker" UNAVAILABLE profiling_worker_failed
-    continue
+    echo 'CI_REPROFILE_STATUS=INFRA_FAILURE'
+    exit "$rc"
   fi
 
-  RESULT_PATH="$(awk -F= '/^CI_RESULT=/{v=$2} END{print v}' "$stdout")"
-  if [[ -z "$RESULT_PATH" ]]; then
-    set_health "$worker" UNAVAILABLE missing_result
-    continue
+  if ! python3 "$BASE/bin/parse-postgres-discovery.py" --profile \
+      --sha "$SHA" --log "$stdout" --output "$RUN_DIR/profile-files.txt" \
+      --selection-output "$RUN_DIR/profile-selection.txt" \
+      || ! cmp -s "$RUN_DIR/selection.txt" "$RUN_DIR/profile-selection.txt" \
+      || ! cmp -s "$RUN_DIR/postgres-files.txt" "$RUN_DIR/profile-files.txt"; then
+    echo 'CI_REPROFILE_STATUS=INVALID_EXECUTION_RECEIPT'
+    exit 70
   fi
 
-  RESULT_LOCAL="$RUN_DIR/${worker}-result.json"
-  if ! "$SCP_BIN" -q -o BatchMode=yes -o ConnectTimeout=5 \
-      "$target:$RESULT_PATH" "$RESULT_LOCAL"; then
-    set_health "$worker" UNAVAILABLE result_copy_failed
-    continue
-  fi
-
-  REMOTE_LOG="$(python3 - "$RESULT_LOCAL" <<'PY'
-import json,sys
-print(json.load(open(sys.argv[1]))['log'])
-PY
-)"
-  if [[ -z "$REMOTE_LOG" ]]; then
-    set_health "$worker" UNAVAILABLE missing_profile_log
-    continue
-  fi
-
-  if ! "$SCP_BIN" -q -o BatchMode=yes -o ConnectTimeout=5 \
-      "$target:$REMOTE_LOG" "$RUN_DIR/profile.log"; then
-    set_health "$worker" UNAVAILABLE profile_log_copy_failed
-    continue
-  fi
-
+  cp "$stdout" "$RUN_DIR/profile.log"
   set_health "$worker" READY profile_pass
   PROFILE_OK=1
   echo "CI_REPROFILE_WORKER=$worker"
   break
-done < <(ordered_workers "${READY_WORKERS[@]}")
+done
 
 (( PROFILE_OK == 1 )) || {
   echo 'CI_REPROFILE_STATUS=NO_PROFILE_CAPACITY'
@@ -245,17 +236,19 @@ done < <(ordered_workers "${READY_WORKERS[@]}")
 NEW_PROFILE="$PROFILE_ROOT/.${PROFILE_KEY}.new-$RUN_ID"
 rm -rf "$NEW_PROFILE"
 mkdir -p "$NEW_PROFILE"
-"$BASE/bin/plan-postgres.py" \
+python3 "$BASE/bin/plan-postgres.py" \
   --log "$RUN_DIR/profile.log" \
   --capacity "$CAPACITY" \
   --output-dir "$NEW_PROFILE" \
-  --source-sha "$SHA"
+  --source-sha "$SHA" \
+  --selection-sha256 "$SELECTION_SHA"
 
 if ! cmp -s "$NEW_PROFILE/postgres-files.txt" "$RUN_DIR/postgres-files.txt"; then
   echo 'profile file-set mismatch' >&2
   rm -rf "$NEW_PROFILE"
   exit 70
 fi
+cp "$RUN_DIR/selection.txt" "$NEW_PROFILE/selection.txt"
 
 rm -rf "$PROFILE"
 mv "$NEW_PROFILE" "$PROFILE"

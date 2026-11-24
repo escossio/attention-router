@@ -9,12 +9,13 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, "/usr/local/lib/andy-github-app")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from probe import CONFIG, INSTALLATION_CONFIG, load_env, make_jwt, request_json
-from ci_impact_policy import get_pr_impact
+from ci_impact_policy import get_pr_impact, merged_main_target
 
 DB_PATH = Path("/var/lib/andy-github-app/events.sqlite3")
 CHECK_NAME = "distributed-postgres"
@@ -209,13 +210,41 @@ def run_command(argv: list[str]) -> subprocess.CompletedProcess:
 
 def extract_summary(output: str) -> dict | None:
     matches = re.findall(r"^CI_DISTRIBUTED_SUMMARY=(.+)$", output, re.M)
-    if not matches:
+    if len(matches) != 1:
         return None
-    path = Path(matches[-1].strip())
+    path = Path(matches[0].strip())
     try:
-        return json.loads(path.read_text())
-    except Exception:
+        summary = json.loads(path.read_text())
+    except (OSError, ValueError):
         return None
+    return summary if isinstance(summary, dict) else None
+
+
+def verified_success(summary: dict | None, sha: str, output: str) -> bool:
+    terminal = re.findall(r"^CI_DISTRIBUTED_STATUS=(PASS|FAIL)$", output, re.M)
+    if summary is None or terminal != ["PASS"]:
+        return False
+    if (summary.get("schema_version") != 5 or summary.get("sha") != sha
+            or summary.get("suite") != "postgres" or summary.get("status") != "PASS"
+            or summary.get("configured_workers") != ["ci03"]):
+        return False
+    digest = summary.get("selection_sha256")
+    files = summary.get("selected_file_count")
+    tests = summary.get("selected_test_count")
+    passed = summary.get("total_passed_tests")
+    if (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or summary.get("profile_key") != f"nodes-{digest}"
+            or any(type(count) is not int for count in (files, tests, passed))
+            or not 0 < files <= tests or not 0 < passed <= tests):
+        return False
+    workers = summary.get("workers")
+    if not isinstance(workers, dict) or set(workers) != {"ci03"}:
+        return False
+    worker = workers["ci03"]
+    return (
+        isinstance(worker, dict) and worker.get("status") == "PASS" and worker.get("rc") == 0
+        and worker.get("target_files") == files and worker.get("passed_tests") == passed
+    )
 
 
 def render_summary(summary: dict | None, *, reprofiled: bool) -> str:
@@ -231,6 +260,12 @@ def render_summary(summary: dict | None, *, reprofiled: bool) -> str:
         "| Worker | Status | Duration | Tests | Files |",
         "| --- | --- | ---: | ---: | ---: |",
     ]
+    if selection := summary.get("selection_sha256"):
+        parts[3:3] = [
+            f"Selected tests: {summary.get('selected_test_count')}",
+            f"Selected files: {summary.get('selected_file_count')}",
+            f"Selection SHA-256: {selection}",
+        ]
     for name in ("ci01", "ci02", "ci03"):
         data = workers.get(name) or {}
         parts.append(
@@ -239,22 +274,28 @@ def render_summary(summary: dict | None, *, reprofiled: bool) -> str:
             f"{data.get('passed_tests','?')} | {data.get('target_files','?')} |"
         )
     return "\n".join(parts)
-def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, int | None]:
+def execute_exact_sha(repo: str, pr_number: int, sha: str, *, merged_main: bool = False) -> tuple[str, str, int | None]:
     token = installation_token()
-    pr = current_pr(token, repo, pr_number)
-    current_sha = ((pr.get("head") or {}).get("sha") or "").lower()
-    if pr.get("state") != "open" or current_sha != sha.lower():
-        return "STALE", "PR is closed or head SHA moved before execution.", None
+    request = partial(request_json, token=token)
+    if merged_main:
+        if not merged_main_target(repo, pr_number, sha, request):
+            return "REFUSED", "Merged PR and main ancestry did not verify.", None
+    else:
+        pr = current_pr(token, repo, pr_number)
+        current_sha = ((pr.get("head") or {}).get("sha") or "").lower()
+        if pr.get("state") != "open" or current_sha != sha.lower():
+            return "STALE", "PR is closed or head SHA moved before execution.", None
 
     check_id = create_check(token, repo, sha, pr_number)
     reprofiled = False
     try:
-        impact = get_pr_impact(repo, pr_number, sha, lambda path: request_json(path, token))
-        if not impact.required("postgres"):
-            detail = impact.summary("postgres")
-            complete_check(token, repo, check_id, "success",
-                           "NOT APPLICABLE: distributed-postgres (no test run)", detail)
-            return "NOT_APPLICABLE", detail, check_id
+        if not merged_main:
+            impact = get_pr_impact(repo, pr_number, sha, request)
+            if not impact.required("postgres"):
+                detail = impact.summary("postgres")
+                complete_check(token, repo, check_id, "success",
+                               "NOT APPLICABLE: distributed-postgres (no test run)", detail)
+                return "NOT_APPLICABLE", detail, check_id
         result = run_command([CI_RUN, sha, "postgres"])
         if result.returncode == 66:
             reprofiled = True
@@ -269,7 +310,9 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, in
             result = run_command([CI_RUN, sha, "postgres"])
 
         summary = extract_summary(result.stdout)
-        if result.returncode == 0 and summary and summary.get("status") == "PASS":
+        if result.returncode == 0 and verified_success(summary, sha, result.stdout):
+            if merged_main and not merged_main_target(repo, pr_number, sha, request):
+                raise RuntimeError("MERGED_MAIN_ANCESTRY_CHANGED")
             text = render_summary(summary, reprofiled=reprofiled)
             complete_check(
                 token, repo, check_id, "success",
@@ -278,6 +321,8 @@ def execute_exact_sha(repo: str, pr_number: int, sha: str) -> tuple[str, str, in
             return "PASS", text, check_id
 
         detail = render_summary(summary, reprofiled=reprofiled)
+        if result.returncode == 0:
+            detail = "PostgreSQL execution summary did not verify.\n\n" + detail
         detail += "\n\n" + result.stdout[-12000:]
         complete_check(
             token, repo, check_id, "failure",
@@ -332,16 +377,18 @@ def main() -> None:
     run.add_argument("--repo", default=TARGET_REPO, choices=[TARGET_REPO])
     run.add_argument("--pr", type=int, required=True)
     run.add_argument("--sha", required=True)
+    run.add_argument("--merged-main", action="store_true", help="Certify the integrated commit of a merged main PR.")
     sub.add_parser("daemon")
     args = parser.parse_args()
 
-    ensure_tables()
     if args.command == "daemon":
         daemon()
         return
+    if not args.merged_main:
+        ensure_tables()
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.sha):
         raise SystemExit("invalid SHA")
-    state, detail, check_id = execute_exact_sha(args.repo, args.pr, args.sha.lower())
+    state, detail, check_id = execute_exact_sha(args.repo, args.pr, args.sha.lower(), merged_main=args.merged_main)
     print(f"STATE={state}")
     print(f"CHECK_RUN_ID={check_id or ''}")
     print(detail)

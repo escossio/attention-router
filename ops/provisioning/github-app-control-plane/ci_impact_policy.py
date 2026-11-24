@@ -26,7 +26,7 @@ class Impact:
     reason: str
     paths_sha256: str
     file_count: int
-    policy: str = "ci-impact-v1"
+    policy: str = "ci-impact-v2"
 
     def required(self, suite: str) -> bool:
         return suite in self.suites
@@ -68,10 +68,9 @@ def _suites_for_path(path: str) -> frozenset[str]:
         return frozenset({"transport", "docker", "python"})
     if path.startswith("alembic/") or path == "alembic.ini":
         return frozenset({"python", "postgres", "docker"})
-    if path.startswith("tests/integration/"):
-        return frozenset({"python", "postgres"})
     if path.startswith("tests/"):
-        return frozenset({"python"})
+        # A test or shared fixture can select PostgreSQL anywhere in tests/.
+        return frozenset({"python", "postgres"})
     if path.startswith("attention_router/"):
         # Most code shares auth/tenant/DB execution contracts. Full is safer.
         return _FULL
@@ -102,6 +101,33 @@ def classify_files(files: list[dict] | None) -> Impact:
     if not suites:
         reason = "NON_EXECUTABLE_DOCS_ONLY"
     return Impact(frozenset(suites), reason, fingerprint, len(normalized))
+
+
+def merged_main_target(repo: str, number: int, sha: str, request: Callable[[str], tuple[int, object]]) -> bool:
+    """A closed canonical PR identifies the integrated commit; main may have advanced since."""
+    if repo != REPO or type(number) is not int or number < 1 or not _SHA.fullmatch(sha):
+        return False
+
+    def read(endpoint):
+        try:
+            status, body = request(f"/repos/{repo}/{endpoint}")
+        except (OSError, ValueError):
+            return {}
+        return body if status == 200 and isinstance(body, dict) else {}
+
+    pr = read(f"pulls/{number}")
+    if (pr.get("number") != number
+            or pr.get("state") != "closed" or pr.get("merged") is not True
+            or pr.get("merge_commit_sha") != sha):
+        return False
+    base = pr.get("base")
+    if (not isinstance(base, dict) or base.get("ref") != "main" or not isinstance(base.get("repo"), dict)
+            or base["repo"].get("full_name") != repo):
+        return False
+    relation = read(f"compare/{sha}...main?per_page=1")
+    merge_base = relation.get("merge_base_commit")
+    return (relation.get("status") in {"ahead", "identical"}
+            and isinstance(merge_base, dict) and merge_base.get("sha") == sha)
 
 
 def get_pr_impact(
