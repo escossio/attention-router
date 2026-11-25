@@ -36,6 +36,7 @@ from attention_router.observability.tracing import (
     start_span,
 )
 from attention_router.web.internal_security import verify_internal_signature
+from attention_router.web.maintenance_gate import install_maintenance_middleware, guarded_ingress_call
 
 
 configure_tracing(service_name="attention-router-ingress")
@@ -286,6 +287,8 @@ def create_internal_ingress_app() -> FastAPI:
         openapi_url=None,
     )
 
+    install_maintenance_middleware(app, "internal-ingress-http", extra_participants=("internal-ingress-executor",))
+
     @app.get("/health/live", tags=["health"])
     def live() -> dict[str, str]:
         return {"status": "live", "listener": "internal-ingress"}
@@ -307,6 +310,7 @@ def create_internal_ingress_app() -> FastAPI:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             internal_ingress_executor,
+            guarded_ingress_call,
             process_internal_event,
             body,
             x_attention_timestamp,
@@ -324,6 +328,7 @@ def create_internal_ingress_app() -> FastAPI:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             internal_ingress_executor,
+            guarded_ingress_call,
             process_media_notification,
             body,
             x_attention_timestamp,

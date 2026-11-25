@@ -55,6 +55,7 @@ from attention_router.application.platform.capability_pack import process_due_sc
 from attention_router.config import settings
 from attention_router.domain.models import new_id, now_utc
 from attention_router.infrastructure.db import SessionLocal
+from attention_router.infrastructure.maintenance_gate import runtime_admission, observe_runtime
 from attention_router.infrastructure.models import InboundEventRow, QueueRow
 from attention_router.infrastructure.repository import audit
 from attention_router.platform.meta_callback_reconciliation import (
@@ -472,374 +473,377 @@ def run_forever() -> None:
     last_personal_context_materialization_run_monotonic: float | None = None
     last_conversation_capture_reconcile_monotonic: float | None = None
     from attention_router.application.voice_backfill import start_voice_backfill
+    observe_runtime("worker")
     start_voice_backfill()
     logger.info("worker started worker_id=%s", identity)
     while True:
-        transport_ready = probe_transport_ready()
-        with SessionLocal() as session:
-            grace_count = process_due_grace_windows(session, identity)
-            session.commit()
-            transcription_count = process_voice_transcriptions(session, identity)
-            artifact_understanding_count = process_artifact_understandings(
-                session,
-                identity,
-            )
-            decision_count = process_agent_decisions(session, identity)
-            session.commit()
-            try:
-                process_group_contextual_cycle(session)
-            except Exception:
-                session.rollback()
-                logger.exception("group contextual cycle failed worker_id=%s", identity)
-            execution_count = enqueue_ready_intents(
-                session,
-                transport_ready=transport_ready,
-            )
-            session.commit()
-            try:
-                tts_count = process_tts_derivations(session, identity)
-            except Exception:
-                session.rollback()
-                tts_count = 0
-                logger.exception("tts derivation cycle failed worker_id=%s", identity)
-            outbox_count = process_outbox(session, identity)
-            if settings.first_contact_enabled:
-                from attention_router.application.first_contact_runtime import reconcile_presentations
-
-                try:
-                    reconcile_presentations(session)
-                except Exception:
-                    session.rollback()
-                    logger.exception("first contact receipt reconciliation failed")
-            timer_count = process_due_timers(session, identity)
-            scheduled_event_count = process_scheduled_events_if_available(session)
-            media_cleanup_count = cleanup_expired_media(session)
-            integration_dispatch_result = None
-            try:
-                integration_dispatch_result = (
-                    process_integration_dispatch_if_enabled(session)
-                )
-                if integration_dispatch_result is not None:
+        with runtime_admission("worker") as admitted:
+            if admitted:
+                transport_ready = probe_transport_ready()
+                with SessionLocal() as session:
+                    grace_count = process_due_grace_windows(session, identity)
                     session.commit()
-            except Exception as exc:
-                session.rollback()
-                logger.exception(
-                    "integration inbox dispatch failed worker_id=%s error=%s",
-                    identity,
-                    exc,
-                )
-
-            if settings.memory_ingestion_enabled:
-                with start_span("memory.extract") as memory_span:
-                    memory_count = process_memory_ingestion_jobs(session)
-                    safe_set_attribute(memory_span, "attention.memory.candidate_count", memory_count)
-                    set_outcome(memory_span, "PROCESSED" if memory_count else "NO_JOBS")
-            else:
-                memory_count = 0
-            session.commit()
-
-            # Separate, bounded evidence-only recovery path. No historical
-            # bootstrap, decision replay or outbound side effects.
-            if settings.conversation_capture_enabled:
-                capture_now = time.monotonic()
-                if (
-                    last_conversation_capture_reconcile_monotonic is None
-                    or capture_now - last_conversation_capture_reconcile_monotonic >= 60.0
-                ):
+                    transcription_count = process_voice_transcriptions(session, identity)
+                    artifact_understanding_count = process_artifact_understandings(
+                        session,
+                        identity,
+                    )
+                    decision_count = process_agent_decisions(session, identity)
+                    session.commit()
                     try:
-                        recovered = reconcile_live_capture_batch(session, limit=25)
-                        session.commit()
-                        if recovered.failed:
-                            logger.warning(
-                                "conversation capture reconcile retryable failures=%d",
-                                recovered.failed,
-                            )
+                        process_group_contextual_cycle(session)
                     except Exception:
                         session.rollback()
-                        logger.exception("conversation capture reconciliation failed")
-                    last_conversation_capture_reconcile_monotonic = capture_now
-
-            personal_context_bootstrap_result = None
-            personal_context_bootstrap_now = time.monotonic()
-            try:
-                (
-                    personal_context_bootstrap_result,
-                    last_personal_context_bootstrap_run_monotonic,
-                ) = process_personal_context_bootstrap_runtime_if_due(
-                    session,
-                    now_monotonic=personal_context_bootstrap_now,
-                    last_run_monotonic=(
-                        last_personal_context_bootstrap_run_monotonic
-                    ),
-                )
-                if personal_context_bootstrap_result is not None:
-                    session.commit()
-            except Exception as exc:
-                session.rollback()
-                logger.exception(
-                    "personal context bootstrap runtime cycle failed "
-                    "worker_id=%s error=%s",
-                    identity,
-                    exc,
-                )
-
-            cognitive_runtime_result = None
-            cognitive_runtime_now = time.monotonic()
-            try:
-                (
-                    cognitive_runtime_result,
-                    last_cognitive_runtime_run_monotonic,
-                ) = process_cognitive_runtime_if_due(
-                    session,
-                    now_monotonic=cognitive_runtime_now,
-                    last_run_monotonic=(
-                        last_cognitive_runtime_run_monotonic
-                    ),
-                )
-                if cognitive_runtime_result is not None:
-                    session.commit()
-            except Exception as exc:
-                session.rollback()
-                logger.exception(
-                    "cognitive runtime cycle failed "
-                    "worker_id=%s error=%s",
-                    identity,
-                    exc,
-                )
-
-            personal_context_result = None
-            personal_context_now = time.monotonic()
-            try:
-                (
-                    personal_context_result,
-                    last_personal_context_run_monotonic,
-                ) = process_personal_context_runtime_if_due(
-                    session,
-                    now_monotonic=personal_context_now,
-                    last_run_monotonic=(
-                        last_personal_context_run_monotonic
-                    ),
-                )
-                if personal_context_result is not None:
-                    session.commit()
-            except Exception as exc:
-                session.rollback()
-                logger.exception(
-                    "personal context runtime cycle failed "
-                    "worker_id=%s error=%s",
-                    identity,
-                    exc,
-                )
-
-            personal_context_authority_result = None
-            personal_context_authority_now = time.monotonic()
-            try:
-                (
-                    personal_context_authority_result,
-                    last_personal_context_authority_run_monotonic,
-                ) = process_personal_context_authority_runtime_if_due(
-                    session,
-                    now_monotonic=personal_context_authority_now,
-                    last_run_monotonic=(
-                        last_personal_context_authority_run_monotonic
-                    ),
-                )
-                if personal_context_authority_result is not None:
-                    session.commit()
-            except Exception as exc:
-                session.rollback()
-                logger.exception(
-                    "personal context authority runtime cycle failed "
-                    "worker_id=%s error=%s",
-                    identity,
-                    exc,
-                )
-
-            personal_context_materialization_result = None
-            personal_context_materialization_now = time.monotonic()
-            try:
-                (
-                    personal_context_materialization_result,
-                    last_personal_context_materialization_run_monotonic,
-                ) = process_personal_context_materialization_runtime_if_due(
-                    session,
-                    now_monotonic=personal_context_materialization_now,
-                    last_run_monotonic=(
-                        last_personal_context_materialization_run_monotonic
-                    ),
-                )
-                if personal_context_materialization_result is not None:
-                    session.commit()
-            except Exception as exc:
-                session.rollback()
-                logger.exception(
-                    "personal context materialization runtime cycle failed "
-                    "worker_id=%s error=%s",
-                    identity,
-                    exc,
-                )
-
-        meta_inbox = reconcile_pending_meta_callback_inbox(
-            SessionLocal,
-            worker_id=identity,
-            limit=settings.meta_reconciliation_batch_size,
-            transaction_timeout_seconds=(
-                settings.meta_admission_transaction_timeout_seconds
-            ),
-        )
-        meta_reconciliation = reconcile_due_meta_callback_outcomes(
-            SessionLocal,
-            worker_id=identity,
-            limit=settings.meta_reconciliation_batch_size,
-            transaction_timeout_seconds=(
-                settings.meta_reconciliation_transaction_timeout_seconds
-            ),
-        )
-        if (
-            grace_count
-            or transcription_count
-            or artifact_understanding_count
-            or decision_count
-            or execution_count
-            or tts_count
-            or outbox_count
-            or timer_count
-            or scheduled_event_count
-            or memory_count
-            or media_cleanup_count
-            or (
-                integration_dispatch_result is not None
-                and (
-                    integration_dispatch_result.processed
-                    or integration_dispatch_result.blocked
-                )
-            )
-            or (
-                personal_context_bootstrap_result is not None
-                and (
-                    personal_context_bootstrap_result.batches_completed
-                    or personal_context_bootstrap_result.runs_failed
-                )
-            )
-            or (
-                personal_context_result is not None
-                and (
-                    personal_context_result.hypotheses_persisted
-                    or personal_context_result.recommendations_persisted
-                    or personal_context_result.recommendations_enqueued
-                    or personal_context_result.expired_recommendations
-                )
-            )
-            or (
-                personal_context_authority_result is not None
-                and (
-                    personal_context_authority_result.assessments_completed
-                    or personal_context_authority_result.assessments_failed
-                )
-            )
-            or (
-                personal_context_materialization_result is not None
-                and (
-                    personal_context_materialization_result.materialized
-                    or personal_context_materialization_result.retired
-                    or personal_context_materialization_result.expired
-                    or personal_context_materialization_result.approval_required
-                    or personal_context_materialization_result.authority_blocked
-                    or personal_context_materialization_result.execution_blocked
-                    or personal_context_materialization_result.malformed
-                    or personal_context_materialization_result.failed
-                )
-            )
-            or meta_reconciliation.selected
-            or meta_inbox.selected
-        ):
-            logger.info(
-                "processed worker_id=%s grace_count=%s "
-                "artifact_understanding_count=%s decision_count=%s outbox_count=%s "
-                "timer_count=%s scheduled_event_count=%s "
-                "integration_dispatch_processed=%s "
-                "integration_dispatch_blocked=%s "
-                "personal_context_bootstrap_batches=%s "
-                "personal_context_bootstrap_failed=%s "
-                "personal_context_hypotheses=%s "
-                "personal_context_recommendations=%s "
-                "personal_context_enqueued=%s "
-                "personal_context_authority_assessments=%s "
-                "personal_context_intents_prepared=%s "
-                "personal_context_materialized=%s "
-                "personal_context_materialization_blocked=%s "
-                "meta_reconciliation_processed=%s "
-                "meta_reconciliation_failed=%s meta_inbox_correlated=%s",
-                identity,
-                grace_count,
-                artifact_understanding_count,
-                decision_count,
-                outbox_count,
-                timer_count,
-                scheduled_event_count,
-                (
-                    integration_dispatch_result.processed
-                    if integration_dispatch_result is not None
-                    else 0
-                ),
-                (
-                    integration_dispatch_result.blocked
-                    if integration_dispatch_result is not None
-                    else 0
-                ),
-                (
-                    personal_context_bootstrap_result.batches_completed
-                    if personal_context_bootstrap_result is not None
-                    else 0
-                ),
-                (
-                    personal_context_bootstrap_result.runs_failed
-                    if personal_context_bootstrap_result is not None
-                    else 0
-                ),
-                (
-                    personal_context_result.hypotheses_persisted
-                    if personal_context_result is not None
-                    else 0
-                ),
-                (
-                    personal_context_result.recommendations_persisted
-                    if personal_context_result is not None
-                    else 0
-                ),
-                (
-                    personal_context_result.recommendations_enqueued
-                    if personal_context_result is not None
-                    else 0
-                ),
-                (
-                    personal_context_authority_result.assessments_completed
-                    if personal_context_authority_result is not None
-                    else 0
-                ),
-                (
-                    personal_context_authority_result.intents_prepared
-                    if personal_context_authority_result is not None
-                    else 0
-                ),
-                (
-                    personal_context_materialization_result.materialized
-                    if personal_context_materialization_result is not None
-                    else 0
-                ),
-                (
-                    (
-                        personal_context_materialization_result.approval_required
-                        + personal_context_materialization_result.authority_blocked
-                        + personal_context_materialization_result.execution_blocked
+                        logger.exception("group contextual cycle failed worker_id=%s", identity)
+                    execution_count = enqueue_ready_intents(
+                        session,
+                        transport_ready=transport_ready,
                     )
-                    if personal_context_materialization_result is not None
-                    else 0
-                ),
-                meta_reconciliation.processed,
-                meta_reconciliation.failed,
-                meta_inbox.correlated,
-            )
+                    session.commit()
+                    try:
+                        tts_count = process_tts_derivations(session, identity)
+                    except Exception:
+                        session.rollback()
+                        tts_count = 0
+                        logger.exception("tts derivation cycle failed worker_id=%s", identity)
+                    outbox_count = process_outbox(session, identity)
+                    if settings.first_contact_enabled:
+                        from attention_router.application.first_contact_runtime import reconcile_presentations
+
+                        try:
+                            reconcile_presentations(session)
+                        except Exception:
+                            session.rollback()
+                            logger.exception("first contact receipt reconciliation failed")
+                    timer_count = process_due_timers(session, identity)
+                    scheduled_event_count = process_scheduled_events_if_available(session)
+                    media_cleanup_count = cleanup_expired_media(session)
+                    integration_dispatch_result = None
+                    try:
+                        integration_dispatch_result = (
+                            process_integration_dispatch_if_enabled(session)
+                        )
+                        if integration_dispatch_result is not None:
+                            session.commit()
+                    except Exception as exc:
+                        session.rollback()
+                        logger.exception(
+                            "integration inbox dispatch failed worker_id=%s error=%s",
+                            identity,
+                            exc,
+                        )
+
+                    if settings.memory_ingestion_enabled:
+                        with start_span("memory.extract") as memory_span:
+                            memory_count = process_memory_ingestion_jobs(session)
+                            safe_set_attribute(memory_span, "attention.memory.candidate_count", memory_count)
+                            set_outcome(memory_span, "PROCESSED" if memory_count else "NO_JOBS")
+                    else:
+                        memory_count = 0
+                    session.commit()
+
+                    # Separate, bounded evidence-only recovery path. No historical
+                    # bootstrap, decision replay or outbound side effects.
+                    if settings.conversation_capture_enabled:
+                        capture_now = time.monotonic()
+                        if (
+                            last_conversation_capture_reconcile_monotonic is None
+                            or capture_now - last_conversation_capture_reconcile_monotonic >= 60.0
+                        ):
+                            try:
+                                recovered = reconcile_live_capture_batch(session, limit=25)
+                                session.commit()
+                                if recovered.failed:
+                                    logger.warning(
+                                        "conversation capture reconcile retryable failures=%d",
+                                        recovered.failed,
+                                    )
+                            except Exception:
+                                session.rollback()
+                                logger.exception("conversation capture reconciliation failed")
+                            last_conversation_capture_reconcile_monotonic = capture_now
+
+                    personal_context_bootstrap_result = None
+                    personal_context_bootstrap_now = time.monotonic()
+                    try:
+                        (
+                            personal_context_bootstrap_result,
+                            last_personal_context_bootstrap_run_monotonic,
+                        ) = process_personal_context_bootstrap_runtime_if_due(
+                            session,
+                            now_monotonic=personal_context_bootstrap_now,
+                            last_run_monotonic=(
+                                last_personal_context_bootstrap_run_monotonic
+                            ),
+                        )
+                        if personal_context_bootstrap_result is not None:
+                            session.commit()
+                    except Exception as exc:
+                        session.rollback()
+                        logger.exception(
+                            "personal context bootstrap runtime cycle failed "
+                            "worker_id=%s error=%s",
+                            identity,
+                            exc,
+                        )
+
+                    cognitive_runtime_result = None
+                    cognitive_runtime_now = time.monotonic()
+                    try:
+                        (
+                            cognitive_runtime_result,
+                            last_cognitive_runtime_run_monotonic,
+                        ) = process_cognitive_runtime_if_due(
+                            session,
+                            now_monotonic=cognitive_runtime_now,
+                            last_run_monotonic=(
+                                last_cognitive_runtime_run_monotonic
+                            ),
+                        )
+                        if cognitive_runtime_result is not None:
+                            session.commit()
+                    except Exception as exc:
+                        session.rollback()
+                        logger.exception(
+                            "cognitive runtime cycle failed "
+                            "worker_id=%s error=%s",
+                            identity,
+                            exc,
+                        )
+
+                    personal_context_result = None
+                    personal_context_now = time.monotonic()
+                    try:
+                        (
+                            personal_context_result,
+                            last_personal_context_run_monotonic,
+                        ) = process_personal_context_runtime_if_due(
+                            session,
+                            now_monotonic=personal_context_now,
+                            last_run_monotonic=(
+                                last_personal_context_run_monotonic
+                            ),
+                        )
+                        if personal_context_result is not None:
+                            session.commit()
+                    except Exception as exc:
+                        session.rollback()
+                        logger.exception(
+                            "personal context runtime cycle failed "
+                            "worker_id=%s error=%s",
+                            identity,
+                            exc,
+                        )
+
+                    personal_context_authority_result = None
+                    personal_context_authority_now = time.monotonic()
+                    try:
+                        (
+                            personal_context_authority_result,
+                            last_personal_context_authority_run_monotonic,
+                        ) = process_personal_context_authority_runtime_if_due(
+                            session,
+                            now_monotonic=personal_context_authority_now,
+                            last_run_monotonic=(
+                                last_personal_context_authority_run_monotonic
+                            ),
+                        )
+                        if personal_context_authority_result is not None:
+                            session.commit()
+                    except Exception as exc:
+                        session.rollback()
+                        logger.exception(
+                            "personal context authority runtime cycle failed "
+                            "worker_id=%s error=%s",
+                            identity,
+                            exc,
+                        )
+
+                    personal_context_materialization_result = None
+                    personal_context_materialization_now = time.monotonic()
+                    try:
+                        (
+                            personal_context_materialization_result,
+                            last_personal_context_materialization_run_monotonic,
+                        ) = process_personal_context_materialization_runtime_if_due(
+                            session,
+                            now_monotonic=personal_context_materialization_now,
+                            last_run_monotonic=(
+                                last_personal_context_materialization_run_monotonic
+                            ),
+                        )
+                        if personal_context_materialization_result is not None:
+                            session.commit()
+                    except Exception as exc:
+                        session.rollback()
+                        logger.exception(
+                            "personal context materialization runtime cycle failed "
+                            "worker_id=%s error=%s",
+                            identity,
+                            exc,
+                        )
+
+                meta_inbox = reconcile_pending_meta_callback_inbox(
+                    SessionLocal,
+                    worker_id=identity,
+                    limit=settings.meta_reconciliation_batch_size,
+                    transaction_timeout_seconds=(
+                        settings.meta_admission_transaction_timeout_seconds
+                    ),
+                )
+                meta_reconciliation = reconcile_due_meta_callback_outcomes(
+                    SessionLocal,
+                    worker_id=identity,
+                    limit=settings.meta_reconciliation_batch_size,
+                    transaction_timeout_seconds=(
+                        settings.meta_reconciliation_transaction_timeout_seconds
+                    ),
+                )
+                if (
+                    grace_count
+                    or transcription_count
+                    or artifact_understanding_count
+                    or decision_count
+                    or execution_count
+                    or tts_count
+                    or outbox_count
+                    or timer_count
+                    or scheduled_event_count
+                    or memory_count
+                    or media_cleanup_count
+                    or (
+                        integration_dispatch_result is not None
+                        and (
+                            integration_dispatch_result.processed
+                            or integration_dispatch_result.blocked
+                        )
+                    )
+                    or (
+                        personal_context_bootstrap_result is not None
+                        and (
+                            personal_context_bootstrap_result.batches_completed
+                            or personal_context_bootstrap_result.runs_failed
+                        )
+                    )
+                    or (
+                        personal_context_result is not None
+                        and (
+                            personal_context_result.hypotheses_persisted
+                            or personal_context_result.recommendations_persisted
+                            or personal_context_result.recommendations_enqueued
+                            or personal_context_result.expired_recommendations
+                        )
+                    )
+                    or (
+                        personal_context_authority_result is not None
+                        and (
+                            personal_context_authority_result.assessments_completed
+                            or personal_context_authority_result.assessments_failed
+                        )
+                    )
+                    or (
+                        personal_context_materialization_result is not None
+                        and (
+                            personal_context_materialization_result.materialized
+                            or personal_context_materialization_result.retired
+                            or personal_context_materialization_result.expired
+                            or personal_context_materialization_result.approval_required
+                            or personal_context_materialization_result.authority_blocked
+                            or personal_context_materialization_result.execution_blocked
+                            or personal_context_materialization_result.malformed
+                            or personal_context_materialization_result.failed
+                        )
+                    )
+                    or meta_reconciliation.selected
+                    or meta_inbox.selected
+                ):
+                    logger.info(
+                        "processed worker_id=%s grace_count=%s "
+                        "artifact_understanding_count=%s decision_count=%s outbox_count=%s "
+                        "timer_count=%s scheduled_event_count=%s "
+                        "integration_dispatch_processed=%s "
+                        "integration_dispatch_blocked=%s "
+                        "personal_context_bootstrap_batches=%s "
+                        "personal_context_bootstrap_failed=%s "
+                        "personal_context_hypotheses=%s "
+                        "personal_context_recommendations=%s "
+                        "personal_context_enqueued=%s "
+                        "personal_context_authority_assessments=%s "
+                        "personal_context_intents_prepared=%s "
+                        "personal_context_materialized=%s "
+                        "personal_context_materialization_blocked=%s "
+                        "meta_reconciliation_processed=%s "
+                        "meta_reconciliation_failed=%s meta_inbox_correlated=%s",
+                        identity,
+                        grace_count,
+                        artifact_understanding_count,
+                        decision_count,
+                        outbox_count,
+                        timer_count,
+                        scheduled_event_count,
+                        (
+                            integration_dispatch_result.processed
+                            if integration_dispatch_result is not None
+                            else 0
+                        ),
+                        (
+                            integration_dispatch_result.blocked
+                            if integration_dispatch_result is not None
+                            else 0
+                        ),
+                        (
+                            personal_context_bootstrap_result.batches_completed
+                            if personal_context_bootstrap_result is not None
+                            else 0
+                        ),
+                        (
+                            personal_context_bootstrap_result.runs_failed
+                            if personal_context_bootstrap_result is not None
+                            else 0
+                        ),
+                        (
+                            personal_context_result.hypotheses_persisted
+                            if personal_context_result is not None
+                            else 0
+                        ),
+                        (
+                            personal_context_result.recommendations_persisted
+                            if personal_context_result is not None
+                            else 0
+                        ),
+                        (
+                            personal_context_result.recommendations_enqueued
+                            if personal_context_result is not None
+                            else 0
+                        ),
+                        (
+                            personal_context_authority_result.assessments_completed
+                            if personal_context_authority_result is not None
+                            else 0
+                        ),
+                        (
+                            personal_context_authority_result.intents_prepared
+                            if personal_context_authority_result is not None
+                            else 0
+                        ),
+                        (
+                            personal_context_materialization_result.materialized
+                            if personal_context_materialization_result is not None
+                            else 0
+                        ),
+                        (
+                            (
+                                personal_context_materialization_result.approval_required
+                                + personal_context_materialization_result.authority_blocked
+                                + personal_context_materialization_result.execution_blocked
+                            )
+                            if personal_context_materialization_result is not None
+                            else 0
+                        ),
+                        meta_reconciliation.processed,
+                        meta_reconciliation.failed,
+                        meta_inbox.correlated,
+                    )
         time.sleep(settings.worker_poll_interval_seconds)
 
 

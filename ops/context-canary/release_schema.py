@@ -11,6 +11,7 @@ This prevents accidental schema promotion, NOT attacks by an existing DBA.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from hashlib import sha256
 from importlib.util import find_spec
@@ -31,6 +32,7 @@ from attention_router.application.context_schema_release import (
     approved_context_schema_release,
 )
 from attention_router.config import settings
+from attention_router.infrastructure.maintenance_gate import GateError, configured_gate
 
 
 CONFIRM = {
@@ -41,6 +43,7 @@ CONFIRM = {
 }
 FILES = (
     "attention_router/config.py",
+    "attention_router/infrastructure/maintenance_gate.py",
     "alembic/env.py",
     "alembic/versions/0068_google_contacts_cache.py",
     "alembic/versions/0069_cognitive_revocation_v0.py",
@@ -247,6 +250,90 @@ def check_window(record, approval):
         raise RuntimeError("RELEASE_APPROVAL_EXPIRED")
 
 
+# Mandatory baseline for this topology. Optional background cycles must
+# be included when deployed; validating their effective configuration and
+# coverage is an operational prerequisite, not inferred from this list.
+SCHEMA_REQUIRED_PARTICIPANTS = frozenset({
+    "worker", "api-http", "vector-http", "vector-cycle", "artifact-worker",
+    "internal-ingress-http", "internal-ingress-executor", "neutral-ingress-http",
+})
+SCHEMA_OPTIONAL_PARTICIPANTS = frozenset({
+    "voice-backfill", "contacts-cycle", "conversation-context-cycle",
+})
+
+
+def schema_approval_ref(approval: dict) -> str:
+    """Bind the existing opaque GitHub approval_ref to the private G3 record.
+
+    The public V2 shape is unchanged; no gate path, token, credentials or
+    private approval contents enter GitHub. G4 retains its existing contract.
+    """
+    content = {k: v for k, v in approval.items() if k != "approval_ref"}
+    encoded = json.dumps(content, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return sha256(encoded).hexdigest()
+
+
+def _load_schema_approval(path: Path) -> dict:
+    private_file(path)
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise RuntimeError("RELEASE_DUPLICATE_APPROVAL_FIELD")
+            result[key] = value
+        return result
+
+    approval = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
+    if not isinstance(approval, dict):
+        raise RuntimeError("RELEASE_OPERATOR_APPROVAL_MISSING")
+    return approval
+
+
+@contextmanager
+def schema_maintenance(root, approval_path, record, operation, comment_id):
+    """Require an exclusive, attested, drained hold before touching the DB."""
+    approved = _load_schema_approval(approval_path)
+    if (type(approved.get("version")) is not int or approved["version"] != 1
+            or approved.get("operation") != operation
+            or approved.get("confirmation") != CONFIRM[operation]):
+        raise RuntimeError("RELEASE_OPERATOR_APPROVAL_MISSING")
+    if (approved.get("approval_ref") != schema_approval_ref(approved)
+            or approved.get("approval_ref") != record["approval_ref"]):
+        raise RuntimeError("RELEASE_MAINTENANCE_APPROVAL_BINDING_MISMATCH")
+    check_window(record, approved)
+    issued = datetime.fromisoformat(approved["approved_at_utc"])
+    if issued.utcoffset() is None or not 0 <= (datetime.now(timezone.utc) - issued).total_seconds() <= 1800:
+        raise RuntimeError("RELEASE_APPROVAL_EXPIRED")
+    binding = approved.get("maintenance_gate")
+    if not isinstance(binding, dict) or set(binding) != {"gate_id", "window", "hold", "participants"}:
+        raise RuntimeError("RELEASE_MAINTENANCE_BINDING_REQUIRED")
+    roster = binding["participants"]
+    if (not isinstance(roster, list) or not all(isinstance(x, str) for x in roster)
+            or roster != sorted(set(roster)) or not SCHEMA_REQUIRED_PARTICIPANTS <= set(roster)
+            or not set(roster) <= SCHEMA_REQUIRED_PARTICIPANTS | SCHEMA_OPTIONAL_PARTICIPANTS):
+        raise RuntimeError("RELEASE_MAINTENANCE_ROSTER_INVALID")
+    module = find_spec("attention_router.infrastructure.maintenance_gate")
+    if (module is None or module.origin is None or Path(module.origin).resolve() !=
+            root / "attention_router/infrastructure/maintenance_gate.py"):
+        raise RuntimeError("RELEASE_MAINTENANCE_CHECKOUT_MISMATCH")
+    try:
+        gate = configured_gate()
+        if gate is None:
+            raise RuntimeError("RELEASE_MAINTENANCE_GATE_REQUIRED")
+        with gate.execute_maintenance(
+            binding, operation=operation, approval_ref=approved["approval_ref"],
+            comment_id=comment_id,
+        ) as verify_hold:
+            yield approved, verify_hold
+    except GateError as error:
+        reason = str(error)
+        if re.fullmatch(r"GATE_[A-Z0-9_]+", reason):
+            raise RuntimeError("RELEASE_MAINTENANCE_" + reason) from None
+        raise RuntimeError("RELEASE_MAINTENANCE_REFUSED") from None
+
+
 def report_failure(error):
     # Driver exceptions may include bound identifiers, DDL or connection
     # diagnostics. Keep CLI output restricted to our own symbolic refusals.
@@ -269,82 +356,94 @@ def run(action: str, *, root: Path, acl_path: Path,
     ):
         raise RuntimeError("RELEASE_OPERATOR_WINDOW_NOT_OPEN")
     if action != "check":
-        record = verify_github_release(root, approval_path, github_comment_id, "schema_" + action)
-    # Never accept a DSN on the command line or log credentials.
-    raw_url = os.environ["DATABASE_URL"]
-    engine = create_engine(raw_url, hide_parameters=True, connect_args={"connect_timeout": 4})
-    try:
-        with engine.connect() as conn:
-            with conn.begin():
-                if action == "check":
-                    conn.execute(text("SET TRANSACTION READ ONLY"))
-                conn.execute(text("SET LOCAL idle_in_transaction_session_timeout='60s'"))
-                conn.execute(text("SET LOCAL statement_timeout='20000ms'"))
-                conn.execute(text("SET LOCAL lock_timeout='1500ms'"))
-                info = baseline(conn)
-                wanted = "0072_context_index_fence" if action == "rollback" else "0067_vector_lock_order"
-                if info["revision"] != wanted:
-                    raise RuntimeError("RELEASE_BASELINE_REVISION_MISMATCH")
-                if action != "rollback" and info["fence_table_count"]:
-                    raise RuntimeError("RELEASE_FENCE_ALREADY_PRESENT")
+        operation = "schema_" + action
+        record = verify_github_release(root, approval_path, github_comment_id, operation)
+        maintenance = schema_maintenance(root, approval_path, record, operation, github_comment_id)
+    else:
+        maintenance = nullcontext((None, None))
+    # Hold covers engine construction, the transaction including commit,
+    # connection closure and disposal. Neither success nor error reopens it.
+    with maintenance as (approved_inputs, verify_hold):
+        # Never accept a DSN on the command line or log credentials.
+        raw_url = os.environ["DATABASE_URL"]
+        engine = create_engine(raw_url, hide_parameters=True, connect_args={"connect_timeout": 4})
+        try:
+            with engine.connect() as conn:
+                with conn.begin():
+                    if action == "check":
+                        conn.execute(text("SET TRANSACTION READ ONLY"))
+                    conn.execute(text("SET LOCAL idle_in_transaction_session_timeout='60s'"))
+                    conn.execute(text("SET LOCAL statement_timeout='20000ms'"))
+                    conn.execute(text("SET LOCAL lock_timeout='1500ms'"))
+                    info = baseline(conn)
+                    wanted = "0072_context_index_fence" if action == "rollback" else "0067_vector_lock_order"
+                    if info["revision"] != wanted:
+                        raise RuntimeError("RELEASE_BASELINE_REVISION_MISMATCH")
+                    if action != "rollback" and info["fence_table_count"]:
+                        raise RuntimeError("RELEASE_FENCE_ALREADY_PRESENT")
 
-                if action in ("check", "apply"):
-                    report = verify_snapshot(
-                        conn, root=root, acl_path=acl_path, catalog_path=catalog_path,
-                    )
-                else:
-                    report = {"status": "ROLLBACK_REQUIRES_ABSENCE_OF_CANARY_HISTORY"}
-                    if conn.execute(text(
-                        "SELECT count(*) FROM andy_context_fenced_tenants"
-                    )).scalar_one():
-                        raise RuntimeError("RELEASE_ROLLBACK_TENANT_STILL_ENROLLED")
-                    if conn.execute(text("SELECT count(*) FROM context_consent_scopes")).scalar_one():
-                        raise RuntimeError("RELEASE_ROLLBACK_CONSENT_HISTORY_EXISTS")
-                    if conn.execute(text("SELECT count(*) FROM context_source_consents")).scalar_one():
-                        raise RuntimeError("RELEASE_ROLLBACK_CONSENT_HISTORY_EXISTS")
-
-                if action == "check":
-                    return {
-                        "status": "CHECK_ONLY_NO_DDL",
-                        "approved_for_production": False,
-                        "preflight": report["status"],
-                        "revision": info["revision"],
-                    }
-
-                approval = verify_approval(
-                    approval_path, operation="schema_" + action, root=root,
-                    snapshot_path=catalog_path, acl_path=acl_path, conn=conn,
-                )
-                check_window(record, approval)
-                started = monotonic()
-                _preflight_running_writers(conn)
-                cfg = Config(str(root / "alembic.ini"))
-                cfg.attributes["connection"] = conn
-                cfg.set_main_option("script_location", str(root / "alembic"))
-                # Invariant: the callback is held only for this validated
-                # connection, within the already-open migration transaction.
-                with approved_context_schema_release(conn):
-                    if action == "apply":
-                        command.upgrade(cfg, "0072_context_index_fence")
+                    if action in ("check", "apply"):
+                        report = verify_snapshot(
+                            conn, root=root, acl_path=acl_path, catalog_path=catalog_path,
+                        )
                     else:
-                        command.downgrade(cfg, "0067_vector_lock_order")
-                expected = "0072_context_index_fence" if action == "apply" else "0067_vector_lock_order"
-                if baseline(conn)["revision"] != expected:
-                    raise RuntimeError("RELEASE_MIGRATION_RESULT_UNEXPECTED")
-                if action == "apply":
-                    if conn.scalar(text("""
-                        SELECT EXISTS (SELECT 1 FROM public.andy_context_fenced_tenants
-                                      UNION ALL SELECT 1 FROM public.context_consent_scopes)
-                    """)):
-                        raise RuntimeError("RELEASE_UNEXPECTED_AUTHORITY")
-                else:
-                    verify_snapshot(conn, root=root, acl_path=acl_path, catalog_path=catalog_path)
-                check_window(record, approval)
-                if monotonic() - started > 45:
-                    raise RuntimeError("RELEASE_DDL_WINDOW_EXCEEDED")
-                return {"status": "SCHEMA_RELEASE_COMMITTED", "revision": expected}
-    finally:
-        engine.dispose()
+                        report = {"status": "ROLLBACK_REQUIRES_ABSENCE_OF_CANARY_HISTORY"}
+                        if conn.execute(text(
+                            "SELECT count(*) FROM andy_context_fenced_tenants"
+                        )).scalar_one():
+                            raise RuntimeError("RELEASE_ROLLBACK_TENANT_STILL_ENROLLED")
+                        if conn.execute(text("SELECT count(*) FROM context_consent_scopes")).scalar_one():
+                            raise RuntimeError("RELEASE_ROLLBACK_CONSENT_HISTORY_EXISTS")
+                        if conn.execute(text("SELECT count(*) FROM context_source_consents")).scalar_one():
+                            raise RuntimeError("RELEASE_ROLLBACK_CONSENT_HISTORY_EXISTS")
+
+                    if action == "check":
+                        return {
+                            "status": "CHECK_ONLY_NO_DDL",
+                            "approved_for_production": False,
+                            "preflight": report["status"],
+                            "revision": info["revision"],
+                        }
+
+                    approval = verify_approval(
+                        approval_path, operation="schema_" + action, root=root,
+                        snapshot_path=catalog_path, acl_path=acl_path, conn=conn,
+                    )
+                    if approval != approved_inputs:
+                        raise RuntimeError("RELEASE_MAINTENANCE_APPROVAL_CHANGED")
+                    check_window(record, approval)
+                    verify_hold()
+                    started = monotonic()
+                    _preflight_running_writers(conn)
+                    verify_hold()
+                    cfg = Config(str(root / "alembic.ini"))
+                    cfg.attributes["connection"] = conn
+                    cfg.set_main_option("script_location", str(root / "alembic"))
+                    # Invariant: the callback is held only for this validated
+                    # connection, within the already-open migration transaction.
+                    with approved_context_schema_release(conn):
+                        if action == "apply":
+                            command.upgrade(cfg, "0072_context_index_fence")
+                        else:
+                            command.downgrade(cfg, "0067_vector_lock_order")
+                    expected = "0072_context_index_fence" if action == "apply" else "0067_vector_lock_order"
+                    if baseline(conn)["revision"] != expected:
+                        raise RuntimeError("RELEASE_MIGRATION_RESULT_UNEXPECTED")
+                    if action == "apply":
+                        if conn.scalar(text("""
+                            SELECT EXISTS (SELECT 1 FROM public.andy_context_fenced_tenants
+                                          UNION ALL SELECT 1 FROM public.context_consent_scopes)
+                        """)):
+                            raise RuntimeError("RELEASE_UNEXPECTED_AUTHORITY")
+                    else:
+                        verify_snapshot(conn, root=root, acl_path=acl_path, catalog_path=catalog_path)
+                    verify_hold()
+                    check_window(record, approval)
+                    if monotonic() - started > 45:
+                        raise RuntimeError("RELEASE_DDL_WINDOW_EXCEEDED")
+                    return {"status": "SCHEMA_RELEASE_COMMITTED", "revision": expected}
+        finally:
+            engine.dispose()
 
 
 def main() -> None:
