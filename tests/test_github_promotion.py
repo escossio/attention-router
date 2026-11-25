@@ -414,3 +414,455 @@ def test_schema_runner_requires_approved_source_digest(release, digest):
     check, _, _, _, _ = release
     with pytest.raises(Blocked, match="digest do runner"):
         check(artifact=digest)
+
+
+# V2 fixtures are synthetic and deliberately do not create GitHub approvals.
+# Existing V1 tests above remain unchanged.
+@pytest.fixture()
+def single_owner_release(release):
+    from copy import deepcopy
+    from hashlib import sha256
+
+    check, receipt, api, git, commands = release
+    uid = 101
+    owner = {"login": "escossio", "id": uid, "type": "User"}
+    all_permissions = dict.fromkeys(("pull", "triage", "push", "maintain", "admin"), True)
+    api["@repository"] = {
+        "full_name": REPO, "default_branch": "main", "owner": dict(owner),
+        "permissions": dict(all_permissions),
+    }
+    api["@authenticated-user"] = dict(owner)
+    api["collaborators?affiliation=all&per_page=100"] = [
+        {**owner, "role_name": "admin", "permissions": dict(all_permissions)}
+    ]
+    pr = api["pulls/5"]
+    pr.update(user=dict(owner), author_association="OWNER", merged_at="2026-01-01T11:45:00Z")
+    pr["head"]["repo"] = {"full_name": REPO}
+    api["pulls/5/reviews?per_page=100"] = []
+    api[f"git/commits/{SHA}"]["parents"] = [{"sha": "4" * 40}, {"sha": HEAD}]
+    official = {name: 4982054 if name.startswith("distributed-") else 15368
+                for name in gate["REQUIRED_CHECKS"]}
+    protection = api["branches/main/protection/required_status_checks"]
+    protection["strict"] = True
+    for c in protection["checks"]:
+        c["app_id"] = official[c["context"]]
+    api["branches/main/protection"] = {
+        "enforce_admins": {"enabled": True}, "required_pull_request_reviews": None,
+        "required_status_checks": protection,
+    }
+    api[BRANCH_RULES] = [
+        {"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": True,
+            "required_status_checks": [
+                {"context": name, "integration_id": app} for name, app in official.items()
+            ],
+        }},
+        {"type": "pull_request", "parameters": {
+            "required_approving_review_count": 0, "require_code_owner_review": False,
+            "require_last_push_approval": False, "required_review_thread_resolution": True,
+            "required_reviewers": [],
+        }},
+    ]
+    integrated = api[CHECK_RUNS]
+    for n, c in enumerate(integrated, 100):
+        c.update(id=n, app={"id": official[c["name"]]}, completed_at="2026-01-01T11:50:00Z")
+        if c["name"] == "distributed-postgres":
+            c["output"]["summary"] = c["output"]["summary"].replace(
+                "Tests passed: 10", "Tests passed: 12").replace("| 10 | 3 |", "| 12 | 3 |")
+    heads = deepcopy(integrated)
+    for c in heads:
+        c.update(id=c["id"] + 100, head_sha=HEAD, completed_at="2026-01-01T11:42:00Z")
+        if c["name"] in DISTRIBUTED_OUTPUTS:
+            c["output"]["summary"] = c["output"]["summary"].replace(SHA, HEAD)
+    api[f"commits/{HEAD}/check-runs?filter=all&per_page=100"] = heads
+
+    def identities(rows):
+        # Independent construction of the accepted evidence; never use the verifier to
+        # derive the expected value for the positive test.
+        return {r["name"]: {
+            "app_id": r["app"]["id"], "check_run_id": r["id"], "completed_at": r["completed_at"],
+            "output_sha256": sha256(json.dumps(r["output"], sort_keys=True,
+                                              ensure_ascii=False, separators=(",", ":")).encode()).hexdigest(),
+        } for r in rows}
+
+    accepted = {
+        "version": 2, "record_type": "technical_acceptance", "mode": "single_owner",
+        "decision": "accepted", "assurance": "automated_evidence_not_independent_human_review",
+        "gate": receipt["gate"], "operation": receipt["operation"], "pr": receipt["pr"],
+        "sha": SHA, "head": HEAD, "tree": TREE, "artifact_sha256": receipt["artifact_sha256"],
+        "expires_at": "2026-01-01T12:30:00Z",
+        "checks": {"head": identities(heads), "integrated": identities(integrated)},
+    }
+    op_comment = api["issues/comments/7"]
+    op_comment.update(id=7, user=dict(owner), created_at=op_comment["updated_at"])
+    technical = api["issues/comments/6"] = {
+        "id": 6, "user": dict(owner), "issue_url": op_comment["issue_url"],
+        "created_at": "2026-01-01T11:52:00Z", "updated_at": "2026-01-01T11:52:00Z",
+    }
+    receipt.update(version=2, record_type="operation_authorization", mode="single_owner",
+                   technical_acceptance_id=6)
+
+    def reseal():
+        technical["body"] = "\x60\x60\x60json\n" + json.dumps(accepted) + "\n\x60\x60\x60"
+        receipt["technical_acceptance_sha256"] = sha256(technical["body"].encode()).hexdigest()
+
+    reseal()
+    return check, receipt, api, git, commands, accepted, reseal
+
+
+@pytest.mark.parametrize("operation", ["schema_apply", "schema_rollback", "roles_apply", "roles_rollback"])
+def test_single_owner_v2_explicit_separate_acceptance(single_owner_release, operation):
+    check, record, _, _, _, accepted, reseal = single_owner_release
+    record.update(operation=operation, gate=gate["OPERATIONS"][operation])
+    accepted.update(operation=operation, gate=record["gate"])
+    reseal()
+    assert check(operation) == (SHA, 5)
+    assert check(operation, return_record=True) == record
+
+
+@pytest.mark.parametrize("operation", ["runtime_apply", "runtime_rollback", "canary_enable", "canary_disable"])
+def test_single_owner_v2_preserves_attestation(single_owner_release, monkeypatch, tmp_path, operation):
+    from types import SimpleNamespace
+
+    check, record, _, _, commands, accepted, reseal = single_owner_release
+    record.update(operation=operation, gate=gate["OPERATIONS"][operation])
+    accepted.update(operation=operation, gate=record["gate"])
+    reseal()
+    archive = tmp_path / "synthetic.oci.tar"
+    archive.write_bytes(b"synthetic fixture")
+    reference = f"ghcr.io/{REPO}@sha256:{'a' * 64}"
+    config = f"sha256:{'b' * 64}"
+    monkeypatch.setitem(verify.__globals__, "runpy", SimpleNamespace(
+        run_path=lambda _: {"inspect_image": lambda *a, **k: ("sha256:" + "a" * 64, config)}
+    ))
+    with pytest.raises(Blocked, match="arquivo OCI necessário"):
+        check(operation, reference)
+    result = check(operation, reference, archive=archive, return_record=True)
+    assert result == {**record, "oci_image_id": config}
+    attestations = [cmd for cmd in commands if cmd[:3] == ("gh", "attestation", "verify")]
+    assert len(attestations) == 1 and attestations[0][-3:] == (
+        "--source-digest", SHA, "--deny-self-hosted-runners",
+    )
+    assert commands[-1][0] == "git"  # Fresh checkout verification after attestation.
+
+
+def test_no_automatic_single_owner_fallback(release):
+    check, _, api, _, _ = release
+    api["pulls/5/reviews?per_page=100"] = []
+    with pytest.raises(Blocked, match="revisão favorável"):
+        check()
+
+
+@pytest.mark.parametrize("case,reason", [
+    ("actor", "identidade ou autoridade"),
+    ("owner_type", "identidade ou autoridade"),
+    ("admin", "identidade ou autoridade"),
+    ("author", "PR não pertence"),
+    ("foreign_head", "PR não pertence"),
+    ("write_collaborator", "outra autoridade"),
+    ("duplicate_collaborator", "inventário de colaboradores"),
+    ("incomplete_permissions", "inventário de colaboradores"),
+    ("empty_inventory", "inventário de colaboradores"),
+    ("missing_owner", "outra autoridade"),
+    ("technical_author", "autor divergente"),
+    ("technical_uid", "autor do registro"),
+    ("request_changes", "pedido de alteração"),
+])
+def test_single_owner_v2_authority_refusals(single_owner_release, case, reason):
+    from copy import deepcopy
+    check, _, api, _, _, _, _ = single_owner_release
+    collaborators = api["collaborators?affiliation=all&per_page=100"]
+    pr = api["pulls/5"]
+    if case == "actor":
+        api["@authenticated-user"]["id"] = 102
+    elif case == "owner_type":
+        api["@repository"]["owner"]["type"] = "Organization"
+    elif case == "admin":
+        api["@repository"]["permissions"]["admin"] = False
+    elif case == "author":
+        pr["user"] = {"login": "other", "id": 102}
+    elif case == "foreign_head":
+        pr["head"]["repo"]["full_name"] = "other/project"
+    elif case == "write_collaborator":
+        collaborators.append(dict(deepcopy(collaborators[0]), id=102, login="another"))
+    elif case == "duplicate_collaborator":
+        collaborators.append(deepcopy(collaborators[0]))
+    elif case == "incomplete_permissions":
+        del collaborators[0]["permissions"]["push"]
+    elif case == "empty_inventory":
+        collaborators.clear()
+    elif case == "missing_owner":
+        collaborators[0].update(id=102, login="another")
+    elif case == "technical_author":
+        api["issues/comments/6"]["user"]["login"] = "other"
+    elif case == "technical_uid":
+        api["issues/comments/6"]["user"]["id"] = 102
+    else:
+        api["pulls/5/reviews?per_page=100"].append({
+            "id": 9, "submitted_at": "2026-01-01T11:51:00Z", "state": "CHANGES_REQUESTED",
+            "commit_id": HEAD, "author_association": "COLLABORATOR", "user": {"login": "another"},
+        })
+    with pytest.raises(Blocked, match=reason):
+        check()
+
+
+def test_single_owner_v2_allows_read_only_collaborator(single_owner_release):
+    check, _, api, _, _, _, _ = single_owner_release
+    api["collaborators?affiliation=all&per_page=100"].append({
+        "id": 102, "login": "reader", "type": "User", "role_name": "read",
+        "permissions": {"pull": True, "triage": False, "push": False, "maintain": False, "admin": False},
+    })
+    assert check() == (SHA, 5)
+
+
+@pytest.mark.parametrize("case,reason", [
+    ("mode", "contrato operacional"),
+    ("v1_markers", "V1 não pode"),
+    ("same_comment", "registro distinto"),
+    ("bad_hash", "digest do aceite"),
+    ("edited_technical", "editado ou revogado"),
+    ("edited_operation", "editado ou revogado"),
+    ("revoked", "revogado ou inválido"),
+    ("wrong_operation", "outra operação"),
+    ("wrong_sha", "outra operação"),
+    ("wrong_head", "outra operação"),
+    ("wrong_artifact", "outra operação"),
+    ("wrong_tree", "árvore integrada"),
+    ("wrong_parent", "não preserva"),
+    ("technical_after_operation", "deve preceder"),
+    ("technical_before_merge", "anterior à integração"),
+    ("operation_too_long", "fora da janela"),
+    ("technical_too_long", "fora da janela"),
+    ("expiry", "fora da janela"),
+    ("non_utc", "deve usar UTC"),
+    ("no_assurance", "revogado ou inválido"),
+])
+def test_single_owner_v2_record_refusals(single_owner_release, case, reason):
+    check, record, api, _, _, accepted, reseal = single_owner_release
+    tech, op = api["issues/comments/6"], api["issues/comments/7"]
+    changed_technical = False
+    if case == "mode":
+        record["mode"] = "automatic"
+    elif case == "v1_markers":
+        record["version"] = 1
+    elif case == "same_comment":
+        record["technical_acceptance_id"] = 7
+    elif case == "bad_hash":
+        record["technical_acceptance_sha256"] = "f" * 64
+    elif case == "edited_technical":
+        tech["updated_at"] = "2026-01-01T11:54:00Z"
+    elif case == "edited_operation":
+        op["updated_at"] = "2026-01-01T11:56:00Z"
+    elif case == "revoked":
+        accepted["decision"] = "revoked"
+        changed_technical = True
+    elif case == "wrong_operation":
+        accepted["operation"] = "schema_rollback"
+        changed_technical = True
+    elif case == "wrong_sha":
+        accepted["sha"] = HEAD
+        changed_technical = True
+    elif case == "wrong_head":
+        accepted["head"] = SHA
+        changed_technical = True
+    elif case == "wrong_artifact":
+        accepted["artifact_sha256"] = "b" * 64
+        changed_technical = True
+    elif case == "wrong_tree":
+        accepted["tree"] = "f" * 40
+        changed_technical = True
+    elif case == "wrong_parent":
+        api[f"git/commits/{SHA}"]["parents"][1]["sha"] = "f" * 40
+    elif case == "technical_after_operation":
+        tech["created_at"] = tech["updated_at"] = "2026-01-01T11:56:00Z"
+    elif case == "technical_before_merge":
+        tech["created_at"] = tech["updated_at"] = "2026-01-01T11:40:00Z"
+    elif case == "operation_too_long":
+        record["expires_at"] = "2026-01-01T12:26:00Z"
+    elif case == "technical_too_long":
+        accepted["expires_at"] = "2026-01-03T12:00:00Z"
+        changed_technical = True
+    elif case == "expiry":
+        accepted["expires_at"] = "2026-01-01T11:59:00Z"
+        changed_technical = True
+    elif case == "non_utc":
+        record["expires_at"] = "2026-01-01T13:15:00+01:00"
+    else:
+        accepted["assurance"] = "independent_human_review"
+        changed_technical = True
+    if changed_technical:
+        reseal()
+    with pytest.raises(Blocked, match=reason):
+        check()
+
+
+@pytest.mark.parametrize("case,reason", [
+    ("other_app", "política estrita ou Apps oficiais"),
+    ("classic_admin", "não se aplica ao administrador"),
+    ("classic_review", "revisão clássica obrigatória"),
+    ("strict_rule", "ruleset estrito"),
+    ("mandatory_review", "regras de revisão"),
+    ("head_missing", "check ausente"),
+    ("latest_replaced", "identidade ou recibo"),
+    ("receipt_changed", "identidade ou recibo"),
+    ("receipt_missing", "recibo de execução"),
+    ("partial_postgres", "não cobre toda a seleção"),
+    ("late_check", "concluído após"),
+    ("new_failure", "sem sucesso"),
+    ("dirty_checkout", "checkout com alterações"),
+])
+def test_single_owner_v2_certification_refusals(single_owner_release, case, reason):
+    from copy import deepcopy
+    check, _, api, git, _, _, _ = single_owner_release
+    checks = api[CHECK_RUNS]
+    pg = next(c for c in checks if c["name"] == "distributed-postgres")
+    if case == "other_app":
+        for c in api["branches/main/protection/required_status_checks"]["checks"]:
+            if c["context"] == "distributed-postgres":
+                c["app_id"] = 42
+        for c in api[BRANCH_RULES][0]["parameters"]["required_status_checks"]:
+            if c["context"] == "distributed-postgres":
+                c["integration_id"] = 42
+    elif case == "classic_admin":
+        api["branches/main/protection"]["enforce_admins"]["enabled"] = False
+    elif case == "classic_review":
+        api["branches/main/protection"]["required_pull_request_reviews"] = {
+            "required_approving_review_count": 1}
+    elif case == "strict_rule":
+        api[BRANCH_RULES][0]["parameters"]["strict_required_status_checks_policy"] = False
+    elif case == "mandatory_review":
+        api[BRANCH_RULES][1]["parameters"]["required_approving_review_count"] = 1
+    elif case == "head_missing":
+        api[f"commits/{HEAD}/check-runs?filter=all&per_page=100"].pop()
+    elif case == "latest_replaced":
+        checks.append(dict(deepcopy(pg), id=999))
+    elif case == "receipt_changed":
+        pg["output"]["summary"] += "\nAdditional changed content"
+    elif case == "receipt_missing":
+        pg["output"] = {}
+    elif case == "partial_postgres":
+        pg["output"]["summary"] = pg["output"]["summary"].replace(
+            "Tests passed: 12", "Tests passed: 10").replace("| 12 | 3 |", "| 10 | 3 |")
+    elif case == "late_check":
+        pg["completed_at"] = "2026-01-01T11:53:00Z"
+    elif case == "new_failure":
+        checks.append(dict(deepcopy(pg), id=999, conclusion="failure"))
+    else:
+        git[next(k for k in git if k[0] == "status")] = "?? extra.py"
+    with pytest.raises(Blocked, match=reason):
+        check()
+
+
+@pytest.mark.parametrize("action", ["schema_apply", "schema_rollback", "roles_apply", "roles_rollback"])
+def test_single_owner_v2_rejection_before_database(single_owner_release, monkeypatch, tmp_path, action):
+    from attention_router.config import settings
+    check, record, api, _, _, accepted, reseal = single_owner_release
+    kind, verb = action.split("_")
+    record.update(operation=action, gate=gate["OPERATIONS"][action])
+    accepted.update(operation=action, gate=record["gate"])
+    reseal()
+    api["collaborators?affiliation=all&per_page=100"].clear()
+    runner = runpy.run_path(str(MODULE.with_name(f"release_{kind}.py")))["run"]
+    run_path = runpy.run_path
+    monkeypatch.setattr(runpy, "run_path", lambda path: (
+        {"verify": lambda comment, op, *a, **kw: check(op)} if Path(path) == MODULE else run_path(path)
+    ))
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setenv("ANDY_SCHEMA_RELEASE_EXPLICIT", "SCHEMA_ONLY_NO_TENANT")
+    monkeypatch.setenv("ANDY_ROLES_RELEASE_EXPLICIT", "ROLES_ONLY_NO_TENANT")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    approval = tmp_path / "approval.json"
+    approval.write_text(json.dumps({"approval_ref": record["approval_ref"]}))
+    approval.chmod(0o600)
+    missing = tmp_path / "not-read.json"
+    with pytest.raises(Blocked, match="inventário de colaboradores"):
+        runner(verb, root=MODULE.parents[2], catalog_path=missing, acl_path=missing,
+               approval_path=approval, github_comment_id=7,
+               **({"scope_path": missing} if kind == "roles" else {}))
+
+
+@pytest.mark.parametrize("operation", ["runtime_apply", "runtime_rollback", "canary_enable", "canary_disable"])
+def test_single_owner_v2_rejection_before_compose(single_owner_release, monkeypatch, tmp_path, operation):
+    check, record, api, _, _, accepted, reseal = single_owner_release
+    record.update(operation=operation, gate=gate["OPERATIONS"][operation])
+    accepted.update(operation=operation, gate=record["gate"])
+    reseal()
+    api["collaborators?affiliation=all&per_page=100"].clear()
+    runner = runpy.run_path(str(MODULE.with_name("private_runtime_release.py")))["run"]
+    seen = []
+    def command(args, **kwargs):
+        seen.append(args)
+        assert str(args[1]) == str(MODULE)  # No Docker inspect or Compose is allowed yet.
+        check(operation)
+    monkeypatch.setattr(subprocess, "check_output", command)
+    archive = tmp_path / "synthetic.oci.tar"
+    archive.write_bytes(b"synthetic")
+    with pytest.raises(Blocked, match="inventário de colaboradores"):
+        runner(operation, 7, f"ghcr.io/{REPO}@sha256:{'a' * 64}",
+               root=MODULE.parents[2], archive=archive)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("case", ["technical_deleted", "inventory_denied", "operational_deleted"])
+def test_single_owner_v2_missing_api_evidence_fails_closed(single_owner_release, case):
+    check, _, api, _, commands, _, _ = single_owner_release
+    if case == "technical_deleted":
+        del api["issues/comments/6"]
+    elif case == "inventory_denied":
+        del api["collaborators?affiliation=all&per_page=100"]
+    else:
+        # Use the real verifier directly rather than fixture.check(), which writes body.
+        del api["issues/comments/7"]
+        with pytest.raises(KeyError):
+            verify(7, "schema_apply", Path("."), "a" * 64,
+                   fetch=lambda endpoint, **_: api[endpoint], now=NOW)
+        assert not commands
+        return
+    with pytest.raises(KeyError):
+        check()
+    assert not commands
+
+
+@pytest.mark.parametrize("case,reason", [
+    ("technical", "registro V2 alterado"),
+    ("operation", "registro V2 alterado"),
+    ("collaborator", "outra autoridade"),
+    ("checks", "checks mudaram"),
+    ("reviews", "revisões mudaram"),
+    ("pr", "PR mudou"),
+])
+def test_single_owner_v2_material_changes_during_preflight(single_owner_release, tmp_path, case, reason):
+    from copy import deepcopy
+    _, record, api, _, _, _, _ = single_owner_release
+    api["issues/comments/7"]["body"] = "\x60\x60\x60json\n" + json.dumps(record) + "\n\x60\x60\x60"
+    counts = {}
+
+    def fetch(endpoint, **_):
+        counts[endpoint] = counts.get(endpoint, 0) + 1
+        result = deepcopy(api[endpoint])
+        if counts[endpoint] < 2:
+            return result
+        if case == "technical" and endpoint == "issues/comments/6":
+            result["updated_at"] = "2026-01-01T11:58:00Z"
+        if case == "operation" and endpoint == "issues/comments/7":
+            result["updated_at"] = "2026-01-01T11:59:00Z"
+        if case == "collaborator" and endpoint == "collaborators?affiliation=all&per_page=100":
+            result.append(dict(deepcopy(result[0]), id=102, login="new-admin"))
+        if case == "checks" and endpoint == CHECK_RUNS:
+            result.append(dict(deepcopy(result[0]), id=1000))
+        if case == "reviews" and endpoint == "pulls/5/reviews?per_page=100":
+            result.append({"state": "CHANGES_REQUESTED"})
+        if case == "pr" and endpoint == "pulls/5":
+            result["head"]["sha"] = "f" * 40
+        return result
+
+    with pytest.raises(Blocked, match=reason):
+        verify(7, "schema_apply", tmp_path, "a" * 64, fetch=fetch, now=NOW)
+
+
+def test_single_owner_v2_rejects_duplicate_json_fields(single_owner_release, tmp_path):
+    _, record, api, _, _, _, _ = single_owner_release
+    api["issues/comments/7"]["body"] = "\x60\x60\x60json\n" + json.dumps(record)[:-1] + ', "version": 2}\n\x60\x60\x60'
+    with pytest.raises(Blocked, match="campo duplicado"):
+        verify(7, "schema_apply", tmp_path, "a" * 64,
+               fetch=lambda endpoint, **_: api[endpoint], now=NOW)
