@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>Andy Ops — Live Supervisor</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="ar1001-card.css">
 </head>
 <body>
   <header class="topbar">
@@ -22,14 +23,23 @@
 
   <nav class="tabs" aria-label="Painéis">
     <button class="tab is-active" data-tab="compute" type="button">COMPUTE</button>
+    <button class="tab" data-tab="context-performance" type="button">CONTEXT / PERFORMANCE</button>
+    <button class="tab" data-tab="ar1001" type="button">FALHAS / AR-1001</button>
     <button class="tab" data-tab="chat" type="button">CHAT / CONSOLE</button>
+    <button class="tab" data-tab="investigator" type="button">INVESTIGADOR</button>
     <button class="tab" data-tab="transport" type="button">AGENT / TRANSPORT</button>
     <button class="tab" data-tab="goaccess" type="button">HTTP / GOACCESS</button>
     <button class="tab" data-tab="dozzle" type="button">CONTAINERS / DOZZLE</button>
+    <button class="tab" data-tab="flow-e2e" type="button">FLOW / E2E</button>
+    <button class="tab" data-tab="live-message" type="button">LIVE MESSAGE</button>
     <button class="tab" data-tab="network" type="button">NETWORK / OSI</button>
   </nav>
 
   <main>
+    <section id="ar1001-view" class="view" aria-label="Ficha de ocorrência AR-1001">
+      <div id="ar1001-content" aria-live="polite"><p class="empty">Selecione a aba para consultar as evidências do Zabbix.</p></div>
+    </section>
+
     <section id="compute-view" class="view is-active">
       <section class="dispatch-strip">
         <div>
@@ -200,6 +210,42 @@
       </section>
     </section>
 
+    <section id="investigator-view" class="view" aria-label="Acompanhamento do Investigador">
+      <section class="transport-hero">
+        <div>
+          <span class="section-label">ATIVIDADE OBSERVADA · SOMENTE LEITURA</span>
+          <h2>Investigador V0 — sequência de execução</h2>
+          <p>Consultas realmente executadas, em ordem, sem depender do chat.
+             Não exibe argumentos, alertas originais, prompts ou raciocínio interno do modelo.</p>
+        </div>
+        <span id="investigator-state" class="source-state ready" aria-live="polite">DESABILITADO</span>
+      </section>
+      <section class="investigator-summary" aria-label="Resumo da investigação">
+        <article class="transport-card">
+          <span class="section-label">EXECUÇÃO</span>
+          <strong id="investigator-run">—</strong>
+        </article>
+        <article class="transport-card">
+          <span class="section-label">ÚLTIMO SINAL</span>
+          <strong id="investigator-age">—</strong>
+        </article>
+        <article class="transport-card">
+          <span class="section-label">CONSULTAS REGISTRADAS</span>
+          <strong id="investigator-query-count">0</strong>
+        </article>
+      </section>
+      <section class="history-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">JOURNAL DO INVESTIGADOR</span>
+            <h2>Ordem real das consultas</h2>
+          </div>
+          <span class="muted">eventos tipados · sem payload · sem execução de comandos</span>
+        </div>
+        <div id="investigator-timeline" class="investigator-timeline" aria-live="polite"></div>
+      </section>
+    </section>
+
     <section id="goaccess-view" class="view observability-view">
       <section class="observability-hero">
         <div>
@@ -210,6 +256,7 @@
         <div class="observability-actions">
           <span id="goaccess-state" class="source-state">AGUARDANDO</span>
           <a id="goaccess-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+          <a id="goaccess-domain-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>DOMÍNIOS / CONTEÚDO</a>
         </div>
       </section>
       <div class="observability-frame-shell">
@@ -234,6 +281,30 @@
       </div>
     </section>
 
+    <section id="flow-e2e-view" class="view observability-view">
+      <section class="observability-hero"><div>
+        <span class="section-label">OPEN TELEMETRY · TEMPO</span>
+        <h2>ROC-E2E / Operational Flow</h2>
+        <p>Traces de Worker, Transport e decisões; dashboard do Grafana ROC.</p>
+      </div><div class="observability-actions">
+        <span id="flow-e2e-state" class="source-state">AGUARDANDO</span>
+        <a id="flow-e2e-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+      </div></section>
+      <div class="observability-frame-shell"><iframe id="flow-e2e-frame" title="ROC E2E Operational Flow" loading="lazy" referrerpolicy="no-referrer"></iframe></div>
+    </section>
+
+    <section id="live-message-view" class="view observability-view">
+      <section class="observability-hero"><div>
+        <span class="section-label">MENSAGENS · CAMINHO COMPLETO</span>
+        <h2>Andy · Live Message Path</h2>
+        <p>Visualização de cada etapa observável, com resultado e lacunas do fluxo.</p>
+      </div><div class="observability-actions">
+        <span id="live-message-state" class="source-state">AGUARDANDO</span>
+        <a id="live-message-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
+      </div></section>
+      <div class="observability-frame-shell"><iframe id="live-message-frame" title="Andy Live Message Path" loading="lazy" referrerpolicy="no-referrer"></iframe></div>
+    </section>
+
     <section id="network-view" class="view observability-view">
       <section class="observability-hero">
         <div>
@@ -251,9 +322,63 @@
       </div>
     </section>
 
+    <section id="context-performance-view" class="view" aria-labelledby="context-performance-heading">
+      <section class="dispatch-strip context-header">
+        <div>
+          <span class="section-label">CONTEXT / PERFORMANCE</span>
+          <h2 id="context-performance-heading">Desempenho contextual</h2>
+          <small id="context-freshness" class="muted">Aguardando telemetria</small>
+          <small id="context-otlp" class="muted"></small>
+        </div>
+        <span id="context-state" class="source-state" role="status">AGUARDANDO</span>
+      </section>
+      <div class="context-toolbar">
+        <div class="context-modes" role="group" aria-label="Modos de desempenho contextual">
+          <button type="button" class="context-mode is-active" data-context-mode="live" aria-pressed="true">LIVE</button>
+          <button type="button" class="context-mode" data-context-mode="trace" aria-pressed="false">TRACE</button>
+          <button type="button" class="context-mode" data-context-mode="compare" aria-pressed="false">COMPARE</button>
+        </div>
+        <label>Execução <select id="context-run"><option value="">Aguardando execução</option></select></label>
+        <button class="context-mode" type="button" id="context-compute">VER COMPUTE</button>
+      </div>
+      <section id="context-live" class="context-body">
+        <div id="context-health" class="chat-grid"></div>
+        <div id="context-worker" class="context-worker"></div>
+        <div id="context-components"></div>
+        <div id="context-capacity"></div>
+        <div id="context-pool-summary"></div>
+        <div id="context-pool-open"></div>
+        <div id="context-pool-distribution"></div>
+        <div id="context-outcomes"></div>
+      </section>
+      <section id="context-trace" class="context-body" hidden>
+        <div class="context-toolbar">
+          <label>Consulta <select id="context-trace-select"><option value="">Escolha uma consulta</option></select></label>
+          <a class="observability-open" id="context-tempo" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR NO TEMPO</a>
+        </div>
+        <div id="context-critical"></div>
+        <div id="context-timeline"></div>
+        <div id="context-pool-trace"></div>
+      </section>
+      <section id="context-compare" class="context-body" hidden>
+        <div class="context-toolbar">
+          <label>Baseline <select id="context-baseline"><option value="historical">M1 histórico · 199 segmentos</option></select></label>
+          <span id="context-comparability" class="source-state"></span>
+          <p id="context-comparison-basis" class="muted"></p>
+        </div>
+        <div id="context-summary-comparison"></div>
+        <div id="context-distribution"></div>
+        <div id="context-stage-comparison"></div>
+        <div id="context-resource-comparison"></div>
+        <div id="context-identities"></div>
+      </section>
+    </section>
+
     <section id="error-panel" class="error-panel" hidden></section>
   </main>
 
   <script src="app.js" defer></script>
+  <script src="context-performance.js" defer></script>
+  <script src="ar1001-card.js" defer></script>
 </body>
 </html>
