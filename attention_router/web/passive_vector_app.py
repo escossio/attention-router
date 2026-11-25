@@ -6,11 +6,13 @@ from sqlalchemy import text
 from attention_router.config import settings
 from attention_router.infrastructure.db import SessionLocal
 from attention_router.infrastructure.conversation_vector_runtime import install
+from attention_router.web.maintenance_gate import install_maintenance_middleware
 from attention_router.application.conversation_embedding import get_provider
 
 app = FastAPI(
     title="Andy Passive Conversation Index", docs_url=None, redoc_url=None, openapi_url=None
 )
+install_maintenance_middleware(app, "vector-http")
 
 
 def get_session():

@@ -371,12 +371,17 @@ def start_voice_backfill():
     if os.environ.get("WHATSAPP_VOICE_BACKFILL_ENABLED") != "true":
         return
     from attention_router.infrastructure.db import SessionLocal
+    from attention_router.infrastructure.maintenance_gate import runtime_admission, observe_runtime
+
+    observe_runtime("voice-backfill")
 
     def run():
         while True:
             try:
-                with SessionLocal() as session:
-                    cycle(session)
+                with runtime_admission("voice-backfill") as admitted:
+                    if admitted:
+                        with SessionLocal() as session:
+                            cycle(session)
             except Exception:
                 LOG.warning("voice_history_cycle_failed")
             time.sleep(history_interval_seconds())

@@ -135,6 +135,12 @@ def get_callback_session_factory():
 
 def create_ingress_app() -> FastAPI:
     app = FastAPI(title="Attention Router Ingress", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
+    from attention_router.web.maintenance_gate import install_maintenance_middleware
+
+    from attention_router.web.integration_ingress import maintenance_unavailable_response
+
+    install_maintenance_middleware(app, "neutral-ingress-http",
+                                   unavailable_response=maintenance_unavailable_response)
     app.include_router(build_integration_ingress_router())
 
     @app.get("/health/live", tags=["health"])

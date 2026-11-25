@@ -9,6 +9,7 @@ from attention_router.application.google_contacts import (
 )
 from attention_router.security.provider_secrets import ProviderSecretCipher
 from attention_router.infrastructure.db import SessionLocal
+from attention_router.infrastructure.maintenance_gate import runtime_admission, observe_runtime
 
 
 def install_google_contacts(app, settings, client_sessions, get_session):
@@ -34,8 +35,10 @@ def install_google_contacts(app, settings, client_sessions, get_session):
     def run():
         while not stop.is_set():
             try:
-                with SessionLocal() as session:
-                    service.sync_one(session)
+                with runtime_admission("contacts-cycle") as admitted:
+                    if admitted:
+                        with SessionLocal() as session:
+                            service.sync_one(session)
             except Exception:
                 import logging
 
@@ -44,6 +47,7 @@ def install_google_contacts(app, settings, client_sessions, get_session):
 
     @app.on_event("startup")
     def start():
+        observe_runtime("contacts-cycle")
         threading.Thread(target=run, name="google-contacts-sync", daemon=True).start()
 
     @app.on_event("shutdown")
@@ -63,20 +67,26 @@ def install_conversation_context(app):
         import logging
         while not stop.is_set():
             try:
-                with SessionLocal() as session:
-                    reconcile(session)
+                with runtime_admission("conversation-context-cycle") as admitted:
+                    if admitted:
+                        try:
+                            with SessionLocal() as session:
+                                reconcile(session)
+                        except Exception:
+                            logging.getLogger(__name__).warning("conversation_context_cycle_failed")
+                            try:
+                                with SessionLocal() as session:
+                                    session.execute(text("UPDATE conversation_context_progress SET failures=failures+1,updated_at=now() WHERE name='reconcile'"))
+                                    session.commit()
+                            except Exception:
+                                pass
             except Exception:
-                logging.getLogger(__name__).warning("conversation_context_cycle_failed")
-                try:
-                    with SessionLocal() as session:
-                        session.execute(text("UPDATE conversation_context_progress SET failures=failures+1,updated_at=now() WHERE name='reconcile'"))
-                        session.commit()
-                except Exception:
-                    pass
+                logging.getLogger(__name__).warning("conversation_context_gate_failed")
             stop.wait(30)
 
     @app.on_event("startup")
     def start_context():
+        observe_runtime("conversation-context-cycle")
         threading.Thread(target=run, name="conversation-context", daemon=True).start()
 
     @app.on_event("shutdown")

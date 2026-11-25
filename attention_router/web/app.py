@@ -54,6 +54,8 @@ from attention_router.core.tenancy import DEFAULT_TENANT_ID
 from attention_router.config import settings
 from attention_router.adapters.synthetic_inbound import SyntheticInboundAdapter
 from attention_router.infrastructure.db import SessionLocal
+from attention_router.infrastructure.maintenance_gate import GateError, runtime_admission
+from attention_router.web.maintenance_gate import install_maintenance_middleware
 from attention_router.integrations.google_identity import GoogleIdentityVerifier
 from attention_router.integrations.whatsapp_history import WhatsAppHistoryAdapter
 from attention_router.infrastructure.repository import (
@@ -77,6 +79,7 @@ from attention_router.platform.governance_api import build_governance_router
 
 
 app = FastAPI(title="Attention Router", version="0.1.0")
+install_maintenance_middleware(app, "api-http")
 app.mount("/static", StaticFiles(directory="attention_router/web/static"), name="static")
 templates = Jinja2Templates(directory="attention_router/web/templates")
 synthetic_adapter = SyntheticInboundAdapter()
@@ -255,9 +258,12 @@ app.include_router(build_personal_context_bootstrap_router(
 
 @app.on_event("startup")
 def startup() -> None:
-    with SessionLocal() as session:
-        seed_policies(session)
-        session.commit()
+    with runtime_admission("api-http") as admitted:
+        if not admitted:
+            raise GateError("GATE_STARTUP_DRAINING")
+        with SessionLocal() as session:
+            seed_policies(session)
+            session.commit()
 
 
 @app.get("/health/live", tags=["health"])

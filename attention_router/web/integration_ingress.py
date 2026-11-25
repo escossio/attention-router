@@ -73,6 +73,14 @@ def _error(
     )
 
 
+def maintenance_unavailable_response(scope):
+    # Preserve the neutral ingress protocol's existing retryable error shape.
+    if scope.get("path") != INTEGRATION_INGRESS_PATH:
+        return None
+    return _error(request_id=new_id(), error_code="INGRESS_UNAVAILABLE",
+                  status_code=503, headers={"Retry-After": "2"})
+
+
 def _success(result: AdmissionResult) -> JSONResponse:
     if result.receipt_id is None or result.admitted_at is None or result.correlation_id is None:
         raise ValueError("INTEGRATION_ADMISSION_SUCCESS_INCOMPLETE")

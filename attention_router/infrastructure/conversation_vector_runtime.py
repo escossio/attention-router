@@ -9,6 +9,7 @@ from fastapi import Depends, Header, HTTPException
 from pydantic import BaseModel, Field, ConfigDict
 from attention_router.application.conversation_vectors import cycle, sources, sql, scope
 from attention_router.application.conversation_hybrid import search
+from attention_router.infrastructure.maintenance_gate import runtime_admission, observe_runtime
 
 LOG = logging.getLogger(__name__)
 
@@ -129,10 +130,14 @@ def install(app, settings, get_session, require_admin):
             return
         from attention_router.infrastructure.db import SessionLocal
 
+        observe_runtime("vector-cycle")
+
         def run():
             while not stop.is_set():
                 try:
-                    cycle(SessionLocal, batch_size=4)
+                    with runtime_admission("vector-cycle") as admitted:
+                        if admitted:
+                            cycle(SessionLocal, batch_size=4)
                 except Exception:
                     LOG.warning("passive_vector_cycle_failed")
                 stop.wait(max(10, int(os.getenv("CONVERSATION_VECTOR_INTERVAL_SECONDS", "10"))))
