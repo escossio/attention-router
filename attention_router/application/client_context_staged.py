@@ -53,7 +53,7 @@ def _prepare_transaction(reader, session, bearer, scope, *, pg_consent):
         reader._require_owner(session, bearer, scope)
 
 
-def _authorized_context(reader, session, bearer, scope, permits):
+def _authorized_context(reader, session, bearer, scope, permits, *, source_allowed_many=None):
     identity = reader._require_owner(session, bearer, scope)
     row = sessions.get_client_session_by_token(session, token=bearer)
     if row is None or row.device_id != identity.device.device_id:
@@ -65,6 +65,7 @@ def _authorized_context(reader, session, bearer, scope, permits):
         owner_human_identity_id=scope.owner_id,
         source_account=scope.source_account,
         start=scope.start, now=reader._clock(), source_allowed=permits,
+        source_allowed_many=source_allowed_many,
     )
     reader._lock_authority_row(session, TenantRow, scope.tenant_id)
     reader._lock_authority_row(session, ClientSessionRow, row.id)
@@ -117,8 +118,11 @@ class StagedClientContextAuthority:
             with reader._sessions.begin() as session:
                 _prepare_transaction(reader, session, bearer, scope, pg_consent=True)
                 with phase(Stage.CONSENT):
-                    revision, permits = self._pg_consent.current(session, scope, expected_revision)
-                yield revision, _authorized_context(reader, session, bearer, scope, permits), permits
+                    revision, permits = self._pg_consent.current(session, scope, expected_revision, batch=True)
+                yield revision, _authorized_context(
+                    reader, session, bearer, scope, permits,
+                    source_allowed_many=getattr(permits, "filter_rows", None),
+                ), permits
 
     def _scope(self, scope_ref, bearer):
         if self._owner_scope_registry is not None:

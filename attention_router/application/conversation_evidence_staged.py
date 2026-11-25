@@ -137,15 +137,26 @@ def _collect(context, resource_id, prepared, filters, policy, captured_at):
 def _check_expiry(context, snapshot, locked, now):
     """Repeat only time-dependent gates immediately before handing off the body."""
     wall_time = datetime.now(UTC)
+    def layers_for(message):
+        return ("embedding", "transcription") if message.message_type == "VOICE" else ("embedding",)
+
+    batch = getattr(context, "_source_allowed_many", None)
+    if batch is not None:
+        messages = tuple(locked[ConversationMessageRow][source.source_ref] for source in snapshot.sources)
+        permitted = batch(
+            messages, owner_id=context.arguments["owner_human_identity_id"], now=now,
+            required_layers=layers_for,
+        )
+        if len(permitted) != len(messages):
+            raise StagedReadRejected("STAGED_CONVERSATION_SUPPORT_EXPIRED")
     for source in snapshot.sources:
         message = locked[ConversationMessageRow][source.source_ref]
         receipt = locked[ArtifactReceiptRow][source.receipt_ref]
-        layers = ("embedding", "transcription") if message.message_type == "VOICE" else ("embedding",)
         if (
-            not context._source_allowed(
+            (batch is None and not context._source_allowed(
                 message, owner_id=context.arguments["owner_human_identity_id"], now=now,
-                required_layers=layers,
-            )
+                required_layers=layers_for(message),
+            ))
             or context_receipt_refusal(receipt.metadata_json, now=now) is not None
             or context_receipt_refusal(receipt.metadata_json, now=wall_time) is not None
         ):
