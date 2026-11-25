@@ -24,6 +24,9 @@ install -m 0644 "$ROOT_DIR/app.js" "$INSTALL_DIR/app.js"
 install -m 0644 "$ROOT_DIR/context-performance.js" "$INSTALL_DIR/context-performance.js"
 install -m 0644 "$ROOT_DIR/context_performance.py" "$INSTALL_DIR/context_performance.py"
 install -m 0644 "$ROOT_DIR/styles.css" "$INSTALL_DIR/styles.css"
+install -m 0644 "$ROOT_DIR/tcpbrain_observability.py" "$INSTALL_DIR/tcpbrain_observability.py"
+install -m 0644 "$ROOT_DIR/tcpbrain-mgmt.js" "$INSTALL_DIR/tcpbrain-mgmt.js"
+install -m 0644 "$ROOT_DIR/tcpbrain-mgmt.css" "$INSTALL_DIR/tcpbrain-mgmt.css"
 install -m 0644 "$ROOT_DIR/README.md" "$INSTALL_DIR/README.md"
 install -m 0644 "$ROOT_DIR/andy-ops-panel.service" "$SERVICE_PATH"
 
@@ -38,10 +41,12 @@ python3 -m py_compile \
   "$INSTALL_DIR/ar1001_observability.py" \
   "$INSTALL_DIR/investigator_observability.py" \
   "$INSTALL_DIR/transport_observability.py" \
-  "$INSTALL_DIR/message_tracing.py"
+  "$INSTALL_DIR/message_tracing.py" \
+  "$INSTALL_DIR/tcpbrain_observability.py"
 node --check "$INSTALL_DIR/app.js" >/dev/null
 node --check "$INSTALL_DIR/context-performance.js" >/dev/null
 node --check "$INSTALL_DIR/ar1001-card.js" >/dev/null
+node --check "$INSTALL_DIR/tcpbrain-mgmt.js" >/dev/null
 
 systemctl daemon-reload
 systemctl enable --now andy-ops-panel.service
