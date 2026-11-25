@@ -18,6 +18,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from investigator_observability import sample_investigator_activity
 from context_performance import context_performance
+from tcpbrain_observability import sample_tcpbrain
 from message_tracing import sample_message_traces
 from ar1001_observability import cached_sample
 from transport_observability import sample_transport_observability
@@ -940,6 +941,9 @@ class OpsHandler(SimpleHTTPRequestHandler):
             with _state_lock:
                 payload = json.loads(json.dumps(_state))
             self._json(payload)
+            return
+        if path == "/api/tcpbrain/status":
+            self._json(sample_tcpbrain())
             return
         if path == "/api/ar1001":
             self._json(cached_sample())

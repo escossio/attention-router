@@ -172,3 +172,41 @@ Sem essa URL, a aba usa a origem de NETWORK / OSI, quando disponível.
 O operador inicia a bancada descartável no worker e acompanha a aba. A aba
 não dispõe de API de execução, reprocessamento, autoridade ou publicação.
 Veja o [contrato experimental](../../observability/g7-mgmt-experiment.md).
+
+
+## TCPBrain status in NETWORK / OSI
+
+The existing NETWORK / OSI view keeps its ROC/Grafana iframe and adds a
+read-only TCPBrain section. The same protected MGMT origin serves
+`GET /api/tcpbrain/status` (schema `tcpbrain.mgmt.v1`). There is no new
+listener, network attachment, IP allocation, raw event subscription, provider
+call or write to the data plane. The UI polls every two seconds only while the
+tab is active and the document is visible.
+
+The adapter projects a fixed allowlist from the two capture status files and
+the flow analyzer status file under the runtime status directory. It reads
+bounded regular files, rejects unknown schemas and treats samples older than
+five seconds as stale. Missing or invalid metrics are null, not zero. No raw
+packet, IP/MAC, payload, last-event text, credentials or service inventory is
+returned. Use the existing authenticated management boundary; the server
+itself is not a replacement for that boundary.
+
+Capture discards, subscriber delivery failures, flow input connectivity and
+observation coverage are independent. Legacy producers are displayed as
+unverified; V2 counters and watermarks are interpreted when available, with
+epoch and freshness checks. A bounded window is not proof of complete physical
+wire observation. Observed forwarding totals are cumulative for a process
+epoch; an unobserved expected egress does not establish root cause.
+
+This does not integrate TCPBrain path events into the ROC flow-map or change
+the source's NOT_INTEGRATED contract. That integration requires a separate
+review. It does not depend on promotion of a new TCPBrain collector build.
+
+Targeted offline validation:
+`python -B -m unittest discover -s tests -p 'test_tcpbrain_mgmt*.py'` from
+the repository root; `node --check ops/provisioning/andy-ops-panel/tcpbrain-mgmt.js`.
+The dedicated CI runs these tests. Before rollout, verify the exact approved
+revision, existing authenticated access, same-origin assets, health and
+unrelated tabs. Back up the existing server and index, install the new assets
+before the new entry points, and restart only MGMT in an authorized window.
+Restore exact originals and remove only newly added files on regression.

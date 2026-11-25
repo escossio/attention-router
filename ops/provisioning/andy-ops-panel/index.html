@@ -7,6 +7,7 @@
   <title>Andy Ops — Live Supervisor</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="ar1001-card.css">
+  <link rel="stylesheet" href="tcpbrain-mgmt.css">
 </head>
 <body>
   <header class="topbar">
@@ -317,6 +318,13 @@
           <a id="network-open" class="observability-open" href="#" target="_blank" rel="noopener noreferrer" hidden>ABRIR SEPARADO</a>
         </div>
       </section>
+      <section id="tcpbrain-panel" class="tb-panel" aria-labelledby="tcpbrain-heading">
+        <header class="tb-panel-header">
+          <div><span class="section-label">TCP BRAIN · EVIDÊNCIA DE REDE</span><h2 id="tcpbrain-heading">Captura, distribuição e correlação</h2></div>
+          <span class="tb-refresh" role="status">Aguardando status</span>
+        </header>
+        <div class="tb-body"><p class="tb-muted">Aguardando telemetria.</p></div>
+      </section>
       <div class="observability-frame-shell">
         <iframe id="network-frame" title="ROC-NETWORK / OSI" loading="lazy" referrerpolicy="no-referrer"></iframe>
       </div>
@@ -380,5 +388,6 @@
   <script src="app.js" defer></script>
   <script src="context-performance.js" defer></script>
   <script src="ar1001-card.js" defer></script>
+  <script src="tcpbrain-mgmt.js" defer></script>
 </body>
 </html>
