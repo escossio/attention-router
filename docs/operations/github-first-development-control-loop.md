@@ -169,3 +169,75 @@ ao PR e ao prazo. A entrega de credenciais, inscrição de tenant e ativação
 do canário exigem suas próprias decisões posteriores.
 
 Na homologação descartável, o executor de CI deve criar e identificar seu próprio banco antes de selecionar a configuração de teste. O harness versionado faz essa associação apenas no contêiner efêmero.
+
+
+### Modalidade V2: proprietário único
+
+O contrato V1 continua sendo o padrão de registros de versão 1 e exige a
+revisão humana independente no head final. O V2 é uma modalidade explícita,
+não um fallback por ausência de revisão. Não muda o ruleset nem o requisito de
+aprovação imposto pelo GitHub; se uma regra vigente exigir outra aprovação,
+o V2 bloqueia a promoção. O verificador exige repositório individual,
+autenticação efetiva do proprietário com administração, PR do próprio
+proprietário e inventário autenticado e paginado de colaboradores. Se houver
+outra conta com escrita, manutenção ou administração, inventário incompleto,
+autoridade divergente ou pedido de alteração não resolvido, o V2 recusa.
+
+A separação é técnica, não humana. O inventário comprova as contas
+colaboradoras expostas pela API, não todos os tokens, chaves e Apps que possam
+operar sob a autoridade do proprietário. O CI e a auditoria não oferecem
+proteção equivalente à revisão independente de duas pessoas e não protegem
+contra um proprietário malicioso. O V2 não cria autorizações automaticamente.
+
+Há dois comentários JSON distintos na issue #428, ambos escritos pelo
+proprietário. O aceite é posterior ao merge e aos checks, e precede a
+autorização operacional. Ambos são vinculados à mesma operação individual,
+inclusive no rollback, e ao mesmo artefato.
+
+**Aceite técnico V2**, campos exatos:
+
+- version: 2; record_type: technical_acceptance; mode: single_owner;
+  decision: accepted; assurance: automated_evidence_not_independent_human_review.
+- gate, operation, pr, sha (commit integrado), head (head final), tree
+  (árvore integrada) e artifact_sha256 (digest exigido pelo runner).
+- expires_at: UTC, no máximo 24 horas após a criação.
+- checks: objeto com dois mapas, head e integrated. Cada mapa contém
+  exatamente os checks obrigatórios vigentes. A chave é o nome do check;
+  o valor contém app_id, check_run_id, completed_at e output_sha256.
+  A impressão do conteúdo é SHA-256 de json.dumps(output, sort_keys=True,
+  ensure_ascii=False, separators=(",", ":")).encode(), com o output do
+  check oficial. O verificador consulta novamente o GitHub, seleciona o
+  último check por nome/App no SHA exato, valida os recibos distribuídos,
+  exige cobertura PostgreSQL integral e compara os dois mapas. Os oito
+  pares mínimos de nomes/Apps são fixados no contrato V2. Os checks não
+  podem ter terminado depois da criação do aceite. Não usar o resultado
+  de um SHA para outro, nem completar campos com valores sintéticos.
+
+**Autorização operacional V2**, campos exatos:
+
+- version: 2; record_type: operation_authorization; mode: single_owner.
+- gate, operation, pr, sha, artifact_sha256: iguais aos do aceite técnico.
+- technical_acceptance_id: ID do comentário anterior;
+  technical_acceptance_sha256: SHA-256 UTF-8 do corpo integral desse
+  comentário retornado pela API do GitHub (incluindo o bloco JSON).
+- approval_ref: referência opaca da autorização privada;
+  expires_at: UTC, no máximo 30 minutos após a criação da autorização,
+  e não posterior ao vencimento do aceite técnico.
+
+A autoria, issue, IDs, ordem temporal, digest e imutabilidade dos
+comentários são conferidos. Editar ou excluir qualquer um dos comentários
+invalida a prova; para revogar, editar o aceite para decision=revoked ou
+excluir o comentário. Para corrigir um registro, criar outro após nova
+decisão explícita, não editar o antigo. A API indisponível bloqueia.
+No fim do pré-voo o verificador relê os registros, PR, revisões, inventário,
+regras, linhagem, checks e checkout. Isso reduz a janela de divergência,
+mas não oferece atomicidade com futuras mudanças no GitHub nem consumo
+exatamente uma vez da autorização. Permanecem as guardas transacionais,
+os limites temporais e o procedimento de reconciliação de cada runner.
+
+A mudança de contrato não autoriza G3-G6, não substitui catálogo, ACL,
+backup/restauração, aprovação privada de schema/papéis, atestação OCI,
+isolamento, consentimento ou rollback. Uma nova versão do verificador
+exige PR, CI oficial no head e na main integrada, novo digest do runner
+e nova decisão de promoção. Não usar o patch de bancada para executar
+release no banco operacional.
