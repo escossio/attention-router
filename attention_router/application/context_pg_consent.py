@@ -18,6 +18,7 @@ from attention_router.infrastructure.hashing import stable_hash
 from attention_router.infrastructure.models import ConversationMessageRow
 
 PURPOSE = "prospective_context"
+_BATCH_SIZE = 256
 
 
 def _scope_fields(scope):
@@ -66,6 +67,48 @@ def _receipt(session, scope, receipt_id):
     ).with_for_update(read=True).execution_options(populate_existing=True))
 
 
+def _chunks(ids):
+    """Bound each statement without reducing the existing evidence limit."""
+    keys = sorted(set(ids))
+    for start in range(0, len(keys), _BATCH_SIZE):
+        yield keys[start:start + _BATCH_SIZE]
+
+
+def _receipts(session, scope, receipt_ids):
+    """Fresh scoped receipt locks, in deterministic order for this transaction."""
+    result = {}
+    for keys in _chunks(receipt_ids):
+        rows = session.scalars(select(ArtifactReceiptRow).where(
+            ArtifactReceiptRow.id.in_(keys),
+            ArtifactReceiptRow.tenant_id == scope.tenant_id,
+            ArtifactReceiptRow.source_account == scope.source_account,
+            ArtifactReceiptRow.source_channel == "channel.whatsapp",
+        ).order_by(ArtifactReceiptRow.id).with_for_update(read=True)
+          .execution_options(populate_existing=True)).all()
+        result.update((row.id, row) for row in rows)
+    return result
+
+
+def _grant(row, scope, purpose):
+    return SourceConsent(
+        row.decision_ref, scope.tenant_id, scope.owner_id, scope.source_account,
+        row.conversation_id, row.message_id, row.receipt_id, purpose,
+        row.starts_at, row.expires_at, row.sensitivity,
+        tuple((layer, datetime.fromisoformat(deadline)) for layer, deadline in row.retention.items()),
+    )
+
+
+class _BatchedPermit:
+    """A scalar permit plus a fresh, transaction-bound set projection."""
+
+    def __init__(self, scalar, filter_rows):
+        self._scalar = scalar
+        self.filter_rows = filter_rows
+
+    def __call__(self, message, *, owner_id, now, required_layers=()):
+        return self._scalar(message, owner_id=owner_id, now=now, required_layers=required_layers)
+
+
 def _digest(message):
     return stable_hash((message.content_hash, message.text, message.normalized_text))
 
@@ -87,16 +130,19 @@ def _matches(row, grant, message, receipt, *, owner_id, now, required_layers=())
 class PgSourceConsent:
     """Bind a scoped permit predicate to the caller's held transaction."""
 
-    def current(self, session, scope, expected_revision=None):
+    def current(self, session, scope, expected_revision=None, *, batch=False):
         authority = _lock_scope(session, scope)
         revision = f"{authority.id}:{authority.incarnation}:{authority.revision}"
         if expected_revision is not None and expected_revision != revision:
             raise ValueError("CONTEXT_CONSENT_REVISION_STALE")
         transaction = session.get_transaction()
 
-        def permits(message, *, owner_id, now, required_layers=()):
+        def require_transaction():
             if session.get_transaction() is not transaction or not transaction.is_active:
                 raise ValueError("CONTEXT_CONSENT_TRANSACTION_ENDED")
+
+        def permits(message, *, owner_id, now, required_layers=()):
+            require_transaction()
             required_layers = tuple(required_layers)
             row = session.get(ContextSourceConsentRow, (authority.id, message.id))
             if row is None:
@@ -104,18 +150,58 @@ class PgSourceConsent:
             if row.revoked_at is not None:
                 record(Decision.REVOKED)
                 return False
-            grant = SourceConsent(
-                row.decision_ref, scope.tenant_id, scope.owner_id, scope.source_account,
-                row.conversation_id, row.message_id, row.receipt_id, authority.purpose,
-                row.starts_at, row.expires_at, row.sensitivity,
-                tuple((layer, datetime.fromisoformat(deadline)) for layer, deadline in row.retention.items()),
-            )
+            grant = _grant(row, scope, authority.purpose)
             return _matches(
                 row, grant, message, _receipt(session, scope, row.receipt_id),
                 owner_id=owner_id, now=now, required_layers=required_layers,
             )
 
-        return revision, permits
+        if not batch:
+            return revision, permits
+
+        def filter_rows(messages, *, owner_id, now, required_layers=()):
+            # Caller has already locked message rows in the same transaction.
+            # No grants, receipts, permit decisions, or time samples are retained
+            # between calls. Delivery must acquire a new scope/transaction.
+            require_transaction()
+            if session.in_nested_transaction():
+                raise ValueError("CONTEXT_PG_CONSENT_UNAVAILABLE")
+            messages = tuple(messages)
+            if not messages:
+                return ()
+            if any(message.tenant_id != scope.tenant_id or
+                   message.source_account != scope.source_account for message in messages):
+                raise ValueError("CONTEXT_CONSENT_BATCH_SCOPE_MISMATCH")
+            grants = {}
+            for keys in _chunks(message.id for message in messages):
+                rows = session.scalars(select(ContextSourceConsentRow).where(
+                    ContextSourceConsentRow.scope_id == authority.id,
+                    ContextSourceConsentRow.message_id.in_(keys),
+                ).order_by(ContextSourceConsentRow.message_id)
+                  .execution_options(populate_existing=True)).all()
+                grants.update((row.message_id, row) for row in rows)
+            receipts = _receipts(session, scope, (
+                row.receipt_id for row in grants.values()
+                if row.revoked_at is None and row.receipt_id
+            ))
+            allowed = []
+            for message in messages:
+                row = grants.get(message.id)
+                if row is None:
+                    continue
+                if row.revoked_at is not None:
+                    record(Decision.REVOKED)
+                    continue
+                stamp = now() if callable(now) else now
+                layers = required_layers(message) if callable(required_layers) else required_layers
+                if _matches(row, _grant(row, scope, authority.purpose), message,
+                            receipts.get(row.receipt_id), owner_id=owner_id, now=stamp,
+                            required_layers=tuple(layers)):
+                    allowed.append(message)
+            require_transaction()
+            return tuple(allowed)
+
+        return revision, _BatchedPermit(permits, filter_rows)
 
     @staticmethod
     def require_current_source(session, scope, scope_ref, permits, now):
@@ -147,6 +233,22 @@ class PgSourceConsent:
         messages = context.lock_permitted_source_rows(versions)
         if len(messages) != len(versions):
             raise ValueError("CONTEXT_CONSENT_SOURCE_STALE")
+        if isinstance(permits, _BatchedPermit):
+            receipts = _receipts(context.session, scope, (v.receipt_ref for v in versions.values()))
+            for message in messages:
+                version = versions[message.id]
+                receipt = receipts.get(version.receipt_ref)
+                if (
+                    message.context_revision != version.revision
+                    or version.receipt_ref != (message.metadata_json or {}).get("artifact_receipt_id")
+                    or receipt is None or receipt.context_revision != version.receipt_revision
+                ):
+                    raise ValueError("CONTEXT_CONSENT_SOURCE_STALE")
+            # Independently reload the grant and its receipt; sample the current
+            # clock per source rather than reusing the capture timestamp.
+            if len(permits.filter_rows(messages, owner_id=scope.owner_id, now=clock)) != len(messages):
+                raise ValueError("CONTEXT_CONSENT_SOURCE_STALE")
+            return
         for message in messages:
             version = versions[message.id]
             receipt = _receipt(context.session, scope, version.receipt_ref)

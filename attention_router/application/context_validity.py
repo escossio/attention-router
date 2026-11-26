@@ -31,7 +31,7 @@ class ContextValidity:
     def __init__(
         self, session: Session, *, tenant_id: str, binding_id: str,
         owner_human_identity_id: str, source_account: str, start: datetime, now: datetime,
-        source_allowed=None,
+        source_allowed=None, source_allowed_many=None,
     ):
         if session.get_bind().dialect.name != "postgresql":
             raise ValueError("CONTEXT_VALIDITY_POSTGRESQL_REQUIRED")
@@ -43,6 +43,9 @@ class ContextValidity:
             raise ValueError("CONTEXT_VALIDITY_SCOPE_INVALID")
         self.session = session
         self._source_allowed = source_allowed
+        if source_allowed_many is not None and (not callable(source_allowed_many) or source_allowed is None):
+            raise ValueError("CONTEXT_CONSENT_BATCH_INVALID")
+        self._source_allowed_many = source_allowed_many
         self.transaction = session.get_transaction()
         self.arguments = MappingProxyType(dict(
             tenant_id=tenant_id, binding_id=binding_id,
@@ -100,6 +103,11 @@ class ContextValidity:
             ConversationMessageRow.source_account == self.arguments["source_account"],
         ).order_by(ConversationMessageRow.id).with_for_update(read=True)
           .execution_options(populate_existing=True)).all()
+        if self._source_allowed_many is not None:
+            return self._source_allowed_many(
+                messages, owner_id=self.arguments["owner_human_identity_id"],
+                now=self.arguments["now"], required_layers=required_layers,
+            )
         required = {"required_layers": required_layers} if required_layers else {}
         return tuple(
             message for message in messages
