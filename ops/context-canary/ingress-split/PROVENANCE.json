@@ -1,0 +1,53 @@
+{
+  "format_version": 1,
+  "status": "PREPARATION_ONLY",
+  "deployment_authorized": false,
+  "schema_change_authorized": false,
+  "andy_certified_base": "6dc705a1afdf703fdf40b4132aa13c90da2fdace",
+  "andy_certified_tree": "47d76a118efbfabb82df71288bc4194448fd8f86",
+  "legacy_source_revision": "9d7276b7ec8dba015de13f56a5168462eacae723",
+  "tested_legacy_local_image_id": "sha256:13c02bffe68611cccd32542a904b578ffea69d11fcca8967586259e20a17dd92",
+  "historical_standalone_pr": 374,
+  "historical_standalone_head": "eb2c7c32c75410d5d91e2f85b74ebb774f82cb2f",
+  "historical_launcher_sha256": "fda4c75c6663654a17993b47718a148347a73a7c4dcea1c63d0db4a0edb591c5",
+  "legacy_image_dependencies": {
+    "attention_router/web/dual_ingress_server.py": "36eae7099762cd81ea061733514b4769d63363afe833975adc3259791b8db0ef",
+    "attention_router/web/maestro_relay_ingress.py": "bb7d49f9115d9f26ba2464c326a3197825a591a6fcdb065f5d4fb0cf6164da3e",
+    "attention_router/config.py": "4a79a93a72014f2aeea6c79d6511ca88ac36cc12cdb25da5911a393e89a49fe4"
+  },
+  "files_sha256": {
+    "compose.andy.yaml": "74462e2ce79cac65017d48c93ee55732490905afe23a7aca5ac1bcf199a7b9f9",
+    "compose.maestro-standby.yaml": "616fea0b2092df3ba4b071b7f8ab7d419658d4c7e2b962cd4674d0066696489f",
+    "maestro_standalone_server.py": "98b322ea1e8f6f91abda69ecf731c8b2902d485eadca2f742512e095d0fdd43c"
+  },
+  "andy_overlay_sha256": {
+    "attention_router/infrastructure/maintenance_gate.py": "bdbcf218dc72bb51631afe8f21a4fd783a74b56662c5a6d35d5fa46a66871710",
+    "attention_router/web/ingress_app.py": "40426b4a3b426f527cd7bb603e3dc0f1266c0ce6db5196910937941ee509e737",
+    "attention_router/web/integration_ingress.py": "f3ec3a84cf563e6e538d93bda13ee918e4d3195650ff9b386cf05a70d51ba7ec",
+    "attention_router/web/maintenance_gate.py": "18cf4a8ee19552b2f153e88d7d22e3c6742ee6f315dd4bf6f8640f398a36a210"
+  },
+  "tested_database_revision": "0067_vector_lock_order",
+  "maestro_standby_admission_enabled": false,
+  "evidence": [
+    {
+      "scope": "independent lifecycle with historical enabled synthetic relay",
+      "passed": 25,
+      "total": 25
+    },
+    {
+      "scope": "adapted standby launcher, synthetic PostgreSQL and TLS",
+      "passed": 15,
+      "total": 15
+    },
+    {
+      "scope": "Compose static render with non-operational placeholders",
+      "passed": 20,
+      "total": 20
+    },
+    {
+      "scope": "Compose runtime with network-none and private synthetic database socket override",
+      "passed": 20,
+      "total": 20
+    }
+  ]
+}

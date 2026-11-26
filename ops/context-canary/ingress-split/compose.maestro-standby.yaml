@@ -1,0 +1,65 @@
+# PREPARATION ONLY. Existing standby admission remains disabled.
+# This local candidate is not the historically certified #374 artifact.
+name: maestro-tls-independent
+services:
+  maestro-ingress:
+    profiles: [authorized-cutover]
+    image: ${MAESTRO_LEGACY_IMAGE_ID:?verified exact local legacy image required}
+    pull_policy: never
+    command: [python, -B, -m, attention_router.web.maestro_standalone_server]
+    user: "10001:10001"
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=128m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: ${MAESTRO_PIDS_LIMIT:?reviewed resource budget required}
+    cpus: ${MAESTRO_CPU_LIMIT:?reviewed resource budget required}
+    mem_limit: ${MAESTRO_MEMORY_LIMIT:?reviewed resource budget required}
+    restart: unless-stopped
+    stop_grace_period: ${MAESTRO_STOP_GRACE:?reviewed stop budget required}
+    env_file:
+      - ${MAESTRO_PRIVATE_ENV_FILE:?separate reviewed private MAESTRO environment required}
+    environment:
+      MAESTRO_RELAY_INGRESS_ENABLED: "false"
+      MAESTRO_HTTPS_LISTENER_ENABLED: "true"
+      INTEGRATION_INGRESS_ENABLED: "false"
+      MAESTRO_HTTPS_BIND_HOST: ${MAESTRO_RESERVED_IP:?existing authorized TLS identity required}
+      MAESTRO_HTTPS_PORT: "18443"
+      MAESTRO_DATABASE_URL_FILE: /run/secrets/database_url
+      MAESTRO_HTTPS_CERTFILE: /run/tls/server.crt
+      MAESTRO_HTTPS_KEYFILE: /run/tls/server.key
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - type: bind
+        source: ${MAESTRO_STANDALONE_LAUNCHER:?reviewed sealed local candidate required}
+        target: /app/attention_router/web/maestro_standalone_server.py
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MAESTRO_DB_URL_HOST_FILE:?approved private file required}
+        target: /run/secrets/database_url
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MAESTRO_CERT_HOST_FILE:?approved certificate required}
+        target: /run/tls/server.crt
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MAESTRO_KEY_HOST_FILE:?approved private key required}
+        target: /run/tls/server.key
+        read_only: true
+        bind: {create_host_path: false}
+    networks:
+      operational:
+        ipv4_address: ${MAESTRO_RESERVED_IP:?existing authorized TLS identity required}
+    healthcheck:
+      test: [CMD, python, -B, -m, attention_router.web.maestro_standalone_server, --health]
+      interval: 20s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+networks:
+  operational:
+    external: true
+    name: ${MAESTRO_OPERATIONAL_NETWORK:?reviewed existing network required}

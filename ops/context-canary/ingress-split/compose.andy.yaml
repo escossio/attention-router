@@ -1,0 +1,65 @@
+# PREPARATION ONLY. Do not invoke up/create/start without independent cutover approval.
+name: andy-neutral-independent
+services:
+  andy-ingress:
+    profiles: [authorized-cutover]
+    image: ${ANDY_LEGACY_IMAGE_ID:?verified exact local legacy image required}
+    pull_policy: never
+    command: [uvicorn, attention_router.web.ingress_app:app, --host, "0.0.0.0", --port, "18101", --lifespan, "on"]
+    user: "0:0"
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=128m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: ${ANDY_PIDS_LIMIT:?reviewed resource budget required}
+    cpus: ${ANDY_CPU_LIMIT:?reviewed resource budget required}
+    mem_limit: ${ANDY_MEMORY_LIMIT:?reviewed resource budget required}
+    restart: unless-stopped
+    stop_grace_period: ${ANDY_STOP_GRACE:?reviewed stop budget required}
+    env_file:
+      - ${ANDY_PRIVATE_ENV_FILE:?separate reviewed private Andy environment required}
+    environment:
+      INTEGRATION_INGRESS_ENABLED: "true"
+      MAESTRO_RELAY_INGRESS_ENABLED: "false"
+      MAESTRO_HTTPS_LISTENER_ENABLED: "false"
+      ANDY_MAINTENANCE_GATE_DIR: /run/andy-maintenance
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - type: bind
+        source: ${ANDY_GATE_HOST_DIR:?existing authorized gate required}
+        target: /run/andy-maintenance
+        read_only: false
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${ANDY_OVERLAY_ROOT:?sealed overlay path required}/attention_router/infrastructure/maintenance_gate.py
+        target: /app/attention_router/infrastructure/maintenance_gate.py
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${ANDY_OVERLAY_ROOT:?sealed overlay path required}/attention_router/web/maintenance_gate.py
+        target: /app/attention_router/web/maintenance_gate.py
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${ANDY_OVERLAY_ROOT:?sealed overlay path required}/attention_router/web/ingress_app.py
+        target: /app/attention_router/web/ingress_app.py
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${ANDY_OVERLAY_ROOT:?sealed overlay path required}/attention_router/web/integration_ingress.py
+        target: /app/attention_router/web/integration_ingress.py
+        read_only: true
+        bind: {create_host_path: false}
+    networks:
+      operational:
+        ipv4_address: ${ANDY_RESERVED_IP:?authoritative reservation required}
+    healthcheck:
+      test: [CMD, curl, -fsS, "http://127.0.0.1:18101/health/live"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+networks:
+  operational:
+    external: true
+    name: ${ANDY_OPERATIONAL_NETWORK:?reviewed existing network required}
