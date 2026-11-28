@@ -3,11 +3,11 @@
 import json
 import os
 from pathlib import Path
+import secrets
 import socket
 import sys
 import tempfile
 
-from .composition import RestrictedGoogleIdentity
 from .runtime import load_app
 
 
@@ -44,6 +44,12 @@ def main():
             assert str(error) == "EXPLICIT_EXPERIMENT_REQUIRED"
         else:
             raise AssertionError("WRONG_ENVIRONMENT_ACCEPTED")
+    # Disposable smoke secrets satisfy the inherited Settings guards, never a
+    # ClientSession or provider credential. No productive environment is imported.
+    os.environ["ADMIN_TOKEN"] = secrets.token_urlsafe(32)
+    os.environ["INTERNAL_INGRESS_HMAC_SECRET"] = secrets.token_urlsafe(32)
+    from .composition import RestrictedGoogleIdentity
+
     verifier = RestrictedGoogleIdentity(
         audience="synthetic.apps.googleusercontent.com", allowed_subjects=["synthetic"]
     )

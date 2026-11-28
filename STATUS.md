@@ -555,3 +555,7 @@ provisioned. Exact-SHA artifact receipts remain in #482/#479.
 First dedicated Python 3.13 build exposed the general package's psycopg-binary
 3.2.1 wheel incompatibility. M2 uses its own bounded dependency list (V0 psycopg
 3.2.13); productive dependency pins and services are unchanged.
+The image smoke then exposed inherited global Settings initialization. Runtime now
+reads protected experimental bootstrap secrets before those imports, retaining the
+existing guards; disposable certification generates test-only values without
+APP_ENV=test. No new authority token or productive route is introduced.

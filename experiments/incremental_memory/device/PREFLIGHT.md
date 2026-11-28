@@ -29,6 +29,12 @@ Copy config.example.json to a protected location OUTSIDE Git/build contexts. Own
 marker, M1 schema/roles and four onboarding tables explicitly; no startup migration.
 Use generated experimental passwords only during separately authorized provisioning.
 Runtime roles are not owners/superusers and cannot create schemas or bypass RLS.
+The existing service/ORM imports also instantiate global Settings. Supply independent
+random lab_admin_secret and lab_ingress_secret (at least 32 characters) in that same
+protected file. They satisfy the unchanged admin/HMAC guards; no admin/internal
+ingress router is mounted and neither value is a ClientSession. The inherited ORM
+engine points to in-memory SQLite; all actual identity/memory work uses the explicit
+dedicated PostgreSQL factories. Do not set APP_ENV=test or disable those guards.
 The reader cannot mutate memory/identity. The issuer writes identity only; memory
 corrections are administrative operations outside HTTP. Recheck grants by SQL
 catalog inspection in the disposable rehearsal.

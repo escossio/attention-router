@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from .composition import create_device_app
 
 
 def load_app():
@@ -17,6 +16,20 @@ def load_app():
     config = json.loads(path.read_text())
     if config.get("environment") != "M2_SYNTHETIC_DEVICE":
         raise ValueError("EXPLICIT_EXPERIMENT_REQUIRED")
+    # Existing ORM/service imports instantiate global Settings. Preserve its guards
+    # using dedicated protected lab secrets; no admin/internal router is mounted.
+    for key, variable in (
+        ("lab_admin_secret", "ADMIN_TOKEN"),
+        ("lab_ingress_secret", "INTERNAL_INGRESS_HMAC_SECRET"),
+    ):
+        value = config.get(key)
+        if not isinstance(value, str) or len(value) < 32:
+            raise ValueError("EXPERIMENTAL_BOOTSTRAP_SECRETS_REQUIRED")
+        os.environ[variable] = value
+    os.environ["ADMIN_AUTH_ENABLED"] = "true"
+    os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
+    from .composition import create_device_app
+
     factories = []
     for key in ("issuer_dsn", "reader_dsn"):
         engine = create_engine(
