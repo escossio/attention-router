@@ -559,3 +559,6 @@ The image smoke then exposed inherited global Settings initialization. Runtime n
 reads protected experimental bootstrap secrets before those imports, retaining the
 existing guards; disposable certification generates test-only values without
 APP_ENV=test. No new authority token or productive route is introduced.
+Dedicated image d736a6b passed Python 3.13 smoke plus 23 M1/M2 cases in disposable
+PostgreSQL. Final certification locks all resolved wheel hashes and exercises
+load_app with protected configuration; see #482/#479 for the final immutable receipt.

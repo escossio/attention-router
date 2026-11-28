@@ -62,7 +62,21 @@ docker run --rm --network "$name" --read-only --cap-drop ALL --security-opt no-n
   -e PUBLIC_POSTGRES_TEST_URL=postgresql+psycopg://ar_test@postgres/attention_router_test \
   "$name:tests" | tee "$output/integration.txt"
 docker save "$image" | gzip -n > "$output/m2-image.docker.tar.gz"
-docker inspect --format '{{.Id}}' "$image" > "$output/image-config.digest"
+docker inspect --format '{{.Id}}' "$image" > "$output/image-id.txt"
+python3 - "$output" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+import tarfile
+output = Path(sys.argv[1])
+with tarfile.open(output / 'm2-image.docker.tar.gz', 'r:gz') as archive:
+    manifest = json.load(archive.extractfile('manifest.json'))
+    assert len(manifest) == 1
+    config = archive.extractfile(manifest[0]['Config']).read()
+    digest = 'sha256:' + hashlib.sha256(config).hexdigest()
+    (output / 'image-config.digest').write_text(digest + '\n')
+PY
 printf '%s\n' "$sha" > "$output/source.sha"
 printf '%s\n' "$base" > "$output/python-base.digest"
 printf '%s\n' "$postgres" > "$output/postgres-base.digest"

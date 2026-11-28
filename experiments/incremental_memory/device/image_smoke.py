@@ -14,6 +14,7 @@ from .runtime import load_app
 def main():
     assert sys.version_info[:2] == (3, 13)
     assert os.getuid() == 10001
+    assert os.environ.get("APP_ENV", "production") != "test"
     # Even loopback has no running peer; prohibit any connection during this smoke.
     def forbidden(*args, **kwargs):
         raise AssertionError("SMOKE_MUST_NOT_CONNECT")
@@ -44,6 +45,13 @@ def main():
             assert str(error) == "EXPLICIT_EXPERIMENT_REQUIRED"
         else:
             raise AssertionError("WRONG_ENVIRONMENT_ACCEPTED")
+        config.write_text(json.dumps({"environment": "M2_SYNTHETIC_DEVICE"}))
+        try:
+            load_app()
+        except ValueError as error:
+            assert str(error) == "EXPERIMENTAL_BOOTSTRAP_SECRETS_REQUIRED"
+        else:
+            raise AssertionError("MISSING_SECRETS_ACCEPTED")
     # Disposable smoke secrets satisfy the inherited Settings guards, never a
     # ClientSession or provider credential. No productive environment is imported.
     os.environ["ADMIN_TOKEN"] = secrets.token_urlsafe(32)
@@ -57,6 +65,7 @@ def main():
     print(json.dumps({"status": "PASS", "python": sys.version.split()[0],
                       "uid": os.getuid(), "imports": "PASS", "missing_config": "REJECTED",
                       "public_config": "REJECTED", "wrong_environment": "REJECTED",
+                      "missing_bootstrap_secrets": "REJECTED",
                       "network": "none", "provider_calls": 0}))
 
 

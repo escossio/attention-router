@@ -2,7 +2,9 @@
 
 import base64
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+import json
+import os
+import secrets
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -16,16 +18,16 @@ from attention_router.core.human_identity import VerifiedProviderIdentity
 from attention_router.integrations.google_identity import GoogleIdentityVerifier
 from experiments.incremental_memory.authenticated.schema import register_scope
 from experiments.incremental_memory.device.composition import (
-    create_device_app,
     provision_onboarding,
 )
+from experiments.incremental_memory.device.runtime import load_app
 
 lab = m1_lab
 pytestmark = pytest.mark.postgres
 
 
 @pytest.fixture
-def device_lab(lab, monkeypatch):
+def device_lab(lab, monkeypatch, tmp_path):
     engine = lab.admin.kw["bind"]
     provision_onboarding(
         engine,
@@ -45,21 +47,22 @@ def device_lab(lab, monkeypatch):
         )
 
     monkeypatch.setattr(GoogleIdentityVerifier, "verify", verify)
-    settings = SimpleNamespace(
-        **vars(lab.settings),
-        human_identity_enabled=True,
-        human_auth_challenge_ttl_seconds=60,
-        human_auth_continuation_grant_ttl_seconds=120,
-        device_bootstrap_enabled=True,
-        device_bootstrap_challenge_ttl_seconds=60,
-    )
-    app = create_device_app(
-        issuer_factory=lab.issuer_factory,
-        reader_factory=lab.reader_factory,
-        settings=settings,
-        google_audience="synthetic-lab.apps.googleusercontent.com",
-        allowed_subjects={"synthetic-device-owner"},
-    )
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({
+        "environment": "M2_SYNTHETIC_DEVICE",
+        "issuer_dsn": lab.issuer_factory.kw["bind"].url.render_as_string(hide_password=False),
+        "reader_dsn": lab.reader_factory.kw["bind"].url.render_as_string(hide_password=False),
+        "lab_admin_secret": secrets.token_urlsafe(32),
+        "lab_ingress_secret": secrets.token_urlsafe(32),
+        "google_audience": "synthetic-lab.apps.googleusercontent.com",
+        "allowed_subjects": ["synthetic-device-owner"],
+    }))
+    config.chmod(0o600)
+    monkeypatch.setenv("ANDY_LAB_CONFIG", str(config))
+    # Ensure load_app's environment changes are restored for neighboring tests.
+    for key in ("ADMIN_TOKEN", "INTERNAL_INGRESS_HMAC_SECRET", "ADMIN_AUTH_ENABLED", "DATABASE_URL"):
+        monkeypatch.setenv(key, os.environ.get(key, ""))
+    app = load_app()
     with TestClient(app) as client:
         yield lab, client, assertion
 

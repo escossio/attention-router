@@ -35,7 +35,7 @@ not merely remove the provider allowlist entry.
 
 The file selected by ANDY_LAB_CONFIG must be mode 0600, readable by runtime UID,
 with fields environment=M2_SYNTHETIC_DEVICE, issuer_dsn, reader_dsn,
-google_audience and allowed_subjects. DSNs target only the dedicated DB over the
+google_audience, allowed_subjects, lab_admin_secret and lab_ingress_secret. DSNs target only the dedicated DB over the
 Unix socket. Account sub values, passwords and actual endpoints stay outside Git.
 Use a separate Google OAuth project/client and explicitly approved test account;
 configure the Android .lab package and approved APK signing certificate in that
