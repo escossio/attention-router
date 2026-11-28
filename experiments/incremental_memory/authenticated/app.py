@@ -34,12 +34,10 @@ class Question(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
 
 
-def require_experimental(factory, *, reader):
+def require_experimental(factory, *, reader, onboarding=False):
     """Attest exclusive schema, role and write fences; never create/repair them."""
     with factory.begin() as session:
-        database, role = session.execute(
-            text("SELECT current_database(),current_user")
-        ).one()
+        database, role = session.execute(text("SELECT current_database(),current_user")).one()
         import re
 
         if not re.fullmatch(r"andy_memory_m1_[0-9a-f]{32}", database):
@@ -66,6 +64,13 @@ def require_experimental(factory, *, reader):
             "memory_scopes",
             "memory_scope_information",
         }
+        if onboarding:
+            protected |= {
+                "external_identity_bindings",
+                "human_auth_transactions",
+                "human_auth_continuation_grants",
+                "device_bootstrap_challenges",
+            }
         tables = set(
             session.execute(
                 text("SELECT tablename FROM pg_tables WHERE schemaname='public'")
@@ -117,9 +122,9 @@ class ContextEndpoint:
                 "error": code,
             }
             with anyio.move_on_after(2):
-                await JSONResponse(
-                    body, status_code=status, headers={"Cache-Control": "no-store"}
-                )(scope, receive, send)
+                await JSONResponse(body, status_code=status, headers={"Cache-Control": "no-store"})(
+                    scope, receive, send
+                )
 
         try:
             raw = bytearray()
@@ -159,9 +164,7 @@ class ContextEndpoint:
                         ],
                     }
                 )
-                await send(
-                    {"type": "http.response.body", "body": body, "more_body": False}
-                )
+                await send({"type": "http.response.body", "body": body, "more_body": False})
 
         def read():
             self.delivery.query_and_deliver(
@@ -203,15 +206,19 @@ class ContextEndpoint:
             group.cancel_scope.cancel()
 
 
-def create_app(*, issuer_factory, reader_factory, settings):
+def create_app(*, issuer_factory, reader_factory, settings, onboarding=False):
     def location(factory):
         url = factory.kw["bind"].url
         return url.drivername, url.host, url.port, url.database, url.query
 
     if location(issuer_factory) != location(reader_factory):
         raise ValueError("SAME_EXPERIMENTAL_DATABASE_REQUIRED")
-    issuer_db, issuer_role = require_experimental(issuer_factory, reader=False)
-    reader_db, reader_role = require_experimental(reader_factory, reader=True)
+    issuer_db, issuer_role = require_experimental(
+        issuer_factory, reader=False, onboarding=onboarding
+    )
+    reader_db, reader_role = require_experimental(
+        reader_factory, reader=True, onboarding=onboarding
+    )
     if issuer_db != reader_db or issuer_role == reader_role:
         raise ValueError("SEPARATE_ROLES_SAME_EXPERIMENTAL_DATABASE_REQUIRED")
     service = ClientSessionService(settings=settings)
@@ -223,9 +230,7 @@ def create_app(*, issuer_factory, reader_factory, settings):
             yield session
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    app.include_router(
-        build_client_session_router(get_session=get_session, service=service)
-    )
+    app.include_router(build_client_session_router(get_session=get_session, service=service))
     delivery = AuthenticatedMemoryDelivery(MemoryAuthority(reader_factory, service))
     app.router.routes.append(Route(PATH, ContextEndpoint(delivery), methods=["POST"]))
 

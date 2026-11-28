@@ -11,6 +11,22 @@ concurrency:
   group: public-ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  m2-image:
+    if: github.ref == 'refs/heads/experiment/incremental-memory-v0-device'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Certify the dedicated M2 image without operational activation
+        run: bash experiments/incremental_memory/device/certify-image.sh "$GITHUB_SHA" "$RUNNER_TEMP/m2-certification"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: m2-image-${{ github.sha }}
+          path: ${{ runner.temp }}/m2-certification/
+          if-no-files-found: error
+          compression-level: 0
   impact:
     runs-on: ubuntu-latest
     timeout-minutes: 5

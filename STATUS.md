@@ -539,3 +539,26 @@ the assets and `docs/demo.md`.
 
 - Candidato `fix/first-contact-intro-audio-only-pass24` parte da main `aebeccfd7f9180bca1137629ada254ba1519c44b`. Somente `INTRODUCE` recebe marcador de áudio no texto; o seletor e a validação de saída exigem apresentação `CONFIRMED`, prova ACK >= 2, intent e hash vinculados. `CONTINUE`, conversas comuns e atores vinculados não geram complemento; recebimento/transcrição de áudio e resposta histórica somente em voz seguem independentes.
 - Testes locais sintéticos de First Contact e voz: 83 PASS, Ruff, compileall e diff-check PASS. PostgreSQL descartável e checks oficiais serão executados no SHA publicado; não houve migração 0061, reenfileiramento de históricos, mudança produtiva ou envio real.
+
+## M2-LAB candidate
+
+Experimental device onboarding composition prepared under #479, on the dedicated
+experiment/incremental-memory-v0-device branch. No listeners/deployment/real identity
+used. M0 and prior PR heads preserved. See experiments/incremental_memory/device/README.md.
+Exact-SHA test receipts and current certification state are recorded in #482/#479.
+Android remains blocked until legitimate #106 incorporation. No operational activation.
+
+Dedicated M2 image certification added to CI, with offline fail-closed smoke and
+discardable PostgreSQL onboarding/session/query checks. Inert HBA/socket preparation
+and protected OAuth/TLS/isolation preflight are versioned; no credentials/resources
+provisioned. Exact-SHA artifact receipts remain in #482/#479.
+First dedicated Python 3.13 build exposed the general package's psycopg-binary
+3.2.1 wheel incompatibility. M2 uses its own bounded dependency list (V0 psycopg
+3.2.13); productive dependency pins and services are unchanged.
+The image smoke then exposed inherited global Settings initialization. Runtime now
+reads protected experimental bootstrap secrets before those imports, retaining the
+existing guards; disposable certification generates test-only values without
+APP_ENV=test. No new authority token or productive route is introduced.
+Dedicated image d736a6b passed Python 3.13 smoke plus 23 M1/M2 cases in disposable
+PostgreSQL. Final certification locks all resolved wheel hashes and exercises
+load_app with protected configuration; see #482/#479 for the final immutable receipt.

@@ -1,0 +1,84 @@
+# INERT TEMPLATE: no ports, no auto-restart, no operational resources created.
+name: andy-memory-m2
+services:
+  socket-init:
+    profiles: [authorized-device]
+    image: python@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
+    network_mode: none
+    read_only: true
+    restart: "no"
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER]
+    security_opt: [no-new-privileges:true]
+    command: [python, -c, "import os; os.chown('/socket',70,70); os.chmod('/socket',0o2770); os.chown('/http',10001,10001); os.chmod('/http',0o2770)"]
+    volumes: [pgsocket:/socket, http:/http]
+  core:
+    profiles: [authorized-device]
+    image: ${LAB_CORE_IMAGE:?exact-source image pinned by digest required}
+    command: [uvicorn, experiments.incremental_memory.device.runtime:load_app, --factory, --uds, /http/app.sock, --no-access-log]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "10001:10001"
+    group_add: ["70"]
+    depends_on:
+      socket-init:
+        condition: service_completed_successfully
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+    environment:
+      ANDY_LAB_CONFIG: /run/lab/config.json
+      HTTPS_PROXY: ${LAB_VERIFIER_PROXY:?approved restricted certificate-fetch proxy required}
+    volumes:
+      - ${LAB_PRIVATE_CONFIG:?protected experimental file required}:/run/lab/config.json:ro
+      - http:/http
+      - pgsocket:/socket
+    networks: [lab]
+    tmpfs: [/tmp]
+  db:
+    profiles: [authorized-device]
+    image: ${LAB_POSTGRES_IMAGE:?PostgreSQL 16.15 Alpine digest required}
+    network_mode: none
+    depends_on:
+      socket-init:
+        condition: service_completed_successfully
+    command: [postgres, -c, listen_addresses=, -c, unix_socket_directories=/socket, -c, unix_socket_permissions=0770, -c, hba_file=/run/lab/pg_hba.conf, -c, shared_buffers=64MB, -c, max_connections=12]
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/lab/db-password
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=reject
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - pgsocket:/socket
+      - ${LAB_DB_PASSWORD_FILE:?exclusive experimental secret required}:/run/lab/db-password:ro
+      - ./pg_hba.conf:/run/lab/pg_hba.conf:ro
+    mem_limit: 512m
+    cpus: 1
+    restart: "no"
+  tls:
+    profiles: [authorized-device]
+    image: ${LAB_TLS_IMAGE:?reviewed unprivileged TLS image digest required}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+    user: "101:101"
+    group_add: ["10001"]
+    depends_on:
+      socket-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - http:/http:ro
+      - ${LAB_TLS_DIRECTORY:?dedicated certificates and allowlist required}:/run/lab-tls:ro
+    tmpfs: [/tmp]
+    networks: [lab]
+# No static addresses, external networks, productive volumes or Docker socket.
+networks:
+  lab:
+    internal: true
+volumes:
+  http: {}
+  pgdata: {}
+  pgsocket: {}

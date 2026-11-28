@@ -1,0 +1,9 @@
+{
+  "environment": "M2_SYNTHETIC_DEVICE",
+  "issuer_dsn": "",
+  "reader_dsn": "",
+  "lab_admin_secret": "",
+  "lab_ingress_secret": "",
+  "google_audience": "",
+  "allowed_subjects": []
+}
