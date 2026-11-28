@@ -70,9 +70,9 @@ def continuation(client, assertion):
     challenge = c.json()
     assertion["nonce"] = challenge["nonce"]
     url = "/api/v1/auth/google/challenges/" + challenge["challenge_id"] + "/verify-and-continue"
-    r = client.post(url, json={"id_token": "synthetic-provider-assertion"})
+    r = client.post(url, json={"id_token": "synthetic-provider-assertion-disposable-only"})
     assert r.status_code == 200
-    assert client.post(url, json={"id_token": "synthetic-provider-assertion"}).status_code == 409
+    assert client.post(url, json={"id_token": "synthetic-provider-assertion-disposable-only"}).status_code == 409
     return r.json()["continuation_grant"]["token"]
 
 
@@ -147,7 +147,7 @@ def test_rejected_provider_identity_or_nonce(device_lab, failure):
         assertion["subject"] = "not-allowed"
     r = client.post(
         "/api/v1/auth/google/challenges/" + c["challenge_id"] + "/verify-and-continue",
-        json={"id_token": "synthetic-provider-assertion"},
+        json={"id_token": "synthetic-provider-assertion-disposable-only"},
     )
     assert r.status_code == 401
     with lab.admin.begin() as s:
