@@ -1,0 +1,9 @@
+secrets/
+vendor/
+__pycache__/
+evidence/before.json
+evidence/isolation.json
+evidence/preservation.json
+evidence/resources.jsonl
+evidence/storage.txt
+evidence/validation.json

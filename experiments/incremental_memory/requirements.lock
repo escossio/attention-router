@@ -1,0 +1,2 @@
+psycopg==3.2.13 --hash=sha256:a481374514f2da627157f767a9336705ebefe93ea7a0522a6cbacba165da179a
+psycopg-binary==3.2.13 --hash=sha256:ea2fdbcc9142933a47c66970e0df8b363e3bd1ea4c5ce376f2f3d94a9aeec847

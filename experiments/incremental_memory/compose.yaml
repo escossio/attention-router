@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    container_name: andy-memory-lab-db
+    network_mode: none
+    restart: "no"
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/admin
+      POSTGRES_DB: memory_lab
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=reject
+    command: [postgres, -c, "listen_addresses=", -c, unix_socket_directories=/var/run/postgresql, -c, unix_socket_permissions=0777, -c, shared_buffers=64MB, -c, max_connections=12, -c, log_statement=none, -c, log_min_error_statement=panic]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - pgsocket:/var/run/postgresql
+      - ./secrets/admin:/run/secrets/admin:ro
+  core:
+    image: python@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
+    container_name: andy-memory-lab-core
+    network_mode: none
+    restart: "no"
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=64m,mode=1777,exec"]
+    environment:
+      PYTHONPATH: /tmp/deps:/app
+      PYTHONDONTWRITEBYTECODE: "1"
+    working_dir: /app
+    command: [sh, -c, "pip install --no-index --no-cache-dir --require-hashes --find-links=/vendor --target=/tmp/deps -r /app/requirements.lock && exec python -c 'import time; time.sleep(86400)'"]
+    volumes:
+      - pgsocket:/socket
+      - ./memory.py:/app/memory.py:ro
+      - ./requirements.lock:/app/requirements.lock:ro
+      - ./vendor:/vendor:ro
+      - ./secrets/reader:/run/secrets/reader:ro
+      - ./secrets/writer:/run/secrets/writer:ro
+volumes:
+  pgdata:
+    name: andy-memory-lab-pgdata
+  pgsocket:
+    name: andy-memory-lab-pgsocket

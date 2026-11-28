@@ -1,0 +1,25 @@
+{
+  "at": "2026-11-28T17:52:02.208260+00:00",
+  "registration": {
+    "information_id": "071d82e4-e123-4884-a8d3-f508eac6e875",
+    "evidence_id": "256ccbaf-2b0e-4fd7-bafd-e9efc3008085",
+    "revision": 1
+  },
+  "query": {
+    "contract_version": "1",
+    "status": "ANSWERED",
+    "answer": "O carro de Roberto é azul.",
+    "evidence": [
+      {
+        "evidence_id": "256ccbaf-2b0e-4fd7-bafd-e9efc3008085",
+        "information_id": "071d82e4-e123-4884-a8d3-f508eac6e875",
+        "revision": 1,
+        "excerpt": "Roberto possui um veículo azul.",
+        "origin": "synthetic-manual",
+        "recorded_at": "2026-11-28 17:51:59.197638+00:00"
+      }
+    ],
+    "correlation_id": "94ca0df0-a533-47d8-b4bb-e04f67557741"
+  },
+  "processes": "separate docker exec invocations"
+}

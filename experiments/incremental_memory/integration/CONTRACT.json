@@ -1,0 +1,14 @@
+{
+  "state": "PREPARATION_ONLY_NO_LISTENER",
+  "backend_base": "83b06b237f00ecbf08c2e2a1a92f9221ff641d3e",
+  "android_base": "e1326aaef977c42a55afe9987a633a591ae4cfd7",
+  "path": "/api/v1/client/context/query",
+  "method": "POST",
+  "authentication": "existing ClientSession, experimental identity persistence only",
+  "input": ["scope_ref", "question"],
+  "output": ["contract_version", "status", "answer", "evidence", "correlation_id"],
+  "statuses": ["ANSWERED", "INSUFFICIENT_EVIDENCE", "AMBIGUOUS", "UNAVAILABLE"],
+  "scope": "server-owned experimental registry; never accept client tenant as authority",
+  "integration_boundary": "StagedDelivery.query_and_deliver",
+  "forbidden": ["production canary activation", "APP_ENV=test bypass", "command dispatcher", "Outbox"]
+}
