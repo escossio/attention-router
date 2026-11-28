@@ -62,7 +62,11 @@ def world(monkeypatch, request):
     ]
     if hasattr(request, "param"):
         for msg, excerpt in zip(messages, request.param, strict=True):
-            msg.update(conversation_id="one", index_text=excerpt)
+            msg["conversation_id"] = "one"
+            if isinstance(excerpt, str):
+                msg["index_text"] = excerpt
+            else:
+                msg.update(excerpt)
     receipts = {}
     message_rows = {}
     rows = []
@@ -73,7 +77,7 @@ def world(monkeypatch, request):
         msg.update(
             tenant_id="t", source_account="a", source="wwebjs", source_message_id=msg["id"],
             sender_actor_id="bia", external_sender_key=None, from_me=False, sent_at=NOW,
-            reply_to_message_id=None, source_fingerprint="hash-" + msg["id"],
+            reply_to_message_id=msg.get("reply_to_message_id"), source_fingerprint="hash-" + msg["id"],
             context_revision="first", transcription_id=None, metadata={"artifact_receipt_id": receipt_id},
         )
         message_rows[msg["id"]] = ConversationMessageRow(id=msg["id"], message_type="TEXT")
@@ -313,4 +317,71 @@ def test_staged_temporal_answer_cites_only_supported_excerpts(world, expected_so
     assert [item["source_ref"] for item in answer["evidence"]] == expected_sources
     assert [item["excerpt"] for item in answer["evidence"]] == [
         msg["index_text"] for msg in world.messages if msg["id"] in expected_sources
+    ]
+
+
+@pytest.mark.parametrize(("world", "expected_sources"), [
+    pytest.param(
+        ("A inspeção do moinho foi aprovada.", "A inspeção da caldeira do moinho foi agendada."),
+        ["m1"], id="related-without-outcome",
+    ),
+    pytest.param(
+        ("A inspeção do moinho foi aprovada.", "A inspeção do moinho foi recusada."),
+        ["m1", "m2"], id="attributed-divergence",
+    ),
+    pytest.param(
+        ("A inspeção do moinho foi agendada.", "A inspeção da caldeira foi recusada."),
+        [], id="insufficient-outcome-for-target",
+    ),
+    pytest.param(
+        ("A inspeção do moinho foi aprovada?", {
+            "index_text": "A inspeção do moinho foi aprovada.",
+            "reply_to_message_id": "m1",
+        }),
+        ["m1", "m2"], id="explicit-complement",
+    ),
+    pytest.param(
+        ("A inspeção do moinho foi aprovada?", "A inspeção do moinho foi aprovada."),
+        ["m2"], id="unlinked-question",
+    ),
+    pytest.param(
+        ("A inspeção da caldeira foi aprovada?", {
+            "index_text": "A inspeção do moinho foi aprovada.",
+            "reply_to_message_id": "m1",
+        }),
+        ["m2"], id="linked-but-unrelated",
+    ),
+    pytest.param(
+        ("O moinho fica no galpão. A inspeção da caldeira foi aprovada?", {
+            "index_text": "A inspeção do moinho foi aprovada.",
+            "reply_to_message_id": "m1",
+        }),
+        ["m2"], id="linked-question-with-anchors-split-across-sentences",
+    ),
+], indirect=["world"])
+def test_staged_inspection_outcome_cites_grounded_observations(world, expected_sources):
+    boundary = staged.StagedConversationEvidenceReader(
+        world.original, provider=world.provider, reserve_query=lambda _scope: True,
+        render_packet=owner_answer,
+    )
+    bodies = []
+
+    def deliver(body):
+        assert world.state["active"] and world.state["fenced"]
+        bodies.append(body)
+
+    with query_trace() as trace:
+        receipt = boundary.query_and_deliver(
+            bearer="owner", scope_ref="scope", question="Qual foi o resultado da inspeção do moinho?",
+            deliver=deliver,
+        )
+
+    body, = bodies
+    assert receipt.body_sha256 == sha256(body).hexdigest()
+    answer = json.loads(body)
+    assert answer["correlation_id"] == trace
+    assert answer["kind"] == ("OBSERVATION" if expected_sources else "INSUFFICIENT_EVIDENCE")
+    assert answer["conclusion"] is None and answer["date"] is None
+    assert [(item["source_ref"], item["excerpt"]) for item in answer["evidence"]] == [
+        (msg["id"], msg["index_text"]) for msg in world.messages if msg["id"] in expected_sources
     ]

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from threading import Lock
 from time import monotonic
 from types import SimpleNamespace
@@ -44,6 +45,30 @@ MODEL_MANIFEST = Path(__file__).resolve().parents[2] / "ops/reconciliation/model
 SOCKET_DIRECTORY = "/run/postgresql"
 
 
+def _inspection_excerpts(excerpts, prepared):
+    assessed = [
+        (excerpt, features(prepared.query, excerpt["text"], prepared=prepared))
+        for excerpt in excerpts
+    ]
+    reply_targets = {
+        excerpt["reply_to_ref"]
+        for excerpt, support in assessed
+        if support["answer_type_supported"] and excerpt.get("reply_to_ref")
+    }
+    # A linked question can explain a supported observation, but cannot supply its outcome.
+    return [
+        excerpt for excerpt, support in assessed
+        if support["answer_type_supported"] or (
+            excerpt["source_ref"] in reply_targets
+            and support["question_only_support"]
+            and any(
+                sentence.rstrip().endswith("?") and prepared.wanted <= prepared.content_terms(sentence)
+                for sentence in re.split(r"(?<=[.!?])\s+", excerpt["text"])
+            )
+        )
+    ]
+
+
 def owner_answer(packet):
     """Present supported literal excerpts, without asserting their claims as facts."""
     evidence = {}
@@ -53,7 +78,10 @@ def owner_answer(packet):
     prepared = prepare_candidate_features(query) if topic is None else None
     for item in packet.items:
         reason = item.provenance["single_excerpt_heuristic"]
-        for excerpt in item.attributes["excerpts"]:
+        excerpts = item.attributes["excerpts"]
+        if prepared is not None and prepared.required == "INSPECTION_OUTCOME" and reason is None:
+            excerpts = _inspection_excerpts(excerpts, prepared)
+        for excerpt in excerpts:
             key = (excerpt["source_ref"], excerpt["char_start"], excerpt["char_end"])
             if topic is None and reason is None and excerpt["text"].strip():
                 # Segment-level temporal support does not make each source a witness.
