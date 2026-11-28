@@ -1,5 +1,6 @@
 """Offline parity against the governed reader with a synthetic index boundary."""
 
+from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,8 @@ from attention_router.application.conversation_segments import segment_messages
 from attention_router.application.staged_read import StagedReadRejected
 from attention_router.infrastructure.artifact_models import ArtifactReceiptRow
 from attention_router.infrastructure.models import ConversationMessageRow
+from attention_router.observability.private_context import query_trace
+from attention_router.web.private_context import owner_answer
 
 
 NOW = datetime(2026, 11, 23, tzinfo=UTC)
@@ -42,7 +45,7 @@ class Provider:
 
 
 @pytest.fixture
-def world(monkeypatch):
+def world(monkeypatch, request):
     state = dict(active=False, fenced=False, encodes=0, revision="a", epoch=0, allowed=True, expire=False)
     provider = Provider(state)
     context = SimpleNamespace(
@@ -57,10 +60,14 @@ def world(monkeypatch):
         dict(id="m1", conversation_id="one", index_text="Bia confirmou a reunião às 15 horas."),
         dict(id="m2", conversation_id="two", index_text="A reunião ficou marcada para 16 horas."),
     ]
+    if hasattr(request, "param"):
+        for msg, excerpt in zip(messages, request.param, strict=True):
+            msg.update(conversation_id="one", index_text=excerpt)
     receipts = {}
     message_rows = {}
     rows = []
     memberships = {}
+    conversations = defaultdict(list)
     for msg in messages:
         receipt_id = "receipt-" + msg["id"]
         msg.update(
@@ -71,12 +78,18 @@ def world(monkeypatch):
         )
         message_rows[msg["id"]] = ConversationMessageRow(id=msg["id"], message_type="TEXT")
         receipts[receipt_id] = ArtifactReceiptRow(id=receipt_id, context_revision="first", metadata_json={})
-        plan, = segment_messages([msg], provider)
+        conversations[msg["conversation_id"]].append(msg)
+    for conversation in conversations.values():
+        plan, = segment_messages(conversation, provider)
         rows.append(dict(
             id=plan["id"], similarity=0.8, content_text=plan["text"], content_hash=plan["content_hash"],
             source_hash=plan["source_hash"], indexed_embedding="[1,0]", segment_generation=1,
         ))
-        memberships[plan["id"]] = [(msg["conversation_id"], msg["id"], 0, 0, len(msg["index_text"]), "PRIMARY")]
+        memberships[plan["id"]] = [
+            (member["message"]["conversation_id"], member["message"]["id"], ordinal,
+             member["start"], member["end"], member["role"])
+            for ordinal, member in enumerate(plan["members"])
+        ]
     rows.sort(key=lambda row: row["id"])
 
     @contextmanager
@@ -115,10 +128,10 @@ def world(monkeypatch):
 
     def sources(_context, _memberships, _filters, **_options):
         assert state["active"]
-        authorized = {
-            m["conversation_id"]: [m] for m in messages
-            if not (state["expire"] and m["id"] == "m1")
-        }
+        authorized = defaultdict(list)
+        for msg in messages:
+            if not (state["expire"] and msg["id"] == "m1"):
+                authorized[msg["conversation_id"]].append(msg)
         return authorized, receipts, {ArtifactReceiptRow: receipts, ConversationMessageRow: message_rows}
 
     monkeypatch.setattr(control.settings, "app_env", "test")
@@ -258,3 +271,46 @@ def test_detached_index_tampering_cannot_supply_an_excerpt(world, monkeypatch):
     reader(world).query_and_deliver(bearer="owner", scope_ref="scope", question="reunião", deliver=bodies.append)
     assert json.loads(bodies[0])["candidate_count"] == 1
     assert world.rows[0]["id"] not in bodies[0].decode()
+
+
+@pytest.mark.parametrize(("world", "expected_sources"), [
+    pytest.param(
+        ("A inspeção do moinho ficou para quinta-feira.", "A caldeira foi desligada na quarta-feira."),
+        ["m1"], id="independent-neighbor",
+    ),
+    pytest.param(
+        ("A inspeção do moinho ficou para quinta-feira.", "A inspeção do moinho ficou para sexta-feira."),
+        ["m1", "m2"], id="two-supported-observations",
+    ),
+    pytest.param(
+        ("A inspeção do moinho ficou para quinta-feira?", "A caldeira foi desligada na quarta-feira."),
+        [], id="question-and-unrelated-time",
+    ),
+], indirect=["world"])
+def test_staged_temporal_answer_cites_only_supported_excerpts(world, expected_sources):
+    boundary = staged.StagedConversationEvidenceReader(
+        world.original, provider=world.provider, reserve_query=lambda _scope: True,
+        render_packet=owner_answer,
+    )
+    bodies = []
+
+    def deliver(body):
+        assert world.state["active"] and world.state["fenced"]
+        bodies.append(body)
+
+    with query_trace() as trace:
+        receipt = boundary.query_and_deliver(
+            bearer="owner", scope_ref="scope", question="Quando ficou a inspeção do moinho?",
+            deliver=deliver,
+        )
+
+    body, = bodies
+    assert receipt.body_sha256 == sha256(body).hexdigest()
+    answer = json.loads(body)
+    assert answer["correlation_id"] == trace
+    assert answer["kind"] == ("OBSERVATION" if expected_sources else "INSUFFICIENT_EVIDENCE")
+    assert answer["conclusion"] is None and answer["date"] is None
+    assert [item["source_ref"] for item in answer["evidence"]] == expected_sources
+    assert [item["excerpt"] for item in answer["evidence"]] == [
+        msg["index_text"] for msg in world.messages if msg["id"] in expected_sources
+    ]
