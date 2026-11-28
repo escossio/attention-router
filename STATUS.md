@@ -539,3 +539,10 @@ the assets and `docs/demo.md`.
 
 - Candidato `fix/first-contact-intro-audio-only-pass24` parte da main `aebeccfd7f9180bca1137629ada254ba1519c44b`. Somente `INTRODUCE` recebe marcador de áudio no texto; o seletor e a validação de saída exigem apresentação `CONFIRMED`, prova ACK >= 2, intent e hash vinculados. `CONTINUE`, conversas comuns e atores vinculados não geram complemento; recebimento/transcrição de áudio e resposta histórica somente em voz seguem independentes.
 - Testes locais sintéticos de First Contact e voz: 83 PASS, Ruff, compileall e diff-check PASS. PostgreSQL descartável e checks oficiais serão executados no SHA publicado; não houve migração 0061, reenfileiramento de históricos, mudança produtiva ou envio real.
+
+## M2-LAB candidate
+
+Experimental device onboarding composition prepared under #479, on the dedicated
+experiment/incremental-memory-v0-device branch. No listeners/deployment/real identity
+used. M0 and prior PR heads preserved. See experiments/incremental_memory/device/README.md.
+Distributed verification pending; Android blocked until legitimate #106 incorporation.
