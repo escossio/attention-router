@@ -1,5 +1,11 @@
 # M2-LAB — dormant physical-device preparation
 
+Image certification: `certify-image.sh <published-SHA> <output-directory>` on an
+authorized CI worker. Public CI has a dedicated M2 job for this experimental branch.
+Receipts distinguish the Docker image configuration digest from the archive SHA256;
+no registry manifest is claimed without publishing. See [PREFLIGHT.md](PREFLIGHT.md)
+for prepared OAuth/TLS/HBA/socket/isolation configuration and remaining conditions.
+
 Issue #479 / Android #103. Base M1 #481 is preserved; no deployment or network
 activation is part of this change. Android #106 must be legitimately incorporated
 before changing its test frontier. G3 NO_GO; G6 pending.

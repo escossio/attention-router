@@ -547,3 +547,8 @@ experiment/incremental-memory-v0-device branch. No listeners/deployment/real ide
 used. M0 and prior PR heads preserved. See experiments/incremental_memory/device/README.md.
 Exact-SHA test receipts and current certification state are recorded in #482/#479.
 Android remains blocked until legitimate #106 incorporation. No operational activation.
+
+Dedicated M2 image certification added to CI, with offline fail-closed smoke and
+discardable PostgreSQL onboarding/session/query checks. Inert HBA/socket preparation
+and protected OAuth/TLS/isolation preflight are versioned; no credentials/resources
+provisioned. Exact-SHA artifact receipts remain in #482/#479.

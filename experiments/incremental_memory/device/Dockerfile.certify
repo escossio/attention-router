@@ -1,0 +1,9 @@
+ARG RUNTIME_IMAGE
+FROM ${RUNTIME_IMAGE}
+USER root
+RUN pip install --no-cache-dir pytest==9.1.1 httpx==0.27.2
+COPY tests/integration/test_incremental_memory_m1.py tests/integration/test_incremental_memory_m2.py /checks/
+ENV PYTHONPATH=/app
+WORKDIR /checks
+USER 10001:10001
+CMD ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--confcutdir=/checks", "test_incremental_memory_m1.py", "test_incremental_memory_m2.py"]
