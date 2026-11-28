@@ -30,7 +30,8 @@ from attention_router.application.context_preactivation import require_context_d
 from attention_router.application.conversation_embedding import LocalEmbeddingProvider
 from attention_router.application.conversation_evidence_staged import StagedConversationEvidenceReader
 from attention_router.application.conversation_relevance import (
-    CONTRAST_NEEDS_PAIR, contrast_topic_query, inspection_outcome,
+    CONTRAST_NEEDS_PAIR, contrast_topic_query, features, inspection_outcome,
+    prepare_candidate_features,
 )
 from attention_router.config import settings
 from attention_router.infrastructure.context_epoch_durable import DurableEpochAuthority
@@ -47,12 +48,19 @@ def owner_answer(packet):
     """Present supported literal excerpts, without asserting their claims as facts."""
     evidence = {}
     outcomes = defaultdict(lambda: defaultdict(list))
-    topic = contrast_topic_query(getattr(packet, "query", ""))
+    query = getattr(packet, "query", "")
+    topic = contrast_topic_query(query)
+    prepared = prepare_candidate_features(query) if topic is None else None
     for item in packet.items:
         reason = item.provenance["single_excerpt_heuristic"]
         for excerpt in item.attributes["excerpts"]:
             key = (excerpt["source_ref"], excerpt["char_start"], excerpt["char_end"])
             if topic is None and reason is None and excerpt["text"].strip():
+                # Segment-level temporal support does not make each source a witness.
+                if prepared.required == "TIME" and not features(
+                    query, excerpt["text"], prepared=prepared,
+                )["answer_type_supported"]:
+                    continue
                 evidence[key] = excerpt
             elif topic is not None and reason == CONTRAST_NEEDS_PAIR:
                 witness = inspection_outcome(excerpt["text"], topic)
