@@ -40,7 +40,11 @@ First enroll, register scope administratively, then rebuild/configure the lab
 artifact with the resulting reference; revalidate its exact SHA, signature and hash.
 
 compose.yaml/nginx.conf are INERT templates, not certified deployment artifacts.
-No published port or automatic restart. All image variables must be immutable
+No published port or automatic restart. The dedicated Dockerfile copies the
+experimental sources omitted by the productive Dockerfile; supply PYTHON_IMAGE
+with the approved Python 3.13 Slim digest and SOURCE_SHA with the exact commit.
+Building requires dependency downloads on CI; no build was executed on the control
+plane. The resulting image still requires its own build/smoke certification. All image variables must be immutable
 approved digests; core image must contain this exact source and existing locked
 dependencies. Socket volume UID/GID permissions, PostgreSQL HBA scram credentials,
 bootstrap admin removal, and protected TLS file ownership must be prepared and

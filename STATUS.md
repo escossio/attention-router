@@ -545,4 +545,5 @@ the assets and `docs/demo.md`.
 Experimental device onboarding composition prepared under #479, on the dedicated
 experiment/incremental-memory-v0-device branch. No listeners/deployment/real identity
 used. M0 and prior PR heads preserved. See experiments/incremental_memory/device/README.md.
-Distributed verification pending; Android blocked until legitimate #106 incorporation.
+Exact-SHA test receipts and current certification state are recorded in #482/#479.
+Android remains blocked until legitimate #106 incorporation. No operational activation.
