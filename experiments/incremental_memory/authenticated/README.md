@@ -81,9 +81,9 @@ A pass must include success, expiry/revocation, wrong tenant/scope, correction r
 held delivery fence, historical preservation, abstention, readonly grants, missing
 fence rejection and infrastructure errors. CI evidence is separate from code existence.
 
-Android #105 is still an architectural prerequisite owned by ChatGPT; no merge here.
-After legitimate incorporation, adapt #104's isolated contextual client to this
-small DTO, then coordinator/ViewModel/MainActivity as governed by #103. Require
+Android #105 was legitimately merged by ChatGPT into main
+`3c3f34da8cd1dd9e7f7efdce398514a35a90dee3`. Candidate #104 has been replayed onto
+that base and composes the contextual SDK/coordinator/ViewModel/panel as governed by #103. Require
 `.lab`, visible lab indicator, exclusive HTTPS endpoint and experimental identity
 storage. Missing config fails closed; no productive endpoint/command-channel fallback;
 no redirects; cancel pending work on session/tenant/identity change. Text first.
