@@ -552,3 +552,6 @@ Dedicated M2 image certification added to CI, with offline fail-closed smoke and
 discardable PostgreSQL onboarding/session/query checks. Inert HBA/socket preparation
 and protected OAuth/TLS/isolation preflight are versioned; no credentials/resources
 provisioned. Exact-SHA artifact receipts remain in #482/#479.
+First dedicated Python 3.13 build exposed the general package's psycopg-binary
+3.2.1 wheel incompatibility. M2 uses its own bounded dependency list (V0 psycopg
+3.2.13); productive dependency pins and services are unchanged.

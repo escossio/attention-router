@@ -27,6 +27,19 @@ docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-
 docker run --rm --network none --read-only "$image" python -m pip check > "$output/pip-check.txt"
 docker run --rm --network none --read-only "$image" python -m pip freeze --all > "$output/dependencies.txt"
 docker run --rm --network none --read-only "$image" python -m pip inspect > "$output/dependencies.json"
+docker run --rm --network none --read-only "$image" cat /app/m2-install.json > "$output/install-report.json"
+python3 - "$output/install-report.json" "$output/runtime.requirements.lock" <<'PY'
+import json
+import sys
+from pathlib import Path
+report = json.loads(Path(sys.argv[1]).read_text())
+lines = []
+for item in report['install']:
+    meta = item['metadata']
+    digest = item['download_info']['archive_info']['hashes']['sha256']
+    lines.append(f"{meta['name']}=={meta['version']} --hash=sha256:{digest}")
+Path(sys.argv[2]).write_text('\n'.join(sorted(lines, key=str.lower)) + '\n')
+PY
 # Disposable test layer: runtime code is inherited without replacement. Provider
 # assertions are patched ONLY in these tests; no test code enters the runtime image.
 docker build --build-arg RUNTIME_IMAGE="$image" \

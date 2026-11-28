@@ -1,0 +1,10 @@
+# Independent device runtime; production pyproject.toml remains unchanged.
+# psycopg 3.2.13 is the existing V0 Python 3.13-compatible selection.
+psycopg[binary]==3.2.13
+cryptography==50.0.1
+fastapi==0.112.2
+google-auth==2.58.0
+pydantic-settings==2.5.2
+sqlalchemy==2.0.32
+uvicorn==0.31.1
+requests==2.34.2
